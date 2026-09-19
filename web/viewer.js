@@ -16,13 +16,14 @@
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
     return [[cy, 0, sy], [sp * sy, cp, -sp * cy], [-cp * sy, sp, cp * cy]];
   }
-  function nearbyGroups(poses, box, cutoff, recordedEdges) {
+  function nearbyGroups(poses, box, cutoff, recordedEdges, periodic = true) {
     const adjacency = poses.map(() => []);
     if (Array.isArray(recordedEdges)) {
       recordedEdges.forEach(([i, j]) => { if (i < poses.length && j < poses.length) { adjacency[i].push(j); adjacency[j].push(i); } });
     } else {
       for (let i = 0; i < poses.length; i++) for (let j = i + 1; j < poses.length; j++) {
-        if (norm(minimumImage(sub(poses[j].position, poses[i].position), box)) <= cutoff) {
+        const delta = sub(poses[j].position, poses[i].position);
+        if (norm(periodic ? minimumImage(delta, box) : delta) <= cutoff) {
           adjacency[i].push(j); adjacency[j].push(i);
         }
       }
@@ -36,8 +37,17 @@
     groups.sort((a, b) => b.length - a.length || a[0] - b[0]);
     return { groups, adjacency };
   }
-  function displayedCenters(frame, box, focus, bodyBound, radius) {
+  function displayedCenters(frame, box, focus, bodyBound, radius, boundary = "periodic") {
     const poses = frame.poses;
+    if (boundary === "spherical") {
+      const proximity = nearbyGroups(poses, box, 2 * bodyBound + 2 * radius, frame.contact_edges, false);
+      let group = focus === "box" ? poses.map((_, i) => i) : proximity.groups[0];
+      if (focus === "seed" && frame.seed_labels.length) group = frame.seed_labels.filter(i => i < poses.length);
+      else if (focus.startsWith("body:")) { const index = Number(focus.slice(5)); group = [index, ...proximity.adjacency[index]]; }
+      const mean = focus === "box" ? [0, 0, 0] : group.reduce((s, i) => add(s, poses[i].position), [0, 0, 0]).map(x => x / group.length);
+      return { centers: poses.map(p => sub(p.position, mean)), group, boundaryCenter: mean.map(x => -x),
+        label: focus === "box" ? "Spherical container · unwrapped coordinates" : focus === "seed" ? `Initial seed · ${group.length} bodies` : focus.startsWith("body:") ? `Body ${group[0]} and nearby bodies` : `Largest nearby group · ${group.length} bodies` };
+    }
     if (focus === "box") return { centers: poses.map(p => minimumImage(p.position, box)), group: poses.map((_, i) => i), label: "Primary cell · body centers wrapped" };
     const proximity = nearbyGroups(poses, box, 2 * bodyBound + 2 * radius, frame.contact_edges);
     let group;
@@ -150,11 +160,12 @@
   }
   function updateGeometry(reset) {
     const frame = data.frames[state.index];
-    const displayed = displayedCenters(frame, data.box_lengths, $("focus").value, data.body_bound, data.depletant_radius || 0);
+    const displayed = displayedCenters(frame, data.box_lengths, $("focus").value, data.body_bound, data.depletant_radius || 0, data.boundary || "periodic");
     state.centers = displayed.centers; state.group = displayed.group;
+    state.boundaryCenter = displayed.boundaryCenter || [0, 0, 0];
     state.geometry = bodyGeometry(data, frame, displayed.centers); setColors();
     if (gl) { gl.bindBuffer(gl.ARRAY_BUFFER, geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER, state.geometry, gl.DYNAMIC_DRAW); }
-    $("view-caption").textContent = displayed.label + "\nPeriodic images brought together around the focus";
+    $("view-caption").textContent = displayed.label + (data.boundary === "spherical" ? "\nHard atom wall · permeable depletant bath" : "\nPeriodic images brought together around the focus");
     if ($("focus").value === "box") $("view-caption").textContent = displayed.label;
     $("frame-label").textContent = `Frame ${state.index + 1}/${data.frames.length} · sweep ${frame.sweep}`;
     $("frame").value = state.index;
@@ -176,7 +187,7 @@
   function resetCamera() {
     state.pan = [0, 0];
     const [, height] = resize();
-    let extent = $("focus").value === "box" ? norm(data.box_lengths) / 2 + data.body_bound : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
+    let extent = $("focus").value === "box" ? (data.spherical_wall_radius || norm(data.box_lengths) / 2 + data.body_bound) : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
     state.scale = Math.min(viewport.clientWidth, viewport.clientHeight) * (global.devicePixelRatio || 1) * .43 / Math.max(extent, 1);
     // Match the pixel-ratio cap used by resize.
     if ((global.devicePixelRatio || 1) > 2) state.scale *= 2 / global.devicePixelRatio;
@@ -190,7 +201,22 @@
   }
   function drawOverlay(r, width, height, dpr) {
     const ctx = overlayContext; ctx.clearRect(0, 0, width, height); ctx.lineWidth = dpr;
-    if ($("box").checked) {
+    if ($("box").checked && data.boundary === "spherical") {
+      const center = state.boundaryCenter, radius = data.spherical_wall_radius;
+      ctx.strokeStyle = "rgba(89,116,137,0.42)";
+      const p = project(center, r, width, height);
+      ctx.beginPath(); ctx.arc(p[0], p[1], radius * state.scale, 0, 2 * Math.PI); ctx.stroke();
+      ctx.strokeStyle = "rgba(89,116,137,0.17)";
+      for (let axis = 0; axis < 3; axis++) {
+        ctx.beginPath();
+        for (let k = 0; k <= 128; k++) {
+          const angle = 2 * Math.PI * k / 128, q = [...center];
+          q[(axis + 1) % 3] += radius * Math.cos(angle); q[(axis + 2) % 3] += radius * Math.sin(angle);
+          const v = project(q, r, width, height); if (k === 0) ctx.moveTo(v[0], v[1]); else ctx.lineTo(v[0], v[1]);
+        }
+        ctx.stroke();
+      }
+    } else if ($("box").checked) {
       const corners = [];
       for (let x = -1; x <= 1; x += 2) for (let y = -1; y <= 1; y += 2) for (let z = -1; z <= 1; z += 2) corners.push([x * data.box_lengths[0] / 2, y * data.box_lengths[1] / 2, z * data.box_lengths[2] / 2]);
       ctx.strokeStyle = "rgba(89,116,137,0.35)"; ctx.beginPath();
@@ -276,6 +302,10 @@
   });
   global.addEventListener("resize", () => { resize(); state.dirty = true; });
   $("run-name").textContent = data.run_name;
+  if (data.boundary === "spherical") {
+    $("boundary-label").textContent = "Wall";
+    Array.from($("focus").options).find(option => option.value === "box").textContent = "Whole container";
+  }
   $("body-count").textContent = `${data.body_count} tetramers`;
   $("sphere-count").textContent = `${(data.body_count * data.atoms.length).toLocaleString()} atom spheres`;
   $("frame-count").textContent = `${data.frames.length} saved frames`;

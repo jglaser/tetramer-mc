@@ -69,12 +69,23 @@ def bundle(run, output):
         raise ValueError('This viewer requires a fixed number of rigid bodies')
     box = config.get('box_lengths', config.get('box_lengths_A'))
     if box is None or len(box) != 3 or not all(math.isfinite(v) and v > 0 for v in box):
-        raise ValueError('Require three positive periodic box lengths')
+        raise ValueError('Require three positive display/periodic box lengths')
+    boundary_spec = config.get('boundary', 'periodic')
+    boundary = boundary_spec.get('kind') if isinstance(boundary_spec, dict) else boundary_spec
+    if boundary not in ('periodic', 'spherical'):
+        raise ValueError('Only periodic or spherical boundaries are supported')
+    wall_radius = None
+    if boundary == 'spherical':
+        wall_radius = boundary_spec.get('radius') if isinstance(boundary_spec, dict) else config.get('spherical_wall_radius', config.get('spherical_radius'))
+        if not isinstance(wall_radius, (int, float)) or not math.isfinite(wall_radius) or wall_radius <= 0:
+            raise ValueError('Spherical boundary requires a finite positive wall radius')
+        box = [2 * wall_radius] * 3
     for frame in frames:
         if any(not isinstance(i, int) or i < 0 or i >= count for i in frame['seed_labels']):
             raise ValueError('Seed label outside body index range')
     data = dict(schema='tetramer-offline-viewer-v1', run_name=run.name, atoms=atoms, frames=frames,
-        body_count=count, box_lengths=box, body_bound=max(math.hypot(*a[:3])+a[3] for a in atoms),
+        body_count=count, box_lengths=box, boundary=boundary, spherical_wall_radius=wall_radius,
+        body_bound=max(math.hypot(*a[:3])+a[3] for a in atoms),
         depletant_radius=config.get('depletant_radius', 0.),
         source_sha256=dict(config=sha(config_path), trajectory=sha(trajectory_path), shape=sha(shape_path)),
         geometry_scope='Actual saved rigid-body sphere union; colors indicate body identity or original seed membership, never native registration.')

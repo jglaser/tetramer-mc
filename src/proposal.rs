@@ -251,6 +251,7 @@ pub struct FrozenRelativePoseProposal {
     log_uniform_density: f64,
     log_learned_weight: f64,
     shape_sha256: String,
+    periodic: bool,
 }
 
 impl FrozenRelativePoseProposal {
@@ -379,7 +380,84 @@ impl FrozenRelativePoseProposal {
                 (-uniform_weight).ln_1p()
             },
             shape_sha256: raw.shape_sha256,
+            periodic: true,
         })
+    }
+
+    /// Open-space Gaussian mixture with a defensive uniform centered cube.
+    /// The physical wall is checked by the caller, without retrying rejected draws.
+    pub fn from_json_str_open(
+        text: &str,
+        uniform_cube_lengths: Vec3,
+        uniform_weight: f64,
+        expected_shape_sha256: &str,
+    ) -> Result<Self> {
+        let mut result = Self::from_json_str(
+            text,
+            uniform_cube_lengths,
+            uniform_weight,
+            expected_shape_sha256,
+        )?;
+        result.periodic = false;
+        Ok(result)
+    }
+
+    pub fn is_periodic(&self) -> bool {
+        self.periodic
+    }
+    pub fn angular_length(&self) -> f64 {
+        self.angular_length
+    }
+
+    /// A fresh immutable mixture, shifting each mean by its original Cholesky L times offset.
+    pub fn with_whitened_mean_offsets(&self, offsets: &[[f64; 6]]) -> Result<Self> {
+        ensure!(
+            offsets.len() == self.components.len(),
+            "One mean offset required per component"
+        );
+        ensure!(
+            offsets.iter().flatten().all(|x| x.is_finite()),
+            "Nonfinite mean offset"
+        );
+        let mut result = self.clone();
+        for (component, offset) in result.components.iter_mut().zip(offsets) {
+            for i in 0..6 {
+                component.mean[i] += (0..=i)
+                    .map(|j| component.lower[i][j] * offset[j])
+                    .sum::<f64>();
+            }
+            ensure!(
+                component.mean.iter().all(|x| x.is_finite()),
+                "Unrepresentable shifted mean"
+            );
+        }
+        Ok(result)
+    }
+
+    /// Standardized component residual; pi-chart seams and numerical overflow return None.
+    pub fn component_residual(
+        &self,
+        relative_t: Vec3,
+        relative_r: Mat3,
+        k: usize,
+    ) -> Option<[f64; 6]> {
+        let component = self.components.get(k)?;
+        let c = cayley_inverse(matmul(relative_r, transpose(component.anchor_rotation)))?;
+        let mut residual = [0.; 6];
+        for i in 0..6 {
+            let latent = if i < 3 {
+                relative_t[i] - component.anchor_position[i]
+            } else {
+                self.angular_length * c[i - 3]
+            };
+            let value = latent
+                - component.mean[i]
+                - (0..i)
+                    .map(|j| component.lower[i][j] * residual[j])
+                    .sum::<f64>();
+            residual[i] = value / component.lower[i][i];
+        }
+        residual.iter().all(|x| x.is_finite()).then_some(residual)
     }
 
     pub fn component_count(&self) -> usize {
@@ -435,15 +513,26 @@ impl FrozenRelativePoseProposal {
         validate_pose(anchor)?;
         let anchor_rotation = rotation(anchor.orientation);
         let inverse_anchor = transpose(anchor_rotation);
-        let displacement = minimum_image(
-            std::array::from_fn(|i| pose.position[i] - anchor.position[i]),
-            self.box_lengths,
-        );
+        let raw_displacement = std::array::from_fn(|i| pose.position[i] - anchor.position[i]);
+        let displacement = if self.periodic {
+            minimum_image(raw_displacement, self.box_lengths)
+        } else {
+            raw_displacement
+        };
         let relative_t = matvec(inverse_anchor, displacement);
         let relative_r = matmul(inverse_anchor, rotation(pose.orientation));
         let learned = self.relative_log_density_unchecked(relative_t, relative_r);
         Ok(log_add(
-            self.log_uniform_density,
+            if self.periodic
+                || (0..3).all(|i| {
+                    pose.position[i] >= -0.5 * self.box_lengths[i]
+                        && pose.position[i] < 0.5 * self.box_lengths[i]
+                })
+            {
+                self.log_uniform_density
+            } else {
+                f64::NEG_INFINITY
+            },
             self.log_learned_weight + learned,
         ))
     }
@@ -485,7 +574,10 @@ impl FrozenRelativePoseProposal {
         };
         let candidate = match branch {
             ProposalBranch::Uniform => {
-                let position = std::array::from_fn(|i| rng.random::<f64>() * self.box_lengths[i]);
+                let position = std::array::from_fn(|i| {
+                    (rng.random::<f64>() - if self.periodic { 0. } else { 0.5 })
+                        * self.box_lengths[i]
+                });
                 let mut orientation: [f64; 4] = std::array::from_fn(|_| StandardNormal.sample(rng));
                 let norm = orientation.iter().fold(0.0_f64, |a, v| a.hypot(*v));
                 if !norm.is_finite() || norm == 0.0 {
@@ -526,20 +618,27 @@ impl FrozenRelativePoseProposal {
                 let anchor_rotation = rotation(anchor.orientation);
                 let displacement = matvec(anchor_rotation, relative_t);
                 if !finite3(displacement)
-                    || (0..3).any(|i| {
-                        displacement[i] < -0.5 * self.box_lengths[i]
-                            || displacement[i] >= 0.5 * self.box_lengths[i]
-                    })
+                    || (self.periodic
+                        && (0..3).any(|i| {
+                            displacement[i] < -0.5 * self.box_lengths[i]
+                                || displacement[i] >= 0.5 * self.box_lengths[i]
+                        }))
                 {
                     outcome.null_reason = Some("learned_outside_unique_image_cube".into());
                     return Ok(outcome);
                 }
                 let relative_r = matmul(cayley(c), component.anchor_rotation);
                 let orientation = quaternion(matmul(anchor_rotation, relative_r));
-                let position = wrap(
-                    std::array::from_fn(|i| anchor.position[i] + displacement[i]),
-                    self.box_lengths,
-                );
+                let raw_position = std::array::from_fn(|i| anchor.position[i] + displacement[i]);
+                if !finite3(raw_position) {
+                    outcome.null_reason = Some("learned_numerical_null".into());
+                    return Ok(outcome);
+                }
+                let position = if self.periodic {
+                    wrap(raw_position, self.box_lengths)
+                } else {
+                    raw_position
+                };
                 Pose {
                     position,
                     orientation,

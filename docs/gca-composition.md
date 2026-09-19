@@ -15,8 +15,10 @@ This is a physical, model-independent GCA kernel G reversible with respect to
 \exp[-z|\cup_i E_i(X)|].
 \]
 
-The following is a composition/lifting derivation, not an implementation of
-spherical GCA in the new Rust sampler. Current Rust production is periodic.
+The following derives the composition and lifting. Spherical GCA, center shifts
+and a fixed-K Gaussian-mean auxiliary lift are now implemented in Python and
+Rust; see [implementation and validation](spherical-ensemble.md). Periodic
+production remains available as a separate boundary choice.
 
 ## Frozen learned proposal
 

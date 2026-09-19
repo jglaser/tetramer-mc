@@ -26,3 +26,14 @@ equilibrium basin probabilities.
 
 `native-pair-motifs.json` and `monomer-shape.json` are optional post-hoc analysis
 inputs. They never enter the production proposal density or acceptance gate.
+
+## Spherical starts
+
+`spherical-seeded.json` and `spherical-oligomers.json` preserve assembled
+fragments from the 400-sweep Rust learned pilot. Exclusion-bound neighborhoods
+were unwrapped, then re-placed without hard overlap inside an equal-volume
+sphere of radius 354.50820786337056 Å. Input metadata records source checkpoint
+hashes and fragment labels. These are new preparations, not equilibrium maps
+from periodic to spherical boundaries. Both examples enable GCA and common
+center shifts after every ordinary learned/local sweep. The default mixture
+is frozen; add `"auxiliary_transport": {}` for the normalized Gaussian-mean law.

@@ -1,0 +1,422 @@
+{
+  "python": [
+    {
+      "id": "seed-free-frozen",
+      "sweeps": 40,
+      "cpu_seconds": 11.161413436,
+      "counts": {
+        "local": {
+          "attempted": 258,
+          "accepted": 0
+        },
+        "global": {
+          "attempted": 222,
+          "accepted": 0
+        }
+      }
+    },
+    {
+      "id": "seed-free-frozen-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 34.192597082999995,
+      "counts": {
+        "local": {
+          "attempted": 237,
+          "accepted": 0
+        },
+        "global": {
+          "attempted": 243,
+          "accepted": 0
+        },
+        "gca": {
+          "attempted": 40,
+          "accepted": 40
+        },
+        "shift": {
+          "attempted": 40,
+          "accepted": 40
+        }
+      }
+    },
+    {
+      "id": "seed-free-transport-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 88.714002488,
+      "counts": {
+        "local": {
+          "attempted": 241,
+          "accepted": 0
+        },
+        "global": {
+          "attempted": 239,
+          "accepted": 1
+        },
+        "gca": {
+          "attempted": 40,
+          "accepted": 40
+        },
+        "shift": {
+          "attempted": 40,
+          "accepted": 40
+        }
+      }
+    },
+    {
+      "id": "seeded-frozen",
+      "sweeps": 40,
+      "cpu_seconds": 21.577558103,
+      "counts": {
+        "local": {
+          "attempted": 255,
+          "accepted": 24
+        },
+        "global": {
+          "attempted": 225,
+          "accepted": 0
+        }
+      }
+    },
+    {
+      "id": "seeded-frozen-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 55.488240211000004,
+      "counts": {
+        "local": {
+          "attempted": 226,
+          "accepted": 13
+        },
+        "global": {
+          "attempted": 254,
+          "accepted": 2
+        },
+        "gca": {
+          "attempted": 40,
+          "accepted": 40
+        },
+        "shift": {
+          "attempted": 40,
+          "accepted": 40
+        }
+      }
+    },
+    {
+      "id": "seeded-transport-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 104.750360099,
+      "counts": {
+        "global": {
+          "attempted": 221,
+          "accepted": 0
+        },
+        "local": {
+          "attempted": 259,
+          "accepted": 24
+        },
+        "gca": {
+          "attempted": 40,
+          "accepted": 40
+        },
+        "shift": {
+          "attempted": 40,
+          "accepted": 40
+        }
+      }
+    }
+  ],
+  "rust": [
+    {
+      "id": "seed-free-frozen",
+      "sweeps": 40,
+      "cpu_seconds": 2.613300342,
+      "counts": {
+        "center_shift": {
+          "attempted": 0,
+          "completed": 0,
+          "transformed_bodies": 0
+        },
+        "gca": {
+          "attempted": 0,
+          "completed": 0,
+          "transformed_bodies": 0
+        },
+        "global": {
+          "accepted": 0,
+          "attempted": 230,
+          "hard_rejected": 183,
+          "hard_valid": 47,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 0,
+          "attempted": 250,
+          "hard_rejected": 248,
+          "hard_valid": 2,
+          "proposal_nulls": 0
+        },
+        "selected_body_updates": 480,
+        "selected_body_updates_by_body": [
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40
+        ]
+      }
+    },
+    {
+      "id": "seed-free-frozen-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 3.997360317,
+      "counts": {
+        "center_shift": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 480
+        },
+        "gca": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 240
+        },
+        "global": {
+          "accepted": 0,
+          "attempted": 230,
+          "hard_rejected": 181,
+          "hard_valid": 49,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 0,
+          "attempted": 250,
+          "hard_rejected": 250,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "selected_body_updates": 480,
+        "selected_body_updates_by_body": [
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40
+        ]
+      }
+    },
+    {
+      "id": "seed-free-transport-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 3.8660126779999997,
+      "counts": {
+        "center_shift": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 480
+        },
+        "gca": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 240
+        },
+        "global": {
+          "accepted": 0,
+          "attempted": 230,
+          "hard_rejected": 182,
+          "hard_valid": 48,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 0,
+          "attempted": 250,
+          "hard_rejected": 250,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "selected_body_updates": 480,
+        "selected_body_updates_by_body": [
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40
+        ]
+      }
+    },
+    {
+      "id": "seeded-frozen",
+      "sweeps": 40,
+      "cpu_seconds": 2.6384860199999998,
+      "counts": {
+        "center_shift": {
+          "attempted": 0,
+          "completed": 0,
+          "transformed_bodies": 0
+        },
+        "gca": {
+          "attempted": 0,
+          "completed": 0,
+          "transformed_bodies": 0
+        },
+        "global": {
+          "accepted": 1,
+          "attempted": 237,
+          "hard_rejected": 195,
+          "hard_valid": 42,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 21,
+          "attempted": 243,
+          "hard_rejected": 222,
+          "hard_valid": 21,
+          "proposal_nulls": 0
+        },
+        "selected_body_updates": 480,
+        "selected_body_updates_by_body": [
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40
+        ]
+      }
+    },
+    {
+      "id": "seeded-frozen-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 3.666996117,
+      "counts": {
+        "center_shift": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 480
+        },
+        "gca": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 254
+        },
+        "global": {
+          "accepted": 1,
+          "attempted": 237,
+          "hard_rejected": 202,
+          "hard_valid": 35,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 21,
+          "attempted": 243,
+          "hard_rejected": 222,
+          "hard_valid": 21,
+          "proposal_nulls": 0
+        },
+        "selected_body_updates": 480,
+        "selected_body_updates_by_body": [
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40
+        ]
+      }
+    },
+    {
+      "id": "seeded-transport-gca-shift",
+      "sweeps": 40,
+      "cpu_seconds": 3.772008456,
+      "counts": {
+        "center_shift": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 480
+        },
+        "gca": {
+          "attempted": 40,
+          "completed": 40,
+          "transformed_bodies": 254
+        },
+        "global": {
+          "accepted": 1,
+          "attempted": 237,
+          "hard_rejected": 200,
+          "hard_valid": 37,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 21,
+          "attempted": 243,
+          "hard_rejected": 222,
+          "hard_valid": 21,
+          "proposal_nulls": 0
+        },
+        "selected_body_updates": 480,
+        "selected_body_updates_by_body": [
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40,
+          40
+        ]
+      }
+    }
+  ],
+  "final_build": {
+    "executable_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+    "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43",
+    "smoke_completed_sweeps": 5
+  },
+  "unit_tests_passed": 25,
+  "scope": "Short spherical functionality pilot; different RNG implementations; no inferred mixing speedup. Final build additionally includes ingress and auxiliary-scale hardening; per-run source bundles retain exact pilot implementations.",
+  "independent_audit": {
+    "passed": true,
+    "runs": 12,
+    "analysis_sha256": "e31d87d5d149b09aa61f95901abcac2f4a17de181d9408728eb7f3e557d04cf5",
+    "report_path": "results/spherical-pilot-audit/report.md",
+    "audited_frames": 108,
+    "audited_move_records": 6400,
+    "gca_partial_flips": 265,
+    "gca_updates": 320,
+    "new_registered_motifs": 1
+  }
+}

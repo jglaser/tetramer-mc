@@ -1,0 +1,233 @@
+{
+  "box_lengths": [
+    709.0164157267411,
+    709.0164157267411,
+    709.0164157267411
+  ],
+  "depletant_radius": 1.5,
+  "endpoint_gate": {
+    "max_cells": 2047,
+    "max_depth": 14,
+    "min_width": 0.5
+  },
+  "fixed_body_indices": [],
+  "global_probability": 0.5,
+  "initial_poses": [
+    {
+      "position": [
+        -5.17858441895293,
+        -177.30284262167694,
+        79.83854458001348
+      ],
+      "orientation": [
+        0.01187522894097203,
+        0.4928714663705466,
+        0.4541937463417298,
+        0.7420544032342986
+      ]
+    },
+    {
+      "position": [
+        -20.79869215681625,
+        -206.3940040123119,
+        6.918513031959648
+      ],
+      "orientation": [
+        0.45360762645935465,
+        0.741958603413945,
+        -0.012390659595633544,
+        -0.4935423219874096
+      ]
+    },
+    {
+      "position": [
+        -299.2416412249023,
+        -68.80493189167953,
+        95.00182612209261
+      ],
+      "orientation": [
+        -0.28069014814149745,
+        0.11854637511298963,
+        -0.45304500993737506,
+        0.8378007022285898
+      ]
+    },
+    {
+      "position": [
+        133.5008335471057,
+        87.7685512499807,
+        91.16561458652941
+      ],
+      "orientation": [
+        -0.6148261069862945,
+        0.7163347533818001,
+        -0.32835430889835393,
+        0.03219979958629581
+      ]
+    },
+    {
+      "position": [
+        51.276511273943356,
+        -202.05334511303204,
+        214.8610504111859
+      ],
+      "orientation": [
+        0.13258300143235885,
+        0.4153677985087306,
+        -0.37011311941788616,
+        0.820309465097142
+      ]
+    },
+    {
+      "position": [
+        -267.5855095748324,
+        31.670112953542514,
+        110.27837517183224
+      ],
+      "orientation": [
+        -0.537238740353905,
+        0.6470677816664955,
+        0.3482958630348561,
+        0.4139659570362698
+      ]
+    },
+    {
+      "position": [
+        -7.8078471573371,
+        -196.74484311650625,
+        35.50443050444527
+      ],
+      "orientation": [
+        -0.49341685054108897,
+        0.012104637256606756,
+        0.7420076824789782,
+        -0.45367156457196495
+      ]
+    },
+    {
+      "position": [
+        -285.7091566410129,
+        -53.47004372196102,
+        69.33177145549558
+      ],
+      "orientation": [
+        0.8378365902752636,
+        0.4529919331422952,
+        0.11840179371342796,
+        0.28072971297917393
+      ]
+    },
+    {
+      "position": [
+        -254.70052877478489,
+        46.703494181804615,
+        84.03993671210361
+      ],
+      "orientation": [
+        0.41379898244862795,
+        -0.34853081710632766,
+        0.6472902922699223,
+        0.5369468774327627
+      ]
+    },
+    {
+      "position": [
+        63.52044610371979,
+        -227.42455531846406,
+        198.0390412987029
+      ],
+      "orientation": [
+        0.8202771598483676,
+        0.3702927902674134,
+        0.41521801010112624,
+        -0.13275027154296187
+      ]
+    },
+    {
+      "position": [
+        -1.4220725571446948,
+        -209.89260547705945,
+        77.97656051831812
+      ],
+      "orientation": [
+        0.7417522493528677,
+        -0.45421997855546886,
+        0.49329071711070466,
+        -0.012332074985070558
+      ]
+    },
+    {
+      "position": [
+        102.14882666639252,
+        80.34650710270733,
+        84.79093983292282
+      ],
+      "orientation": [
+        0.032431836693939814,
+        0.3290166962072725,
+        0.7163398958724516,
+        0.6144536948924257
+      ]
+    }
+  ],
+  "learned_uniform_weight": 0.1,
+  "local_small_angle_std_degrees": 1.0,
+  "local_translation_std_A": 0.2,
+  "metadata": {
+    "arm": "seed-free",
+    "global_protein_packing_fraction": 0.002792059687504742,
+    "initial_free_tetramers": 12,
+    "initial_snapshot_sha256": "e102441918915d4f5b903b24101688b841645b90b73d335e763e3c421de6e219",
+    "initialization": "supplied fixed preparation; repeated with new RNG",
+    "method": "learned",
+    "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+    "native_pair_motifs": "native-pair-motifs.json",
+    "preparation_equilibrated": false,
+    "replicate": 0,
+    "source": "Frozen-proposal pilot independent production start r00, repeated for Rust validation",
+    "training_feedback": false,
+    "spherical_initialization": "unwrapped preassembled fragments independently placed in equal-volume sphere",
+    "source_checkpoint": "/home/xvg/tetramer-mc/runs/rust-validation-400/runs/seed-free-r00-learned/checkpoint.json",
+    "source_sha256": "148809964e16c3c07f28c29d50a149753c148ef782c040ab41857c4835963983",
+    "initial_fragments": [
+      [
+        0,
+        1,
+        6,
+        10
+      ],
+      [
+        2,
+        7
+      ],
+      [
+        3,
+        11
+      ],
+      [
+        4,
+        9
+      ],
+      [
+        5,
+        8
+      ]
+    ],
+    "sphere_volume_matches_original_periodic_volume": true
+  },
+  "method": "learned",
+  "monomer_shape": "monomer-shape.json",
+  "poisson_lambda_ratio": 16.0,
+  "reservoir_density": 0.035,
+  "sample_every": 10,
+  "seed": 518911,
+  "seed_labels": [],
+  "shape": "tetramer-shape.json",
+  "sweeps": 400,
+  "boundary": {
+    "kind": "spherical",
+    "radius": 354.50820786337056
+  },
+  "gca_probability": 1.0,
+  "center_shift_probability": 1.0
+}

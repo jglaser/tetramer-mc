@@ -22,16 +22,36 @@ impl Trajectory {
         lengths: Vec3,
         tree: &SphereTree,
     ) -> Result<()> {
+        self.append_with_spherical_wall(step, poses, lengths, tree, None)
+    }
+
+    /// Spherical atom positions remain in the origin-centered lab frame. GSD's
+    /// standard box is display metadata; custom boundary flags define the target.
+    pub fn append_with_spherical_wall(
+        &mut self,
+        step: u64,
+        poses: &[Pose],
+        lengths: Vec3,
+        tree: &SphereTree,
+        spherical_radius: Option<f64>,
+    ) -> Result<()> {
         let n = poses.len() * tree.shape.atoms.len();
-        let center = scale(lengths, 0.5);
+        let center = if spherical_radius.is_some() {
+            [0.; 3]
+        } else {
+            scale(lengths, 0.5)
+        };
         let mut positions = Vec::with_capacity(n);
         let mut images = Vec::with_capacity(n);
         for pose in poses {
             let r = rotation(pose.orientation);
             for atom in &tree.shape.atoms {
                 let raw = sub(add(pose.position, matvec(r, atom.center)), center);
-                let image: [i32; 3] =
-                    std::array::from_fn(|k| (raw[k] / lengths[k] + 0.5).floor() as i32);
+                let image: [i32; 3] = if spherical_radius.is_some() {
+                    [0; 3]
+                } else {
+                    std::array::from_fn(|k| (raw[k] / lengths[k] + 0.5).floor() as i32)
+                };
                 positions.push(std::array::from_fn::<_, 3, _>(|k| {
                     (raw[k] - f64::from(image[k]) * lengths[k]) as f32
                 }));
@@ -78,6 +98,16 @@ impl Trajectory {
         )?;
         self.gsd
             .write_scalars("log/tetramer_mc/box_lengths", lengths)?;
+        self.gsd.write_scalars(
+            "log/tetramer_mc/periodic",
+            [u8::from(spherical_radius.is_none()); 3],
+        )?;
+        if let Some(radius) = spherical_radius {
+            self.gsd
+                .write_scalars("log/tetramer_mc/spherical_wall_radius", [radius])?;
+            self.gsd
+                .write_scalars("log/tetramer_mc/bath_wall_permeable", [1_u8])?;
+        }
         self.gsd.end_frame()?;
         Ok(())
     }

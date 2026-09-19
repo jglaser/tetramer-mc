@@ -1,7 +1,7 @@
 # tetramer-mc
 
 Rust Monte Carlo for rigid sphere-union particles in an implicit ideal depletant
-bath. A frozen full-covariance Gaussian mixture proposes relative translations
+bath, with periodic or spherical boundaries. A full-covariance Gaussian mixture proposes relative translations
 and orientations; a complete Hastings factor and a conditional Poisson gate
 preserve the hard-particle, many-body depletion target. Crystal information is
 allowed in training examples but never substitutes for physical acceptance.
@@ -47,8 +47,13 @@ nohup python3 tools/run_campaign.py --out runs/frozen-4000 \
 ```
 
 The launcher repeats the supplied initial configurations with independent paired
-RNG seeds. It does not create new equilibrated fluid preparations. Production
-does not fit or change the mixture. See `progress.json` and per-job logs.
+RNG seeds. It does not create new equilibrated fluid preparations. This campaign
+uses a frozen mixture. See `progress.json` and per-job logs.
+
+For spherical GCA, common center shifts, and optional reversible transport of
+a conditional Gaussian model, see [the spherical ensemble guide](docs/spherical-ensemble.md).
+Use `examples/spherical-seeded.json` or `examples/spherical-oligomers.json`
+with the same Rust command. Both collective kernels are enabled in those examples.
 
 ## Output and continuation
 
@@ -106,16 +111,18 @@ and trajectory format do not depend on a rendering engine.
 | `geometry` | Reusable body-frame sphere BVH, exact atomic hard tests, union coverage |
 | `proposal` | Immutable Gaussian atlas, full Haar density, uniform support, periodic null trials |
 | `depletion` | Conservative disjoint endpoint envelope and exact Poisson thinning |
+| `spherical` | Exact atomic wall, implicit many-body GCA, common-translation chord |
+| `auxiliary` | Normalized state-dependent mixture-mean law and latent transport |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 
 For the exclusion union U(X), the physical target is
-`π(X) ∝ hard(X) exp[-z |U(X)|]`, with translation volume and normalized Haar
+`π(X) ∝ hard(X) wall(X) exp[-z |U(X)|]`, with translation volume and normalized Haar
 orientation measure. It includes all simultaneous exclusions, not a sum of
 pair overlaps. A spectator anchor is uniformly selected and retained as a move
 label; every proposal evaluates the **whole** mixture at both endpoints.
 
-The learned raw displacement must lie in the unique lab-frame minimum-image
+For periodic boundaries, the learned raw displacement must lie in the unique lab-frame minimum-image
 cell. Draws outside it are null moves, without retries or Gaussian wrapping.
 The uniform pose branch supplies reverse support. For fixed spectators and
 independently chosen endpoints, the fresh body-coordinate cloud gives
@@ -129,15 +136,19 @@ At finite pruning depth, unresolved cells are retained and exact membership
 thinning follows. Budget controls efficiency rather than the target. Ordinary
 guarded FP64 is used, not formal interval arithmetic. Orthorhombic boxes must
 satisfy every `L > 4 (body bounding radius + depletant radius)`; unsupported
-small cells and fixed particles are explicitly rejected.
+small periodic cells and fixed particles are explicitly rejected. Spherical
+coordinates have no minimum-image convention; their ideal bath is not clipped
+at the protein wall.
 
-The model is frozen in this implementation. Frozen invariance is not evidence
-of equilibration from a prepared state. [Reversible-jump/continuing-learning
-constructions and their validation](docs/rjmcmc.md) are documented separately;
-they have not been enabled in production.
+The default model is frozen. The optional spherical `auxiliary_transport`
+mode changes fixed-K mixture means under a normalized conditional Gaussian
+law, using the transported reverse model. Its latent residuals are part of
+the checkpoint. This preserves the physical marginal; it does not prove
+equilibration. [General reversible-jump/continuing-learning constructions](docs/rjmcmc.md)
+remain separate; component birth/death and accumulating training are not enabled.
 
 Mixture fitting remains in the existing Python research workflow. This Rust
-port loads its immutable Gaussian export; it does not retrain the model or
+port loads a fixed base Gaussian export; it does not accumulate training data or
 include the experimental Student-t proposal variant.
 
 ## Validation and scope

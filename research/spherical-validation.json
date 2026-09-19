@@ -1,0 +1,1979 @@
+{
+  "reference": {
+    "passed": true,
+    "exact_pair_reference": {
+      "a": 1.0,
+      "wall": 4.0,
+      "rd": 0.5,
+      "z": 1.5,
+      "center_radius": 3.0,
+      "expected": {
+        "distance": 2.7736117345660194,
+        "distance_squared": 8.473914505619357,
+        "exclusion_contact_probability": 0.6975882620336054,
+        "midpoint_squared": 2.978121482122466,
+        "mean_center_squared": 5.096600108527305,
+        "midpoint_x": 0.0,
+        "midpoint_y": 0.0,
+        "midpoint_z": 0.0,
+        "mean_rotation_trace": 0.0
+      },
+      "density": "p(d) proportional to d\u00b2 overlap(C,d) exp[z overlap(a+rd,d)]; C=R-a, 2a<=d<=2C",
+      "wall_description": "Protein-only wall; no solvent-wall exclusion or periodic images."
+    },
+    "iid_reference": {
+      "passed": true,
+      "checks": {
+        "distance": {
+          "mean": 2.7706896756034025,
+          "exact": 2.7736117345660194,
+          "standard_error": 0.008083851724831703,
+          "standardized_error": -0.36146864911450544,
+          "passed": true
+        },
+        "distance_squared": {
+          "mean": 8.460839834345354,
+          "exact": 8.473914505619357,
+          "standard_error": 0.054071847232496195,
+          "standardized_error": -0.24180182374360315,
+          "passed": true
+        },
+        "exclusion_contact_probability": {
+          "mean": 0.7000833333333333,
+          "exact": 0.6975882620336054,
+          "standard_error": 0.004183142343602565,
+          "standardized_error": 0.5964586176570659,
+          "passed": true
+        },
+        "midpoint_squared": {
+          "mean": 2.990759617530169,
+          "exact": 2.978121482122466,
+          "standard_error": 0.015827285296436625,
+          "standardized_error": 0.7985030389607067,
+          "passed": true
+        },
+        "mean_center_squared": {
+          "mean": 5.105969576116508,
+          "exact": 5.096600108527305,
+          "standard_error": 0.015575545319749909,
+          "standardized_error": 0.6015498909898688,
+          "passed": true
+        },
+        "midpoint_x": {
+          "mean": 0.003567364964984395,
+          "exact": 0.0,
+          "standard_error": 0.00915410973016532,
+          "standardized_error": 0.3897009179635396,
+          "passed": true
+        },
+        "midpoint_y": {
+          "mean": 0.0045681240778473785,
+          "exact": 0.0,
+          "standard_error": 0.009110993862370848,
+          "standardized_error": 0.5013859241760776,
+          "passed": true
+        },
+        "midpoint_z": {
+          "mean": 0.006948107719226211,
+          "exact": 0.0,
+          "standard_error": 0.009079426294513589,
+          "standardized_error": 0.7652584528853694,
+          "passed": true
+        },
+        "mean_rotation_trace": {
+          "mean": 0.006668137029044637,
+          "exact": 0.0,
+          "standard_error": 0.006437032698159746,
+          "standardized_error": 1.0359023080542935,
+          "passed": true
+        }
+      }
+    },
+    "iid_sampling": {
+      "independent_draws": 12000,
+      "proposals": 157432,
+      "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+    },
+    "collinear_triple_reference": {
+      "a": 0.25,
+      "rd": 1.0,
+      "wall": 4.0,
+      "z": 0.4,
+      "signs": [
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          -1,
+          1
+        ],
+        [
+          -1,
+          1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          1
+        ],
+        [
+          1,
+          -1,
+          -1
+        ],
+        [
+          1,
+          -1,
+          1
+        ],
+        [
+          1,
+          1,
+          -1
+        ],
+        [
+          1,
+          1,
+          1
+        ]
+      ],
+      "magnitudes": [
+        0.6,
+        1.2,
+        1.8
+      ],
+      "centers": [
+        [
+          -0.6,
+          -1.2,
+          -1.8
+        ],
+        [
+          -0.6,
+          -1.2,
+          1.8
+        ],
+        [
+          -0.6,
+          1.2,
+          -1.8
+        ],
+        [
+          -0.6,
+          1.2,
+          1.8
+        ],
+        [
+          0.6,
+          -1.2,
+          -1.8
+        ],
+        [
+          0.6,
+          -1.2,
+          1.8
+        ],
+        [
+          0.6,
+          1.2,
+          -1.8
+        ],
+        [
+          0.6,
+          1.2,
+          1.8
+        ]
+      ],
+      "exact_union_volumes": [
+        13.958619758675047,
+        19.231783027725516,
+        20.928243060664006,
+        18.378840622275884,
+        18.378840622275884,
+        20.928243060664006,
+        19.231783027725516,
+        13.958619758675047
+      ],
+      "probability": [
+        0.36940186892240967,
+        0.04481844706344639,
+        0.022737960722318033,
+        0.06304172329182589,
+        0.06304172329182589,
+        0.022737960722318033,
+        0.04481844706344639,
+        0.36940186892240967
+      ],
+      "incorrect_pair_additive_probability": [
+        0.4470473135260436,
+        0.018104228577683994,
+        0.00918490633386956,
+        0.025663551562402867,
+        0.025663551562402867,
+        0.00918490633386956,
+        0.018104228577683994,
+        0.4470473135260436
+      ],
+      "pair_additive_pearson_divergence": 0.1249678074110877
+    },
+    "lens_integral_checks": 37,
+    "independent_cross_section_union_integrals": 8,
+    "negative_control": "Pair-additive eight-state law differs by a Pearson divergence large enough to detect at the planned budget."
+  },
+  "source_sha256": "135273ab48d34b1de3ba8c150e51348bbb237b466dac00d7978a7b282589a4b0",
+  "auxiliary_balance": {
+    "passed": true,
+    "attempted": 220,
+    "nonnull_proposals": 205,
+    "hard_valid_endpoints": 43,
+    "independent_log_density_maximum_error": 1.7763568394002505e-14,
+    "actual_step_hastings_maximum_error": 1.9539925233402755e-14,
+    "accepted_log_flux_maximum_error": 4.440892098500626e-15,
+    "conditional_density_plus_transport_jacobian_maximum_error": 1.0658141036401503e-14,
+    "maximum_nonzero_transport_log_jacobian": 8.798022412760565,
+    "stale_reverse_model_negative_control_log_error": 8.980920712471486,
+    "scope": "Actual AuxiliaryMeans and SphericalSystem.step; full state-dependent reverse model checked independently using SciPy Gaussian densities and Haar Jacobian. Normalized conditional density cancels its nonunit affine transport Jacobian."
+  },
+  "auxiliary_fixture": {
+    "path": "tests/fixtures/spherical_auxiliary.json",
+    "cases": 12,
+    "shape_sha256": "f76584bcfd8debc480daad16fa6a556f5987bdba7cd410277f05ea292dbe3a51",
+    "sha256": "b8522cd668acc42e97db239396183b91e7dd1a601a38965ecff5027f62b601a4"
+  },
+  "shift_geometry": {
+    "passed": true,
+    "steps": 300,
+    "maximum_reverse_chord_error": 1.7763568394002505e-15,
+    "internal_relative_poses_unchanged": true,
+    "atomic_wall_checked": true
+  },
+  "pair_stationarity": [
+    {
+      "method": "shift",
+      "z": 1.5,
+      "independent_starts": 3000,
+      "passed": true,
+      "moments": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 2.781906314603791,
+            "exact": 2.7736117345660194,
+            "standard_error": 0.016249608761476214,
+            "standardized_error": 0.5104479842884453,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 8.530888048150679,
+            "exact": 8.473914505619357,
+            "standard_error": 0.10923804934045131,
+            "standardized_error": 0.521554008656439,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.6916666666666667,
+            "exact": 0.6975882620336054,
+            "standard_error": 0.008432773378427384,
+            "standardized_error": -0.7022120838782713,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 2.989865251655649,
+            "exact": 2.978121482122466,
+            "standard_error": 0.03177452451651414,
+            "standardized_error": 0.36959701873994794,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 5.122587263693319,
+            "exact": 5.096600108527305,
+            "standard_error": 0.030814162222805162,
+            "standardized_error": 0.843351020810206,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": -0.0016344846842024504,
+            "exact": 0.0,
+            "standard_error": 0.018157239949042225,
+            "standardized_error": -0.09001834468176799,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": -0.021715571549048584,
+            "exact": 0.0,
+            "standard_error": 0.01830493497518767,
+            "standardized_error": -1.1863233373122621,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.020890464418852464,
+            "exact": 0.0,
+            "standard_error": 0.018217969443592025,
+            "standardized_error": 1.1466955460395978,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": 0.02449471664289268,
+            "exact": 0.0,
+            "standard_error": 0.012913416193318233,
+            "standardized_error": 1.8968424990102106,
+            "passed": true
+          }
+        }
+      },
+      "paired_change": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": -5.625129991434126e-18,
+            "exact": 0.0,
+            "standard_error": 4.170613403759959e-18,
+            "standardized_error": -1.3487536357032919,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": -4.2928623618839385e-17,
+            "exact": 0.0,
+            "standard_error": 2.8598643319142505e-17,
+            "standardized_error": -1.5010720312772707,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.0,
+            "exact": 0.0,
+            "standard_error": 0.0,
+            "standardized_error": null,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": -0.018794396258566437,
+            "exact": 0.0,
+            "standard_error": 0.026681948267539016,
+            "standardized_error": -0.7043862041150686,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": -0.01879439625856646,
+            "exact": 0.0,
+            "standard_error": 0.026681948267539016,
+            "standardized_error": -0.7043862041150695,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.010507551191998801,
+            "exact": 0.0,
+            "standard_error": 0.01478961501741166,
+            "standardized_error": 0.7104682021559298,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": -0.00311224484113818,
+            "exact": 0.0,
+            "standard_error": 0.01437592543436486,
+            "standardized_error": -0.21649005174293195,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": -0.0038662659141449137,
+            "exact": 0.0,
+            "standard_error": 0.014201361168445888,
+            "standardized_error": -0.2722461507940097,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": 0.0,
+            "exact": 0.0,
+            "standard_error": 0.0,
+            "standardized_error": null,
+            "passed": true
+          }
+        }
+      },
+      "cpu_seconds": 0.1447796730000004,
+      "sampling": {
+        "independent_draws": 3000,
+        "proposals": 41372,
+        "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+      },
+      "scope": "One actual kernel composition per exact independent equilibrium start; stationarity, not an ergodicity or convergence claim."
+    },
+    {
+      "method": "gca",
+      "z": 1.5,
+      "independent_starts": 3000,
+      "passed": true,
+      "moments": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 2.7833159150637408,
+            "exact": 2.7736117345660194,
+            "standard_error": 0.016220524237543357,
+            "standardized_error": 0.5982655280191546,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 8.535900597262762,
+            "exact": 8.473914505619357,
+            "standard_error": 0.10864152701380608,
+            "standardized_error": 0.5705561523958312,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.69,
+            "exact": 0.6975882620336054,
+            "standard_error": 0.008445340407084282,
+            "standardized_error": -0.8985146445062271,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 2.9519817952508505,
+            "exact": 2.978121482122466,
+            "standard_error": 0.03133613862460462,
+            "standardized_error": -0.8341706419147402,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 5.085956944566542,
+            "exact": 5.096600108527305,
+            "standard_error": 0.030716355607170873,
+            "standardized_error": -0.34649826616405144,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.0061721992351281615,
+            "exact": 0.0,
+            "standard_error": 0.017999693130367426,
+            "standardized_error": 0.34290580347256006,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": 0.003539989244676453,
+            "exact": 0.0,
+            "standard_error": 0.018179037151569977,
+            "standardized_error": 0.19472919358497118,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": -0.003193129369072783,
+            "exact": 0.0,
+            "standard_error": 0.018161371458212686,
+            "standardized_error": -0.17581983697761053,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": 0.006360778989206527,
+            "exact": 0.0,
+            "standard_error": 0.01283267213261188,
+            "standardized_error": 0.49567065405199395,
+            "passed": true
+          }
+        }
+      },
+      "paired_change": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": -0.004011272605833493,
+            "exact": 0.0,
+            "standard_error": 0.008905440438156177,
+            "standardized_error": -0.45042944632438703,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": -0.03221433604551063,
+            "exact": 0.0,
+            "standard_error": 0.06347443049967975,
+            "standardized_error": -0.507516740078088,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.003,
+            "exact": 0.0,
+            "standard_error": 0.005323511991781573,
+            "standardized_error": 0.5635377556454074,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 0.00805358401137767,
+            "exact": 0.0,
+            "standard_error": 0.01586860762491994,
+            "standardized_error": 0.5075167400780888,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 1.7023419710919066e-17,
+            "exact": 0.0,
+            "standard_error": 1.757898617088376e-17,
+            "standardized_error": 0.968395989702473,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.0351264899540928,
+            "exact": 0.0,
+            "standard_error": 0.020648159583726514,
+            "standardized_error": 1.7011922932723327,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": 0.006827074633731274,
+            "exact": 0.0,
+            "standard_error": 0.021205651445847205,
+            "standardized_error": 0.3219459987430968,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": -0.015162444093455638,
+            "exact": 0.0,
+            "standard_error": 0.020661021120364755,
+            "standardized_error": -0.7338671213355769,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": -0.01684442457787028,
+            "exact": 0.0,
+            "standard_error": 0.014459290653941668,
+            "standardized_error": -1.1649551130143727,
+            "passed": true
+          }
+        }
+      },
+      "cpu_seconds": 0.43550751599999993,
+      "sampling": {
+        "independent_draws": 3000,
+        "proposals": 41308,
+        "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+      },
+      "scope": "One actual kernel composition per exact independent equilibrium start; stationarity, not an ergodicity or convergence claim."
+    },
+    {
+      "method": "local",
+      "z": 1.5,
+      "independent_starts": 3000,
+      "passed": true,
+      "moments": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 2.7717533435113704,
+            "exact": 2.7736117345660194,
+            "standard_error": 0.016335448199826602,
+            "standardized_error": -0.11376431377430764,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 8.482890354066228,
+            "exact": 8.473914505619357,
+            "standard_error": 0.10984459630543897,
+            "standardized_error": 0.08171406467654287,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.7033333333333334,
+            "exact": 0.6975882620336054,
+            "standard_error": 0.008341165597986262,
+            "standardized_error": 0.6887612087590007,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 3.00221989980336,
+            "exact": 2.978121482122466,
+            "standard_error": 0.032237271762686544,
+            "standardized_error": 0.7475327893220436,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 5.122942488319917,
+            "exact": 5.096600108527305,
+            "standard_error": 0.03186289866517597,
+            "standardized_error": 0.8267414735057543,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.027550920485591657,
+            "exact": 0.0,
+            "standard_error": 0.018031846249573855,
+            "standardized_error": 1.5279034716837587,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": -0.0026936618659068805,
+            "exact": 0.0,
+            "standard_error": 0.018300568200775236,
+            "standardized_error": -0.1471900673440715,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.015127225911634528,
+            "exact": 0.0,
+            "standard_error": 0.01845761516484412,
+            "standardized_error": 0.8195655709870404,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": -0.014130023184506612,
+            "exact": 0.0,
+            "standard_error": 0.012923870770991632,
+            "standardized_error": -1.0933274894873026,
+            "passed": true
+          }
+        }
+      },
+      "paired_change": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": -0.004831004167123951,
+            "exact": 0.0,
+            "standard_error": 0.00600023481751819,
+            "standardized_error": -0.8051358511869282,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": -0.0233720543524965,
+            "exact": 0.0,
+            "standard_error": 0.042929261121917583,
+            "standardized_error": -0.5444317871234888,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.0036666666666666666,
+            "exact": 0.0,
+            "standard_error": 0.00455853299179777,
+            "standardized_error": 0.8043523373120584,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 0.012645163651822649,
+            "exact": 0.0,
+            "standard_error": 0.011038679994492966,
+            "standardized_error": 1.1455322246981645,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 0.006802150063698526,
+            "exact": 0.0,
+            "standard_error": 0.012693332830281031,
+            "standardized_error": 0.535883692222378,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": -0.001980218978506449,
+            "exact": 0.0,
+            "standard_error": 0.003907569722621821,
+            "standardized_error": -0.506764848504815,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": 0.0021219463385905475,
+            "exact": 0.0,
+            "standard_error": 0.0037958090897055696,
+            "standardized_error": 0.5590234620453847,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": -0.0021117294976333856,
+            "exact": 0.0,
+            "standard_error": 0.003769199305528394,
+            "standardized_error": -0.560259441451146,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": -0.0013307346101588341,
+            "exact": 0.0,
+            "standard_error": 0.0018445517638134555,
+            "standardized_error": -0.7214406427974959,
+            "passed": true
+          }
+        }
+      },
+      "cpu_seconds": 3.826486898,
+      "sampling": {
+        "independent_draws": 3000,
+        "proposals": 41092,
+        "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+      },
+      "scope": "One actual kernel composition per exact independent equilibrium start; stationarity, not an ergodicity or convergence claim."
+    },
+    {
+      "method": "gca-shift",
+      "z": 1.5,
+      "independent_starts": 3000,
+      "passed": true,
+      "moments": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 2.8026298510293284,
+            "exact": 2.7736117345660194,
+            "standard_error": 0.0164510226451396,
+            "standardized_error": 1.7639095811397651,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 8.666371883947294,
+            "exact": 8.473914505619357,
+            "standard_error": 0.11069567308066111,
+            "standardized_error": 1.7386169935269131,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.6836666666666666,
+            "exact": 0.6975882620336054,
+            "standard_error": 0.008491930845318928,
+            "standardized_error": -1.6393910431586731,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 2.91549897557569,
+            "exact": 2.978121482122466,
+            "standard_error": 0.03203485599349766,
+            "standardized_error": -1.9548240379006914,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 5.082091946562514,
+            "exact": 5.096600108527305,
+            "standard_error": 0.03124793150175454,
+            "standardized_error": -0.46429191525770214,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.003457142176471339,
+            "exact": 0.0,
+            "standard_error": 0.017885533818150903,
+            "standardized_error": 0.1932926470980085,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": -0.00769985627975034,
+            "exact": 0.0,
+            "standard_error": 0.01790177218938004,
+            "standardized_error": -0.4301169849719217,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.01582674967381291,
+            "exact": 0.0,
+            "standard_error": 0.01821219369247087,
+            "standardized_error": 0.8690194021138634,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": 0.013157981651155155,
+            "exact": 0.0,
+            "standard_error": 0.012975313953324939,
+            "standardized_error": 1.0140780946408936,
+            "passed": true
+          }
+        }
+      },
+      "paired_change": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 0.004876575519081478,
+            "exact": 0.0,
+            "standard_error": 0.009716078036918608,
+            "standardized_error": 0.5019078171821737,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 0.03834332673325349,
+            "exact": 0.0,
+            "standard_error": 0.07000722253202254,
+            "standardized_error": 0.5477052987742025,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.0,
+            "exact": 0.0,
+            "standard_error": 0.005538672430956039,
+            "standardized_error": 0.0,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 0.01824601120272306,
+            "exact": 0.0,
+            "standard_error": 0.031660229420575815,
+            "standardized_error": 0.5763069799761171,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 0.02783184288603645,
+            "exact": 0.0,
+            "standard_error": 0.02756831413842117,
+            "standardized_error": 1.0095591172638303,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.007902333013138476,
+            "exact": 0.0,
+            "standard_error": 0.022468168643073484,
+            "standardized_error": 0.3517123775717527,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": 0.016792899564934627,
+            "exact": 0.0,
+            "standard_error": 0.022599263235880556,
+            "standardized_error": 0.7430728776269466,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.013724092069707714,
+            "exact": 0.0,
+            "standard_error": 0.02256029595850201,
+            "standardized_error": 0.6083294339290656,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": 0.005176761839775009,
+            "exact": 0.0,
+            "standard_error": 0.01485508604053187,
+            "standardized_error": 0.3484841370592062,
+            "passed": true
+          }
+        }
+      },
+      "cpu_seconds": 0.5629973130000003,
+      "sampling": {
+        "independent_draws": 3000,
+        "proposals": 41360,
+        "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+      },
+      "scope": "One actual kernel composition per exact independent equilibrium start; stationarity, not an ergodicity or convergence claim."
+    },
+    {
+      "method": "global-frozen",
+      "z": 1.5,
+      "independent_starts": 3000,
+      "passed": true,
+      "moments": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 2.783588022531779,
+            "exact": 2.7736117345660194,
+            "standard_error": 0.016025084274794037,
+            "standardized_error": 0.6225419969523304,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 8.51851545389912,
+            "exact": 8.473914505619357,
+            "standard_error": 0.10691295873884897,
+            "standardized_error": 0.41717064802881076,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.6903333333333334,
+            "exact": 0.6975882620336054,
+            "standard_error": 0.00844283727435004,
+            "standardized_error": -0.8592998377823776,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 3.00675516424233,
+            "exact": 2.978121482122466,
+            "standard_error": 0.03172107424116955,
+            "standardized_error": 0.902670631586029,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 5.13638402771711,
+            "exact": 5.096600108527305,
+            "standard_error": 0.03096827311456513,
+            "standardized_error": 1.2846670217169365,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.006510259329100746,
+            "exact": 0.0,
+            "standard_error": 0.018308792336691925,
+            "standardized_error": 0.3555810350229268,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": -0.013892638730340664,
+            "exact": 0.0,
+            "standard_error": 0.018404064216829743,
+            "standardized_error": -0.7548679773479833,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.033886914629915214,
+            "exact": 0.0,
+            "standard_error": 0.01811637571665938,
+            "standardized_error": 1.8705129083160725,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": -0.007516663488907431,
+            "exact": 0.0,
+            "standard_error": 0.012599396276613953,
+            "standardized_error": -0.5965891796624647,
+            "passed": true
+          }
+        }
+      },
+      "paired_change": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 0.0007903935554044625,
+            "exact": 0.0,
+            "standard_error": 0.0043649732808801805,
+            "standardized_error": 0.1810763788329725,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": -0.005231065978955238,
+            "exact": 0.0,
+            "standard_error": 0.029115542735883286,
+            "standardized_error": -0.17966575538048413,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": -0.004666666666666667,
+            "exact": 0.0,
+            "standard_error": 0.002788029690486969,
+            "standardized_error": -1.673822442633876,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 0.007504929963849842,
+            "exact": 0.0,
+            "standard_error": 0.00807762272279985,
+            "standardized_error": 0.9291013236687165,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 0.006197163469111037,
+            "exact": 0.0,
+            "standard_error": 0.007018589758188543,
+            "standardized_error": 0.8829641968859694,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": 0.0008095855217649402,
+            "exact": 0.0,
+            "standard_error": 0.0031416652988314896,
+            "standardized_error": 0.2576931164710822,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": 0.009209483654394151,
+            "exact": 0.0,
+            "standard_error": 0.0033978128620437632,
+            "standardized_error": 2.710415207756528,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.002794498479541773,
+            "exact": 0.0,
+            "standard_error": 0.003852769921396169,
+            "standardized_error": 0.7253219207362118,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": 0.003071577417029488,
+            "exact": 0.0,
+            "standard_error": 0.0027094518194367687,
+            "standardized_error": 1.1336527171271111,
+            "passed": true
+          }
+        }
+      },
+      "cpu_seconds": 3.685323446,
+      "sampling": {
+        "independent_draws": 3000,
+        "proposals": 42104,
+        "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+      },
+      "scope": "One actual kernel composition per exact independent equilibrium start; stationarity, not an ergodicity or convergence claim."
+    },
+    {
+      "method": "global-auxiliary",
+      "z": 1.5,
+      "independent_starts": 3000,
+      "passed": true,
+      "moments": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 2.7877798909364513,
+            "exact": 2.7736117345660194,
+            "standard_error": 0.016366012759569667,
+            "standardized_error": 0.8657060567270655,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 8.574987994875196,
+            "exact": 8.473914505619357,
+            "standard_error": 0.11044262714770883,
+            "standardized_error": 0.915167375733109,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.696,
+            "exact": 0.6975882620336054,
+            "standard_error": 0.00839949505460839,
+            "standardized_error": -0.18909018021672647,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 2.9544003066469062,
+            "exact": 2.978121482122466,
+            "standard_error": 0.031570579345545066,
+            "standardized_error": -0.7513696602120564,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 5.098147305365705,
+            "exact": 5.096600108527305,
+            "standard_error": 0.030969821459526738,
+            "standardized_error": 0.04995820981474442,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": -0.011677782804166646,
+            "exact": 0.0,
+            "standard_error": 0.018310555765964756,
+            "standardized_error": -0.6377623352030113,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": 0.026623129960893697,
+            "exact": 0.0,
+            "standard_error": 0.01810042888470103,
+            "standardized_error": 1.4708563056976116,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": -0.00647793250737818,
+            "exact": 0.0,
+            "standard_error": 0.017942427179199916,
+            "standardized_error": -0.36103992189461637,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": -0.003057629153150869,
+            "exact": 0.0,
+            "standard_error": 0.0128256862963245,
+            "standardized_error": -0.2383988725833021,
+            "passed": true
+          }
+        }
+      },
+      "paired_change": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": -0.0001896850228936966,
+            "exact": 0.0,
+            "standard_error": 0.004449550052852461,
+            "standardized_error": -0.04263015824984275,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": -0.01200900285977229,
+            "exact": 0.0,
+            "standard_error": 0.02972165623165602,
+            "standardized_error": -0.40404891188337305,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": -0.0003333333333333333,
+            "exact": 0.0,
+            "standard_error": 0.002848469530636244,
+            "standardized_error": -0.11702190588602815,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": -0.0025025337410006063,
+            "exact": 0.0,
+            "standard_error": 0.007592678995805485,
+            "standardized_error": -0.32959825410544963,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": -0.005504784455943672,
+            "exact": 0.0,
+            "standard_error": 0.006558766732913118,
+            "standardized_error": -0.8393017590211944,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": -0.004936688096499061,
+            "exact": 0.0,
+            "standard_error": 0.003044391355212298,
+            "standardized_error": -1.6215681627288046,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": -0.0008953612630049494,
+            "exact": 0.0,
+            "standard_error": 0.0032637241611891566,
+            "standardized_error": -0.2743372965314322,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.0002617124185465692,
+            "exact": 0.0,
+            "standard_error": 0.003225492002073941,
+            "standardized_error": 0.081138759103508,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": 0.0016181069127065727,
+            "exact": 0.0,
+            "standard_error": 0.0027511584622173578,
+            "standardized_error": 0.5881547482373746,
+            "passed": true
+          }
+        }
+      },
+      "cpu_seconds": 7.138288217999998,
+      "sampling": {
+        "independent_draws": 3000,
+        "proposals": 40632,
+        "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+      },
+      "scope": "One actual kernel composition per exact independent equilibrium start; stationarity, not an ergodicity or convergence claim."
+    },
+    {
+      "method": "auxiliary-gca-shift",
+      "z": 1.5,
+      "independent_starts": 3000,
+      "passed": true,
+      "moments": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": 2.7854786198447923,
+            "exact": 2.7736117345660194,
+            "standard_error": 0.016572232779158196,
+            "standardized_error": 0.7160703953963938,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": 8.582533200572977,
+            "exact": 8.473914505619357,
+            "standard_error": 0.11160537150801023,
+            "standardized_error": 0.9732389533403776,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.696,
+            "exact": 0.6975882620336054,
+            "standard_error": 0.00839949505460839,
+            "standardized_error": -0.18909018021672647,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 2.9566399970244372,
+            "exact": 2.978121482122466,
+            "standard_error": 0.03184023836329532,
+            "standardized_error": -0.6746647073720495,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 5.102273297167681,
+            "exact": 5.096600108527305,
+            "standard_error": 0.031048103382934785,
+            "standardized_error": 0.18272255056630046,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": -0.01279901288183689,
+            "exact": 0.0,
+            "standard_error": 0.018334169325081223,
+            "standardized_error": -0.6980961425030467,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": -0.01134446366605543,
+            "exact": 0.0,
+            "standard_error": 0.017931596152113243,
+            "standardized_error": -0.6326521950316443,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": 0.01395754239841298,
+            "exact": 0.0,
+            "standard_error": 0.018111567841514985,
+            "standardized_error": 0.7706424159712872,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": -0.02092612006858377,
+            "exact": 0.0,
+            "standard_error": 0.012622995385785148,
+            "standardized_error": -1.6577776850135613,
+            "passed": true
+          }
+        }
+      },
+      "paired_change": {
+        "passed": true,
+        "checks": {
+          "distance": {
+            "mean": -0.002063969801470458,
+            "exact": 0.0,
+            "standard_error": 0.010125225874784032,
+            "standardized_error": -0.20384432179538728,
+            "passed": true
+          },
+          "distance_squared": {
+            "mean": -0.009412888775399158,
+            "exact": 0.0,
+            "standard_error": 0.07197215407526127,
+            "standardized_error": -0.1307851473440145,
+            "passed": true
+          },
+          "exclusion_contact_probability": {
+            "mean": 0.004666666666666667,
+            "exact": 0.0,
+            "standard_error": 0.005831301349831922,
+            "standardized_error": 0.8002787691294974,
+            "passed": true
+          },
+          "midpoint_squared": {
+            "mean": 0.009414519472526839,
+            "exact": 0.0,
+            "standard_error": 0.031022502204755116,
+            "standardized_error": 0.3034738916412676,
+            "passed": true
+          },
+          "mean_center_squared": {
+            "mean": 0.007061297278677064,
+            "exact": 0.0,
+            "standard_error": 0.02749543272071779,
+            "standardized_error": 0.25681709942162073,
+            "passed": true
+          },
+          "midpoint_x": {
+            "mean": -0.02320598615751671,
+            "exact": 0.0,
+            "standard_error": 0.022622002616876982,
+            "standardized_error": -1.0258148471879343,
+            "passed": true
+          },
+          "midpoint_y": {
+            "mean": 0.017514862840215823,
+            "exact": 0.0,
+            "standard_error": 0.022866569195840188,
+            "standardized_error": 0.7659593658414692,
+            "passed": true
+          },
+          "midpoint_z": {
+            "mean": -0.01499844588532481,
+            "exact": 0.0,
+            "standard_error": 0.023233776220360824,
+            "standardized_error": -0.6455449059624231,
+            "passed": true
+          },
+          "mean_rotation_trace": {
+            "mean": -0.027831390536647738,
+            "exact": 0.0,
+            "standard_error": 0.014660687033967163,
+            "standardized_error": -1.8983687785003212,
+            "passed": true
+          }
+        }
+      },
+      "cpu_seconds": 8.004752837999998,
+      "sampling": {
+        "independent_draws": 3000,
+        "proposals": 41384,
+        "method": "Uniform independent centers in accessible balls, exact AO exponential rejection, independent Haar orientations"
+      },
+      "scope": "One actual kernel composition per exact independent equilibrium start; stationarity, not an ergodicity or convergence claim."
+    }
+  ],
+  "triple_stationarity": [
+    {
+      "passed": true,
+      "z": 0.0,
+      "independent_starts": 6000,
+      "observed_counts": [
+        755,
+        752,
+        745,
+        768,
+        786,
+        748,
+        724,
+        722
+      ],
+      "exact_probabilities": [
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125,
+        0.125
+      ],
+      "chi_squared": 4.183999999999999,
+      "p_value": 0.7583571229796557,
+      "transition_counts": [
+        [
+          100,
+          104,
+          98,
+          74,
+          99,
+          84,
+          107,
+          105
+        ],
+        [
+          93,
+          99,
+          76,
+          94,
+          106,
+          89,
+          99,
+          94
+        ],
+        [
+          86,
+          94,
+          70,
+          99,
+          99,
+          92,
+          83,
+          86
+        ],
+        [
+          91,
+          90,
+          81,
+          99,
+          109,
+          106,
+          92,
+          78
+        ],
+        [
+          96,
+          99,
+          104,
+          97,
+          95,
+          93,
+          93,
+          91
+        ],
+        [
+          93,
+          100,
+          101,
+          97,
+          102,
+          100,
+          82,
+          78
+        ],
+        [
+          106,
+          92,
+          101,
+          106,
+          98,
+          90,
+          86,
+          91
+        ],
+        [
+          90,
+          74,
+          114,
+          102,
+          78,
+          94,
+          82,
+          99
+        ]
+      ],
+      "flux_checks": [
+        {
+          "states": [
+            0,
+            1
+          ],
+          "forward": 104,
+          "reverse": 93,
+          "standardized_difference": 0.7837175498670061
+        },
+        {
+          "states": [
+            0,
+            2
+          ],
+          "forward": 98,
+          "reverse": 86,
+          "standardized_difference": 0.8846517369293828
+        },
+        {
+          "states": [
+            0,
+            3
+          ],
+          "forward": 74,
+          "reverse": 91,
+          "standardized_difference": -1.323448205074589
+        },
+        {
+          "states": [
+            0,
+            4
+          ],
+          "forward": 99,
+          "reverse": 96,
+          "standardized_difference": 0.21483446221182986
+        },
+        {
+          "states": [
+            0,
+            5
+          ],
+          "forward": 84,
+          "reverse": 93,
+          "standardized_difference": -0.676481425202546
+        },
+        {
+          "states": [
+            0,
+            6
+          ],
+          "forward": 107,
+          "reverse": 106,
+          "standardized_difference": 0.06851887098275317
+        },
+        {
+          "states": [
+            0,
+            7
+          ],
+          "forward": 105,
+          "reverse": 90,
+          "standardized_difference": 1.0741723110591495
+        },
+        {
+          "states": [
+            1,
+            2
+          ],
+          "forward": 76,
+          "reverse": 94,
+          "standardized_difference": -1.3805369799252667
+        },
+        {
+          "states": [
+            1,
+            3
+          ],
+          "forward": 94,
+          "reverse": 90,
+          "standardized_difference": 0.29488391230979427
+        },
+        {
+          "states": [
+            1,
+            4
+          ],
+          "forward": 106,
+          "reverse": 99,
+          "standardized_difference": 0.4889012070387047
+        },
+        {
+          "states": [
+            1,
+            5
+          ],
+          "forward": 89,
+          "reverse": 100,
+          "standardized_difference": -0.8001322641986387
+        },
+        {
+          "states": [
+            1,
+            6
+          ],
+          "forward": 99,
+          "reverse": 92,
+          "standardized_difference": 0.5065022237046951
+        },
+        {
+          "states": [
+            1,
+            7
+          ],
+          "forward": 94,
+          "reverse": 74,
+          "standardized_difference": 1.543033499620919
+        },
+        {
+          "states": [
+            2,
+            3
+          ],
+          "forward": 99,
+          "reverse": 81,
+          "standardized_difference": 1.3416407864998738
+        },
+        {
+          "states": [
+            2,
+            4
+          ],
+          "forward": 99,
+          "reverse": 104,
+          "standardized_difference": -0.3509312031717982
+        },
+        {
+          "states": [
+            2,
+            5
+          ],
+          "forward": 92,
+          "reverse": 101,
+          "standardized_difference": -0.6478341756738251
+        },
+        {
+          "states": [
+            2,
+            6
+          ],
+          "forward": 83,
+          "reverse": 101,
+          "standardized_difference": -1.3269776053940743
+        },
+        {
+          "states": [
+            2,
+            7
+          ],
+          "forward": 86,
+          "reverse": 114,
+          "standardized_difference": -1.979898987322333
+        },
+        {
+          "states": [
+            3,
+            4
+          ],
+          "forward": 109,
+          "reverse": 97,
+          "standardized_difference": 0.8360796171499412
+        },
+        {
+          "states": [
+            3,
+            5
+          ],
+          "forward": 106,
+          "reverse": 97,
+          "standardized_difference": 0.6316761657092368
+        },
+        {
+          "states": [
+            3,
+            6
+          ],
+          "forward": 92,
+          "reverse": 106,
+          "standardized_difference": -0.9949366763261821
+        },
+        {
+          "states": [
+            3,
+            7
+          ],
+          "forward": 78,
+          "reverse": 102,
+          "standardized_difference": -1.7888543819998317
+        },
+        {
+          "states": [
+            4,
+            5
+          ],
+          "forward": 93,
+          "reverse": 102,
+          "standardized_difference": -0.6445033866354896
+        },
+        {
+          "states": [
+            4,
+            6
+          ],
+          "forward": 93,
+          "reverse": 98,
+          "standardized_difference": -0.36178730264621084
+        },
+        {
+          "states": [
+            4,
+            7
+          ],
+          "forward": 91,
+          "reverse": 78,
+          "standardized_difference": 1.0
+        },
+        {
+          "states": [
+            5,
+            6
+          ],
+          "forward": 82,
+          "reverse": 90,
+          "standardized_difference": -0.6099942813304187
+        },
+        {
+          "states": [
+            5,
+            7
+          ],
+          "forward": 78,
+          "reverse": 94,
+          "standardized_difference": -1.2199885626608373
+        },
+        {
+          "states": [
+            6,
+            7
+          ],
+          "forward": 91,
+          "reverse": 82,
+          "standardized_difference": 0.684257329142735
+        }
+      ],
+      "cpu_seconds": 0.39638484900000037,
+      "scope": "True triple-overlap exact collinear sphere orbit; all8 states hard/wall-valid, fixed proper half-turn axis. No pair-additive approximation."
+    },
+    {
+      "passed": true,
+      "z": 0.4,
+      "independent_starts": 6000,
+      "observed_counts": [
+        2183,
+        271,
+        166,
+        359,
+        393,
+        139,
+        257,
+        2232
+      ],
+      "exact_probabilities": [
+        0.36940186892240967,
+        0.04481844706344639,
+        0.022737960722318033,
+        0.06304172329182589,
+        0.06304172329182589,
+        0.022737960722318033,
+        0.04481844706344639,
+        0.36940186892240967
+      ],
+      "chi_squared": 9.170555614471004,
+      "p_value": 0.24064175929355736,
+      "transition_counts": [
+        [
+          953,
+          47,
+          16,
+          76,
+          80,
+          18,
+          43,
+          967
+        ],
+        [
+          45,
+          54,
+          14,
+          14,
+          17,
+          16,
+          48,
+          57
+        ],
+        [
+          20,
+          14,
+          21,
+          10,
+          21,
+          14,
+          16,
+          10
+        ],
+        [
+          73,
+          15,
+          15,
+          71,
+          84,
+          26,
+          15,
+          86
+        ],
+        [
+          86,
+          12,
+          29,
+          76,
+          71,
+          20,
+          23,
+          81
+        ],
+        [
+          16,
+          11,
+          23,
+          17,
+          22,
+          16,
+          16,
+          17
+        ],
+        [
+          51,
+          59,
+          22,
+          25,
+          15,
+          13,
+          52,
+          53
+        ],
+        [
+          939,
+          59,
+          26,
+          70,
+          83,
+          16,
+          44,
+          961
+        ]
+      ],
+      "flux_checks": [
+        {
+          "states": [
+            0,
+            1
+          ],
+          "forward": 47,
+          "reverse": 45,
+          "standardized_difference": 0.20851441405707477
+        },
+        {
+          "states": [
+            0,
+            2
+          ],
+          "forward": 16,
+          "reverse": 20,
+          "standardized_difference": -0.6666666666666666
+        },
+        {
+          "states": [
+            0,
+            3
+          ],
+          "forward": 76,
+          "reverse": 73,
+          "standardized_difference": 0.24576957615571215
+        },
+        {
+          "states": [
+            0,
+            4
+          ],
+          "forward": 80,
+          "reverse": 86,
+          "standardized_difference": -0.4656903154237997
+        },
+        {
+          "states": [
+            0,
+            5
+          ],
+          "forward": 18,
+          "reverse": 16,
+          "standardized_difference": 0.34299717028501764
+        },
+        {
+          "states": [
+            0,
+            6
+          ],
+          "forward": 43,
+          "reverse": 51,
+          "standardized_difference": -0.8251369970070347
+        },
+        {
+          "states": [
+            0,
+            7
+          ],
+          "forward": 967,
+          "reverse": 939,
+          "standardized_difference": 0.6413521916919266
+        },
+        {
+          "states": [
+            1,
+            6
+          ],
+          "forward": 48,
+          "reverse": 59,
+          "standardized_difference": -1.0634101379502299
+        },
+        {
+          "states": [
+            1,
+            7
+          ],
+          "forward": 57,
+          "reverse": 59,
+          "standardized_difference": -0.18569533817705186
+        },
+        {
+          "states": [
+            2,
+            4
+          ],
+          "forward": 21,
+          "reverse": 29,
+          "standardized_difference": -1.131370849898476
+        },
+        {
+          "states": [
+            2,
+            5
+          ],
+          "forward": 14,
+          "reverse": 23,
+          "standardized_difference": -1.4795908857482156
+        },
+        {
+          "states": [
+            2,
+            6
+          ],
+          "forward": 16,
+          "reverse": 22,
+          "standardized_difference": -0.9733285267845753
+        },
+        {
+          "states": [
+            2,
+            7
+          ],
+          "forward": 10,
+          "reverse": 26,
+          "standardized_difference": -2.6666666666666665
+        },
+        {
+          "states": [
+            3,
+            4
+          ],
+          "forward": 84,
+          "reverse": 76,
+          "standardized_difference": 0.6324555320336759
+        },
+        {
+          "states": [
+            3,
+            5
+          ],
+          "forward": 26,
+          "reverse": 17,
+          "standardized_difference": 1.372487132993442
+        },
+        {
+          "states": [
+            3,
+            6
+          ],
+          "forward": 15,
+          "reverse": 25,
+          "standardized_difference": -1.5811388300841895
+        },
+        {
+          "states": [
+            3,
+            7
+          ],
+          "forward": 86,
+          "reverse": 70,
+          "standardized_difference": 1.281025230440697
+        },
+        {
+          "states": [
+            4,
+            5
+          ],
+          "forward": 20,
+          "reverse": 22,
+          "standardized_difference": -0.3086066999241838
+        },
+        {
+          "states": [
+            4,
+            6
+          ],
+          "forward": 23,
+          "reverse": 15,
+          "standardized_difference": 1.2977713690461004
+        },
+        {
+          "states": [
+            4,
+            7
+          ],
+          "forward": 81,
+          "reverse": 83,
+          "standardized_difference": -0.15617376188860607
+        },
+        {
+          "states": [
+            5,
+            7
+          ],
+          "forward": 17,
+          "reverse": 16,
+          "standardized_difference": 0.17407765595569785
+        },
+        {
+          "states": [
+            6,
+            7
+          ],
+          "forward": 53,
+          "reverse": 44,
+          "standardized_difference": 0.9138115486202573
+        }
+      ],
+      "cpu_seconds": 1.9482557879999973,
+      "scope": "True triple-overlap exact collinear sphere orbit; all8 states hard/wall-valid, fixed proper half-turn axis. No pair-additive approximation."
+    }
+  ],
+  "implementation_sha256": "90a481f23c1cfc3763d5a75e9f18033e7506c7fb34dd2f0243246a13c49ea567",
+  "passed": true
+}

@@ -1,15 +1,18 @@
-//! Sequential, all-mobile periodic Monte Carlo. Every sweep has independent
+//! Sequential, all-mobile periodic or spherical Monte Carlo. Every sweep has independent
 //! named RNG streams derived from (master seed, absolute sweep, stream label),
 //! allowing exact checkpoint continuation without serializing opaque RNG state.
 use crate::{
+    auxiliary::{self, AuxiliaryConfig},
     depletion::{self, GateOptions},
-    geometry::{Environment, Shape, SphereTree},
+    geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
     proposal::FrozenRelativePoseProposal,
+    spherical::{self, Container, HalfTurn},
     trajectory::Trajectory,
 };
 use anyhow::{Context, Result, ensure};
 use rand::{RngExt, SeedableRng, rngs::StdRng, seq::SliceRandom};
+use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -35,12 +38,43 @@ fn default_angle() -> f64 {
 fn default_floor() -> f64 {
     0.1
 }
+/// Origin-centered hard atomic wall; the ideal depletant bath remains unbounded.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Boundary {
+    #[default]
+    Periodic,
+    Spherical {
+        radius: f64,
+    },
+}
+impl Boundary {
+    pub fn radius(self) -> Option<f64> {
+        match self {
+            Self::Periodic => None,
+            Self::Spherical { radius } => Some(radius),
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Periodic => "periodic",
+            Self::Spherical { .. } => "spherical",
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
     pub monomer_shape: Option<PathBuf>,
     pub shape: PathBuf,
     pub box_lengths: Vec3,
+    #[serde(default)]
+    pub boundary: Boundary,
+    /// Independent Bernoulli attempts after each ordinary single-body sweep.
+    #[serde(default)]
+    pub gca_probability: f64,
+    #[serde(default)]
+    pub center_shift_probability: f64,
     pub initial_poses: Vec<Pose>,
     pub seed: u64,
     pub depletant_radius: f64,
@@ -57,6 +91,8 @@ pub struct Config {
     pub learned_uniform_weight: f64,
     #[serde(default)]
     pub endpoint_gate: GateOptions,
+    #[serde(default)]
+    pub auxiliary_transport: Option<AuxiliaryConfig>,
     #[serde(default)]
     pub seed_labels: Vec<usize>,
     #[serde(default)]
@@ -76,8 +112,24 @@ impl Config {
         );
         ensure!(
             self.box_lengths.iter().all(|x| x.is_finite() && *x > 0.),
-            "invalid periodic lengths"
+            "invalid display/periodic lengths"
         );
+        for probability in [self.gca_probability, self.center_shift_probability] {
+            ensure!(
+                probability.is_finite() && (0. ..=1.).contains(&probability),
+                "invalid collective scheduling probability"
+            );
+        }
+        match self.boundary {
+            Boundary::Periodic => ensure!(
+                self.gca_probability == 0. && self.center_shift_probability == 0.,
+                "spherical GCA/center shift requires a spherical boundary"
+            ),
+            Boundary::Spherical { radius } => ensure!(
+                radius.is_finite() && radius > 0.,
+                "invalid spherical wall radius"
+            ),
+        }
         ensure!(
             self.depletant_radius.is_finite()
                 && self.depletant_radius >= 0.
@@ -109,6 +161,13 @@ impl Config {
         for p in &self.initial_poses {
             p.validate()?;
         }
+        if let Some(options) = &self.auxiliary_transport {
+            options.validate()?;
+            ensure!(
+                self.boundary.radius().is_some(),
+                "auxiliary transport currently requires a spherical boundary"
+            );
+        }
         self.endpoint_gate.validate()
     }
 }
@@ -131,8 +190,28 @@ pub struct Counts {
 pub struct RunCounts {
     pub local: Counts,
     pub global: Counts,
+    #[serde(default)]
+    pub gca: CollectiveCounts,
+    #[serde(default)]
+    pub center_shift: CollectiveCounts,
     pub selected_body_updates: u64,
     pub selected_body_updates_by_body: Vec<u64>,
+}
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
+pub struct CollectiveCounts {
+    pub attempted: u64,
+    pub completed: u64,
+    /// Bodies selected for a transformation; may include a numerical identity.
+    pub transformed_bodies: u64,
+}
+impl CollectiveCounts {
+    fn since(&self, old: &Self) -> Self {
+        Self {
+            attempted: self.attempted - old.attempted,
+            completed: self.completed - old.completed,
+            transformed_bodies: self.transformed_bodies - old.transformed_bodies,
+        }
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Checkpoint {
@@ -147,6 +226,8 @@ pub struct Checkpoint {
     pub counts: RunCounts,
     pub master_seed: u64,
     pub rng_protocol: String,
+    #[serde(default)]
+    pub auxiliary_eta: Option<Vec<[f64; 6]>>,
 }
 
 impl Counts {
@@ -165,6 +246,8 @@ impl RunCounts {
         Self {
             local: self.local.since(&old.local),
             global: self.global.since(&old.global),
+            gca: self.gca.since(&old.gca),
+            center_shift: self.center_shift.since(&old.center_shift),
             selected_body_updates: self.selected_body_updates - old.selected_body_updates,
             selected_body_updates_by_body: self
                 .selected_body_updates_by_body
@@ -218,6 +301,77 @@ fn jsonline(stream: &mut impl Write, row: &Value) -> Result<()> {
     Ok(())
 }
 
+/// The open bath uses ordinary spectator poses. Its exclusion volume is NOT
+/// clipped to the spherical wall: only the protein atoms see that wall.
+fn environment<'a>(
+    tree: &'a SphereTree,
+    poses: &[Pose],
+    moving: usize,
+    old: Pose,
+    new: Pose,
+    config: &Config,
+) -> Result<Environment<'a>> {
+    if config.boundary == Boundary::Periodic {
+        return Environment::new(
+            tree,
+            poses,
+            moving,
+            old,
+            new,
+            config.box_lengths,
+            config.depletant_radius,
+        );
+    }
+    ensure!(moving < poses.len(), "invalid moving index");
+    old.validate()?;
+    new.validate()?;
+    let reach = 2. * (tree.bound + config.depletant_radius);
+    let guard = 1024. * f64::EPSILON * (1. + reach + norm(old.position) + norm(new.position));
+    let mut fixed = Vec::new();
+    let mut labels = Vec::new();
+    for (j, &pose) in poses.iter().enumerate() {
+        pose.validate()?;
+        if j != moving
+            && (norm(sub(pose.position, old.position)) <= reach + guard
+                || norm(sub(pose.position, new.position)) <= reach + guard)
+        {
+            fixed.push(Placed::new(pose));
+            labels.push((j, [0; 3]));
+        }
+    }
+    Ok(Environment {
+        tree,
+        fixed,
+        labels,
+        rd: config.depletant_radius,
+    })
+}
+
+fn spherical_local_pose(rng: &mut StdRng, old: Pose, dt: f64, dc: f64) -> Pose {
+    let displacement: Vec3 = std::array::from_fn(|_| {
+        let z: f64 = StandardNormal.sample(rng);
+        dt * z
+    });
+    let c: Vec3 = std::array::from_fn(|_| {
+        let z: f64 = StandardNormal.sample(rng);
+        dc * z
+    });
+    Pose {
+        position: add(old.position, displacement),
+        orientation: quaternion(matmul(cayley(c), rotation(old.orientation))),
+    }
+}
+
+fn uniform_direction(rng: &mut StdRng) -> Vec3 {
+    let v: Vec3 = std::array::from_fn(|_| StandardNormal.sample(rng));
+    let length = norm(v);
+    assert!(
+        length.is_finite() && length > 0.,
+        "unrepresentable random direction"
+    );
+    scale(v, 1. / length)
+}
+
 pub struct RunOptions {
     pub config: PathBuf,
     pub model: Option<PathBuf>,
@@ -239,6 +393,13 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let config_sha = hash_bytes(&raw_config);
     let mut config: Config = serde_json::from_slice(&raw_config)?;
     config.validate()?;
+    let declared: Value = serde_json::from_slice(&raw_config)?;
+    if let Some(radius) = declared.get("spherical_radius").filter(|v| !v.is_null()) {
+        ensure!(
+            radius.as_f64() == config.boundary.radius() && config.boundary.radius().is_some(),
+            "legacy spherical_radius requires matching boundary: {{kind: spherical, radius: R}}"
+        );
+    }
     let shape_path = if config.shape.is_absolute() {
         config.shape.clone()
     } else {
@@ -252,6 +413,15 @@ pub fn run(options: RunOptions) -> Result<Value> {
         fs::read(&shape_path).with_context(|| format!("shape {}", shape_path.display()))?;
     let shape_sha = hash_bytes(&shape_raw);
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
+    let wall = config
+        .boundary
+        .radius()
+        .map(|radius| Container::new(radius, &tree))
+        .transpose()?;
+    let uniform_lengths = match config.boundary {
+        Boundary::Periodic => config.box_lengths,
+        Boundary::Spherical { radius } => [2. * (radius + tree.bound); 3],
+    };
     config.shape = fs::canonicalize(&shape_path)?;
     if let Some(path) = &config.monomer_shape {
         let path = if path.is_absolute() {
@@ -277,24 +447,48 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let model_raw = options.model.as_ref().map(fs::read).transpose()?;
     let model_sha = model_raw.as_ref().map(|raw| hash_bytes(raw));
     let proposal = match options.method {
-        Method::Learned => Some(FrozenRelativePoseProposal::from_json_str(
-            std::str::from_utf8(
+        Method::Learned => {
+            let text = std::str::from_utf8(
                 model_raw
                     .as_ref()
                     .context("learned method requires --model")?,
-            )?,
-            config.box_lengths,
-            config.learned_uniform_weight,
-            &shape_sha,
-        )?),
+            )?;
+            Some(if wall.is_some() {
+                FrozenRelativePoseProposal::from_json_str_open(
+                    text,
+                    uniform_lengths,
+                    config.learned_uniform_weight,
+                    &shape_sha,
+                )?
+            } else {
+                FrozenRelativePoseProposal::from_json_str(
+                    text,
+                    uniform_lengths,
+                    config.learned_uniform_weight,
+                    &shape_sha,
+                )?
+            })
+        }
         Method::LocalUniform => {
             ensure!(model_raw.is_none(), "uniform control does not use a model");
             None
         }
     };
+    ensure!(
+        config.auxiliary_transport.is_none() || proposal.is_some(),
+        "auxiliary transport requires --method learned and a model"
+    );
+    let mut auxiliary_eta = config.auxiliary_transport.as_ref().map(|_| {
+        auxiliary::draw_eta(
+            proposal.as_ref().unwrap(),
+            &mut stream(config.seed, 0, "auxiliary"),
+        )
+    });
     let mut poses = config.initial_poses.clone();
-    for p in &mut poses {
-        p.position = wrap(p.position, config.box_lengths);
+    if wall.is_none() {
+        for p in &mut poses {
+            p.position = wrap(p.position, config.box_lengths);
+        }
     }
     let mut counts = RunCounts {
         selected_body_updates_by_body: vec![0; poses.len()],
@@ -333,6 +527,18 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 && checkpoint.counts.selected_body_updates_by_body.len() == poses.len(),
             "checkpoint body count mismatch"
         );
+        ensure!(
+            checkpoint.auxiliary_eta.is_some() == config.auxiliary_transport.is_some(),
+            "checkpoint auxiliary mode mismatch"
+        );
+        if let Some(eta) = &checkpoint.auxiliary_eta {
+            ensure!(
+                eta.len() == proposal.as_ref().unwrap().component_count()
+                    && eta.iter().flatten().all(|x| x.is_finite()),
+                "checkpoint auxiliary residual mismatch"
+            );
+        }
+        auxiliary_eta = checkpoint.auxiliary_eta;
         poses = checkpoint.poses;
         counts = checkpoint.counts;
         completed = checkpoint.completed_sweeps;
@@ -343,15 +549,11 @@ pub fn run(options: RunOptions) -> Result<Value> {
     );
     for (i, &p) in poses.iter().enumerate() {
         p.validate()?;
-        let env = Environment::new(
-            &tree,
-            &poses,
-            i,
-            p,
-            p,
-            config.box_lengths,
-            config.depletant_radius,
-        )?;
+        let env = environment(&tree, &poses, i, p, p, &config)?;
+        ensure!(
+            wall.as_ref().is_none_or(|w| w.contains(p)),
+            "initial body {i} violates spherical wall"
+        );
         ensure!(env.hard_valid(p), "hard overlap in initial body {i}");
     }
     if options.out.exists() {
@@ -381,11 +583,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
     effective["sweeps"] = json!(options.sweeps);
     effective["sample_every"] = json!(options.sample_every);
     effective["initial_poses"] = json!(poses);
+    effective["uniform_proposal_cube_lengths"] = json!(uniform_lengths);
     save(&options.out.join("config.json"), &effective)?;
     let executable_sha = hash_file(&std::env::current_exe()?)?;
     save(
         &options.out.join("manifest.json"),
-        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) exp[-z * exclusion_union_volume(X)]","scope":"Frozen learned proposal; algorithmic MC time, not physical kinetics"}),
+        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"scope":"Frozen base model; optional history-free normalized conditional mean law; algorithmic MC time, not physical kinetics"}),
     )?;
     let mut trajectory = BufWriter::new(File::create(options.out.join("trajectory.jsonl"))?);
     let mut moves = if options.record_moves {
@@ -408,25 +611,51 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let mut gate_cpu = 0.;
     let mut geometry_cpu = 0.;
     let mut proposal_cpu = 0.;
+    let mut gca_cpu = 0.;
+    let mut shift_cpu = 0.;
     let snapshot = |sweep: u64,
                     poses: &[Pose],
                     counts: &RunCounts,
+                    auxiliary_eta: &Option<Vec<[f64; 6]>>,
                     trajectory: &mut BufWriter<File>,
                     gsd: &mut Option<Trajectory>|
      -> Result<()> {
         jsonline(
             trajectory,
-            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":"periodic","sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts}),
+            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta}),
         )?;
         trajectory.flush()?;
         if let Some(writer) = gsd {
-            writer.append(sweep, poses, config.box_lengths, &tree)?;
+            let display_lengths = config
+                .boundary
+                .radius()
+                .map_or(config.box_lengths, |r| [2. * r; 3]);
+            writer.append_with_spherical_wall(
+                sweep,
+                poses,
+                display_lengths,
+                &tree,
+                config.boundary.radius(),
+            )?;
             writer.sync()?;
         }
         Ok(())
     };
-    snapshot(completed, &poses, &counts, &mut trajectory, &mut gsd)?;
+    snapshot(
+        completed,
+        &poses,
+        &counts,
+        &auxiliary_eta,
+        &mut trajectory,
+        &mut gsd,
+    )?;
     for sweep in (completed + 1)..=options.sweeps {
+        if config.auxiliary_transport.is_some() {
+            auxiliary_eta = Some(auxiliary::draw_eta(
+                proposal.as_ref().unwrap(),
+                &mut stream(config.seed, sweep, "auxiliary"),
+            ));
+        }
         let mut schedule = stream(config.seed, sweep, "schedule");
         let mut choice = stream(config.seed, sweep, "choice");
         let mut local = stream(config.seed, sweep, "local");
@@ -448,21 +677,58 @@ pub fn run(options: RunOptions) -> Result<Value> {
             let mut correction = 0.;
             let mut proposal_info = json!({"branch":if is_global{"uniform"}else{"local"},"anchor_index":null,"null":false,"log_reverse_forward":0.});
             let candidate = if !is_global {
-                Some(local_pose(
-                    &mut local,
-                    old,
-                    config.box_lengths,
-                    config.local_translation_std_a,
-                    config.local_small_angle_std_degrees.to_radians() / 2.,
-                ))
-            } else if let Some(proposal) = &proposal {
-                let result = proposal.propose(&mut global, &poses, i)?;
+                Some(if wall.is_some() {
+                    spherical_local_pose(
+                        &mut local,
+                        old,
+                        config.local_translation_std_a,
+                        config.local_small_angle_std_degrees.to_radians() / 2.,
+                    )
+                } else {
+                    local_pose(
+                        &mut local,
+                        old,
+                        config.box_lengths,
+                        config.local_translation_std_a,
+                        config.local_small_angle_std_degrees.to_radians() / 2.,
+                    )
+                })
+            } else if let Some(base) = &proposal {
+                let forward_model = config
+                    .auxiliary_transport
+                    .as_ref()
+                    .map(|a| auxiliary::model(base, &poses, auxiliary_eta.as_ref().unwrap(), a))
+                    .transpose()?;
+                let forward = forward_model.as_ref().unwrap_or(base);
+                let mut result = forward.propose(&mut global, &poses, i)?;
                 correction = result.log_reverse_forward.unwrap_or(0.);
-                let pose = result.candidate;
+                let candidate = result.candidate;
+                let mut reverse_log = None;
+                if let (Some(new), Some(a)) = (candidate, config.auxiliary_transport.as_ref()) {
+                    // The model is transported by preserving eta. Use its
+                    // reconstruction at Y, never the stale forward model.
+                    let mut next = poses.clone();
+                    next[i] = new;
+                    let reverse =
+                        auxiliary::model(base, &next, auxiliary_eta.as_ref().unwrap(), a)?;
+                    let value = reverse.log_density(&poses[i], &poses[result.anchor_index])?;
+                    correction =
+                        value - result.new_log_density.context("missing forward density")?;
+                    reverse_log = Some(value);
+                    result.log_reverse_forward = Some(correction);
+                }
                 proposal_info = serde_json::to_value(result)?;
-                pose
+                if config.auxiliary_transport.is_some() {
+                    proposal_info["transported_reverse_log_density"] = json!(reverse_log);
+                    proposal_info["auxiliary_transport"] = json!(true);
+                }
+                candidate
             } else {
-                Some(uniform_pose(&mut global, config.box_lengths))
+                let mut pose = uniform_pose(&mut global, uniform_lengths);
+                if wall.is_some() {
+                    pose.position = sub(pose.position, scale(uniform_lengths, 0.5));
+                }
+                Some(pose)
             };
             proposal_cpu += cpu_seconds() - before;
             let mut valid = false;
@@ -473,20 +739,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 new.validate()?;
                 ensure!(correction.is_finite(), "nonfinite proposal ratio");
                 let before = cpu_seconds();
-                let env = Environment::new(
-                    &tree,
-                    &poses,
-                    i,
-                    old,
-                    new,
-                    config.box_lengths,
-                    config.depletant_radius,
-                )?;
+                let env = environment(&tree, &poses, i, old, new, &config)?;
                 ensure!(
-                    env.hard_valid(old),
+                    env.hard_valid(old) && wall.as_ref().is_none_or(|w| w.contains(old)),
                     "current body invalid during sweep {sweep}"
                 );
-                valid = env.hard_valid(new);
+                valid = wall.as_ref().is_none_or(|w| w.contains(new)) && env.hard_valid(new);
                 geometry_cpu += cpu_seconds() - before;
                 if valid {
                     stats.hard_valid += 1;
@@ -530,9 +788,64 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 )?;
             }
         }
+        if let Some(wall) = &wall {
+            // Separate named streams preserve all preexisting periodic draws.
+            let mut gca_rng = stream(config.seed, sweep, "spherical-gca");
+            if config.gca_probability > 0. && gca_rng.random::<f64>() < config.gca_probability {
+                counts.gca.attempted += 1;
+                let before = cpu_seconds();
+                let axis = uniform_direction(&mut gca_rng);
+                let result = spherical::update(
+                    &tree,
+                    wall,
+                    &mut poses,
+                    HalfTurn::new(axis)?,
+                    config.depletant_radius,
+                    config.reservoir_density,
+                    &mut gca_rng,
+                )?;
+                gca_cpu += cpu_seconds() - before;
+                counts.gca.completed += 1;
+                counts.gca.transformed_bodies += result.flipped_indices.len() as u64;
+                if let Some(writer) = &mut moves {
+                    jsonline(
+                        writer,
+                        &json!({"sweep":sweep,"kind":"gca","axis":axis,"result":result,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
+                    )?;
+                }
+            }
+            let mut shift_rng = stream(config.seed, sweep, "spherical-center-shift");
+            if config.center_shift_probability > 0.
+                && shift_rng.random::<f64>() < config.center_shift_probability
+            {
+                counts.center_shift.attempted += 1;
+                let before = cpu_seconds();
+                let direction = uniform_direction(&mut shift_rng);
+                // Strictly interior 52-bit midpoint, representable even at the
+                // upper endpoint (53-bit midpoint addition could round to one).
+                let open_u = ((shift_rng.random::<u64>() >> 12) as f64 + 0.5) / 4503599627370496.;
+                let result = wall.center_shift(&mut poses, direction, open_u)?;
+                shift_cpu += cpu_seconds() - before;
+                counts.center_shift.completed += 1;
+                counts.center_shift.transformed_bodies += poses.len() as u64;
+                if let Some(writer) = &mut moves {
+                    jsonline(
+                        writer,
+                        &json!({"sweep":sweep,"kind":"center_shift","direction":direction,"result":result,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
+                    )?;
+                }
+            }
+        }
         completed = sweep;
         if sweep % options.sample_every == 0 || sweep == options.sweeps {
-            snapshot(sweep, &poses, &counts, &mut trajectory, &mut gsd)?;
+            snapshot(
+                sweep,
+                &poses,
+                &counts,
+                &auxiliary_eta,
+                &mut trajectory,
+                &mut gsd,
+            )?;
             if let Some(m) = &mut moves {
                 m.flush()?;
             }
@@ -547,6 +860,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 counts: counts.clone(),
                 master_seed: config.seed,
                 rng_protocol: "sha256-master-sweep-stream-v1".into(),
+                auxiliary_eta: auxiliary_eta.clone(),
             };
             save(&options.out.join("checkpoint.json"), &checkpoint)?;
             save(
@@ -555,7 +869,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
             )?;
         }
     }
-    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":"periodic","counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata});
+    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport});
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
 }

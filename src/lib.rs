@@ -7,4 +7,7 @@ pub mod geometry;
 pub mod math;
 pub mod proposal;
 pub mod simulation;
+pub mod spherical;
 pub mod trajectory;
+
+pub mod auxiliary;

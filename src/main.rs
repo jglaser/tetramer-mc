@@ -14,7 +14,8 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Run all-mobile periodic MC. Resume into a fresh output directory.
+    /// Run all-mobile MC with the configured periodic or spherical boundary.
+    /// Resume into a fresh output directory.
     Run {
         #[arg(long)]
         config: PathBuf,

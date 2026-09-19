@@ -1,0 +1,175 @@
+name: Style
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+  push:
+    branches:
+    - trunk
+
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  CARGO_BUILD_WARNINGS: deny
+  CARGO_TERM_COLOR: always
+  CLICOLOR: 1
+
+jobs:
+  cargo-check-clippy:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Remove native build configuration
+      run: rm .cargo/config.toml
+    - name: Configure Rust
+      uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      with:
+        toolchain: 1.98.1
+        targets: wasm32-unknown-unknown
+        components: clippy
+    - name: Cache
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        key: ${{ hashFiles('Cargo.lock') }}
+        cache-bin: false
+        save-if: ${{ github.ref != 'refs/heads/trunk' }}
+
+    # Check all targets in debug and release modes
+    - name: cargo check [native]
+      run: >
+        cargo check
+        --profile ci
+        --locked
+        --workspace
+        --all-targets
+        --all-features
+        --keep-going
+
+    - name: cargo clippy [native]
+      run: >
+        cargo clippy
+        --profile ci
+        --locked
+        --workspace
+        --all-targets
+        --all-features
+        --keep-going
+
+    # Check the examples in wasm builds with and without webgpu
+    - name: cargo check [wasm32, features="bevy"]
+      run: >
+        cargo check
+        --profile ci
+        --features "bevy"
+        --locked
+        --workspace
+        --lib
+        --examples
+        --target wasm32-unknown-unknown
+        --keep-going
+
+    - name: cargo check [wasm32, features="bevy,webgpu"]
+      run: >
+        cargo check
+        --profile ci
+        --features "bevy,webgpu"
+        --locked
+        --workspace
+        --lib
+        --examples
+        --target wasm32-unknown-unknown
+        --keep-going
+
+    - name: cargo clippy [wasm32, features="bevy"]
+      run: >
+        cargo clippy
+        --profile ci
+        --features "bevy"
+        --locked
+        --workspace
+        --lib
+        --examples
+        --target wasm32-unknown-unknown
+        --keep-going
+
+    - name: cargo clippy [wasm32, features="bevy,webgpu"]
+      run: >
+        cargo clippy
+        --profile ci
+        --features "bevy,webgpu"
+        --locked
+        --workspace
+        --lib
+        --examples
+        --target wasm32-unknown-unknown
+        --keep-going
+
+  cargo-fmt:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Remove native build configuration
+      run: rm .cargo/config.toml
+    - name: Configure Rust
+      uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      with:
+        toolchain: nightly-2025-09-17
+        components: rustfmt
+    - run: cargo +nightly-2025-09-17 fmt --all --check
+
+  prek:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: prek
+      uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
+      with:
+        prek-version: '0.3.8'
+
+  zizmor:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Run zizmor
+      uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+      with:
+        advanced-security: false
+
+  # This job is used to provide a single requirement for branch merge conditions.
+  tests_complete:
+    name: All style checks
+    if: always()
+    needs: [cargo-check-clippy, cargo-fmt, prek, zizmor]
+    runs-on: ubuntu-24.04
+
+    steps:
+    - run: jq --exit-status 'all(.result == "success")' <<< "${NEEDS}"
+      env:
+        NEEDS: ${{ toJson(needs) }}
+    - run: exit 0

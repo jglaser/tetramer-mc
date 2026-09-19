@@ -1,0 +1,186 @@
+[package]
+name = "examples"
+categories.workspace = true
+description = "Collect examples that demonstrate how to use hoomd-rs."
+edition.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+# Do not publish examples to crates.io
+publish = false
+
+# Use more relaxed lints in the examples.
+[lints.clippy]
+print_stdout = "allow"
+
+[features]
+bevy = ["dep:bevy", "dep:hoomd-bevy", "dep:bevy_egui"]
+webgpu = ["hoomd-bevy/webgpu"]
+doc-example = ["bevy", "hoomd-bevy/doc-example"]
+
+[dependencies]
+hoomd-bevy = { workspace =  true, optional = true }
+hoomd-derive.workspace = true
+hoomd-geometry.workspace = true
+hoomd-gsd.workspace = true
+hoomd-interaction.workspace = true
+hoomd-linear-algebra.workspace = true
+hoomd-manifold.workspace = true
+hoomd-mc.workspace = true
+hoomd-md.workspace = true
+hoomd-microstate.workspace = true
+hoomd-simulation.workspace = true
+hoomd-spatial.workspace = true
+hoomd-utility.workspace = true
+hoomd-vector.workspace = true
+
+arrayvec.workspace = true
+anyhow.workspace = true
+bevy = { workspace = true, optional = true }
+bevy_egui = { workspace = true, optional = true }
+thiserror.workspace = true
+parquet.workspace = true
+parquet_derive.workspace = true
+rand.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+itertools.workspace = true
+
+[[example]]
+name = "hello"
+path = "hello.rs"
+
+[[example]]
+name = "random-walk"
+path = "mc-tutorial/random-walk.rs"
+
+[[example]]
+name = "custom-random-walk"
+path = "mc-tutorial/custom-random-walk.rs"
+
+[package.metadata.example.custom-random-walk]
+path = "mc-tutorial"
+
+[[example]]
+name = "applying-interactions"
+path = "mc-tutorial/applying-interactions.rs"
+
+[package.metadata.example.applying-interactions]
+path = "mc-tutorial"
+
+[[example]]
+name = "tetronimoes"
+path = "mc-tutorial/tetronimoes.rs"
+
+[package.metadata.example.tetronimoes]
+path = "mc-tutorial"
+
+[[example]]
+name = "hard-disk-self-assembly"
+path = "mc-tutorial/hard-disk-self-assembly.rs"
+
+[package.metadata.example.hard-disk-self-assembly]
+path = "mc-tutorial"
+
+[[example]]
+name = "hard-ellipse-self-assembly"
+path = "mc-tutorial/hard-ellipse-self-assembly.rs"
+
+[package.metadata.example.hard-ellipse-self-assembly]
+path = "mc-tutorial"
+
+[[example]]
+name = "hard-tetrahedron-self-assembly"
+path = "mc-tutorial/hard-tetrahedron-self-assembly.rs"
+
+[package.metadata.example.hard-tetrahedron-self-assembly]
+path = "mc-tutorial"
+
+[[example]]
+name = "patchy-particle-self-assembly"
+path = "mc-tutorial/patchy-particle-self-assembly.rs"
+
+[package.metadata.example.patchy-particle-self-assembly]
+path = "mc-tutorial"
+
+[[example]]
+name = "seeded-self-assembly"
+path = "mc-tutorial/seeded-self-assembly.rs"
+
+[package.metadata.example.seeded-self-assembly]
+path = "mc-tutorial"
+
+[[example]]
+name = "type-dependent-interactions"
+path = "mc-tutorial/type-dependent-interactions.rs"
+
+[package.metadata.example.type-dependent-interactions]
+path = "mc-tutorial"
+
+[[example]]
+name = "polydisperse-hard-disk-model"
+path = "mc-tutorial/polydisperse-hard-disk-model.rs"
+
+[package.metadata.example.polydisperse-hard-disk-model]
+path = "mc-tutorial"
+
+[[example]]
+name = "lj-fluid"
+path = "md-examples/lj-fluid.rs"
+
+[package.metadata.example.lj-fluid]
+path = "md-examples"
+
+[[example]]
+name = "patchy-body-3d"
+path = "md-examples/patchy-body-3d.rs"
+
+[package.metadata.example.patchy-body-3d]
+path = "md-examples"
+
+[[example]]
+name = "patchy-body-2d"
+path = "md-examples/patchy-body-2d.rs"
+
+[package.metadata.example.patchy-body-2d]
+path = "md-examples"
+
+[[example]]
+name = "ellipse-gcmc-2d"
+path = "mc-examples/ellipse-gcmc-2d.rs"
+
+[package.metadata.example.ellipse-gcmc-2d]
+path = "mc-examples"
+
+[[example]]
+name = "crystal-stability"
+path = "mc-examples/crystal-stability.rs"
+
+[package.metadata.example.crystal-stability]
+path = "mc-examples"
+
+[[example]]
+name = "multi-site-patchy-shapes"
+path = "mc-examples/multi-site-patchy-shapes.rs"
+
+[package.metadata.example.multi-site-patchy-shapes]
+path = "mc-examples"
+
+[[example]]
+name = "capsules-on-a-plane"
+path = "mc-examples/capsules-on-a-plane.rs"
+
+[package.metadata.example.capsules-on-a-plane]
+path = "mc-examples"
+
+[[example]]
+name = "binary-hard-shapes"
+path = "mc-examples/binary-hard-shapes.rs"
+
+[package.metadata.example.binary-hard-shapes]
+path = "mc-examples"

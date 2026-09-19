@@ -1,0 +1,23 @@
+{
+  "totals": {
+    "python": {
+      "gate_cpu_seconds": 6.856175812999998,
+      "setup_cpu_seconds": 0.8435942119999991,
+      "raw_points": 1178987
+    },
+    "rust": {
+      "gate_cpu_seconds": 2.1434456339999994,
+      "setup_cpu_seconds": 0.011076833999999591,
+      "raw_points": 1177597
+    }
+  },
+  "gate_speedup": 3.198670264477536,
+  "rust_executable_sha256": "d32c468eff27acca4b9855f748b92d7a302dd9d650c124cadd7d58e9db80e4a4",
+  "python_source_sha256": {
+    "endpoint_cloud_gate.py": "dec1df411cf426d99a89f03df11fe7f030344011fcaf3cff0ea60ddb3bb72204",
+    "contact_triangle_cloud.py": "b9124bb35c4ee331ce09d0efc3ace7a3366791bcc8ae9f4bc67c44e883730270",
+    "run_learned_tetramer_pilot.py": "49e839c2f28df07033648823109e7c3dff56957ccabbf88d779ae582e85d26e9"
+  },
+  "cases_sha256": "9238ebc0c49672c093dd3cf1ac5340b71b53f1a2a658f8382bd4db74899c360e",
+  "scope": "Same endpoints and physical parameters, independent RNGs. Gate speedup only; different conservative partitions may change raw work. Excludes training, compilation, trajectories and mixture evaluation."
+}

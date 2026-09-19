@@ -1,0 +1,23 @@
+[package]
+name = "tetramer-mc"
+version = "0.1.0"
+edition = "2024"
+description = "Reversible learned rigid-body proposals with exact implicit ideal depletion"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+rand = "0.10"
+rand_distr = "0.6"
+sha2 = "0.10"
+libc = "0.2"
+hoomd-gsd = { path = "vendor/hoomd-rs/hoomd-gsd" }
+
+[build-dependencies]
+sha2 = "0.10"
+serde_json = "1"
+
+[profile.release]
+lto = "thin"

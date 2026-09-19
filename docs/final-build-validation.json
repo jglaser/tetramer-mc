@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "hard_audited_frames": 3,
+  "independent_gsd": {
+    "passed": true,
+    "frames": 3,
+    "atom_positions_checked": 144144,
+    "fp64_body_poses_exactly_equal_json": true,
+    "fp32_maximum_atom_error_A": 1.5258263999839983e-05,
+    "file_format_version": [
+      2,
+      1
+    ],
+    "schema_version": [
+      1,
+      4
+    ],
+    "scope": "Independent struct/NumPy GSD2 subset reader; checks every emitted frame, atom/image/diameter/body ID and FP64 body pose. Not a general third-party application compatibility test."
+  },
+  "embedded_sources_verified": 13,
+  "legacy_checkpoint_shape_provenance_checked": true,
+  "executable_sha256": "439178ff619247ad6ca8a966095a8dbe0dec7c57941a998d50344e9e9340aa81",
+  "source_bundle_sha256": "0a38c41c2cbb15de71e3289b118e04bb54f0ca3051104697b59f9e47cb4f11fd",
+  "segment_count": 120
+}

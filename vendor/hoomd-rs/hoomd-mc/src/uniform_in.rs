@@ -1,0 +1,207 @@
+// Copyright (c) 2024-2026 The Regents of the University of Michigan.
+// Part of hoomd-rs, released under the BSD 3-Clause License.
+
+//! Implement `UniformIn`
+
+use hoomd_vector::{Outer, Wedge};
+use rand::{
+    Rng, RngExt,
+    distr::{Distribution, StandardUniform},
+};
+use serde::{Deserialize, Serialize};
+
+use hoomd_microstate::{
+    Body,
+    property::{DynamicOrientedPoint, DynamicPoint, OrientedPoint, Point, RotationalMotionTypes},
+};
+
+use crate::BodyDistribution;
+
+/// Generate bodies uniformly in the given boundary condition.
+///
+/// Give [`UniformIn`] a template vector of sites and it will randomly generate
+/// bodies uniformly distributed in the given boundary. Each generated body will
+/// have the same sites (cloned from `template_sites`) and random body properties
+/// sampled in the given `boundary`.
+///
+/// # Example
+///
+/// Place points at random locations in the boundary:
+/// ```
+/// use hoomd_geometry::{IsPointInside, shape::Rectangle};
+/// use hoomd_mc::{BodyDistribution, UniformIn};
+/// use hoomd_microstate::{Body, boundary::Closed, property::Point};
+/// use hoomd_vector::Cartesian;
+///
+/// use rand::{SeedableRng, distr::Distribution, rngs::StdRng};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let rectangle = Closed(Rectangle::with_equal_edges(5.0.try_into()?));
+/// let mut rng = StdRng::seed_from_u64(1);
+///
+/// let uniform_in = UniformIn {
+///     boundary: rectangle,
+///     template_sites: vec![Point::new(Cartesian::from([0.0, 0.0]))],
+/// };
+///
+/// let body: Body<Point<Cartesian<2>>, Point<Cartesian<2>>> =
+///     uniform_in.sample(0, &mut rng);
+/// assert!(
+///     uniform_in
+///         .boundary
+///         .0
+///         .is_point_inside(&body.properties.position)
+/// );
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Place oriented bodies at random locations in the boundary and give them random
+/// orientations:
+/// ```
+/// use rand::{SeedableRng, rngs::StdRng};
+/// use std::f64::consts::PI;
+///
+/// use hoomd_geometry::{IsPointInside, shape::Rectangle};
+/// use hoomd_mc::{BodyDistribution, UniformIn};
+/// use hoomd_microstate::{
+///     Body,
+///     boundary::Closed,
+///     property::{OrientedPoint, Point},
+/// };
+/// use hoomd_vector::{Angle, Cartesian};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let rectangle = Closed(Rectangle::with_equal_edges(5.0.try_into()?));
+/// let mut rng = StdRng::seed_from_u64(1);
+///
+/// let uniform_in = UniformIn {
+///     boundary: rectangle,
+///     template_sites: vec![
+///         Point::new(Cartesian::from([-1.0, 0.0])),
+///         Point::new(Cartesian::from([1.0, 0.0])),
+///     ],
+/// };
+///
+/// let body: Body<OrientedPoint<Cartesian<2>, Angle>, Point<Cartesian<2>>> =
+///     uniform_in.sample(0, &mut rng);
+/// assert!(
+///     uniform_in
+///         .boundary
+///         .0
+///         .is_point_inside(&body.properties.position)
+/// );
+/// assert!(body.properties.orientation.theta < 2.0 * PI);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UniformIn<S, C> {
+    /// Generate bodies inside this boundary.
+    pub boundary: C,
+
+    /// Give each generated body these sites.
+    pub template_sites: Vec<S>,
+}
+
+/// Randomly place point bodies in a given boundary.
+///
+/// `sample` chooses the *body's* position randomly in the given boundary. Sites,
+/// therefore, may be placed outside the boundary. Callers should reject insertions
+/// appropriately when `add_body` fails.
+impl<V, S, C> BodyDistribution<Body<Point<V>, S>> for UniformIn<S, C>
+where
+    S: Clone,
+    C: Distribution<V>,
+{
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, _index: usize, rng: &mut R) -> Body<Point<V>, S> {
+        let properties = Point {
+            position: self.boundary.sample(rng),
+        };
+        let sites = self.template_sites.clone();
+        Body { properties, sites }
+    }
+}
+
+/// Randomly place dynamic point bodies in a given boundary.
+///
+/// `sample` chooses the *body's* position randomly in the given boundary. Sites,
+/// therefore, may be placed outside the boundary. Callers should reject insertions
+/// appropriately when `add_body` fails.
+///
+/// Mass, momentum, and `net_force` are set to defaults.
+impl<V, S, C> BodyDistribution<Body<DynamicPoint<V>, S>> for UniformIn<S, C>
+where
+    S: Clone,
+    C: Distribution<V>,
+    V: Default + Outer,
+    V::Tensor: Default,
+{
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, _index: usize, rng: &mut R) -> Body<DynamicPoint<V>, S> {
+        let properties = DynamicPoint {
+            position: self.boundary.sample(rng),
+            ..Default::default()
+        };
+        let sites = self.template_sites.clone();
+        Body { properties, sites }
+    }
+}
+
+/// Randomly place oriented bodies in a given boundary.
+///
+/// `sample` chooses the *body's* position randomly in the given boundary and also
+/// assigns a *uniform random orientation*. Sites, therefore, may be placed outside
+/// the boundary. Callers should reject insertions appropriately when `add_body`
+/// fails.
+impl<V, O, S, C> BodyDistribution<Body<OrientedPoint<V, O>, S>> for UniformIn<S, C>
+where
+    S: Clone,
+    C: Distribution<V>,
+    StandardUniform: Distribution<O>,
+{
+    #[inline]
+    fn sample<R: Rng + ?Sized>(&self, _index: usize, rng: &mut R) -> Body<OrientedPoint<V, O>, S> {
+        let properties = OrientedPoint {
+            position: self.boundary.sample(rng),
+            orientation: rng.random(),
+        };
+        let sites = self.template_sites.clone();
+        Body { properties, sites }
+    }
+}
+
+/// Randomly place dynamic oriented bodies in a given boundary.
+///
+/// `sample` chooses the *body's* position randomly in the given boundary and also
+/// assigns a *uniform random orientation*. Sites, therefore, may be placed outside
+/// the boundary. Callers should reject insertions appropriately when `add_body`
+/// fails.
+///
+/// Mass, moment of inertia, momentum, angular momentum, `net_force`, and `net_torque`
+/// are set to defaults.
+impl<V, O, S, C> BodyDistribution<Body<DynamicOrientedPoint<V, O>, S>> for UniformIn<S, C>
+where
+    S: Clone,
+    C: Distribution<V>,
+    StandardUniform: Distribution<O>,
+    V: Default + Wedge + Outer,
+    O: RotationalMotionTypes,
+    DynamicOrientedPoint<V, O>: Default,
+{
+    #[inline]
+    fn sample<R: Rng + ?Sized>(
+        &self,
+        _index: usize,
+        rng: &mut R,
+    ) -> Body<DynamicOrientedPoint<V, O>, S> {
+        let properties = DynamicOrientedPoint {
+            position: self.boundary.sample(rng),
+            orientation: rng.random(),
+            ..Default::default()
+        };
+        let sites = self.template_sites.clone();
+        Body { properties, sites }
+    }
+}

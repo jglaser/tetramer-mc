@@ -1,0 +1,41 @@
+[package]
+name = "hoomd-bevy"
+categories.workspace = true
+description = "Use Bevy to render hoomd-rs simulations in real time."
+edition.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[package.metadata.docs.rs]
+rustdoc-args = [ "--html-in-header", "katex.html" ]
+
+[lints]
+workspace = true
+
+[features]
+doc-example = []
+webgpu = ["bevy/webgpu"]
+
+[dependencies]
+anyhow.workspace = true
+bevy.workspace = true
+bevy_diagnostic.workspace = true
+bevy_winit.workspace = true
+bevy_egui.workspace = true
+itertools.workspace = true
+hoomd-manifold.workspace = true
+hoomd-microstate.workspace = true
+hoomd-simulation.workspace = true
+hoomd-vector.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Work-around for https://github.com/Smithay/wayland-rs/issues/767
+wayland-sys = { workspace = true, features = ["dlopen"] }
+
+# web-sys = "0.3.77"
+# `web_sys::console::log_1(&msg.into());` is useful for println! type debugging in wasm

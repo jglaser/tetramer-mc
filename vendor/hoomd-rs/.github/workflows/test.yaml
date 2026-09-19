@@ -1,0 +1,144 @@
+name: Test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+  push:
+    branches:
+    - trunk
+
+  workflow_dispatch:
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CLICOLOR: 1
+
+jobs:
+  unit_test:
+    name: Unit test [${{ matrix.os }}-${{ matrix.target || 'native' }}]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      # Test the latest Rust on all platforms.
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-26
+          - windows-2025
+        target:
+         - ''
+
+        include:
+        - os: ubuntu-24.04
+          rust: 1.96.0
+          target: wasm32-unknown-unknown
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Remove native build configuration
+      run: rm .cargo/config.toml
+    - name: Configure Rust
+      uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      with:
+        toolchain: 1.98.1
+        targets: ${{ matrix.target }}
+    - name: Check rust installation
+      run: rustc -vV
+    # rust-cache already includes a Cargo.lock hash in the key. However, it
+    # eagerly restores caches with previous Cargo.lock files. This causes
+    # multiple builds to be cached in target/ increasing the cache usage
+    # dramatically. Add the Cargo.lock hash again in the key portion to
+    # prevent this restoration.
+    - name: Cache
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      with:
+        key: ${{ matrix.target || 'native' }}-${{ hashFiles('Cargo.lock') }}
+        cache-bin: false
+        save-if: ${{ github.ref != 'refs/heads/trunk' }}
+
+    - name: Build [default features]
+      run: >
+        cargo build
+        --profile=ci
+        --locked
+        --workspace
+        --lib
+        --bins
+        --tests
+        --examples
+        ${{ matrix.target != '' && '--target' || '' }} ${{ matrix.target }}
+        --verbose
+      if: ${{ matrix.target == '' }}
+
+    - name: Build [all features]
+      run: >
+        cargo build
+        --profile=ci
+        --all-features
+        --locked
+        --workspace
+        --lib
+        --bins
+        --tests
+        --examples
+        ${{ matrix.target != '' && '--target' || '' }} ${{ matrix.target }}
+        --verbose
+
+    - name: Run tests
+      run: >
+        cargo test
+        --profile=ci
+        --all-features
+        --locked
+        --workspace
+        --verbose
+      if: ${{ matrix.target == '' }}
+
+    - name: Build API documentation
+      run: >
+        cargo doc
+        --profile=ci
+        --all-features
+        --locked
+        --workspace
+        --no-deps
+      if: ${{ matrix.target == '' }}
+
+    - name: Run benchmarks
+      run: >
+        cargo bench
+        --profile=ci
+        --all-features
+        --locked
+        --workspace
+      if: ${{ matrix.target == '' }}
+
+    - name: Show target directory size
+      run: du -hsc target/*
+
+  tests_complete:
+    name: All tests
+    if: always()
+    needs: [unit_test]
+    runs-on: ubuntu-latest
+
+    steps:
+    - run: jq --exit-status 'all(.result == "success")' <<< "${NEEDS}"
+      env:
+        NEEDS: ${{ toJson(needs) }}
+    - name: Done
+      run: exit 0

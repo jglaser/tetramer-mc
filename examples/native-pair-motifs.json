@@ -1,0 +1,3225 @@
+{
+  "definition": "Global-orientation-invariant relative transforms of distinct contacting rigid tetramers in the certified native tiling. Permanent intra-tetramer contacts are excluded. A relative pose is expressed in the source tetramer frame.",
+  "relative_position_definition": "R_i^-1 (r_j + L n - r_i)",
+  "relative_orientation_definition": "R_i^-1 R_j, quaternion wxyz",
+  "atomic_pair_indexing": "Within individual monomer, 0..1000; full mobile index is member*1001+atom.",
+  "contact_gap_angstrom": 0.5,
+  "proper_internal_symmetry_order": 1,
+  "proper_internal_symmetries": [
+    [
+      1.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "motif_count": 14,
+  "motifs": [
+    {
+      "id": 0,
+      "relative_position": [
+        0.0,
+        0.0,
+        -75.8
+      ],
+      "relative_orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 2,
+          "member_j": 1,
+          "family": "C2",
+          "directed_class": "C2-",
+          "minimum_atom_gap_angstrom": 0.04264513500614653,
+          "native_atomic_pairs": [
+            [
+              978,
+              376
+            ],
+            [
+              986,
+              368
+            ],
+            [
+              986,
+              371
+            ],
+            [
+              988,
+              371
+            ],
+            [
+              989,
+              371
+            ],
+            [
+              991,
+              371
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "source_block_type": 1,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            0,
+            0,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "relative_position": [
+        0.0,
+        0.0,
+        75.8
+      ],
+      "relative_orientation": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 1,
+          "member_j": 2,
+          "family": "C2",
+          "directed_class": "C2+",
+          "minimum_atom_gap_angstrom": 0.04264513500614564,
+          "native_atomic_pairs": [
+            [
+              376,
+              978
+            ],
+            [
+              368,
+              986
+            ],
+            [
+              371,
+              986
+            ],
+            [
+              371,
+              988
+            ],
+            [
+              371,
+              989
+            ],
+            [
+              371,
+              991
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "source_block_type": 1,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            0,
+            0,
+            1
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            0,
+            0,
+            -1
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            0,
+            0,
+            -1
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "relative_position": [
+        -18.425103383654946,
+        19.476249953575717,
+        -56.85
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 0,
+          "member_j": 3,
+          "family": "C2",
+          "directed_class": "C2-",
+          "minimum_atom_gap_angstrom": 0.04264513500614253,
+          "native_atomic_pairs": [
+            [
+              989,
+              371
+            ],
+            [
+              991,
+              371
+            ],
+            [
+              986,
+              368
+            ],
+            [
+              986,
+              371
+            ],
+            [
+              988,
+              371
+            ],
+            [
+              978,
+              376
+            ]
+          ]
+        },
+        {
+          "member_i": 2,
+          "member_j": 1,
+          "family": "C1",
+          "directed_class": "C1+",
+          "minimum_atom_gap_angstrom": 0.03740585772428884,
+          "native_atomic_pairs": [
+            [
+              867,
+              806
+            ],
+            [
+              867,
+              896
+            ],
+            [
+              867,
+              897
+            ],
+            [
+              867,
+              805
+            ],
+            [
+              867,
+              807
+            ],
+            [
+              871,
+              782
+            ],
+            [
+              871,
+              788
+            ],
+            [
+              869,
+              783
+            ],
+            [
+              869,
+              782
+            ],
+            [
+              868,
+              807
+            ],
+            [
+              878,
+              181
+            ],
+            [
+              878,
+              184
+            ],
+            [
+              878,
+              183
+            ],
+            [
+              881,
+              179
+            ],
+            [
+              877,
+              184
+            ],
+            [
+              880,
+              181
+            ],
+            [
+              880,
+              179
+            ],
+            [
+              879,
+              181
+            ],
+            [
+              881,
+              171
+            ],
+            [
+              881,
+              172
+            ],
+            [
+              871,
+              789
+            ],
+            [
+              871,
+              779
+            ],
+            [
+              869,
+              779
+            ],
+            [
+              870,
+              779
+            ],
+            [
+              833,
+              779
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            0,
+            1,
+            -1
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            -1,
+            0,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "relative_position": [
+        -18.425103383654946,
+        19.476249953575717,
+        18.949999999999996
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 0,
+          "member_j": 2,
+          "family": "C1",
+          "directed_class": "C1-",
+          "minimum_atom_gap_angstrom": 0.03740585772429417,
+          "native_atomic_pairs": [
+            [
+              171,
+              881
+            ],
+            [
+              172,
+              881
+            ],
+            [
+              183,
+              878
+            ],
+            [
+              179,
+              881
+            ],
+            [
+              179,
+              880
+            ],
+            [
+              181,
+              878
+            ],
+            [
+              181,
+              879
+            ],
+            [
+              181,
+              880
+            ],
+            [
+              184,
+              877
+            ],
+            [
+              184,
+              878
+            ],
+            [
+              789,
+              871
+            ],
+            [
+              779,
+              869
+            ],
+            [
+              779,
+              871
+            ],
+            [
+              896,
+              867
+            ],
+            [
+              806,
+              867
+            ],
+            [
+              897,
+              867
+            ],
+            [
+              805,
+              867
+            ],
+            [
+              807,
+              867
+            ],
+            [
+              807,
+              868
+            ],
+            [
+              782,
+              869
+            ],
+            [
+              782,
+              871
+            ],
+            [
+              783,
+              869
+            ],
+            [
+              788,
+              871
+            ],
+            [
+              779,
+              833
+            ],
+            [
+              779,
+              870
+            ]
+          ]
+        },
+        {
+          "member_i": 1,
+          "member_j": 2,
+          "family": "C2",
+          "directed_class": "C2-",
+          "minimum_atom_gap_angstrom": 0.04264513500614253,
+          "native_atomic_pairs": [
+            [
+              989,
+              371
+            ],
+            [
+              991,
+              371
+            ],
+            [
+              986,
+              368
+            ],
+            [
+              986,
+              371
+            ],
+            [
+              988,
+              371
+            ],
+            [
+              978,
+              376
+            ]
+          ]
+        },
+        {
+          "member_i": 1,
+          "member_j": 3,
+          "family": "C1",
+          "directed_class": "C1-",
+          "minimum_atom_gap_angstrom": 0.03740585772429417,
+          "native_atomic_pairs": [
+            [
+              171,
+              881
+            ],
+            [
+              172,
+              881
+            ],
+            [
+              183,
+              878
+            ],
+            [
+              179,
+              881
+            ],
+            [
+              179,
+              880
+            ],
+            [
+              181,
+              878
+            ],
+            [
+              181,
+              879
+            ],
+            [
+              181,
+              880
+            ],
+            [
+              184,
+              877
+            ],
+            [
+              184,
+              878
+            ],
+            [
+              789,
+              871
+            ],
+            [
+              779,
+              869
+            ],
+            [
+              779,
+              871
+            ],
+            [
+              896,
+              867
+            ],
+            [
+              806,
+              867
+            ],
+            [
+              897,
+              867
+            ],
+            [
+              805,
+              867
+            ],
+            [
+              807,
+              867
+            ],
+            [
+              807,
+              868
+            ],
+            [
+              782,
+              869
+            ],
+            [
+              782,
+              871
+            ],
+            [
+              783,
+              869
+            ],
+            [
+              788,
+              871
+            ],
+            [
+              779,
+              833
+            ],
+            [
+              779,
+              870
+            ]
+          ]
+        },
+        {
+          "member_i": 2,
+          "member_j": 0,
+          "family": "C2",
+          "directed_class": "C2+",
+          "minimum_atom_gap_angstrom": 0.04264513500613498,
+          "native_atomic_pairs": [
+            [
+              376,
+              978
+            ],
+            [
+              371,
+              991
+            ],
+            [
+              371,
+              989
+            ],
+            [
+              371,
+              988
+            ],
+            [
+              371,
+              986
+            ],
+            [
+              368,
+              986
+            ]
+          ]
+        },
+        {
+          "member_i": 3,
+          "member_j": 0,
+          "family": "C1",
+          "directed_class": "C1+",
+          "minimum_atom_gap_angstrom": 0.03740585772428884,
+          "native_atomic_pairs": [
+            [
+              867,
+              806
+            ],
+            [
+              867,
+              896
+            ],
+            [
+              867,
+              897
+            ],
+            [
+              867,
+              805
+            ],
+            [
+              867,
+              807
+            ],
+            [
+              871,
+              782
+            ],
+            [
+              871,
+              788
+            ],
+            [
+              869,
+              783
+            ],
+            [
+              869,
+              782
+            ],
+            [
+              868,
+              807
+            ],
+            [
+              878,
+              181
+            ],
+            [
+              878,
+              184
+            ],
+            [
+              878,
+              183
+            ],
+            [
+              881,
+              179
+            ],
+            [
+              877,
+              184
+            ],
+            [
+              880,
+              181
+            ],
+            [
+              880,
+              179
+            ],
+            [
+              879,
+              181
+            ],
+            [
+              881,
+              171
+            ],
+            [
+              881,
+              172
+            ],
+            [
+              871,
+              789
+            ],
+            [
+              871,
+              779
+            ],
+            [
+              869,
+              779
+            ],
+            [
+              870,
+              779
+            ],
+            [
+              833,
+              779
+            ]
+          ]
+        },
+        {
+          "member_i": 3,
+          "member_j": 1,
+          "family": "C2",
+          "directed_class": "C2+",
+          "minimum_atom_gap_angstrom": 0.04264513500613498,
+          "native_atomic_pairs": [
+            [
+              376,
+              978
+            ],
+            [
+              371,
+              991
+            ],
+            [
+              371,
+              989
+            ],
+            [
+              371,
+              988
+            ],
+            [
+              371,
+              986
+            ],
+            [
+              368,
+              986
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            -1,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "relative_position": [
+        -39.54999999999998,
+        -20.07375004642428,
+        -19.451561877005823
+      ],
+      "relative_orientation": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 0,
+          "member_j": 3,
+          "family": "C3",
+          "directed_class": "C3",
+          "minimum_atom_gap_angstrom": 0.03713103084689928,
+          "native_atomic_pairs": [
+            [
+              990,
+              100
+            ],
+            [
+              987,
+              100
+            ],
+            [
+              49,
+              106
+            ],
+            [
+              1000,
+              1000
+            ],
+            [
+              106,
+              49
+            ],
+            [
+              100,
+              990
+            ],
+            [
+              100,
+              987
+            ]
+          ]
+        },
+        {
+          "member_i": 1,
+          "member_j": 2,
+          "family": "C3",
+          "directed_class": "C3",
+          "minimum_atom_gap_angstrom": 0.03713103084689928,
+          "native_atomic_pairs": [
+            [
+              990,
+              100
+            ],
+            [
+              987,
+              100
+            ],
+            [
+              49,
+              106
+            ],
+            [
+              1000,
+              1000
+            ],
+            [
+              106,
+              49
+            ],
+            [
+              100,
+              990
+            ],
+            [
+              100,
+              987
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            -1,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 1,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "relative_position": [
+        39.55000000000001,
+        -20.07375004642428,
+        -19.451561877005823
+      ],
+      "relative_orientation": [
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 2,
+          "member_j": 1,
+          "family": "C3",
+          "directed_class": "C3",
+          "minimum_atom_gap_angstrom": 0.037131030846912605,
+          "native_atomic_pairs": [
+            [
+              987,
+              100
+            ],
+            [
+              990,
+              100
+            ],
+            [
+              49,
+              106
+            ],
+            [
+              1000,
+              1000
+            ],
+            [
+              100,
+              987
+            ],
+            [
+              100,
+              990
+            ],
+            [
+              106,
+              49
+            ]
+          ]
+        },
+        {
+          "member_i": 3,
+          "member_j": 0,
+          "family": "C3",
+          "directed_class": "C3",
+          "minimum_atom_gap_angstrom": 0.037131030846912605,
+          "native_atomic_pairs": [
+            [
+              987,
+              100
+            ],
+            [
+              990,
+              100
+            ],
+            [
+              49,
+              106
+            ],
+            [
+              1000,
+              1000
+            ],
+            [
+              100,
+              987
+            ],
+            [
+              100,
+              990
+            ],
+            [
+              106,
+              49
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 1,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            -1,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "relative_position": [
+        21.124896616345055,
+        -39.55,
+        -0.5015618770058232
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 0,
+          "member_j": 3,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.03691835795533449,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        },
+        {
+          "member_i": 1,
+          "member_j": 2,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.03691835795533449,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            1,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            -1,
+            -1,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "relative_position": [
+        21.124896616345055,
+        39.55,
+        -0.5015618770058232
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        1.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 2,
+          "member_j": 1,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.03691835795533449,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        },
+        {
+          "member_i": 3,
+          "member_j": 0,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.03691835795533449,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 0,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            1,
+            1,
+            0
+          ]
+        },
+        {
+          "source_block_type": 3,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            -1,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "relative_position": [
+        -18.425103383654946,
+        19.47624995357572,
+        -18.949999999999996
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 0,
+          "member_j": 2,
+          "family": "C2",
+          "directed_class": "C2-",
+          "minimum_atom_gap_angstrom": 0.04264513500614209,
+          "native_atomic_pairs": [
+            [
+              978,
+              376
+            ],
+            [
+              991,
+              371
+            ],
+            [
+              989,
+              371
+            ],
+            [
+              988,
+              371
+            ],
+            [
+              986,
+              371
+            ],
+            [
+              986,
+              368
+            ]
+          ]
+        },
+        {
+          "member_i": 0,
+          "member_j": 3,
+          "family": "C1",
+          "directed_class": "C1-",
+          "minimum_atom_gap_angstrom": 0.037405857724295055,
+          "native_atomic_pairs": [
+            [
+              806,
+              867
+            ],
+            [
+              896,
+              867
+            ],
+            [
+              897,
+              867
+            ],
+            [
+              805,
+              867
+            ],
+            [
+              807,
+              867
+            ],
+            [
+              807,
+              868
+            ],
+            [
+              783,
+              869
+            ],
+            [
+              782,
+              871
+            ],
+            [
+              782,
+              869
+            ],
+            [
+              788,
+              871
+            ],
+            [
+              181,
+              878
+            ],
+            [
+              181,
+              880
+            ],
+            [
+              181,
+              879
+            ],
+            [
+              184,
+              878
+            ],
+            [
+              184,
+              877
+            ],
+            [
+              179,
+              881
+            ],
+            [
+              179,
+              880
+            ],
+            [
+              183,
+              878
+            ],
+            [
+              171,
+              881
+            ],
+            [
+              172,
+              881
+            ],
+            [
+              789,
+              871
+            ],
+            [
+              779,
+              871
+            ],
+            [
+              779,
+              869
+            ],
+            [
+              779,
+              870
+            ],
+            [
+              779,
+              833
+            ]
+          ]
+        },
+        {
+          "member_i": 1,
+          "member_j": 3,
+          "family": "C2",
+          "directed_class": "C2-",
+          "minimum_atom_gap_angstrom": 0.04264513500614209,
+          "native_atomic_pairs": [
+            [
+              978,
+              376
+            ],
+            [
+              991,
+              371
+            ],
+            [
+              989,
+              371
+            ],
+            [
+              988,
+              371
+            ],
+            [
+              986,
+              371
+            ],
+            [
+              986,
+              368
+            ]
+          ]
+        },
+        {
+          "member_i": 2,
+          "member_j": 0,
+          "family": "C1",
+          "directed_class": "C1+",
+          "minimum_atom_gap_angstrom": 0.037405857724297276,
+          "native_atomic_pairs": [
+            [
+              881,
+              171
+            ],
+            [
+              881,
+              172
+            ],
+            [
+              877,
+              184
+            ],
+            [
+              878,
+              183
+            ],
+            [
+              878,
+              181
+            ],
+            [
+              878,
+              184
+            ],
+            [
+              881,
+              179
+            ],
+            [
+              879,
+              181
+            ],
+            [
+              880,
+              179
+            ],
+            [
+              880,
+              181
+            ],
+            [
+              871,
+              789
+            ],
+            [
+              869,
+              779
+            ],
+            [
+              871,
+              779
+            ],
+            [
+              867,
+              896
+            ],
+            [
+              867,
+              806
+            ],
+            [
+              867,
+              897
+            ],
+            [
+              867,
+              805
+            ],
+            [
+              867,
+              807
+            ],
+            [
+              869,
+              782
+            ],
+            [
+              869,
+              783
+            ],
+            [
+              871,
+              782
+            ],
+            [
+              871,
+              788
+            ],
+            [
+              868,
+              807
+            ],
+            [
+              833,
+              779
+            ],
+            [
+              870,
+              779
+            ]
+          ]
+        },
+        {
+          "member_i": 2,
+          "member_j": 1,
+          "family": "C2",
+          "directed_class": "C2+",
+          "minimum_atom_gap_angstrom": 0.04264513500614564,
+          "native_atomic_pairs": [
+            [
+              368,
+              986
+            ],
+            [
+              371,
+              989
+            ],
+            [
+              371,
+              991
+            ],
+            [
+              371,
+              986
+            ],
+            [
+              371,
+              988
+            ],
+            [
+              376,
+              978
+            ]
+          ]
+        },
+        {
+          "member_i": 3,
+          "member_j": 1,
+          "family": "C1",
+          "directed_class": "C1+",
+          "minimum_atom_gap_angstrom": 0.037405857724297276,
+          "native_atomic_pairs": [
+            [
+              881,
+              171
+            ],
+            [
+              881,
+              172
+            ],
+            [
+              877,
+              184
+            ],
+            [
+              878,
+              183
+            ],
+            [
+              878,
+              181
+            ],
+            [
+              878,
+              184
+            ],
+            [
+              881,
+              179
+            ],
+            [
+              879,
+              181
+            ],
+            [
+              880,
+              179
+            ],
+            [
+              880,
+              181
+            ],
+            [
+              871,
+              789
+            ],
+            [
+              869,
+              779
+            ],
+            [
+              871,
+              779
+            ],
+            [
+              867,
+              896
+            ],
+            [
+              867,
+              806
+            ],
+            [
+              867,
+              897
+            ],
+            [
+              867,
+              805
+            ],
+            [
+              867,
+              807
+            ],
+            [
+              869,
+              782
+            ],
+            [
+              869,
+              783
+            ],
+            [
+              871,
+              782
+            ],
+            [
+              871,
+              788
+            ],
+            [
+              868,
+              807
+            ],
+            [
+              833,
+              779
+            ],
+            [
+              870,
+              779
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 1,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            0,
+            -1,
+            0
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            1,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "relative_position": [
+        -18.425103383654946,
+        19.47624995357572,
+        56.849999999999994
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 1,
+          "member_j": 2,
+          "family": "C1",
+          "directed_class": "C1-",
+          "minimum_atom_gap_angstrom": 0.037405857724295055,
+          "native_atomic_pairs": [
+            [
+              806,
+              867
+            ],
+            [
+              896,
+              867
+            ],
+            [
+              897,
+              867
+            ],
+            [
+              805,
+              867
+            ],
+            [
+              807,
+              867
+            ],
+            [
+              807,
+              868
+            ],
+            [
+              783,
+              869
+            ],
+            [
+              782,
+              871
+            ],
+            [
+              782,
+              869
+            ],
+            [
+              788,
+              871
+            ],
+            [
+              181,
+              878
+            ],
+            [
+              181,
+              880
+            ],
+            [
+              181,
+              879
+            ],
+            [
+              184,
+              878
+            ],
+            [
+              184,
+              877
+            ],
+            [
+              179,
+              881
+            ],
+            [
+              179,
+              880
+            ],
+            [
+              183,
+              878
+            ],
+            [
+              171,
+              881
+            ],
+            [
+              172,
+              881
+            ],
+            [
+              789,
+              871
+            ],
+            [
+              779,
+              871
+            ],
+            [
+              779,
+              869
+            ],
+            [
+              779,
+              870
+            ],
+            [
+              779,
+              833
+            ]
+          ]
+        },
+        {
+          "member_i": 3,
+          "member_j": 0,
+          "family": "C2",
+          "directed_class": "C2+",
+          "minimum_atom_gap_angstrom": 0.04264513500614564,
+          "native_atomic_pairs": [
+            [
+              368,
+              986
+            ],
+            [
+              371,
+              989
+            ],
+            [
+              371,
+              991
+            ],
+            [
+              371,
+              986
+            ],
+            [
+              371,
+              988
+            ],
+            [
+              376,
+              978
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 1,
+          "target_block_type": 0,
+          "target_tiling_image": [
+            0,
+            -1,
+            1
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 3,
+          "target_tiling_image": [
+            1,
+            0,
+            -1
+          ]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "relative_position": [
+        21.124896616345037,
+        39.55,
+        -38.40156187700582
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 2,
+          "member_j": 0,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.036918357955331826,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 1,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            -1,
+            -1,
+            0
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            1,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "relative_position": [
+        21.124896616345037,
+        39.55,
+        37.39843812299418
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 3,
+          "member_j": 1,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.036918357955331826,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 1,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            -1,
+            -1,
+            1
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            1,
+            0,
+            -1
+          ]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "relative_position": [
+        21.124896616345037,
+        -39.55,
+        -38.40156187700582
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 0,
+          "member_j": 2,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.03691835795532383,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 1,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            -1,
+            0,
+            0
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            1,
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "relative_position": [
+        21.124896616345037,
+        -39.55,
+        37.39843812299418
+      ],
+      "relative_orientation": [
+        0.0,
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "member_contacts": [
+        {
+          "member_i": 1,
+          "member_j": 3,
+          "family": "C4",
+          "directed_class": "C4",
+          "minimum_atom_gap_angstrom": 0.03691835795532383,
+          "native_atomic_pairs": [
+            [
+              325,
+              516
+            ],
+            [
+              334,
+              543
+            ],
+            [
+              327,
+              539
+            ],
+            [
+              327,
+              540
+            ],
+            [
+              309,
+              524
+            ],
+            [
+              321,
+              524
+            ],
+            [
+              336,
+              543
+            ],
+            [
+              325,
+              624
+            ],
+            [
+              325,
+              630
+            ],
+            [
+              325,
+              635
+            ],
+            [
+              325,
+              634
+            ],
+            [
+              325,
+              621
+            ],
+            [
+              655,
+              655
+            ],
+            [
+              543,
+              334
+            ],
+            [
+              543,
+              336
+            ],
+            [
+              539,
+              327
+            ],
+            [
+              540,
+              327
+            ],
+            [
+              524,
+              309
+            ],
+            [
+              524,
+              321
+            ],
+            [
+              624,
+              325
+            ],
+            [
+              635,
+              325
+            ],
+            [
+              621,
+              325
+            ],
+            [
+              630,
+              325
+            ],
+            [
+              634,
+              325
+            ],
+            [
+              516,
+              325
+            ]
+          ]
+        }
+      ],
+      "native_occurrences": [
+        {
+          "source_block_type": 1,
+          "target_block_type": 2,
+          "target_tiling_image": [
+            -1,
+            0,
+            1
+          ]
+        },
+        {
+          "source_block_type": 2,
+          "target_block_type": 1,
+          "target_tiling_image": [
+            1,
+            1,
+            -1
+          ]
+        }
+      ]
+    }
+  ],
+  "neighbors_by_block_type": [
+    [
+      {
+        "source_block_type": 0,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          0,
+          0,
+          -1
+        ],
+        "motif_id": 0,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 0,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          0,
+          0,
+          1
+        ],
+        "motif_id": 1,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 0,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          0,
+          1,
+          -1
+        ],
+        "motif_id": 2,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 0,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          0,
+          1,
+          0
+        ],
+        "motif_id": 3,
+        "member_contact_count": 6
+      },
+      {
+        "source_block_type": 0,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          -1,
+          0,
+          0
+        ],
+        "motif_id": 4,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 0,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          0,
+          0,
+          0
+        ],
+        "motif_id": 5,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 0,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          1,
+          0,
+          0
+        ],
+        "motif_id": 6,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 0,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          1,
+          1,
+          0
+        ],
+        "motif_id": 7,
+        "member_contact_count": 2
+      }
+    ],
+    [
+      {
+        "source_block_type": 1,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          0,
+          -1,
+          0
+        ],
+        "motif_id": 8,
+        "member_contact_count": 6
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          0,
+          -1,
+          1
+        ],
+        "motif_id": 9,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          0,
+          0,
+          -1
+        ],
+        "motif_id": 0,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          0,
+          0,
+          1
+        ],
+        "motif_id": 1,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          -1,
+          -1,
+          0
+        ],
+        "motif_id": 10,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          -1,
+          -1,
+          1
+        ],
+        "motif_id": 11,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          -1,
+          0,
+          0
+        ],
+        "motif_id": 12,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          -1,
+          0,
+          1
+        ],
+        "motif_id": 13,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          0,
+          0,
+          0
+        ],
+        "motif_id": 5,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 1,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          1,
+          0,
+          0
+        ],
+        "motif_id": 4,
+        "member_contact_count": 2
+      }
+    ],
+    [
+      {
+        "source_block_type": 2,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          0,
+          0,
+          0
+        ],
+        "motif_id": 4,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          1,
+          0,
+          0
+        ],
+        "motif_id": 5,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          1,
+          0,
+          -1
+        ],
+        "motif_id": 11,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          1,
+          0,
+          0
+        ],
+        "motif_id": 10,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          1,
+          1,
+          -1
+        ],
+        "motif_id": 13,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          1,
+          1,
+          0
+        ],
+        "motif_id": 12,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          0,
+          0,
+          -1
+        ],
+        "motif_id": 1,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          0,
+          0,
+          1
+        ],
+        "motif_id": 0,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          1,
+          0,
+          -1
+        ],
+        "motif_id": 9,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 2,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          1,
+          0,
+          0
+        ],
+        "motif_id": 8,
+        "member_contact_count": 6
+      }
+    ],
+    [
+      {
+        "source_block_type": 3,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          -1,
+          -1,
+          0
+        ],
+        "motif_id": 6,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 3,
+        "target_block_type": 0,
+        "target_tiling_image": [
+          -1,
+          0,
+          0
+        ],
+        "motif_id": 7,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 3,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          -1,
+          0,
+          0
+        ],
+        "motif_id": 5,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 3,
+        "target_block_type": 1,
+        "target_tiling_image": [
+          0,
+          0,
+          0
+        ],
+        "motif_id": 4,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 3,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          -1,
+          0,
+          0
+        ],
+        "motif_id": 3,
+        "member_contact_count": 6
+      },
+      {
+        "source_block_type": 3,
+        "target_block_type": 2,
+        "target_tiling_image": [
+          -1,
+          0,
+          1
+        ],
+        "motif_id": 2,
+        "member_contact_count": 2
+      },
+      {
+        "source_block_type": 3,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          0,
+          0,
+          -1
+        ],
+        "motif_id": 1,
+        "member_contact_count": 1
+      },
+      {
+        "source_block_type": 3,
+        "target_block_type": 3,
+        "target_tiling_image": [
+          0,
+          0,
+          1
+        ],
+        "motif_id": 0,
+        "member_contact_count": 1
+      }
+    ]
+  ],
+  "inverse_closure_max_error": 2.842170943040401e-14,
+  "original_inventory_atom_contact_gap_angstrom": 1.0
+}

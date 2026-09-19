@@ -4,7 +4,7 @@
 
 The viewer offers frame stepping and playback, drag rotation, shift-drag panning, wheel zoom, body/initial-seed colors, optional body-center labels and a periodic box. Focus on the seed, an individual body, the whole box, or the largest nearby group. Periodic image choices bring neighboring bodies together. When recorded contact edges are unavailable, nearby groups use a bounding-sphere proximity graph strictly for camera framing; they are not an association or crystallinity metric.
 
-Spherical runs use their original unwrapped coordinates and ordinary distances. The outline shows the hard protein wall (the ideal bath permeates it). Focusing a group translates the wall and all bodies by the same camera offset; it never wraps or rearranges them. The whole-container view keeps the wall center at the origin. The exporter recognizes `boundary: {"kind":"spherical","radius":R}` in the run configuration.
+Spherical runs use their original unwrapped coordinates in the fixed container frame. The wall center stays at the origin throughout playback; the camera does not follow the seed, a body, or a changing group. The initial/reset scale fits the sphere radius, and manual rotation, zoom, and panning remain available. The outline shows the hard protein wall (the ideal bath permeates it). The exporter recognizes `boundary: {"kind":"spherical","radius":R}` in the run configuration.
 
 WebGL2 renders individual sphere surfaces with per-fragment depth. A Canvas2D fallback draws sorted projected atom circles. Both use the supplied atom radii; the fallback has approximate occlusion. GPU display buffers are float32; authoritative simulation coordinates remain in the source files and embedded JSON.
 

@@ -40,13 +40,10 @@
   function displayedCenters(frame, box, focus, bodyBound, radius, boundary = "periodic") {
     const poses = frame.poses;
     if (boundary === "spherical") {
-      const proximity = nearbyGroups(poses, box, 2 * bodyBound + 2 * radius, frame.contact_edges, false);
-      let group = focus === "box" ? poses.map((_, i) => i) : proximity.groups[0];
-      if (focus === "seed" && frame.seed_labels.length) group = frame.seed_labels.filter(i => i < poses.length);
-      else if (focus.startsWith("body:")) { const index = Number(focus.slice(5)); group = [index, ...proximity.adjacency[index]]; }
-      const mean = focus === "box" ? [0, 0, 0] : group.reduce((s, i) => add(s, poses[i].position), [0, 0, 0]).map(x => x / group.length);
-      return { centers: poses.map(p => sub(p.position, mean)), group, boundaryCenter: mean.map(x => -x),
-        label: focus === "box" ? "Spherical container · unwrapped coordinates" : focus === "seed" ? `Initial seed · ${group.length} bodies` : focus.startsWith("body:") ? `Body ${group[0]} and nearby bodies` : `Largest nearby group · ${group.length} bodies` };
+      // Keep the container as the reference frame, so common shifts and
+      // collective rotations remain visible instead of following the seed.
+      return { centers: poses.map(p => [...p.position]), group: poses.map((_, i) => i),
+        boundaryCenter: [0, 0, 0], label: "Sphere-centered frame · fixed container" };
     }
     if (focus === "box") return { centers: poses.map(p => minimumImage(p.position, box)), group: poses.map((_, i) => i), label: "Primary cell · body centers wrapped" };
     const proximity = nearbyGroups(poses, box, 2 * bodyBound + 2 * radius, frame.contact_edges);
@@ -166,7 +163,7 @@
     state.geometry = bodyGeometry(data, frame, displayed.centers); setColors();
     if (gl) { gl.bindBuffer(gl.ARRAY_BUFFER, geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER, state.geometry, gl.DYNAMIC_DRAW); }
     $("view-caption").textContent = displayed.label + (data.boundary === "spherical" ? "\nHard atom wall · permeable depletant bath" : "\nPeriodic images brought together around the focus");
-    if ($("focus").value === "box") $("view-caption").textContent = displayed.label;
+    if ($("focus").value === "box" && data.boundary !== "spherical") $("view-caption").textContent = displayed.label;
     $("frame-label").textContent = `Frame ${state.index + 1}/${data.frames.length} · sweep ${frame.sweep}`;
     $("frame").value = state.index;
     $("status").textContent = `${data.body_count} rigid bodies · actual sphere radii in Å · saved sweep ${frame.sweep}`;
@@ -187,7 +184,7 @@
   function resetCamera() {
     state.pan = [0, 0];
     const [, height] = resize();
-    let extent = $("focus").value === "box" ? (data.spherical_wall_radius || norm(data.box_lengths) / 2 + data.body_bound) : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
+    const extent = data.boundary === "spherical" ? data.spherical_wall_radius : $("focus").value === "box" ? norm(data.box_lengths) / 2 + data.body_bound : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
     state.scale = Math.min(viewport.clientWidth, viewport.clientHeight) * (global.devicePixelRatio || 1) * .43 / Math.max(extent, 1);
     // Match the pixel-ratio cap used by resize.
     if ((global.devicePixelRatio || 1) > 2) state.scale *= 2 / global.devicePixelRatio;
@@ -304,15 +301,20 @@
   $("run-name").textContent = data.run_name;
   if (data.boundary === "spherical") {
     $("boundary-label").textContent = "Wall";
-    Array.from($("focus").options).find(option => option.value === "box").textContent = "Whole container";
+    const option = document.createElement("option"); option.value = "box"; option.textContent = "Sphere center";
+    $("focus").replaceChildren(option);
+    $("focus").value = "box";
+    $("focus").disabled = true;
   }
   $("body-count").textContent = `${data.body_count} tetramers`;
   $("sphere-count").textContent = `${(data.body_count * data.atoms.length).toLocaleString()} atom spheres`;
   $("frame-count").textContent = `${data.frames.length} saved frames`;
   $("frame").max = data.frames.length - 1;
-  for (let body = 0; body < data.body_count; body++) { const option = document.createElement("option"); option.value = `body:${body}`; option.textContent = `Body ${body}`; $("focus").appendChild(option); }
-  if (data.frames[0].seed_labels.length) $("focus").value = "seed";
-  else $("color").value = "body";
+  if (data.boundary !== "spherical") {
+    for (let body = 0; body < data.body_count; body++) { const option = document.createElement("option"); option.value = `body:${body}`; option.textContent = `Body ${body}`; $("focus").appendChild(option); }
+    if (data.frames[0].seed_labels.length) $("focus").value = "seed";
+  }
+  if (!data.frames[0].seed_labels.length) $("color").value = "body";
   updateGeometry(true);
   function tick(time) {
     if (state.playing && (!state.lastTick || time - state.lastTick >= 1000 / Number($("speed").value))) {

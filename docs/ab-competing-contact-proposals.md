@@ -258,8 +258,11 @@ are frozen discovery evidence for the next controlled calculation; they
 have not been used to refit a proposal. The controls cost 166.88 and 60.77
 sampler CPU seconds at widths two and four, respectively.
 
-The next required reference is the **complete original 1<q<2 region**,
-retaining the original classification while constructing a conservative
-geometric cover of q≤2. A guided local region can be a useful control, but
-cannot replace that remaining-region coverage requirement. The physical
-model and assembly conclusion remain open.
+These controls prompted integration of the **complete original 1<q<2
+region**, with a geometric cover of q≤2 and frozen shoulder guides. The
+[completed MIS control](deterministic-mixture-mis.md) agrees with its paired
+guide estimate but provides no precision-per-CPU gain; physical tails
+remain unresolved. The [intermediate reference](ab-intermediate-reference.md)
+extends the coverage audit to the unchanged 2≤q<5 band. Neither that band
+nor the finite R3 competitor accounts for all q≥5 configurations. The
+physical model and assembly conclusion remain open.

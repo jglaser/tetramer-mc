@@ -165,11 +165,12 @@ the width-four proposal substantially underestimates the already measured
 finite R3 competitor region. Discovery and accurate integration therefore
 need separate controls; one broad Gaussian scale does not solve both.
 
-The next controlled calculation should target the shoulder directly,
-using a complete geometric cover for q≤2 with the **original** q retained
-for the 1<q<2 mask, plus a frozen guide from the newly discovered poses.
-The existing cover builder can derive its bounds from twice the metric
-tolerances; the physical metric and regional labels must stay unchanged.
-An independent finite-region reference can then check that guide before
-using its proposal in trajectories. The current data do not establish
-native assembly or rule it out.
+Subsequent calculations target the shoulder directly, using complete
+geometric covers and frozen guides while retaining the **original** q
+metric and 1<q<2 mask. The [fixed-quota MIS control](deterministic-mixture-mis.md)
+checks their common normalization and observed cost; it does not improve
+precision per CPU over the guide alone. The
+[intermediate reference](ab-intermediate-reference.md) separately measures
+the sparsely sampled 2≤q<5 band. Physical tails and the complete q≥5
+remainder still require controls. The current data do not establish native
+assembly or rule it out.

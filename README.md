@@ -121,6 +121,11 @@ A [complete radial reference allocation](docs/intermediate-complete-partition.md
 now covers that complement and finds additional high-weight poses. Its hard
 volume is consistent across proposals, while one draw still dominates its
 physical estimate.
+A [geometric neighborhood reference](docs/peak-neighborhood-reference.md)
+now measures the new dominant pose's local mass with independent samples.
+Matched regions expose the loss of narrow-contact coverage with broader
+proposals; disjoint shells retain measurements at several spatial scales.
+The complete intermediate integral and assembly verdict remain unresolved.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

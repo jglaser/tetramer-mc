@@ -72,8 +72,12 @@ The [contact-evidence roadmap](docs/contact-evidence-roadmap.md) separates
 proposal coverage from physical contact free energies and registry constraints.
 An independently validated [involutive Gaussian-chart map](docs/involutive-basin-transport.md)
 constructs its return transformation from the same operation, including the
-Gaussian auxiliary and translation/Haar Jacobian factors. It is a library
-prototype and is not yet an option in the assembly runner.
+Gaussian auxiliary and translation/Haar Jacobian factors. The
+[conditional docking runner](docs/involution-docking.md) combines it with
+implicit many-body depletion and compares correlations against independent
+redraw. The [matched docking pilot](docs/involution-docking-pilot.md) measures
+one-way entries and completed contact roundtrips separately. It is not yet an
+option in the all-mobile assembly runner.
 
 ## Output and continuation
 
@@ -147,6 +151,7 @@ legacy trajectories need their center-shift logs to reconstruct wall motion.
 | `atlas_transport` | Fixed learned charts with reversible mean, relative-covariance and weight fluctuations |
 | `atlas_mask` | Exact weighted active subsets with a separately normalized truncated-Poisson count law |
 | `basin_involution` | Fixed-chart transport with an explicit inverse trace and full auxiliary/Haar correction |
+| `docking` | One-body conditional docking, matched local/global schedules, inverse traces and contact diagnostics |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 
@@ -154,7 +159,9 @@ For the exclusion union U(X), the physical target is
 `π(X) ∝ hard(X) wall(X) exp[-z |U(X)|]`, with translation volume and normalized Haar
 orientation measure. It includes all simultaneous exclusions, not a sum of
 pair overlaps. A spectator anchor is uniformly selected and retained as a move
-label; every proposal evaluates the **whole** mixture at both endpoints.
+label. Independent redraw evaluates the **whole** mixture at both endpoints;
+the conditional involution uses its selected-chart auxiliary/Jacobian factor
+as derived in the docking guide.
 
 For periodic boundaries, the learned raw displacement must lie in the unique lab-frame minimum-image
 cell. Draws outside it are null moves, without retries or Gaussian wrapping.

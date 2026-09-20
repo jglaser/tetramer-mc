@@ -50,6 +50,16 @@ normalizer was dominated by one population, and the full gap was explicitly
 unresolved. It cannot rule out native assembly at the current bath. See the
 [qualified comparison](/home/xvg/protein-nucleation/results/tetramer-native-adsorbed/comparison/report.md).
 
+The subsequent [involutive docking pilot](involution-docking-pilot.md) integrates
+the fixed-chart map with the exact depletion gate. Its covered, five-component
+conditional atlas gives native access from competing starts, but none of the
+20 runs of 5,000 cycles completes a return between the contact cores. The
+`gamma=0.9` arm produces about five times more accepted pose changes per CPU
+than independent redraw; its two native-start departures reach only `q≈2`,
+not the distant competing region near `q≈30`. This is a movement-rate gain,
+not a demonstrated contact-mixing gain. The physical basin-weight and
+compression milestones therefore remain open.
+
 ## Keep three different quantities separate
 
 1. **Proposal coverage:** probability of proposing a hard-valid pose in a

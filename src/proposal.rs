@@ -375,6 +375,27 @@ impl FrozenRelativePoseProposal {
             .collect()
     }
 
+    /// Replace Gaussian parameters while retaining the checked open-space law.
+    /// The immutable chart context and defensive support belong to the caller's
+    /// declared model, so this does not infer or change the physical target.
+    pub fn with_component_parameters(
+        &self,
+        parameters: Vec<GaussianComponentParameters>,
+    ) -> Result<Self> {
+        ensure!(
+            !self.periodic,
+            "Parameter replacement currently requires an open proposal"
+        );
+        Self::from_components_open(
+            parameters,
+            self.angular_length,
+            self.box_lengths,
+            self.uniform_weight,
+            &self.shape_sha256,
+            &self.shape_sha256,
+        )
+    }
+
     pub fn from_path(
         path: impl AsRef<Path>,
         box_lengths: Vec3,

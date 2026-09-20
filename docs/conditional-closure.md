@@ -145,6 +145,9 @@ learned GMM can initialize the library API through `state_from_components`.
 General learned-file CLI import is not included: arbitrary rotational charts
 need a fixed-context extension or an explicitly approximate refit. See the
 [worked initialization construction and tests](conditional-initialization.md).
+The separate [reference-atlas transport mode](atlas-transport.md) now implements
+that fixed-context alternative at fixed component count, including CLI model
+loading and covariance updates relative to the original learned widths.
 
 Frames and refresh logs record normalized count probabilities, raw scores,
 covariance penalties, data counts, and realized auxiliary state. Move logs

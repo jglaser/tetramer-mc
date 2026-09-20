@@ -61,6 +61,9 @@ For an evolving, geometry-only bank of pair-contact proposals, see the
 For a variable-size, full-covariance GMM fitted to current pair geometry without
 a frozen atlas or separate bank, see the [normalized conditional closure](docs/conditional-closure.md)
 and [learned initialization options](docs/conditional-initialization.md).
+For a controlled comparison that retains the successful atlas and progressively
+updates means, covariances and weights in its own units, see
+[reference-atlas transport](docs/atlas-transport.md).
 
 ## Output and continuation
 
@@ -131,6 +134,7 @@ legacy trajectories need their center-shift logs to reconstruct wall motion.
 | `rj` | Reversible ordered component births/deaths under a truncated Poisson prior |
 | `contact_memory` | Independent anchored-pair auxiliary systems and evolving Gaussian chart centers |
 | `conditional` | Deterministic full-GMM fits, normalized count law, persistent Gaussian residuals |
+| `atlas_transport` | Fixed learned charts with reversible mean, relative-covariance and weight fluctuations |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 

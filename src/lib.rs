@@ -11,6 +11,7 @@ pub mod simulation;
 pub mod spherical;
 pub mod trajectory;
 
+pub mod atlas_transport;
 pub mod auxiliary;
 pub mod conditional;
 pub mod contact_memory;

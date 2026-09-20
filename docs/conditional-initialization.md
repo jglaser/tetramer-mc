@@ -7,6 +7,14 @@ that proposal requires compatible coordinate charts and parameters inside the
 conditional model's representable range. This note specifies that version and
 the alternatives when charts differ.
 
+An implemented fixed-context alternative is now available as
+[`atlas_transport`](atlas-transport.md). It loads the original model through
+`--model`, retains its actual charts and narrow covariance scales, and applies
+reversible mean/covariance/weight changes in reference-whitened coordinates.
+Its `reference` initialization recovers the imported proposal at the initial
+configuration. This alternative fixes the component count; it does not import
+an arbitrary atlas into the geometry-only variable-count closure below.
+
 ## Initial state and invariant law
 
 Let the current-state contact data be `D(X)`, and write the conditional closure

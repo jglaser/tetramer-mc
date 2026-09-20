@@ -6,6 +6,8 @@ pub mod depletion;
 pub mod docking;
 pub mod geometry;
 pub mod math;
+pub mod normalizer;
+pub mod overlap_weight;
 pub mod proposal;
 pub mod rj;
 pub mod simulation;

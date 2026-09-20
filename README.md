@@ -78,6 +78,10 @@ implicit many-body depletion and compares correlations against independent
 redraw. The [matched docking pilot](docs/involution-docking-pilot.md) measures
 one-way entries and completed contact roundtrips separately. It is not yet an
 option in the all-mobile assembly runner.
+The [independent basin normalizer](docs/basin-normalizers.md) integrates the
+same physical density using positive Poisson importance weights and an
+exhaustive contact-region partition. It provides a separate check on trapped
+trajectories and on the [earlier SMC endpoint coverage](docs/previous-smc-region-audit.md).
 
 ## Output and continuation
 
@@ -152,6 +156,8 @@ legacy trajectories need their center-shift logs to reconstruct wall motion.
 | `atlas_mask` | Exact weighted active subsets with a separately normalized truncated-Poisson count law |
 | `basin_involution` | Fixed-chart transport with an explicit inverse trace and full auxiliary/Haar correction |
 | `docking` | One-body conditional docking, matched local/global schedules, inverse traces and contact diagnostics |
+| `overlap_weight` | Positive absolute depletion weights with deterministic interior volume and Poisson boundary sampling |
+| `normalizer` | Fixed-budget full-density importance estimates of exhaustive contact-region weights |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 

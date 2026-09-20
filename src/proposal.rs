@@ -675,6 +675,41 @@ impl FrozenRelativePoseProposal {
         Ok(result)
     }
 
+    /// A sorted subset without replacement, preserving relative Gaussian weights.
+    /// The mask is an auxiliary state: callers must retain it for both directions.
+    /// An empty subset uses the same defensive uniform cube; the full subset is
+    /// returned unchanged so control runs retain bitwise identical proposal draws.
+    pub fn weighted_subset(&self, labels: &[usize]) -> Result<Self> {
+        ensure!(
+            !self.periodic,
+            "Weighted atlas masks require an open proposal"
+        );
+        ensure!(
+            labels.iter().all(|&i| i < self.components.len())
+                && labels.windows(2).all(|p| p[0] < p[1]),
+            "Atlas mask labels must be sorted, unique and in range"
+        );
+        if labels.is_empty() {
+            return Self::uniform_only_open(self.box_lengths, &self.shape_sha256);
+        }
+        if labels.len() == self.components.len() {
+            return Ok(self.clone());
+        }
+        let mass: f64 = labels.iter().map(|&i| self.components[i].weight).sum();
+        ensure!(mass.is_finite() && mass > 0., "Invalid subset weight mass");
+        let mut result = self.clone();
+        result.components = labels
+            .iter()
+            .map(|&i| {
+                let mut c = self.components[i].clone();
+                c.weight /= mass;
+                c.log_weight = c.weight.ln();
+                c
+            })
+            .collect();
+        Ok(result)
+    }
+
     /// Ordered active components with replacement, each with weight 1/K.
     /// Duplicate labels are distinct auxiliary slots; never sort or merge them.
     pub fn selected_components(&self, labels: &[usize]) -> Result<Self> {

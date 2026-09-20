@@ -64,6 +64,16 @@ and [learned initialization options](docs/conditional-initialization.md).
 For a controlled comparison that retains the successful atlas and progressively
 updates means, covariances and weights in its own units, see
 [reference-atlas transport](docs/atlas-transport.md).
+For reversible selection of smaller active subsets while retaining that atlas,
+see [the mask law and balance argument](docs/atlas-mask-balance.md) and the
+[matched compression pilot](docs/atlas-mask-pilot.md). These masks reduce the
+active proposal, not stored parameters, and do not discover new basins.
+The [contact-evidence roadmap](docs/contact-evidence-roadmap.md) separates
+proposal coverage from physical contact free energies and registry constraints.
+An independently validated [involutive Gaussian-chart map](docs/involutive-basin-transport.md)
+constructs its return transformation from the same operation, including the
+Gaussian auxiliary and translation/Haar Jacobian factors. It is a library
+prototype and is not yet an option in the assembly runner.
 
 ## Output and continuation
 
@@ -135,6 +145,8 @@ legacy trajectories need their center-shift logs to reconstruct wall motion.
 | `contact_memory` | Independent anchored-pair auxiliary systems and evolving Gaussian chart centers |
 | `conditional` | Deterministic full-GMM fits, normalized count law, persistent Gaussian residuals |
 | `atlas_transport` | Fixed learned charts with reversible mean, relative-covariance and weight fluctuations |
+| `atlas_mask` | Exact weighted active subsets with a separately normalized truncated-Poisson count law |
+| `basin_involution` | Fixed-chart transport with an explicit inverse trace and full auxiliary/Haar correction |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 

@@ -12,6 +12,8 @@ pub mod spherical;
 pub mod trajectory;
 
 pub mod atlas_transport;
+pub mod atlas_mask;
+pub mod basin_involution;
 pub mod auxiliary;
 pub mod conditional;
 pub mod contact_memory;

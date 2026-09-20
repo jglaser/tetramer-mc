@@ -8,6 +8,7 @@ pub mod geometry;
 pub mod latent_region;
 pub mod math;
 pub mod normalizer;
+pub mod native_region;
 pub mod overlap_weight;
 pub mod proposal;
 pub mod rj;

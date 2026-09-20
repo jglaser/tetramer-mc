@@ -7,6 +7,7 @@ for key in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
 import argparse
 import copy
 from datetime import datetime, timezone
+import json
 import math
 from pathlib import Path
 import shutil
@@ -81,7 +82,23 @@ def verify_member_geometry(metric, fixed, peak, poses, latent, x, model, proof, 
                 maximum_RMS_squared_minus_chart_radius_squared=float(np.max(actual-radius2)))
 
 
-def prepare(out, campaign_root=None, seed_base=None):
+def select_peak(extremes, arm=None):
+    """Select a recorded maximum without changing its pose or source weight."""
+    if arm is None:
+        selected = next(p for p in extremes['pieces'] if p['name'] == 'remainder')['top_poses'][0]
+        require(selected['draw'] == 151795 and selected['seed'] == 100601010, 'Unexpected legacy selected point')
+        return selected, None
+    require(extremes.get('complete') is True, 'Source atlas audit is incomplete')
+    campaigns = [p for p in extremes['campaigns'] if p['arm'] == arm]
+    require(len(campaigns) == 1, 'Need exactly one matching audited arm')
+    campaign = campaigns[0]; points = campaign['top_poses']
+    require(bool(points) and all(math.isfinite(p['original_log_importance_weight']) for p in points), 'Invalid source maxima')
+    selected = points[0]
+    require(selected['original_log_importance_weight'] == max(p['original_log_importance_weight'] for p in points), 'First source pose is not its recorded maximum')
+    return selected, campaign
+
+
+def prepare(out, campaign_root=None, seed_base=None, source_audit=None, source_arm=None, probe_seed=PROBE_SEED):
     require(not out.exists(), 'Use a fresh output directory')
     if campaign_root is not None:
         campaign_root = Path(campaign_root).resolve()
@@ -89,6 +106,8 @@ def prepare(out, campaign_root=None, seed_base=None):
     if seed_base is not None:
         require(isinstance(seed_base, int) and seed_base >= 0, 'Nonnegative integer seed required')
     production_seeds = PRODUCTION_SEEDS if seed_base is None else tuple(seed_base+100000*i for i in range(len(RADII)))
+    require((source_audit is None) == (source_arm is None), 'Supply source audit and arm together')
+    require(isinstance(probe_seed, int) and probe_seed >= 0, 'Nonnegative probe seed required')
     freeze = read(GUIDES/'freeze.json')
     require(sha(GUIDES/'config.json') == freeze['config_sha256'], 'Changed config')
     require(sha(GUIDES/'protocol.json') == freeze['protocol_sha256'], 'Changed guide protocol')
@@ -102,9 +121,28 @@ def prepare(out, campaign_root=None, seed_base=None):
     require(source['activity'] == config['reservoir_density'] == .035 and source['depletant_radius'] == config['depletant_radius'] == 1.5, 'Changed depletion parameters')
     require(source['capture_center'] == config['capture_center'] and source['capture_radius'] == config['capture_radius'] == 18., 'Changed capture domain')
     shape = Path(config['shape']); require(sha(shape) == source['shape_sha256'], 'Changed shape')
-    extremes = read(EXTREMES)
-    selected = next(p for p in extremes['pieces'] if p['name'] == 'remainder')['top_poses'][0]
-    require(selected['draw'] == 151795 and selected['seed'] == 100601010, 'Unexpected selected point')
+    extrema_path = EXTREMES if source_audit is None else Path(source_audit).resolve()
+    extremes = read(extrema_path)
+    selected, selected_campaign = select_peak(extremes, source_arm)
+    if selected_campaign is not None:
+        root = Path(selected_campaign['root']); source_config = read(root/'provenance/config.json')
+        for key in ('metadata','fixed_poses','capture_center','capture_radius','reservoir_density','depletant_radius'):
+            require(source_config[key] == config[key], 'Selected atlas target differs: '+key)
+        require(sha(root/'provenance/shape.json') == source['shape_sha256'], 'Selected atlas shape differs')
+        samples_path = root/'runs'/selected['population']/'samples.jsonl'
+        manifest_path = samples_path.parent/'manifest.json'
+        require(sha(manifest_path) == selected_campaign['input_sha256'][str(manifest_path)], 'Selected source manifest changed')
+        require(read(manifest_path)['seed'] == selected['seed'], 'Selected source seed changed')
+        require(sha(samples_path) == selected_campaign['input_sha256'][str(samples_path)], 'Selected source rows changed')
+        original = None
+        with samples_path.open() as handle:
+            for line in handle:
+                row = json.loads(line)
+                if row['draw'] == selected['draw']:
+                    original = row
+                    break
+        require(original is not None and original['pose'] == selected['pose'] and original['q'] == selected['q'], 'Selected source pose changed')
+        require(original['log_importance_weight'] == selected['original_log_importance_weight'], 'Selected source weight changed')
     peak = selected['pose']; fixed = source['fixed_neighbor']
     require(fixed in config['fixed_poses'], 'Keep the actual physical neighbor as chart frame')
     ell = read(GUIDES/'model-weighted.json')['angular_length']
@@ -112,7 +150,7 @@ def prepare(out, campaign_root=None, seed_base=None):
     archive = out/'provenance'; archive.mkdir(parents=True)
     sources = {'config.json':GUIDES/'config.json', 'source-region.json':GUIDES/'provenance/source-region.json',
                'guide-protocol.json':GUIDES/'protocol.json', 'angular-length-source.json':GUIDES/'model-weighted.json',
-               'shape.json':shape, 'extremes.json':EXTREMES, 'guide-freeze.json':GUIDES/'freeze.json'}
+               'shape.json':shape, 'extremes.json':extrema_path, 'guide-freeze.json':GUIDES/'freeze.json'}
     for name in ('prepare_peak_neighborhood.py', 'prepare_cayley_rms_cover.py',
                  'prepare_native_confirmation_atlas.py', 'prepare_smc_normalizer_atlas.py',
                  'analyze_native_region_reference.py', 'prepare_intermediate_local_region.py'):
@@ -136,13 +174,15 @@ def prepare(out, campaign_root=None, seed_base=None):
                               samples=SAMPLES, replicates=REPLICATES, seed_base=seed,
                               seeds=[seed+1009*i for i in range(REPLICATES)]))
     protocol = dict(schema='geometry-scaled-peak-reference-v1', created_utc=datetime.now(timezone.utc).isoformat(),
-                    selection='Center selected from historical remainder maximum. Geometry and radii now fixed before fresh probes or physical draws; center selection is not held-out basin discovery.',
+                    selection='Center selected from a historical audited maximum. Geometry and radii now fixed before fresh probes or physical draws; center selection is not held-out basin discovery.',
+                    selection_source=dict(kind='remainder_maximum' if source_arm is None else 'atlas_maximum',
+                                          arm=source_arm,path=str(extrema_path),sha256=sha(extrema_path)),
                     sampling='Uniform latent six-ball with exact physical Jacobian, original masks, fixed unconditional N, two independent clouds averaged linearly; no retry or adaptive stop.',
                     uncertainty='Row and independent-population estimates; observed errors cannot bound unseen tails. The new nested balls overlap and cannot be added to one another or to the old complete partition.',
                     analysis='Full-N radial and old-weighted-radius <=32 versus >32 poststratification. Each campaign is analyzed separately; retain complete remainder support.',
                     executable=str(BINARY), executable_sha256=BINARY_SHA,
                     lambda_ratio=64., cloud_replicates=2, campaigns=campaigns,
-                    probe_count_per_radius=PROBE_COUNT, probe_seeds=[PROBE_SEED+1009*i for i in range(len(RADII))],
+                    probe_count_per_radius=PROBE_COUNT, probe_seeds=[probe_seed+1009*i for i in range(len(RADII))],
                     config_sha256=sha(out/'config.json'), model_sha256=sha(out/'model.json'),
                     selected_pose_sha256=sha(out/'selected-pose.json'), geometry_sha256=sha(out/'geometry.json'),
                     archived_sha256={name:sha(archive/name) for name in sources})
@@ -151,13 +191,12 @@ def prepare(out, campaign_root=None, seed_base=None):
     atom = AtomUnionAudit(read(shape), config['fixed_poses']); reports=[]
     start = time.process_time()
     for index, radius in enumerate(RADII):
-        poses, latent, x, log_j = uniform_draws(model, fixed, radius, PROBE_COUNT, PROBE_SEED+1009*index)
+        poses, latent, x, log_j = uniform_draws(model, fixed, radius, PROBE_COUNT, probe_seed+1009*index)
         checks = check_coordinates(model, fixed, poses, latent, x, log_j)
         checks.update(verify_member_geometry(config['metadata'], fixed, peak, poses, latent, x, model, proof, log_j))
         valid=0; q_valid=0; minimum_q=math.inf; maximum_q=-math.inf
         label = f'{radius:g}'.replace('.', 'p'); path=out/f'probes-r{label}.jsonl'
         with path.open('w') as handle:
-            import json
             for i, pose in enumerate(poses):
                 q=native_q(config['metadata'], pose); gaps=atom.gaps(pose)
                 inside=2<=q<5; capture=np.linalg.norm(np.asarray(pose['position'])-config['capture_center'])<=config['capture_radius']
@@ -177,4 +216,8 @@ if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__); parser.add_argument('--out',type=Path,required=True)
     parser.add_argument('--campaign-root',type=Path,help='Fresh parent directory for the three declared campaign outputs')
     parser.add_argument('--seed-base',type=int,help='First population seed; radii offset by 100000 and populations by 1009')
-    args=parser.parse_args(); prepare(args.out.resolve(), args.campaign_root, args.seed_base)
+    parser.add_argument('--source-audit',type=Path,help='Completed contact-atlas audit containing the selected maximum')
+    parser.add_argument('--source-arm',help='Arm name in the supplied audit, e.g. broad')
+    parser.add_argument('--probe-seed',type=int,default=PROBE_SEED)
+    args=parser.parse_args(); prepare(args.out.resolve(), args.campaign_root, args.seed_base,
+                                     args.source_audit, args.source_arm, args.probe_seed)

@@ -132,6 +132,12 @@ Both reproduce local mass more efficiently, while the broader arm reveals
 another high-weight contact outside the measured neighborhood. Fresh cloud
 and cross-density checks identify a large proposal-density gap; full
 competing-contact weight remains unresolved.
+A [fresh neighborhood measurement](docs/atlas-peak-neighborhood.md) resolves
+finite mass around that atlas maximum. The historical single draw contributed
+32 times the independently measured smallest-neighborhood mean; a disjoint
+radius-two estimate has about 20% uncertainty. Geometry separates this contact
+from the previous one, while their common complement still requires fresh
+coverage before a full competing-weight conclusion.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

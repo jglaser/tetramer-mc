@@ -226,6 +226,81 @@ def audit_campaign(reference, model, old_model, selected_peak):
         scope='One fresh frozen local region only. Its old-chart remainder intersection overlaps the previous remainder estimate and must not be added to it.')
 
 
+def selected_source_record(historical, selection_source=None):
+    """Resolve the frozen center without treating a different arm as equivalent."""
+    if selection_source is None or selection_source['kind'] == 'remainder_maximum':
+        pieces = [p for p in historical['pieces'] if p['name'] == 'remainder']
+        require(len(pieces) == 1 and pieces[0]['top_poses'], 'Need one historical remainder maximum')
+        return pieces[0]['top_poses'][0], None
+    require(selection_source['kind'] == 'atlas_maximum', 'Unsupported peak selection source')
+    require(historical['complete'], 'Contact-atlas selection audit is incomplete')
+    campaigns = [c for c in historical['campaigns'] if c['arm'] == selection_source['arm']]
+    require(len(campaigns) == 1 and campaigns[0]['top_poses'], 'Need one selected contact-atlas arm')
+    campaign = campaigns[0]; poses = campaign['top_poses']
+    require(all(math.isfinite(p['original_log_importance_weight']) for p in poses), 'Nonfinite selection weight')
+    require(poses[0]['original_log_importance_weight'] == max(p['original_log_importance_weight'] for p in poses),
+            'First atlas pose is not the listed importance maximum')
+    return poses[0], campaign
+
+
+def audit_peak_selection(protocol, historical_path, selected, cfg, shape_sha256):
+    """Check the original rows for the newly supported atlas maximum source.
+
+    Legacy protocols retain their archived-remainder selection rule. The atlas
+    route additionally verifies every original row hash and the maximum over
+    the whole selected arm, not just its archived shortlist.
+    """
+    source = protocol.get('selection_source'); historical = read(historical_path)
+    expected, campaign = selected_source_record(historical, source)
+    require(selected == expected, 'Center no longer matches the selected historical maximum')
+    if source is None:
+        return dict(kind='legacy_remainder_maximum', selected_record_matches=True)
+    source_path = Path(source['path']).resolve()
+    require(sha(source_path) == source['sha256'] == sha(historical_path), 'Selected source audit changed')
+    if campaign is None:
+        return dict(kind=source['kind'], selected_record_matches=True, source_hash_checked=True)
+    original = campaign['original_full_window_audit']
+    for key, value in original['physical_signature'].items():
+        require(cfg[key] == value, f'Selection physical target differs: {key}')
+    require(original['shape_sha256'] == shape_sha256, 'Selection shape changed')
+    window = dict(minimum=2., maximum=5., lower_inclusive=True, upper_inclusive=False)
+    require(historical['original_q_window'] == window and original['original_integration_window'] == window,
+            'Selection integration window changed')
+    sample_hashes = original['sample_sha256']; observed_hashes = {}; maximum = -math.inf; found = False; draws = 0
+    seen_seeds = set()
+    for population in campaign['populations']:
+        require(population['seed'] not in seen_seeds, 'Selection population seeds repeat')
+        seen_seeds.add(population['seed'])
+        path = Path(campaign['root'])/'runs'/population['id']/'samples.jsonl'
+        require(str(path) in sample_hashes, 'Selection population absent from original all-row audit')
+        digest = hashlib.sha256(); count = 0
+        for lines, rows in read_batches(path):
+            for line in lines: digest.update(line)
+            for row in rows:
+                require(row['draw'] == count, 'Selection row order changed'); count += 1
+                # The frozen full-window kernel omits the field on rejected
+                # geometry rows; those rows still count in the original N.
+                value = row.get('log_importance_weight')
+                if value is not None:
+                    require(math.isfinite(value), 'Nonfinite original selection weight')
+                    maximum = max(maximum, value)
+                if population['id'] == selected['population'] and row['draw'] == selected['draw']:
+                    require(population['seed'] == selected['seed'], 'Selected source seed changed')
+                    require(row['pose'] == selected['pose'] and row['q'] == selected['q'] and
+                            value == selected['original_log_importance_weight'], 'Selected source row changed')
+                    found = True
+        require(count == population['samples'], 'Selection unconditional sample count changed')
+        require(digest.hexdigest() == sample_hashes[str(path)], 'Selection original rows changed')
+        observed_hashes[str(path)] = digest.hexdigest(); draws += count
+    require(set(observed_hashes) == set(sample_hashes), 'Selection audit omitted source populations')
+    require(found and selected['original_log_importance_weight'] == maximum,
+            'Selected pose is not the original whole-arm importance maximum')
+    return dict(kind=source['kind'], arm=source['arm'], selected_record_matches=True,
+                whole_arm_maximum_checked=True, original_unconditional_draws=draws,
+                maximum_original_log_importance_weight=maximum, sample_sha256=observed_hashes,
+                scope='Historical selection only; no source draw is reused as a fresh local reference')
+
+
 def analyze(references, chart_model, old_chart_model, out, peak_protocol=None):
     out = Path(out).resolve(); require(not out.exists(), 'Use a fresh derived output directory')
     chart_model = Path(chart_model).resolve(); old_chart_model = Path(old_chart_model).resolve()
@@ -243,9 +318,8 @@ def analyze(references, chart_model, old_chart_model, out, peak_protocol=None):
     require(preparation_cfg['capture_radius'] == 18. and preparation_cfg['depletant_radius'] == 1.5 and
             preparation_cfg['reservoir_density'] == .035, 'Physical baseline changed')
     selected = read(selected_path); selected_peak = selected['pose']
-    historical = read(protocol_path.parent/'provenance/extremes.json')
-    require(selected == next(p for p in historical['pieces'] if p['name'] == 'remainder')['top_poses'][0],
-            'Center no longer matches the selected historical remainder maximum')
+    selection_audit = audit_peak_selection(protocol, protocol_path.parent/'provenance/extremes.json',
+                                           selected, preparation_cfg, model['shape_sha256'])
     # The old chart is the already-frozen partition definition, not refitted
     # from the new local samples. Check its parent freeze when available.
     old_freeze_path = old_chart_model.parent/'freeze.json'
@@ -262,6 +336,8 @@ def analyze(references, chart_model, old_chart_model, out, peak_protocol=None):
     sources = {'chart-model.json': chart_model, 'old-chart-model.json': old_chart_model,
                'old-chart-freeze.json': old_freeze_path, 'peak-protocol.json': protocol_path,
                'selected-pose.json': selected_path}
+    if protocol.get('selection_source') is not None:
+        sources['selection-source-audit.json'] = Path(protocol['selection_source']['path']).resolve()
     dependencies = local_dependencies([Path(__file__)])
     input_hashes = {str(path): sha(path) for path in sources.values()}
     campaigns = []; seeds = set()
@@ -290,7 +366,7 @@ def analyze(references, chart_model, old_chart_model, out, peak_protocol=None):
         'Observed errors and ESS do not certify unseen weight, equilibrium mixing, association of the fixed neighbors, or assembly. Hard flags are from the frozen physical kernel.')
     result = dict(complete=True, radial_edges_A=list(RADIAL_EDGES), radial_endpoint_rule='First bin closed at zero; each upper edge closed and other lower edges open',
         old_chart_split=32., input_sha256=input_hashes, archived_sha256={p.name: sha(p) for p in (out/'provenance').iterdir()},
-        campaigns=campaigns, scope=scope)
+        campaigns=campaigns, selection_audit=selection_audit, scope=scope)
     write(out/'analysis.json', result)
     def number(value): return 'unresolved' if value is None else f'{value:.6g}'
     lines = ['# Selected-pose local neighborhoods', '', '| Radius (Å) | Mask | N | Nonzero | log Q | Row / population RSE | Largest weight |',

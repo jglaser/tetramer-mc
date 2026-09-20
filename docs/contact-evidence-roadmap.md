@@ -43,6 +43,57 @@ the specified conditions fail to stabilize the necessary arrangements. Failure
 of a proposal, a short assembly trajectory, or one isolated pair calculation
 does not establish that conclusion. The overall objective remains unfinished.
 
+In parallel, formalize the balance argument in Lean with pinned dependencies
+and a reproducible checked build. On a measurable state space, use a target
+probability measure, a Markov proposal kernel, and a measurable acceptance
+function of the old and proposed states. Symmetry of the accepted probability
+flow should imply detailed balance and invariance of the completed kernel,
+including rejection as a self-transition. The raw proposal need not preserve
+the physical target. Extend the result to normalized auxiliary distributions
+and recovery of the physical marginal. Keep the theorem's mathematical
+assumptions explicit and connect them to the implemented moves; the general
+theorem alone does not verify floating-point geometry or executable code.
+
+## Current evidence update
+
+The independent normalization work has exposed a substantial coverage
+problem in the earlier one-neighbor estimates. Recentered frozen proposals
+give much steadier native and shoulder estimates, but fresh SMC also found
+a compact distant contact that the previous guides almost entirely missed.
+Independent importance sampling assigns substantial weight to a fixed region
+around that contact; its full surrounding mass remains unresolved. The four
+fresh far-region SMC populations span log Q from 14.16 to 27.27 and are
+dominated by one population. The earlier native probabilities below are
+historical estimates, not a settled physical reference. See the
+[proposal and independent-normalizer controls](smc-normalizer-proposals.md)
+and [explicit-far reference assessment](explicit-far-smc-reference-plan.md).
+
+A separate [uniform latent-region integration](latent-region-normalizer.md)
+now estimates log Q=21.195 for the predeclared radius-three ellipsoid, from
+65,536 unconditional draws in four independent populations. Its observed
+relative standard error is 5.6% (6.8% using the four population means).
+This control avoids Gaussian-mixture importance denominators and retains the
+exact translation/Haar Jacobian. It confirms consequential weight inside
+that fixed region; it does not confirm the complete far normalizer or exclude
+important mass outside the region.
+
+The new contact is hard-valid and has appreciable exclusion overlap in
+independent geometry checks. It is not an internal relabeling of the tetramer
+or one of the inspected nearby crystal placements; see the
+[endpoint audit](explicit-far-endpoint-audit.md). However, all 512 inspected
+discovery endpoints clash when a second prescribed native neighbor is added.
+Most native and shoulder snapshots also clash. This
+[unweighted geometric screen](contact-neighborhood-survival.md) motivates a
+cooperative-neighborhood free-energy test; it is not an equilibrium population
+comparison or a bound on the entire continuous contact region.
+
+The [Lean subproject](../formal/README.md) now checks measurable-state
+accept/reject balance, asymmetric Metropolis–Hastings, normalized conditional
+auxiliary marginals, reference-preserving deterministic involutions, and
+invariance under kernel composition. This provides
+a reproducible mathematical foundation while leaving concrete implementation,
+ergodicity, and sampling convergence as separate obligations.
+
 ## What the existing evidence establishes
 
 The [matched atlas pilot](atlas-transport-pilot.md) uses a 28-component,
@@ -60,8 +111,10 @@ calculation offers a useful independent reference:
 | site1-m1 | 0.610, interval [0.433, 0.781] | 0/8 trajectories |
 
 Native-start trajectories in both environments crossed the native boundary in
-both directions, while competing starts remained outside. The SMC reference
-and the start dependence support a sampling obstruction. The SMC intervals
+both directions, while competing starts remained outside. These SMC estimates
+and the start dependence initially motivated the sampling-obstruction test.
+The newer coverage findings above prevent treating them as a settled
+thermodynamic reference. The SMC intervals
 are conditional on explored populations; competing-basin normalizer variation
 and, at site1, domination by one population remain limitations. These values
 are conditional on an 18 Å capture domain and prescribed fixed neighbor,

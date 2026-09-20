@@ -5,6 +5,7 @@
 pub mod depletion;
 pub mod docking;
 pub mod geometry;
+pub mod latent_region;
 pub mod math;
 pub mod normalizer;
 pub mod overlap_weight;

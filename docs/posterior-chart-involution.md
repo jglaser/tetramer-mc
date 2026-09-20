@@ -149,6 +149,43 @@ attempt, or updating retained proposal parameters requires the already
 specified auxiliary-ensemble target and its corresponding reverse map.
 Posterior chart selection alone does not validate online learning.
 
+## Connection to the checked involution theorem
+
+The [Lean involution theorem](../formal/ReversibleSampling/Involution.lean)
+has a direct abstract interpretation for the independent-destination
+construction. In latent coordinates use the reference probability measure
+
+\[
+ d\mu(a,b,z,u)=w_a w_b\phi(z)\phi(u)\,dz\,du
+\]
+
+and target density, relative to that reference,
+
+\[
+ p(a,b,z,u)=\frac{\pi(T_a(z))}{G(T_a(z))}.
+\]
+
+The label swap preserves the symmetric factor `w_a w_b`; the orthogonal
+latent map preserves the joint standard Gaussian law. The extended map is
+therefore an involution preserving this reference measure. Its Metropolis
+ratio is `p(b,a,z',u')/p(a,b,z,u)`, exactly the boxed correction above.
+This avoids confusing preservation of the **reference** measure with
+preservation of the physical target by the raw proposal.
+
+Pushing the extended target onto x gives
+`[pi(x)/G(x)] sum_a w_a q_a(x) = pi(x)`. Hard and capture exclusions belong
+in `pi`; invalid endpoints have zero target density. The chart seam has zero
+physical measure and needs a consistent measurable definition on that null
+set when instantiating the theorem.
+
+Lean checks the general implication from a measurable reference-preserving
+involution and finite measurable target density to completed-kernel balance
+and invariance. The argument identifying this particular Gaussian/chart map
+with those hypotheses is still mathematical documentation, not a checked
+Lean specialization or Rust verification. The implicit Poisson acceptance
+gate additionally requires its own augmented-state balance argument; a noisy
+substitution for the exact target ratio is not licensed by this theorem.
+
 The current proof uses proper rotations and an open capture domain. Reusing
 it with periodic wrapping needs a consistent image convention, inverse map
 and proposal density; an unrestricted map followed by many-to-one wrapping

@@ -82,6 +82,14 @@ The [independent basin normalizer](docs/basin-normalizers.md) integrates the
 same physical density using positive Poisson importance weights and an
 exhaustive contact-region partition. It provides a separate check on trapped
 trajectories and on the [earlier SMC endpoint coverage](docs/previous-smc-region-audit.md).
+The [frozen-guide controls](docs/smc-normalizer-proposals.md) document substantial
+missed contact weight. A [direct regional integrator](docs/latent-region-normalizer.md)
+checks a fixed discovered pose ellipsoid with uniform latent sampling and the
+exact physical Jacobian, independently of Gaussian importance denominators.
+The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
+Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
+marginals. They are mathematical proofs, not verification of this Rust program
+or of sampling convergence.
 
 ## Output and continuation
 
@@ -158,6 +166,7 @@ legacy trajectories need their center-shift logs to reconstruct wall motion.
 | `docking` | One-body conditional docking, matched local/global schedules, inverse traces and contact diagnostics |
 | `overlap_weight` | Positive absolute depletion weights with deterministic interior volume and Poisson boundary sampling |
 | `normalizer` | Fixed-budget full-density importance estimates of exhaustive contact-region weights |
+| `latent_region` | Direct uniform six-ball integration of a frozen pose ellipsoid with its physical Jacobian |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 

@@ -127,3 +127,8 @@ The standalone Rust diagnostic is
 normalizer algorithms still require separate validation; this audit isolates
 the physical shape, coordinate transformation, point exclusion, and current
 overlap-envelope calculation from proposal-density and population effects.
+
+The subsequent [archived count-law audit](archived-smc-count-audit.md) also
+calls the exact old `sample_overlap_count` implementation at three selected
+poses and compares its mean and dispersion with independent volume estimates.
+That additional fixed-pose check does not establish SMC population coverage.

@@ -126,6 +126,12 @@ now measures the new dominant pose's local mass with independent samples.
 Matched regions expose the loss of narrow-contact coverage with broader
 proposals; disjoint shells retain measurements at several spatial scales.
 The complete intermediate integral and assembly verdict remain unresolved.
+A [contact-centered atlas comparison](docs/intermediate-contact-atlas.md)
+transfers a stable local covariance into two complete-support proposals.
+Both reproduce local mass more efficiently, while the broader arm reveals
+another high-weight contact outside the measured neighborhood. Fresh cloud
+and cross-density checks identify a large proposal-density gap; full
+competing-contact weight remains unresolved.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

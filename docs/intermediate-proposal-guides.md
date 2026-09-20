@@ -201,50 +201,41 @@ unvisited weight.
 
 ## Branch and extreme-pose diagnosis
 
-In the mixture, 23,531 weighted-Gaussian draws produced 12,323 valid poses
-but only **7.669%** of the observed estimator sum. The 23,335 geometry draws
-produced 13,307 valid poses and **92.331%** of the sum. Product supplied
-0.000152%, and cube zero. These are estimator-source contributions,
-`αⱼ ∫ I exp[z C] gⱼ/g_full dx`, not physical basin occupancies or masses
-of the Gaussians. Every weight uses the full hybrid density and original
-N; random branch labels are not fixed-quota strata. Detailed branch counts
-and q-band contributions remain in the diagnostic JSON.
+The mixture drew 23,531 weighted-Gaussian and 23,335 geometry-Gaussian
+poses, giving 12,323 and 13,307 valid poses. They supplied **7.669%** and
+**92.331%** of the observed estimator sum; product supplied 0.000152%,
+and cube zero. These are estimator-source contributions,
+`αⱼ ∫ I exp[z C] gⱼ/g_full dx`, not physical basin occupancies or Gaussian
+masses. Full-N branch/q-band tables remain in the diagnostic JSON.
 
-The mixture's two largest contributions, 67.85% and 16.37% of its sum,
-were geometry draws at q = 3.21151 and 2.19110. Their geometry radii were
-3.207 and 3.101, versus weighted radii 10.326 and 17.303. About 99% of the
-full proposal density at both poses comes from geometry. All 16 largest
-geometry-only contributions likewise came from its Gaussian, at radii
-2.924–3.777; product/cube accounts for at most 3.74% of their density.
-Thus the fresh extremes are poorly represented by the weighted component
-but are reachable within the broad geometry Gaussian, without relying
-primarily on fallback proposals. Gaussian radius is not a local integrated
-sampling probability.
+The mixture's two largest contributions came from geometry, at radii
+3.207 and 3.101 versus weighted radii 10.326 and 17.303. About 99% of
+the proposal density there comes from geometry. All 16 geometry-only
+extremes likewise came from its Gaussian, at radii 2.924–3.777.
+Thus these extremes are poorly represented by the weighted component,
+while the broad geometry component reaches them without primarily relying
+on product/cube fallback.
 
-Conversely, the old training maximum is at weighted radius 0.234, where
-the full mixture density is 3.59×10⁸ times the complete reference density.
-Fresh weighted draws reach a maximum log two-cloud Boltzmann mean of
-24.652, above the training maximum's approximately 22.549. These checks
-argue against simple inaccessibility of strong contacts under the weighted
-proposal. They do not determine the mass or visitation rate of a fixed
-neighborhood; the old maximum is an in-sample fitting point.
+The training maximum, conversely, has weighted radius 0.234 and full
+mixture/reference point-density ratio 3.59×10⁸. Fresh weighted draws
+also reach log Boltzmann means above that training maximum. This argues
+against simple inaccessibility of strong contacts, but neither a pointwise
+density nor Gaussian radius measures local integrated probability. The
+training maximum remains an in-sample fitting point.
 
-Paired independent clouds account for **2.858%** of observed mixture
-variance and **15.317%** of geometry variance. Pose variation therefore
-dominates this diagnostic. A weighted fit focused on training extremes
-and a broad Gaussian with moderate distances still leave rare, dominant
-physical weights. This is consistent with narrow regions of large weight
-inside a broad pose distribution, but does not establish their number or
-topology. A prespecified local reference integral in the weighted chart,
-with a complementary guide check, would distinguish a noisy direct-reference
-outlier from unresolved local mass more directly than another fit.
+Paired clouds account for only **2.858%** of observed mixture variance
+and **15.317%** of geometry variance. Pose heterogeneity dominates.
+The global weighted fit does not describe all observed important contacts,
+and moderate geometry radii coexist with rare, dominant physical weights.
+A prespecified local reference integral in the weighted chart, with a
+complementary guide check, would distinguish a noisy reference outlier
+from unresolved local mass more directly than another fit. No such
+integration or additional fitting is performed here.
 
-The read-only audit at
-`runs/ab-intermediate-guided-tail-diagnostic-qualified-20260920/analysis.json`
-recomputes all 131,072 new raw-row densities, q predicates, cloud numerators
-and source moments. It also checks the 16 largest contributions from each
-fresh guide and 16 from training under both full proposal laws. All 48
-poses pass independent AB atomic checks (minimum gap 0.00058237 Å), and
-selected-pose log densities agree to 1.12×10⁻¹³. No samples, fits, replacement
-weights or pooled normalizers are produced. Reproduce it with
-`python tools/diagnose_intermediate_guided_tails.py --out runs/fresh-tail-audit`.
+`tools/diagnose_intermediate_guided_tails.py` independently reproduces the
+new raw-row moments and checks the 16 largest poses from each guide plus
+16 training extremes. All 48 pass AB atomic checks (minimum gap
+0.00058237 Å); selected log densities agree to 1.12×10⁻¹³. Results,
+original cloud values and hashes are archived in
+`runs/ab-intermediate-guided-tail-diagnostic-qualified-20260920/analysis.json`.
+No samples, replacement weights or pooled normalizers are produced.

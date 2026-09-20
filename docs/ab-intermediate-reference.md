@@ -262,9 +262,11 @@ The same reference rows predict only about 10 or 19 hard-valid target
 poses for proposed unchanged-guide budgets of 4×16,384 or 4×32,768 draws.
 This observed geometric importance diagnostic does not bound unseen guide
 mass. Together with the pointwise density checks it gives no reason to
-spend those budgets on the unchanged shoulder guides. The next control
-will instead fit separate intermediate proposals, freeze them, and sample
-fresh populations with the original region, physical numerator and full
-proposal correction. Earlier reference draws remain separate training and
-comparison evidence; they will not be retrospectively pooled with the new
-estimates.
+spend those budgets on the unchanged shoulder guides. Separate intermediate
+proposals were subsequently fitted and tested with fresh populations and
+the original region, physical numerator and full proposal correction.
+Their [completed guide comparison](intermediate-proposal-guides.md) resolves
+the hard volume consistently, but retains substantial pose-weight
+concentration. The earlier reference draws supplied training data and
+remain separate from the new estimates; they are not held-out validation
+and are not retrospectively pooled with production.

@@ -111,8 +111,9 @@ the component estimates and uses stratified uncertainty and paired comparisons;
 the completed control agrees with the guide-only estimate but does not improve
 precision per CPU.
 An [intermediate-band reference](docs/ab-intermediate-reference.md) checks the
-complete original 2≤q<5 region separately; its rare physical contributions
-require new targeted guides before a reliable competing-weight comparison.
+complete original 2≤q<5 region separately. Its [new frozen guides](docs/intermediate-proposal-guides.md)
+produce many valid poses, but their physical weights remain concentrated;
+the competing-weight comparison is not yet converged.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

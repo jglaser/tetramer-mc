@@ -225,8 +225,23 @@ def load_guided(campaign):
         populations.append(dict(id=path.name,seed=job['seed'],samples=n,**local.report(),samples_sha256=digest.hexdigest()))
         aggregate.merge(local);cpu+=audited['cpu_seconds'];hashes[str(path/'samples.jsonl')]=digest.hexdigest()
     require(aggregate.physical['all'].count==master['total_unconditional_draws'],'Guided campaign denominator changed')
+    model_path=root/'provenance/guide-model.json';model=read(model_path)
+    provenance=dict(model_sha256=sha(model_path),proposal_provenance=copy.deepcopy(model.get('proposal_provenance')),
+        reference_used_for_training=None,held_out_reference_validation=None,
+        qualification='Training independence is not certified by distinct production seeds or by this comparison.')
+    embedded=model.get('proposal_provenance') or {}
+    source_path=master.get('model_source_path')
+    protocol_path=Path(source_path).parent/'protocol.json' if source_path else None
+    if protocol_path is not None and protocol_path.is_file() and embedded.get('protocol_sha256'):
+        require(sha(protocol_path)==embedded['protocol_sha256'],'Guide training protocol changed')
+        protocol=read(protocol_path)
+        provenance.update(source_protocol_path=str(protocol_path),source_protocol_sha256=sha(protocol_path),
+            source_campaign=protocol.get('source_campaign'),
+            source_sample_sha256={p['samples_path']:p['samples_sha256'] for p in protocol.get('source_populations',[])},
+            source_unconditional_draws=protocol.get('source_unconditional_draws'))
     return finish_group(root,aggregate,populations,cpu,{k:cfg[k] for k in PHYSICAL_KEYS},shape_sha,
         dict(sample_sha256=hashes,original_integration_window=window,manifest_sha256=sha(root/'manifest.json'),
+            training_provenance=provenance,
             proposal_rule='Original frozen product-cover/Gaussian/cube hybrid density on every draw; separately estimated, no MIS reweighting.'))
 
 
@@ -239,17 +254,23 @@ def compare(reference,globals_,out,guided_roots=()):
     guided={}
     for path in guided_roots:
         name=Path(path).name;require(name not in guided,'Guided campaign labels must be distinct');guided[name]=load_guided(path)
+        training=guided[name]['training_provenance']
+        reference_hashes=set(ref['existing_reference_audit']['sample_sha256'].values())
+        if reference_hashes.intersection(training.get('source_sample_sha256',{}).values()):
+            training['reference_used_for_training']=True
+            training['held_out_reference_validation']=False
+            training['qualification']='The geometric reference supplied guide training data and is not held-out validation. Production populations are independent conditional on the frozen proposal fit.'
     all_seeds=set()
     for item in [ref,*sources.values(),*guided.values()]:
         require(item['physical_signature']==ref['physical_signature'] and item['shape_sha256']==ref['shape_sha256'],'Comparison physical target changed')
-        for p in item['populations']:require(p['seed'] not in all_seeds,'Independent comparisons require distinct seeds');all_seeds.add(p['seed'])
+        for p in item['populations']:require(p['seed'] not in all_seeds,'Fresh production streams require distinct seeds');all_seeds.add(p['seed'])
     out.mkdir(parents=True);archive=out/'provenance';archive.mkdir()
     dependencies=local_dependencies([Path(__file__)])
     for name,path in dependencies.items():(archive/name).write_bytes(path.read_bytes())
     result=dict(complete=True,q_window=dict(minimum=2.,maximum=5.,lower_inclusive=True,upper_inclusive=False),
         bands=BANDS,reference=ref,global_widths=sources,guided_campaigns=guided,physical=ref['physical_signature'],shape_sha256=ref['shape_sha256'],
         source_sha256={name:sha(archive/name) for name in dependencies},
-        scope='Separate independent original-proposal estimates of the same fixed physical2<=q<5 region. Every hard/capture/q-invalid trial remains in full N; widths are never pooled or reweighted. All-zero subbands remain unresolved. Importance ESS and observed errors do not establish unobserved-mass coverage or MCMC mixing.')
+        scope='Separate original-proposal estimates of the same fixed physical 2<=q<5 region. Fresh guided production populations use independent random draws conditional on their frozen proposal fits. A reference used to fit a guide is training data, not held-out validation; training independence is otherwise not certified here. Agreement does not independently validate unseen-region coverage. Every hard/capture/q-invalid trial remains in full N; campaigns and widths are never pooled or reweighted. All-zero subbands remain unresolved. Importance ESS and observed errors do not establish unobserved-mass coverage or MCMC mixing.')
     write(out/'comparison.json',result)
     lines=['# Intermediate contact-region reference comparison','','| Source | Band | N | Nonzero | log Q | Row / population RSE | Largest weight | Paired-cloud variance |',
         '| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |']
@@ -258,7 +279,9 @@ def compare(reference,globals_,out,guided_roots=()):
         for key in KEYS:
             r=item['physical'][key];band='2<=q<5' if key=='all' else f'{BANDS[int(key)][0]}<=q<{BANDS[int(key)][1]}'
             lines.append(f"| {label} | {band} | {r['draws']} | {r['nonzero']} | {number(r['logQ'])} | {number(r['row_RSE'])} / {number(r['independent_population_RSE'])} | {number(r['maximum_fraction'])} | {number(r['paired_cloud_variance_fraction'])} |")
-    lines+=['',result['scope'],'','Hard-volume estimates, all population results, physical checks, hashes and endpoint counts are in comparison.json.','']
+    lines+=['',result['scope'],'']
+    for name,item in guided.items():lines+=[f"{name}: {item['training_provenance']['qualification']}",'']
+    lines+=['Hard-volume estimates, all population results, physical checks, hashes, guide training provenance and endpoint counts are in comparison.json.','']
     (out/'report.md').write_text('\n'.join(lines));return result
 
 

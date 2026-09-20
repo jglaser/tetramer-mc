@@ -1,0 +1,1103 @@
+{
+  "scope": "Compact extraction of independent campaign audits; full trajectories, provenance and replay reports retained in runs/",
+  "campaigns": [
+    {
+      "campaign": "free-tetramer-fixedk-400",
+      "passed": true,
+      "sweeps": 400,
+      "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+      "analysis_file": "runs/free-tetramer-fixedk-400/assessment/analysis.json",
+      "analysis_sha256": "41dc203e6a4a5dce38a1de675a49bb7d96309e2e1029e75e6f43b7cc07981f13",
+      "results": [
+        {
+          "id": "free-r00-frozen",
+          "replicate": 0,
+          "mode": "frozen",
+          "passed": true,
+          "maximum_native_component": 3,
+          "first_native_association_sweep": 2,
+          "motif_formations": 9,
+          "motif_breakages": 0,
+          "cpu_seconds": 33.462923614,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 4.547473508864641e-13,
+            "maximum_rotation_error": 1.9984014443252818e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 2
+          },
+          "final_native_bonds": 9,
+          "final_native_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ],
+          "final_nonspecific_bonds": 9,
+          "final_nonspecific_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r00-transport",
+          "replicate": 0,
+          "mode": "transport",
+          "passed": true,
+          "maximum_native_component": 3,
+          "first_native_association_sweep": 2,
+          "motif_formations": 9,
+          "motif_breakages": 0,
+          "cpu_seconds": 34.957779217,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 4.547473508864641e-13,
+            "maximum_rotation_error": 2.123301534595612e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 3
+          },
+          "final_native_bonds": 9,
+          "final_native_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ],
+          "final_nonspecific_bonds": 9,
+          "final_nonspecific_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r01-frozen",
+          "replicate": 1,
+          "mode": "frozen",
+          "passed": true,
+          "maximum_native_component": 3,
+          "first_native_association_sweep": 7,
+          "motif_formations": 7,
+          "motif_breakages": 0,
+          "cpu_seconds": 29.738521653,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 3.979039320256561e-13,
+            "maximum_rotation_error": 1.5543122344752192e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 9
+          },
+          "final_native_bonds": 7,
+          "final_native_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ],
+          "final_nonspecific_bonds": 11,
+          "final_nonspecific_component_sizes": [
+            5,
+            3,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r01-transport",
+          "replicate": 1,
+          "mode": "transport",
+          "passed": true,
+          "maximum_native_component": 3,
+          "first_native_association_sweep": 7,
+          "motif_formations": 7,
+          "motif_breakages": 0,
+          "cpu_seconds": 31.358893395,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 5.684341886080801e-13,
+            "maximum_rotation_error": 1.887379141862766e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 3
+          },
+          "final_native_bonds": 7,
+          "final_native_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ],
+          "final_nonspecific_bonds": 9,
+          "final_nonspecific_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r02-frozen",
+          "replicate": 2,
+          "mode": "frozen",
+          "passed": true,
+          "maximum_native_component": 4,
+          "first_native_association_sweep": 11,
+          "motif_formations": 10,
+          "motif_breakages": 0,
+          "cpu_seconds": 34.114330978,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 4.547473508864641e-13,
+            "maximum_rotation_error": 1.7763568394002505e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 5
+          },
+          "final_native_bonds": 10,
+          "final_native_component_sizes": [
+            4,
+            3,
+            3,
+            2
+          ],
+          "final_nonspecific_bonds": 10,
+          "final_nonspecific_component_sizes": [
+            4,
+            3,
+            3,
+            2
+          ]
+        },
+        {
+          "id": "free-r02-transport",
+          "replicate": 2,
+          "mode": "transport",
+          "passed": true,
+          "maximum_native_component": 4,
+          "first_native_association_sweep": 11,
+          "motif_formations": 10,
+          "motif_breakages": 0,
+          "cpu_seconds": 32.544037456999995,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 6.252776074688882e-13,
+            "maximum_rotation_error": 1.7763568394002505e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 0
+          },
+          "final_native_bonds": 10,
+          "final_native_component_sizes": [
+            4,
+            3,
+            3,
+            2
+          ],
+          "final_nonspecific_bonds": 11,
+          "final_nonspecific_component_sizes": [
+            4,
+            3,
+            3,
+            2
+          ]
+        },
+        {
+          "id": "free-r03-frozen",
+          "replicate": 3,
+          "mode": "frozen",
+          "passed": true,
+          "maximum_native_component": 4,
+          "first_native_association_sweep": 4,
+          "motif_formations": 8,
+          "motif_breakages": 0,
+          "cpu_seconds": 32.679806907,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 3.410605131648481e-13,
+            "maximum_rotation_error": 1.6930901125533637e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 8
+          },
+          "final_native_bonds": 8,
+          "final_native_component_sizes": [
+            4,
+            3,
+            2,
+            2,
+            1
+          ],
+          "final_nonspecific_bonds": 9,
+          "final_nonspecific_component_sizes": [
+            4,
+            3,
+            2,
+            2,
+            1
+          ]
+        },
+        {
+          "id": "free-r03-transport",
+          "replicate": 3,
+          "mode": "transport",
+          "passed": true,
+          "maximum_native_component": 5,
+          "first_native_association_sweep": 4,
+          "motif_formations": 8,
+          "motif_breakages": 0,
+          "cpu_seconds": 33.937113888,
+          "replay": {
+            "passed": true,
+            "records": 5600,
+            "frames": 41,
+            "maximum_position_error_A": 5.684341886080801e-13,
+            "maximum_rotation_error": 1.6237011735142914e-15
+          },
+          "provenance": {
+            "model_sha256": "2e534634e6e2fe83da969a2867504c293af8e90a0cf3c4330cdc9e38a6770064",
+            "binary_sha256": "9f311aef9b023453ad75448553dc7c029269bee1515358a1d7eee021d2a723c1",
+            "source_bundle_sha256": "0fc0e914c456477105f1e791d53304d1fd7814d95e51cb3a7751d57c9d07cf43"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 13
+          },
+          "final_native_bonds": 8,
+          "final_native_component_sizes": [
+            5,
+            2,
+            2,
+            2,
+            1
+          ],
+          "final_nonspecific_bonds": 9,
+          "final_nonspecific_component_sizes": [
+            5,
+            2,
+            2,
+            2,
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "campaign": "free-tetramer-rj-1000",
+      "passed": true,
+      "sweeps": 1000,
+      "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+      "analysis_file": "runs/free-tetramer-rj-1000/assessment/analysis.json",
+      "analysis_sha256": "0474a536a9cd510cbd9515cddb05bb05e0b21b235f8e0df2a1b248c07d3c375e",
+      "results": [
+        {
+          "id": "free-r00-native-on-rj",
+          "replicate": 0,
+          "mode": "rj",
+          "variant": "native-on",
+          "passed": true,
+          "maximum_native_component": 2,
+          "first_native_association_sweep": 32,
+          "motif_formations": 6,
+          "motif_breakages": 0,
+          "cpu_seconds": 89.92894618,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 5.115907697472721e-13,
+            "maximum_rotation_error": 1.7763568394002505e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_births": 2111,
+              "accepted_births": 1718,
+              "attempted_deaths": 1889,
+              "accepted_deaths": 1713
+            },
+            "post_attempt_k_histogram": {
+              "9": 546,
+              "10": 460,
+              "11": 347,
+              "12": 242,
+              "13": 173,
+              "14": 100,
+              "15": 55,
+              "16": 38,
+              "17": 15,
+              "8": 592,
+              "7": 525,
+              "6": 412,
+              "5": 273,
+              "4": 140,
+              "3": 58,
+              "2": 21,
+              "1": 2,
+              "18": 1
+            },
+            "mean_k_after_attempt": 8.654,
+            "minimum_k": 1,
+            "maximum_k": 18,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "3a217a0d349de676fb1e790a197011d86d1a87e98774caf035aff0e22bd069c0",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 15
+          },
+          "final_native_bonds": 6,
+          "final_native_component_sizes": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "final_nonspecific_bonds": 6,
+          "final_nonspecific_component_sizes": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r00-native-off-rj",
+          "replicate": 0,
+          "mode": "rj",
+          "variant": "native-off",
+          "passed": true,
+          "maximum_native_component": 1,
+          "first_native_association_sweep": null,
+          "motif_formations": 0,
+          "motif_breakages": 0,
+          "cpu_seconds": 42.333352089,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 4.263256414560601e-13,
+            "maximum_rotation_error": 1.6930901125533637e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_births": 2111,
+              "accepted_births": 1718,
+              "attempted_deaths": 1889,
+              "accepted_deaths": 1713
+            },
+            "post_attempt_k_histogram": {
+              "9": 546,
+              "10": 460,
+              "11": 347,
+              "12": 242,
+              "13": 173,
+              "14": 100,
+              "15": 55,
+              "16": 38,
+              "17": 15,
+              "8": 592,
+              "7": 525,
+              "6": 412,
+              "5": 273,
+              "4": 140,
+              "3": 58,
+              "2": 21,
+              "1": 2,
+              "18": 1
+            },
+            "mean_k_after_attempt": 8.654,
+            "minimum_k": 1,
+            "maximum_k": 18,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 38
+          },
+          "final_native_bonds": 0,
+          "final_native_component_sizes": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "final_nonspecific_bonds": 2,
+          "final_nonspecific_component_sizes": [
+            2,
+            2,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "id": "free-r01-native-on-rj",
+          "replicate": 1,
+          "mode": "rj",
+          "variant": "native-on",
+          "passed": true,
+          "maximum_native_component": 2,
+          "first_native_association_sweep": 30,
+          "motif_formations": 6,
+          "motif_breakages": 0,
+          "cpu_seconds": 95.129012743,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 5.115907697472721e-13,
+            "maximum_rotation_error": 1.942890293094024e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_deaths": 1969,
+              "accepted_deaths": 1723,
+              "attempted_births": 2031,
+              "accepted_births": 1723,
+              "boundary_nulls": 1
+            },
+            "post_attempt_k_histogram": {
+              "7": 531,
+              "8": 575,
+              "6": 432,
+              "9": 572,
+              "10": 462,
+              "11": 319,
+              "5": 333,
+              "4": 210,
+              "3": 107,
+              "2": 35,
+              "12": 189,
+              "13": 107,
+              "14": 64,
+              "15": 48,
+              "16": 12,
+              "1": 2,
+              "17": 2
+            },
+            "mean_k_after_attempt": 8.14625,
+            "minimum_k": 1,
+            "maximum_k": 17,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "3a217a0d349de676fb1e790a197011d86d1a87e98774caf035aff0e22bd069c0",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 30
+          },
+          "final_native_bonds": 6,
+          "final_native_component_sizes": [
+            2,
+            2,
+            2,
+            2,
+            2,
+            2
+          ],
+          "final_nonspecific_bonds": 7,
+          "final_nonspecific_component_sizes": [
+            4,
+            2,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r01-native-off-rj",
+          "replicate": 1,
+          "mode": "rj",
+          "variant": "native-off",
+          "passed": true,
+          "maximum_native_component": 1,
+          "first_native_association_sweep": null,
+          "motif_formations": 0,
+          "motif_breakages": 0,
+          "cpu_seconds": 30.660212708,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 3.694822225952521e-13,
+            "maximum_rotation_error": 1.3322676295501878e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_deaths": 1969,
+              "accepted_deaths": 1723,
+              "attempted_births": 2031,
+              "accepted_births": 1723,
+              "boundary_nulls": 1
+            },
+            "post_attempt_k_histogram": {
+              "7": 531,
+              "8": 575,
+              "6": 432,
+              "9": 572,
+              "10": 462,
+              "11": 319,
+              "5": 333,
+              "4": 210,
+              "3": 107,
+              "2": 35,
+              "12": 189,
+              "13": 107,
+              "14": 64,
+              "15": 48,
+              "16": 12,
+              "1": 2,
+              "17": 2
+            },
+            "mean_k_after_attempt": 8.14625,
+            "minimum_k": 1,
+            "maximum_k": 17,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 49
+          },
+          "final_native_bonds": 0,
+          "final_native_component_sizes": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "final_nonspecific_bonds": 0,
+          "final_nonspecific_component_sizes": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "id": "free-r02-native-on-rj",
+          "replicate": 2,
+          "mode": "rj",
+          "variant": "native-on",
+          "passed": true,
+          "maximum_native_component": 3,
+          "first_native_association_sweep": 26,
+          "motif_formations": 7,
+          "motif_breakages": 0,
+          "cpu_seconds": 84.66297545900001,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 4.547473508864641e-13,
+            "maximum_rotation_error": 2.275957200481571e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_deaths": 2040,
+              "accepted_deaths": 1725,
+              "attempted_births": 1960,
+              "accepted_births": 1726,
+              "boundary_nulls": 3
+            },
+            "post_attempt_k_histogram": {
+              "7": 544,
+              "6": 561,
+              "5": 460,
+              "8": 505,
+              "9": 457,
+              "10": 361,
+              "4": 292,
+              "3": 141,
+              "2": 30,
+              "11": 256,
+              "12": 167,
+              "13": 111,
+              "14": 61,
+              "15": 28,
+              "16": 15,
+              "17": 2,
+              "18": 2,
+              "19": 1,
+              "1": 6
+            },
+            "mean_k_after_attempt": 7.69,
+            "minimum_k": 1,
+            "maximum_k": 19,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "3a217a0d349de676fb1e790a197011d86d1a87e98774caf035aff0e22bd069c0",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 8
+          },
+          "final_native_bonds": 7,
+          "final_native_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ],
+          "final_nonspecific_bonds": 10,
+          "final_nonspecific_component_sizes": [
+            5,
+            3,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r02-native-off-rj",
+          "replicate": 2,
+          "mode": "rj",
+          "variant": "native-off",
+          "passed": true,
+          "maximum_native_component": 1,
+          "first_native_association_sweep": null,
+          "motif_formations": 0,
+          "motif_breakages": 0,
+          "cpu_seconds": 31.46768778,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 3.979039320256561e-13,
+            "maximum_rotation_error": 1.942890293094024e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_deaths": 2040,
+              "accepted_deaths": 1725,
+              "attempted_births": 1960,
+              "accepted_births": 1726,
+              "boundary_nulls": 3
+            },
+            "post_attempt_k_histogram": {
+              "7": 544,
+              "6": 561,
+              "5": 460,
+              "8": 505,
+              "9": 457,
+              "10": 361,
+              "4": 292,
+              "3": 141,
+              "2": 30,
+              "11": 256,
+              "12": 167,
+              "13": 111,
+              "14": 61,
+              "15": 28,
+              "16": 15,
+              "17": 2,
+              "18": 2,
+              "19": 1,
+              "1": 6
+            },
+            "mean_k_after_attempt": 7.69,
+            "minimum_k": 1,
+            "maximum_k": 19,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 50
+          },
+          "final_native_bonds": 0,
+          "final_native_component_sizes": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "final_nonspecific_bonds": 2,
+          "final_nonspecific_component_sizes": [
+            3,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        },
+        {
+          "id": "free-r03-native-on-rj",
+          "replicate": 3,
+          "mode": "rj",
+          "variant": "native-on",
+          "passed": true,
+          "maximum_native_component": 3,
+          "first_native_association_sweep": 19,
+          "motif_formations": 6,
+          "motif_breakages": 0,
+          "cpu_seconds": 95.133040316,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 5.115907697472721e-13,
+            "maximum_rotation_error": 2.248201624865942e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_births": 1989,
+              "accepted_births": 1712,
+              "attempted_deaths": 2011,
+              "accepted_deaths": 1709,
+              "boundary_nulls": 3
+            },
+            "post_attempt_k_histogram": {
+              "9": 479,
+              "8": 546,
+              "10": 393,
+              "7": 565,
+              "6": 511,
+              "5": 382,
+              "4": 227,
+              "11": 302,
+              "3": 100,
+              "12": 181,
+              "13": 136,
+              "14": 78,
+              "2": 40,
+              "15": 31,
+              "16": 10,
+              "17": 6,
+              "18": 4,
+              "19": 2,
+              "1": 7
+            },
+            "mean_k_after_attempt": 8.0065,
+            "minimum_k": 1,
+            "maximum_k": 19,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "3a217a0d349de676fb1e790a197011d86d1a87e98774caf035aff0e22bd069c0",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 29
+          },
+          "final_native_bonds": 6,
+          "final_native_component_sizes": [
+            3,
+            2,
+            2,
+            2,
+            2,
+            1
+          ],
+          "final_nonspecific_bonds": 8,
+          "final_nonspecific_component_sizes": [
+            3,
+            3,
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "free-r03-native-off-rj",
+          "replicate": 3,
+          "mode": "rj",
+          "variant": "native-off",
+          "passed": true,
+          "maximum_native_component": 1,
+          "first_native_association_sweep": null,
+          "motif_formations": 0,
+          "motif_breakages": 0,
+          "cpu_seconds": 30.69227736,
+          "replay": {
+            "passed": true,
+            "records": 18000,
+            "frames": 101,
+            "maximum_position_error_A": 5.400124791776761e-13,
+            "maximum_rotation_error": 1.609823385706477e-15
+          },
+          "reversible_jump": {
+            "config": {
+              "attempts_per_sweep": 4,
+              "initial_components": 8,
+              "max_components": 24,
+              "min_components": 1,
+              "poisson_mean": 8.0
+            },
+            "counts": {
+              "attempted_births": 1989,
+              "accepted_births": 1712,
+              "attempted_deaths": 2011,
+              "accepted_deaths": 1709,
+              "boundary_nulls": 3
+            },
+            "post_attempt_k_histogram": {
+              "9": 479,
+              "8": 546,
+              "10": 393,
+              "7": 565,
+              "6": 511,
+              "5": 382,
+              "4": 227,
+              "11": 302,
+              "3": 100,
+              "12": 181,
+              "13": 136,
+              "14": 78,
+              "2": 40,
+              "15": 31,
+              "16": 10,
+              "17": 6,
+              "18": 4,
+              "19": 2,
+              "1": 7
+            },
+            "mean_k_after_attempt": 8.0065,
+            "minimum_k": 1,
+            "maximum_k": 19,
+            "labels_replay_to_every_frame_and_checkpoint": true,
+            "summary_jump_counts_match": true,
+            "jump_records_in_full_audit": 4000
+          },
+          "provenance": {
+            "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+            "binary_sha256": "7ae27dce5d3fb7576cb77ecd709f78b1e285127cd1f861ab1b75edf42eaa0d5e",
+            "source_bundle_sha256": "5f3f455ab4ad551af3ababe9d916ad3f005dce0173f6735f00e549572d6de010"
+          },
+          "observed_environment_returns": {
+            "native": 0,
+            "nonspecific": 29
+          },
+          "final_native_bonds": 0,
+          "final_native_component_sizes": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "final_nonspecific_bonds": 4,
+          "final_nonspecific_component_sizes": [
+            4,
+            2,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1
+          ]
+        }
+      ]
+    }
+  ]
+}

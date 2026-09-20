@@ -6,6 +6,7 @@ pub mod depletion;
 pub mod geometry;
 pub mod math;
 pub mod proposal;
+pub mod rj;
 pub mod simulation;
 pub mod spherical;
 pub mod trajectory;

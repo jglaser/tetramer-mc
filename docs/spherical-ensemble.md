@@ -55,8 +55,10 @@ are not an ergodicity or mixing-time proof.
 
 The implemented first case is a **fixed number of components with fluctuating
 means**. The frozen base covariances, chart anchors and weights stay fixed.
-This is a useful subcase of the general normalized auxiliary construction;
-it is not RJ component birth/death or unlimited accumulation of training data.
+This is a useful subcase of the general normalized auxiliary construction.
+The Rust runner additionally supports [RJ component births/deaths](rj-assembly.md)
+from a finite atlas; the Python prototype retains this fixed-K mode. Neither
+mode accumulates unlimited training data.
 
 For every ordered pair in the current configuration, compute its standardized
 residual in each frozen component chart. Assign the smallest squared residual,

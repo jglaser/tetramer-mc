@@ -54,6 +54,8 @@ For spherical GCA, common center shifts, and optional reversible transport of
 a conditional Gaussian model, see [the spherical ensemble guide](docs/spherical-ensemble.md).
 Use `examples/spherical-seeded.json` or `examples/spherical-oligomers.json`
 with the same Rust command. Both collective kernels are enabled in those examples.
+For initially isolated tetramers and native-on/off reversible-jump campaigns,
+see [the free-assembly guide](docs/rj-assembly.md).
 
 ## Output and continuation
 
@@ -99,7 +101,8 @@ python3 tools/export_viewer.py --run runs/seeded --out runs/seeded/viewer.html
 
 Open the resulting standalone HTML locally. It contains actual atom-sphere
 geometry and retained body poses, with playback, rotation, zoom, and periodic
-focus controls. It needs no server or network. This lightweight viewer is not
+focus controls, a spherical frame selector (sphere center by default), and
+optional native coordination bonds. It needs no server or network. This lightweight viewer is not
 `hoomd-bevy`; the latter remains an optional future adapter. The physical kernel
 and trajectory format do not depend on a rendering engine.
 
@@ -113,6 +116,7 @@ and trajectory format do not depend on a rendering engine.
 | `depletion` | Conservative disjoint endpoint envelope and exact Poisson thinning |
 | `spherical` | Exact atomic wall, implicit many-body GCA, common-translation chord |
 | `auxiliary` | Normalized state-dependent mixture-mean law and latent transport |
+| `rj` | Reversible ordered component births/deaths under a truncated Poisson prior |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 
@@ -141,11 +145,13 @@ coordinates have no minimum-image convention; their ideal bath is not clipped
 at the protein wall.
 
 The default model is frozen. The optional spherical `auxiliary_transport`
-mode changes fixed-K mixture means under a normalized conditional Gaussian
-law, using the transported reverse model. Its latent residuals are part of
-the checkpoint. This preserves the physical marginal; it does not prove
-equilibration. [General reversible-jump/continuing-learning constructions](docs/rjmcmc.md)
-remain separate; component birth/death and accumulating training are not enabled.
+mode changes mixture means under a normalized conditional Gaussian law,
+using the transported reverse model. Optional `reversible_jump` adds component
+births/deaths from a finite atlas, with all labels and latent residuals included
+in checkpoints. This preserves the physical marginal; it does not prove
+equilibration or accumulate training data. See the [implemented RJ law and
+native-prior controls](docs/rj-assembly.md), and the broader [continuing-learning
+constructions](docs/rjmcmc.md).
 
 Mixture fitting remains in the existing Python research workflow. This Rust
 port loads a fixed base Gaussian export; it does not accumulate training data or

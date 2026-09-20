@@ -463,6 +463,31 @@ impl FrozenRelativePoseProposal {
     pub fn component_count(&self) -> usize {
         self.components.len()
     }
+    /// Fixed dictionary probabilities for auxiliary component-label births.
+    pub fn component_weights(&self) -> Vec<f64> {
+        self.components.iter().map(|c| c.weight).collect()
+    }
+
+    /// Ordered active components with replacement, each with weight 1/K.
+    /// Duplicate labels are distinct auxiliary slots; never sort or merge them.
+    pub fn selected_components(&self, labels: &[usize]) -> Result<Self> {
+        ensure!(
+            !labels.is_empty() && labels.iter().all(|&i| i < self.components.len()),
+            "Invalid active component labels"
+        );
+        let mut result = self.clone();
+        let weight = 1. / labels.len() as f64;
+        result.components = labels
+            .iter()
+            .map(|&i| {
+                let mut component = self.components[i].clone();
+                component.weight = weight;
+                component.log_weight = weight.ln();
+                component
+            })
+            .collect();
+        Ok(result)
+    }
     pub fn shape_sha256(&self) -> &str {
         &self.shape_sha256
     }

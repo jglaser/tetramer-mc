@@ -10,7 +10,7 @@ There are three distinct possibilities:
 | Normalized conditional target `π(X) ρ(θ\|X)` | Exactly `π` | A model statistically correlated with the current configuration | The conditional must be normalized, and particle moves need its reverse correction or a joint transport. |
 | Independent continuing pilot teaches production | Preserves production stationarity | Arbitrary continuing pilot-based fitting | Information must flow from the pilot to production, without production feedback. This is not joint RJ learning from the same chain. |
 
-The constructions and algebra below are our proposed application, not claims that the cited papers already implemented a protein sampler. **The normalized conditional construction now has a fixed-K, Gaussian-mean-only implementation in the spherical runner; see [the implementation and validation](spherical-ensemble.md). RJ births/deaths and accumulating adaptation remain unimplemented.**
+The constructions and algebra below are our proposed application, not claims that the cited papers already implemented a protein sampler. **The spherical runner implements conditional Gaussian means and optional RJ births/deaths of ordered atlas-labelled components with continuous latent means. See [the implemented law, validation, and free-assembly campaign](rj-assembly.md). Covariance/weight inference and accumulating adaptation remain unimplemented.**
 
 ## 1. Physical target and the normalization trap
 

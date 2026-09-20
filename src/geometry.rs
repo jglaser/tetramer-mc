@@ -3,7 +3,10 @@
 use crate::math::*;
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::{
+    cmp::Ordering,
+    collections::{BTreeSet, BinaryHeap},
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Atom {
@@ -74,6 +77,49 @@ pub struct SphereTree {
     nodes: Vec<Node>,
     pub bound: f64,
 }
+
+/// Last exit from the union of atomic hard-core intervals on t=s*direction,
+/// s>=0, for a rotated copy against an identical copy at the origin.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RadialContact {
+    pub distance: f64,
+    pub direction: Vec3,
+    /// Canonical proper orientation actually used by the radial query.
+    pub orientation: [f64; 4],
+    pub moving_atom: usize,
+    pub fixed_atom: usize,
+    pub witness_interval: [f64; 2],
+    pub node_pairs_visited: u64,
+    pub atomic_pairs_tested: u64,
+    pub node_pairs_pruned: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RadialNodePair {
+    upper: f64,
+    moving: usize,
+    fixed: usize,
+}
+impl PartialEq for RadialNodePair {
+    fn eq(&self, other: &Self) -> bool {
+        self.upper == other.upper && self.moving == other.moving && self.fixed == other.fixed
+    }
+}
+impl Eq for RadialNodePair {}
+impl PartialOrd for RadialNodePair {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for RadialNodePair {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.upper
+            .total_cmp(&other.upper)
+            .then_with(|| other.moving.cmp(&self.moving))
+            .then_with(|| other.fixed.cmp(&self.fixed))
+    }
+}
+
 impl SphereTree {
     pub fn new(shape: Shape) -> Result<Self> {
         ensure!(!shape.atoms.is_empty(), "empty rigid shape");
@@ -237,6 +283,172 @@ impl SphereTree {
             let (l, r) = nb.children.unwrap();
             self.overlap_nodes(i, l, a, b) || self.overlap_nodes(i, r, a, b)
         }
+    }
+
+    /// Outermost radial contact, found by a best-first two-body BVH traversal.
+    /// Bounding spheres supply conservative exit bounds; only atomic sphere
+    /// intervals set the answer. A ray with no positive-length forbidden
+    /// interval at s>=0 returns None. This does NOT enumerate internal pockets.
+    ///
+    /// Rotation ingress is checked and canonicalized through a unit quaternion.
+    /// Ordinary FP64 guards support pruning; this is not interval arithmetic.
+    pub fn outermost_radial_contact(
+        &self,
+        relative_rotation: Mat3,
+        direction: Vec3,
+    ) -> Result<Option<RadialContact>> {
+        ensure!(
+            relative_rotation.iter().flatten().all(|x| x.is_finite()),
+            "nonfinite radial orientation"
+        );
+        let gram = matmul(transpose(relative_rotation), relative_rotation);
+        ensure!((0..3).all(|i| (0..3).all(|j| (gram[i][j] - if i == j {1.} else {0.}).abs() <= 1e-10)), "radial orientation is not orthogonal");
+        let r = relative_rotation;
+        let determinant = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+            - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+            + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+        ensure!(
+            (determinant - 1.).abs() <= 1e-10,
+            "radial orientation must be proper"
+        );
+        let orientation = quaternion(relative_rotation);
+        let relative_rotation = rotation(orientation);
+        let length = norm(direction);
+        ensure!(
+            direction.iter().all(|x| x.is_finite()) && length.is_finite() && length > 0.,
+            "invalid radial direction"
+        );
+        let direction = direction.map(|x| x / length);
+        let aa = dot(direction, direction);
+        let mut heap = BinaryHeap::new();
+        if let Some(upper) = self.radial_node_upper(0, 0, relative_rotation, direction, aa)? {
+            heap.push(RadialNodePair {
+                upper,
+                moving: 0,
+                fixed: 0,
+            });
+        }
+        let mut best: Option<RadialContact> = None;
+        let mut visited = 0;
+        let mut tested = 0;
+        let mut pruned = 0;
+        while let Some(pair) = heap.pop() {
+            if best.as_ref().is_some_and(|b| pair.upper <= b.distance) {
+                pruned += 1 + heap.len() as u64;
+                break;
+            }
+            visited += 1;
+            let moving = &self.nodes[pair.moving];
+            let fixed = &self.nodes[pair.fixed];
+            if let (Some(i), Some(j)) = (moving.atom, fixed.atom) {
+                tested += 1;
+                let a = &self.shape.atoms[i];
+                let b = &self.shape.atoms[j];
+                let d = sub(matvec(relative_rotation, a.center), b.center);
+                let bb = dot(d, direction);
+                let cc = dot(d, d) - (a.radius + b.radius).powi(2);
+                let discriminant = bb.mul_add(bb, -aa * cc);
+                ensure!(
+                    discriminant.is_finite(),
+                    "unrepresentable atomic radial discriminant"
+                );
+                if discriminant <= 0. {
+                    continue;
+                }
+                let far_numerator = -bb - discriminant.sqrt().copysign(bb);
+                ensure!(
+                    far_numerator.is_finite() && far_numerator != 0.,
+                    "unrepresentable atomic radial root"
+                );
+                let aroot = far_numerator / aa;
+                let broot = cc / far_numerator;
+                let lower = aroot.min(broot);
+                let upper = aroot.max(broot);
+                ensure!(
+                    lower.is_finite() && upper.is_finite(),
+                    "nonfinite atomic radial interval"
+                );
+                if upper > 0.
+                    && best.as_ref().is_none_or(|b| {
+                        upper > b.distance
+                            || (upper == b.distance && (i, j) < (b.moving_atom, b.fixed_atom))
+                    })
+                {
+                    best = Some(RadialContact {
+                        distance: upper,
+                        direction,
+                        orientation,
+                        moving_atom: i,
+                        fixed_atom: j,
+                        witness_interval: [lower, upper],
+                        node_pairs_visited: 0,
+                        atomic_pairs_tested: 0,
+                        node_pairs_pruned: 0,
+                    });
+                }
+                continue;
+            }
+            let children = if moving.children.is_some()
+                && (fixed.children.is_none() || moving.radius >= fixed.radius)
+            {
+                let (a, b) = moving.children.unwrap();
+                [(a, pair.fixed), (b, pair.fixed)]
+            } else {
+                let (a, b) = fixed.children.unwrap();
+                [(pair.moving, a), (pair.moving, b)]
+            };
+            for (i, j) in children {
+                if let Some(upper) =
+                    self.radial_node_upper(i, j, relative_rotation, direction, aa)?
+                {
+                    if best.as_ref().is_none_or(|b| upper > b.distance) {
+                        heap.push(RadialNodePair {
+                            upper,
+                            moving: i,
+                            fixed: j,
+                        });
+                    } else {
+                        pruned += 1;
+                    }
+                } else {
+                    pruned += 1;
+                }
+            }
+        }
+        if let Some(contact) = &mut best {
+            contact.node_pairs_visited = visited;
+            contact.atomic_pairs_tested = tested;
+            contact.node_pairs_pruned = pruned;
+        }
+        Ok(best)
+    }
+
+    fn radial_node_upper(
+        &self,
+        i: usize,
+        j: usize,
+        rotation: Mat3,
+        direction: Vec3,
+        aa: f64,
+    ) -> Result<Option<f64>> {
+        let a = &self.nodes[i];
+        let b = &self.nodes[j];
+        let d = sub(matvec(rotation, a.center), b.center);
+        let center = -dot(d, direction) / aa;
+        let perpendicular = add(d, scale(direction, center));
+        let guard = 2048. * f64::EPSILON * (1. + self.bound + norm(d) + a.radius + b.radius);
+        let radius = a.radius + b.radius + guard;
+        let discriminant = radius * radius - dot(perpendicular, perpendicular);
+        ensure!(
+            center.is_finite() && discriminant.is_finite(),
+            "unrepresentable radial node bound"
+        );
+        if discriminant < 0. {
+            return Ok(None);
+        }
+        let upper = center + (discriminant / aa).sqrt() + guard;
+        ensure!(upper.is_finite(), "unrepresentable radial upper bound");
+        Ok((upper > 0.).then_some(upper))
     }
 }
 

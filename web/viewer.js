@@ -37,13 +37,14 @@
     groups.sort((a, b) => b.length - a.length || a[0] - b[0]);
     return { groups, adjacency };
   }
-  function displayedCenters(frame, box, focus, bodyBound, radius, boundary = "periodic") {
+  function displayedCenters(frame, box, focus, bodyBound, radius, boundary = "periodic", wallCenter = [0, 0, 0], origin = "sphere") {
     const poses = frame.poses;
     if (boundary === "spherical") {
-      // Keep the container as the reference frame, so common shifts and
-      // collective rotations remain visible instead of following the seed.
-      return { centers: poses.map(p => [...p.position]), group: poses.map((_, i) => i),
-        boundaryCenter: [0, 0, 0], label: "Sphere-centered frame · fixed container" };
+      const offset = origin === "coordinate" ? [0, 0, 0] : wallCenter;
+      const coincident = wallCenter.every(x => x === 0);
+      return { centers: poses.map(p => sub(p.position, offset)), group: poses.map((_, i) => i),
+        boundaryCenter: sub(wallCenter, offset),
+        label: (origin === "coordinate" ? "Coordinate origin" : "Sphere center") + " · fixed frame" + (coincident ? "\nBoth origins coincide in this run" : "") };
     }
     if (focus === "box") return { centers: poses.map(p => minimumImage(p.position, box)), group: poses.map((_, i) => i), label: "Primary cell · body centers wrapped" };
     const proximity = nearbyGroups(poses, box, 2 * bodyBound + 2 * radius, frame.contact_edges);
@@ -80,10 +81,30 @@
     });
     return result;
   }
+  function nativeBondSegments(data, frame, centers) {
+    if (!data.native_bonds || !data.native_bonds.available) return [];
+    const members = data.native_bonds.member_positions, segments = [];
+    (frame.native_bonds || []).forEach(bond => {
+      const [i, j] = bond.bodies, [a, b] = bond.members;
+      const start = add(centers[i], rotate(quaternionMatrix(frame.poses[i].orientation), members[a]));
+      const end = add(centers[j], rotate(quaternionMatrix(frame.poses[j].orientation), members[b]));
+      const raw = sub(end, start);
+      const delta = data.boundary === "spherical" ? raw : minimumImage(raw, data.box_lengths);
+      if (norm(sub(raw, delta)) < 1e-8 * Math.max(1, norm(data.box_lengths))) {
+        segments.push({ start, end, periodicSplit: false });
+      } else {
+        // Two halves represent the same torus bond, each attached to its
+        // actually displayed monomer. Never draw a spurious box-spanning line.
+        segments.push({ start, end: add(start, delta.map(x => x / 2)), periodicSplit: true });
+        segments.push({ start: sub(end, delta.map(x => x / 2)), end, periodicSplit: true });
+      }
+    });
+    return segments;
+  }
   // Export pure geometry helpers for Node checks; no DOM or graphics context is
   // required to test periodic images and rigid-body coordinates independently.
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { quaternionMatrix, minimumImage, nearbyGroups, displayedCenters, bodyGeometry, cameraMatrix };
+    module.exports = { quaternionMatrix, minimumImage, nearbyGroups, displayedCenters, bodyGeometry, nativeBondSegments, cameraMatrix };
     return;
   }
 
@@ -157,9 +178,10 @@
   }
   function updateGeometry(reset) {
     const frame = data.frames[state.index];
-    const displayed = displayedCenters(frame, data.box_lengths, $("focus").value, data.body_bound, data.depletant_radius || 0, data.boundary || "periodic");
+    const displayed = displayedCenters(frame, data.box_lengths, $("focus").value, data.body_bound, data.depletant_radius || 0, data.boundary || "periodic", data.spherical_wall_center || [0, 0, 0], $("frame-origin").value);
     state.centers = displayed.centers; state.group = displayed.group;
     state.boundaryCenter = displayed.boundaryCenter || [0, 0, 0];
+    state.bonds = nativeBondSegments(data, frame, displayed.centers);
     state.geometry = bodyGeometry(data, frame, displayed.centers); setColors();
     if (gl) { gl.bindBuffer(gl.ARRAY_BUFFER, geometryBuffer); gl.bufferData(gl.ARRAY_BUFFER, state.geometry, gl.DYNAMIC_DRAW); }
     $("view-caption").textContent = displayed.label + (data.boundary === "spherical" ? "\nHard atom wall · permeable depletant bath" : "\nPeriodic images brought together around the focus");
@@ -167,6 +189,8 @@
     $("frame-label").textContent = `Frame ${state.index + 1}/${data.frames.length} · sweep ${frame.sweep}`;
     $("frame").value = state.index;
     $("status").textContent = `${data.body_count} rigid bodies · actual sphere radii in Å · saved sweep ${frame.sweep}`;
+    if (data.native_bonds && data.native_bonds.available) $("status").textContent += ` · ${(frame.native_bonds || []).length} external native bonds`;
+    $("native-bond-note").hidden = !$("native-bonds").checked || !(data.native_bonds && data.native_bonds.available);
     if (reset) resetCamera();
     state.dirty = true;
   }
@@ -184,7 +208,7 @@
   function resetCamera() {
     state.pan = [0, 0];
     const [, height] = resize();
-    const extent = data.boundary === "spherical" ? data.spherical_wall_radius : $("focus").value === "box" ? norm(data.box_lengths) / 2 + data.body_bound : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
+    const extent = data.boundary === "spherical" ? data.spherical_wall_radius + norm(state.boundaryCenter) : $("focus").value === "box" ? norm(data.box_lengths) / 2 + data.body_bound : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
     state.scale = Math.min(viewport.clientWidth, viewport.clientHeight) * (global.devicePixelRatio || 1) * .43 / Math.max(extent, 1);
     // Match the pixel-ratio cap used by resize.
     if ((global.devicePixelRatio || 1) > 2) state.scale *= 2 / global.devicePixelRatio;
@@ -198,6 +222,16 @@
   }
   function drawOverlay(r, width, height, dpr) {
     const ctx = overlayContext; ctx.clearRect(0, 0, width, height); ctx.lineWidth = dpr;
+    if ($("native-bonds").checked) {
+      (state.bonds || []).forEach(bond => {
+        const a = project(bond.start, r, width, height), b = project(bond.end, r, width, height);
+        ctx.setLineDash(bond.periodicSplit ? [4 * dpr, 2 * dpr] : []);
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+        ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 4 * dpr; ctx.stroke();
+        ctx.strokeStyle = "#61318e"; ctx.lineWidth = 2 * dpr; ctx.stroke();
+      });
+      ctx.setLineDash([]); ctx.lineWidth = dpr;
+    }
     if ($("box").checked && data.boundary === "spherical") {
       const center = state.boundaryCenter, radius = data.spherical_wall_radius;
       ctx.strokeStyle = "rgba(89,116,137,0.42)";
@@ -275,6 +309,8 @@
   $("next").onclick = () => setFrame(state.index + 1);
   $("frame").oninput = event => setFrame(Number(event.target.value));
   $("focus").onchange = () => updateGeometry(true);
+  $("frame-origin").onchange = () => updateGeometry(true);
+  $("native-bonds").onchange = () => { $("native-bond-note").hidden = !$("native-bonds").checked; state.dirty = true; };
   $("color").onchange = () => { setColors(); state.dirty = true; };
   $("centers").onchange = $("box").onchange = () => { state.dirty = true; };
   $("reset").onclick = () => { state.yaw = -.45; state.pitch = .35; resetCamera(); };
@@ -301,11 +337,16 @@
   $("run-name").textContent = data.run_name;
   if (data.boundary === "spherical") {
     $("boundary-label").textContent = "Wall";
-    const option = document.createElement("option"); option.value = "box"; option.textContent = "Sphere center";
-    $("focus").replaceChildren(option);
+    $("focus-control").hidden = true;
+    $("frame-origin-control").hidden = false;
+    $("frame-origin").value = "sphere";
     $("focus").value = "box";
-    $("focus").disabled = true;
   }
+  const nativeAvailable = Boolean(data.native_bonds && data.native_bonds.available);
+  $("native-bonds").disabled = !nativeAvailable;
+  $("native-bonds").checked = false;
+  $("native-bonds-control").hidden = !nativeAvailable;
+  $("native-bonds-control").title = nativeAvailable ? data.native_bonds.criterion : "Native geometry unavailable";
   $("body-count").textContent = `${data.body_count} tetramers`;
   $("sphere-count").textContent = `${(data.body_count * data.atoms.length).toLocaleString()} atom spheres`;
   $("frame-count").textContent = `${data.frames.length} saved frames`;

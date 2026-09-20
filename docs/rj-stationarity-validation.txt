@@ -1,0 +1,29 @@
+   Compiling tetramer-mc v0.1.0 (/home/xvg/tetramer-mc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.15s
+     Running tests/rj_stationarity.rs (target/debug/deps/rj_stationarity-77da3c06e32e791f)
+
+running 2 tests
+Independent Poisson-sum relative flux defect: correct=1.193e-15, stale=0.440121
+test exact_poisson_flux_control_detects_stale_reverse_reconstruction ... ok
+distance: exact=3.0613251 initial=3.0836992 after=3.0798845 paired_z=-0.303 stale_paired_z=-0.046
+distance_squared: exact=10.1972983 initial=10.3474926 after=10.3203002 paired_z=-0.306 stale_paired_z=-0.214
+depletion_contact: exact=0.6749659 initial=0.6635000 after=0.6691667 paired_z=0.805 stale_paired_z=0.787
+midpoint_squared: exact=2.7250591 initial=2.7291566 after=2.7320593 paired_z=0.100 stale_paired_z=0.243
+absolute_R00: exact=0.0000000 initial=-0.0035236 after=-0.0072893 paired_z=-0.364 stale_paired_z=-0.796
+absolute_R00_squared: exact=0.3333333 initial=0.3315505 after=0.3299934 paired_z=-0.318 stale_paired_z=-0.060
+relative_R00: exact=0.0000000 initial=-0.0109999 after=-0.0205530 paired_z=-1.072 stale_paired_z=-1.409
+relative_R00_squared: exact=0.3333333 initial=0.3338871 after=0.3303093 paired_z=-0.872 stale_paired_z=-2.018
+K: exact=2.6500764 initial=2.6418333 after=2.6696667 paired_z=1.371 stale_paired_z=1.549
+K_distance_cross: exact=0.0000000 initial=-0.0292385 after=-0.0020396 paired_z=1.312 stale_paired_z=1.163
+K_contact_cross: exact=0.0000000 initial=0.0210714 after=0.0002678 paired_z=-1.916 stale_paired_z=-1.692
+K_rotation_cross: exact=0.0000000 initial=0.0017300 after=-0.0089779 paired_z=-0.796 stale_paired_z=-0.895
+first_label0: exact=0.4000000 initial=0.3871667 after=0.3945000 paired_z=0.950 stale_paired_z=1.270
+first_eta0: exact=0.0000000 initial=-0.0267575 after=0.0132658 paired_z=2.245 stale_paired_z=1.953
+first_eta0_squared: exact=1.0000000 initial=0.9420343 after=0.9874499 paired_z=1.854 stale_paired_z=1.874
+actual implementation exercised: Exercised { physical_attempts: 18000, hard_valid: 2939, accepted: 1312, jumps: 36000, births: 12943, deaths: 12776, boundary_nulls: 4588, gate_points: 229067, gca_points: 16426, gca_partial: 4975, shifts: 18000, stale_log_correction_max: 7.171859790845485 }
+Correct composition maximum |paired z|=2.245 across 15 predeclared observables from 6000 independent exact starts and 3 rounds; acceptance bound 5.5
+Stale-reverse mean-drift control is underpowered here (not required to fail); maximum |paired z|=2.018. The separate exact Poisson-sum flux control detects this defect without a sampling-power assumption.
+test actual_rj_learned_poisson_gca_shift_preserves_exact_two_sphere_marginal ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.06s
+

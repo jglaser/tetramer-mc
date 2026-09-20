@@ -117,7 +117,16 @@ fn options(root: &Path, name: &str, sweeps: u64, resume: Option<&str>) -> RunOpt
 }
 #[test]
 fn transported_runner_replays_reverse_models_and_resumes_full_joint_state() -> Result<()> {
-    let root = std::env::temp_dir().join(format!("tetramer-aux-runner-{}", std::process::id()));
+    for variable_k in [false, true] {
+        check_runner(variable_k)?;
+    }
+    Ok(())
+}
+fn check_runner(variable_k: bool) -> Result<()> {
+    let root = std::env::temp_dir().join(format!(
+        "tetramer-aux-runner-{}-{variable_k}",
+        std::process::id()
+    ));
     if root.exists() {
         fs::remove_dir_all(&root)?;
     }
@@ -131,10 +140,13 @@ fn transported_runner_replays_reverse_models_and_resumes_full_joint_state() -> R
     model["shape_sha256"] = json!(hash_file(&root.join("shape.json"))?);
     fs::write(root.join("model.json"), model.to_string())?;
     let aux: AuxiliaryConfig = serde_json::from_value(fixture["auxiliary_settings"].clone())?;
-    let config = json!({"shape":"shape.json","box_lengths":[8.,8.,8.],"boundary":{"kind":"spherical","radius":4.},
+    let mut config = json!({"shape":"shape.json","box_lengths":[8.,8.,8.],"boundary":{"kind":"spherical","radius":4.},
         "initial_poses":[{"position":[-1.1,0.,0.],"orientation":[1.,0.,0.,0.]},{"position":[1.1,0.,0.],"orientation":[1.,0.,0.,0.]}],
         "seed":98273,"depletant_radius":0.5,"reservoir_density":0.4,"gca_probability":1.,"center_shift_probability":1.,
         "learned_uniform_weight":0.2,"auxiliary_transport":aux,"endpoint_gate":{"max_cells":63,"max_depth":6,"min_width":0.25}});
+    if variable_k {
+        config["reversible_jump"] = json!({"min_components":1,"max_components":6,"initial_components":2,"poisson_mean":3.,"attempts_per_sweep":4});
+    }
     fs::write(root.join("config.json"), config.to_string())?;
     run(options(&root, "full", 32, None))?;
     run(options(&root, "part", 13, None))?;
@@ -165,8 +177,20 @@ fn transported_runner_replays_reverse_models_and_resumes_full_joint_state() -> R
     for text in fs::read_to_string(root.join("full/moves.jsonl"))?.lines() {
         let row: Value = serde_json::from_str(text)?;
         let sweep = row["sweep"].as_u64().unwrap() as usize;
-        let eta: Vec<[f64; 6]> = serde_json::from_value(frames[sweep]["auxiliary_eta"].clone())?;
+        let selected;
+        let (base, eta) = if variable_k {
+            let state: tetramer_mc::rj::RjState =
+                serde_json::from_value(frames[sweep]["rj_state"].clone())?;
+            selected = base.selected_components(&state.labels)?;
+            (&selected, state.eta)
+        } else {
+            (
+                &base,
+                serde_json::from_value::<Vec<[f64; 6]>>(frames[sweep]["auxiliary_eta"].clone())?,
+            )
+        };
         match row["kind"].as_str().unwrap() {
+            "model_jump" => {}
             "gca" => {
                 let transform = HalfTurn::new(serde_json::from_value(row["axis"].clone())?)?;
                 for i in row["result"]["flipped_indices"].as_array().unwrap() {
@@ -220,7 +244,11 @@ fn transported_runner_replays_reverse_models_and_resumes_full_joint_state() -> R
     }
     // An auxiliary checkpoint cannot silently lose the model state.
     let mut broken = read("part")?;
-    broken["auxiliary_eta"] = Value::Null;
+    broken[if variable_k {
+        "rj_state"
+    } else {
+        "auxiliary_eta"
+    }] = Value::Null;
     fs::write(root.join("part/checkpoint.json"), broken.to_string())?;
     assert!(run(options(&root, "broken", 32, Some("part"))).is_err());
     fs::remove_dir_all(root)?;

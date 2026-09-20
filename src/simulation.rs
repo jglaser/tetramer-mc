@@ -7,6 +7,7 @@ use crate::{
     geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
     proposal::FrozenRelativePoseProposal,
+    rj::{JumpCounts, RjConfig, RjState},
     spherical::{self, Container, HalfTurn},
     trajectory::Trajectory,
 };
@@ -94,6 +95,8 @@ pub struct Config {
     #[serde(default)]
     pub auxiliary_transport: Option<AuxiliaryConfig>,
     #[serde(default)]
+    pub reversible_jump: Option<RjConfig>,
+    #[serde(default)]
     pub seed_labels: Vec<usize>,
     #[serde(default)]
     pub fixed_body_indices: Vec<usize>,
@@ -168,6 +171,13 @@ impl Config {
                 "auxiliary transport currently requires a spherical boundary"
             );
         }
+        if let Some(options) = &self.reversible_jump {
+            options.validate()?;
+            ensure!(
+                self.auxiliary_transport.is_some(),
+                "reversible jump requires auxiliary transport"
+            );
+        }
         self.endpoint_gate.validate()
     }
 }
@@ -194,6 +204,8 @@ pub struct RunCounts {
     pub gca: CollectiveCounts,
     #[serde(default)]
     pub center_shift: CollectiveCounts,
+    #[serde(default)]
+    pub model_jumps: JumpCounts,
     pub selected_body_updates: u64,
     pub selected_body_updates_by_body: Vec<u64>,
 }
@@ -228,6 +240,8 @@ pub struct Checkpoint {
     pub rng_protocol: String,
     #[serde(default)]
     pub auxiliary_eta: Option<Vec<[f64; 6]>>,
+    #[serde(default)]
+    pub rj_state: Option<RjState>,
 }
 
 impl Counts {
@@ -248,6 +262,7 @@ impl RunCounts {
             global: self.global.since(&old.global),
             gca: self.gca.since(&old.gca),
             center_shift: self.center_shift.since(&old.center_shift),
+            model_jumps: self.model_jumps.since(&old.model_jumps),
             selected_body_updates: self.selected_body_updates - old.selected_body_updates,
             selected_body_updates_by_body: self
                 .selected_body_updates_by_body
@@ -478,12 +493,28 @@ pub fn run(options: RunOptions) -> Result<Value> {
         config.auxiliary_transport.is_none() || proposal.is_some(),
         "auxiliary transport requires --method learned and a model"
     );
-    let mut auxiliary_eta = config.auxiliary_transport.as_ref().map(|_| {
-        auxiliary::draw_eta(
-            proposal.as_ref().unwrap(),
-            &mut stream(config.seed, 0, "auxiliary"),
-        )
-    });
+    let mut auxiliary_eta = config
+        .auxiliary_transport
+        .as_ref()
+        .filter(|_| config.reversible_jump.is_none())
+        .map(|_| {
+            auxiliary::draw_eta(
+                proposal.as_ref().unwrap(),
+                &mut stream(config.seed, 0, "auxiliary"),
+            )
+        });
+    let label_weights = proposal.as_ref().map(|p| p.component_weights());
+    let mut rj_state = config
+        .reversible_jump
+        .as_ref()
+        .map(|r| {
+            RjState::new(
+                r,
+                label_weights.as_ref().unwrap(),
+                &mut stream(config.seed, 0, "rj-init"),
+            )
+        })
+        .transpose()?;
     let mut poses = config.initial_poses.clone();
     if wall.is_none() {
         for p in &mut poses {
@@ -528,7 +559,9 @@ pub fn run(options: RunOptions) -> Result<Value> {
             "checkpoint body count mismatch"
         );
         ensure!(
-            checkpoint.auxiliary_eta.is_some() == config.auxiliary_transport.is_some(),
+            checkpoint.auxiliary_eta.is_some()
+                == (config.auxiliary_transport.is_some() && config.reversible_jump.is_none())
+                && checkpoint.rj_state.is_some() == config.reversible_jump.is_some(),
             "checkpoint auxiliary mode mismatch"
         );
         if let Some(eta) = &checkpoint.auxiliary_eta {
@@ -539,6 +572,13 @@ pub fn run(options: RunOptions) -> Result<Value> {
             );
         }
         auxiliary_eta = checkpoint.auxiliary_eta;
+        if let Some(state) = &checkpoint.rj_state {
+            state.validate(
+                config.reversible_jump.as_ref().unwrap(),
+                proposal.as_ref().unwrap().component_count(),
+            )?;
+        }
+        rj_state = checkpoint.rj_state;
         poses = checkpoint.poses;
         counts = checkpoint.counts;
         completed = checkpoint.completed_sweeps;
@@ -588,7 +628,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let executable_sha = hash_file(&std::env::current_exe()?)?;
     save(
         &options.out.join("manifest.json"),
-        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"scope":"Frozen base model; optional history-free normalized conditional mean law; algorithmic MC time, not physical kinetics"}),
+        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"scope":"Frozen dictionary; optional normalized conditional mean law and reversible component births/deaths; no accumulated fitting; algorithmic MC time, not physical kinetics"}),
     )?;
     let mut trajectory = BufWriter::new(File::create(options.out.join("trajectory.jsonl"))?);
     let mut moves = if options.record_moves {
@@ -617,12 +657,13 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     poses: &[Pose],
                     counts: &RunCounts,
                     auxiliary_eta: &Option<Vec<[f64; 6]>>,
+                    rj_state: &Option<RjState>,
                     trajectory: &mut BufWriter<File>,
                     gsd: &mut Option<Trajectory>|
      -> Result<()> {
         jsonline(
             trajectory,
-            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta}),
+            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta,"rj_state":rj_state}),
         )?;
         trajectory.flush()?;
         if let Some(writer) = gsd {
@@ -646,11 +687,26 @@ pub fn run(options: RunOptions) -> Result<Value> {
         &poses,
         &counts,
         &auxiliary_eta,
+        &rj_state,
         &mut trajectory,
         &mut gsd,
     )?;
     for sweep in (completed + 1)..=options.sweeps {
-        if config.auxiliary_transport.is_some() {
+        if let Some(state) = &mut rj_state {
+            state.refresh_eta(&mut stream(config.seed, sweep, "auxiliary"));
+            let r = config.reversible_jump.as_ref().unwrap();
+            let mut jump_rng = stream(config.seed, sweep, "model-jumps");
+            for attempt in 0..r.attempts_per_sweep {
+                let result = state.update(r, label_weights.as_ref().unwrap(), &mut jump_rng)?;
+                counts.model_jumps.record(&result);
+                if let Some(writer) = &mut moves {
+                    jsonline(
+                        writer,
+                        &json!({"sweep":sweep,"kind":"model_jump","attempt":attempt,"result":result,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
+                    )?;
+                }
+            }
+        } else if config.auxiliary_transport.is_some() {
             auxiliary_eta = Some(auxiliary::draw_eta(
                 proposal.as_ref().unwrap(),
                 &mut stream(config.seed, sweep, "auxiliary"),
@@ -694,10 +750,16 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     )
                 })
             } else if let Some(base) = &proposal {
+                let selected = rj_state
+                    .as_ref()
+                    .map(|s| base.selected_components(&s.labels))
+                    .transpose()?;
+                let base = selected.as_ref().unwrap_or(base);
+                let eta = rj_state.as_ref().map(|s| &s.eta).or(auxiliary_eta.as_ref());
                 let forward_model = config
                     .auxiliary_transport
                     .as_ref()
-                    .map(|a| auxiliary::model(base, &poses, auxiliary_eta.as_ref().unwrap(), a))
+                    .map(|a| auxiliary::model(base, &poses, eta.unwrap(), a))
                     .transpose()?;
                 let forward = forward_model.as_ref().unwrap_or(base);
                 let mut result = forward.propose(&mut global, &poses, i)?;
@@ -709,8 +771,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     // reconstruction at Y, never the stale forward model.
                     let mut next = poses.clone();
                     next[i] = new;
-                    let reverse =
-                        auxiliary::model(base, &next, auxiliary_eta.as_ref().unwrap(), a)?;
+                    let reverse = auxiliary::model(base, &next, eta.unwrap(), a)?;
                     let value = reverse.log_density(&poses[i], &poses[result.anchor_index])?;
                     correction =
                         value - result.new_log_density.context("missing forward density")?;
@@ -843,6 +904,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 &poses,
                 &counts,
                 &auxiliary_eta,
+                &rj_state,
                 &mut trajectory,
                 &mut gsd,
             )?;
@@ -861,6 +923,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 master_seed: config.seed,
                 rng_protocol: "sha256-master-sweep-stream-v1".into(),
                 auxiliary_eta: auxiliary_eta.clone(),
+                rj_state: rj_state.clone(),
             };
             save(&options.out.join("checkpoint.json"), &checkpoint)?;
             save(
@@ -869,7 +932,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
             )?;
         }
     }
-    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport});
+    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump});
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
 }

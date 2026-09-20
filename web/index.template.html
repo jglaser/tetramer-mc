@@ -14,12 +14,13 @@
   </header>
   <section class="controls" aria-label="Trajectory and display controls">
     <div class="playback"><button id="previous" title="Previous frame" aria-label="Previous frame">◀</button><button id="play">Play</button><button id="next" title="Next frame" aria-label="Next frame">▶</button><input id="frame" type="range" min="0" max="0" value="0" aria-label="Saved frame"><span id="frame-label"></span><label>Speed <select id="speed"><option value="1">1 fps</option><option value="4" selected>4 fps</option><option value="10">10 fps</option></select></label></div>
-    <div class="display"><label>Focus <select id="focus"><option value="assembly">Largest nearby group</option><option value="seed">Initial seed</option><option value="box">Whole box</option></select></label><label>Color <select id="color"><option value="seed">Initial seed / other</option><option value="body">Individual body</option></select></label><label class="check"><input id="centers" type="checkbox"> Centers</label><label class="check"><input id="box" type="checkbox" checked> <span id="boundary-label">Box</span></label><button id="reset">Reset view</button></div>
+    <div class="display"><label id="focus-control">Focus <select id="focus"><option value="assembly">Largest nearby group</option><option value="seed">Initial seed</option><option value="box">Whole box</option></select></label><label id="frame-origin-control" hidden>Frame <select id="frame-origin"><option value="sphere" selected>Sphere center</option><option value="coordinate">Coordinate origin</option></select></label><label>Color <select id="color"><option value="seed">Initial seed / other</option><option value="body">Individual body</option></select></label><label class="check"><input id="centers" type="checkbox"> Centers</label><label class="check" id="native-bonds-control" hidden><input id="native-bonds" type="checkbox" disabled> Native bonds</label><label class="check"><input id="box" type="checkbox" checked> <span id="boundary-label">Box</span></label><button id="reset">Reset view</button></div>
   </section>
   <section id="viewport" aria-label="Interactive three-dimensional sphere geometry">
     <canvas id="scene"></canvas><canvas id="overlay"></canvas>
     <div id="legend"><span><i class="seed"></i>Initially seeded</span><span><i class="other"></i>Other bodies</span></div>
     <div id="view-caption"></div><div id="error" role="alert" hidden></div>
+    <div id="native-bond-note" hidden><span class="bond-key"></span> External native monomer bonds · geometry overlay</div>
     <div class="gesture-help">Drag to rotate · Shift-drag to pan · Scroll to zoom · ← → step · Space play</div>
   </section>
   <footer><span id="status">Loading saved geometry…</span><span>Colors and nearby groups do not classify crystallinity.</span></footer>

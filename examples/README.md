@@ -37,3 +37,12 @@ hashes and fragment labels. These are new preparations, not equilibrium maps
 from periodic to spherical boundaries. Both examples enable GCA and common
 center shifts after every ordinary learned/local sweep. The default mixture
 is frozen; add `"auxiliary_transport": {}` for the normalized Gaussian-mean law.
+
+`spherical-free.json` and `spherical-free-transport.json` start with twelve
+independently oriented, separated tetramers. Every pair of exclusion bounding
+spheres is disjoint. Metadata records the preparation seed, pose hash, and
+separation certificate. The starts are prepared quenches, not equilibrium
+fluid samples. The second config enables auxiliary transport; both enable GCA
+and center shifts. Add `"reversible_jump": {}` to the transport config for
+variable proposal-component counts. The [campaign guide](../docs/rj-assembly.md)
+explains a matched test with and without explicit inter-tetramer native charts.

@@ -8,9 +8,10 @@ use std::f64::consts::PI;
 use tetramer_mc::{
     basin_involution::{BasinPair, FixedBasinInvolution},
     depletion::{self, GateOptions},
+    docking::{DockingMethod, DockingProposal},
     geometry::{Atom, Environment, Placed, Shape, SphereTree},
     math::*,
-    proposal::GaussianComponentParameters,
+    proposal::{FrozenRelativePoseProposal, GaussianComponentParameters},
 };
 
 const CORE: f64 = 1.;
@@ -19,8 +20,8 @@ const CAPTURE: f64 = 4.;
 const Z: f64 = 0.4;
 const N: usize = 6000;
 
-fn map(correlation: f64) -> Result<FixedBasinInvolution> {
-    let parameters = (0..2)
+fn parameters() -> Vec<GaussianComponentParameters> {
+    (0..2)
         .map(|j| {
             let scales = if j == 0 {
                 [0.6, 1.2, 0.9, 0.6, 0.8, 0.7]
@@ -48,11 +49,14 @@ fn map(correlation: f64) -> Result<FixedBasinInvolution> {
                 weight: 0.5,
             }
         })
-        .collect();
+        .collect()
+}
+
+fn map(correlation: f64) -> Result<FixedBasinInvolution> {
     // Equivalent to independently uniform source and target chart labels;
     // stored as unordered pairs so direction symmetry is structural.
     FixedBasinInvolution::new(
-        parameters,
+        parameters(),
         1.,
         correlation,
         vec![
@@ -73,6 +77,133 @@ fn map(correlation: f64) -> Result<FixedBasinInvolution> {
             },
         ],
     )
+}
+
+fn posterior_update(
+    proposal: &DockingProposal,
+    env: &Environment,
+    pose: &mut Pose,
+    z: f64,
+    rng: &mut StdRng,
+    work: &mut Work,
+) -> Result<()> {
+    let fixed: Vec<_> = env
+        .fixed
+        .iter()
+        .map(|p| Pose {
+            position: p.position,
+            orientation: quaternion(p.rotation),
+        })
+        .collect();
+    let (candidate, info) = proposal.propose(rng, *pose, &fixed)?;
+    let Some(candidate) = candidate else {
+        return Ok(());
+    };
+    if norm(candidate.position) > CAPTURE || !env.hard_valid(candidate) {
+        return Ok(());
+    }
+    work.valid += 1;
+    let gate = depletion::sample(
+        rng,
+        env,
+        *pose,
+        candidate,
+        4. * z,
+        z,
+        GateOptions {
+            max_cells: 1,
+            max_depth: 0,
+            min_width: 0.,
+        },
+    )?;
+    work.points += gate.raw_points;
+    work.gained += gate.gained;
+    work.lost += gate.lost;
+    let correction = info["log_reverse_forward"].as_f64().unwrap();
+    if rng.random::<f64>().max(f64::MIN_POSITIVE).ln() < (correction + gate.log_weight).min(0.) {
+        work.accepted += 1;
+        work.nonself += usize::from(candidate != *pose);
+        *pose = candidate;
+    }
+    Ok(())
+}
+
+#[test]
+fn posterior_transport_with_poisson_gate_preserves_independent_physical_references() -> Result<()> {
+    let shape = tree()?;
+    let sha = "0000000000000000000000000000000000000000000000000000000000000000";
+    let model = FrozenRelativePoseProposal::from_components_open(
+        parameters(),
+        1.,
+        [2. * CAPTURE; 3],
+        0.2,
+        sha,
+        sha,
+    )?;
+    for (case, centers, z) in [
+        ("AO", vec![[0.; 3]], Z),
+        ("many-body", vec![[-1.5, 0., 0.], [1.5, 0., 0.]], 0.12),
+    ] {
+        let env = Environment {
+            tree: &shape,
+            fixed: centers.iter().copied().map(fixed).collect(),
+            labels: (0..centers.len()).map(|i| (i, [0; 3])).collect(),
+            rd: RD,
+        };
+        for (index, c) in [0., 0.9].into_iter().enumerate() {
+            let proposal = DockingProposal::new(
+                model.clone(),
+                DockingMethod::PosteriorInvolution,
+                c,
+                [0.; 3],
+            )?;
+            let mut starts = StdRng::seed_from_u64(106502);
+            let mut change = [Moments::default(); 8];
+            let mut after = [Moments::default(); 8];
+            let mut work = Work::default();
+            let values = |pose: Pose| {
+                let mut a = observables(pose);
+                if centers.len() > 1 {
+                    let distances: Vec<_> = centers
+                        .iter()
+                        .map(|&p| norm(sub(pose.position, p)))
+                        .collect();
+                    a[2] = f64::from(distances.iter().all(|&d| d < 2. * (CORE + RD)));
+                    a[6] = distances.iter().copied().fold(f64::INFINITY, f64::min);
+                }
+                a
+            };
+            for replicate in 0..N {
+                let mut pose = if centers.len() == 1 {
+                    exact_ao_start(&mut starts)
+                } else {
+                    exact_union_start(&mut starts, &centers, z)
+                };
+                let before = values(pose);
+                let mut rng =
+                    StdRng::seed_from_u64(934503 + index as u64 * 100000 + replicate as u64);
+                for _ in 0..3 {
+                    posterior_update(&proposal, &env, &mut pose, z, &mut rng, &mut work)?;
+                }
+                for (j, (a, b)) in values(pose).into_iter().zip(before).enumerate() {
+                    change[j].add(a - b);
+                    after[j].add(a);
+                }
+            }
+            let maximum = change.iter().map(|m| m.z(0.).abs()).fold(0., f64::max);
+            assert!(maximum < 5.5, "posterior {case} c={c}: paired z={maximum}");
+            if centers.len() == 1 {
+                for (m, e) in after.into_iter().zip(reference()) {
+                    assert!(m.z(e).abs() < 5.5);
+                }
+            }
+            assert!(
+                work.accepted > 300 && work.nonself > 200 && work.gained > 100 && work.lost > 100
+            );
+            eprintln!("Posterior {case} c={c}: max paired z={maximum:.3}; {work:?}");
+        }
+    }
+    Ok(())
 }
 
 fn normal<const D: usize>(rng: &mut StdRng) -> [f64; D] {

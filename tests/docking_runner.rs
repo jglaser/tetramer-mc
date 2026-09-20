@@ -282,7 +282,31 @@ fn replay(
                         assert_eq!(current, new, "diagonal c=1 is bit-exact identity");
                         correction = 0.;
                     } else {
-                        correction = step.log_correction;
+                        correction = if method == DockingMethod::PosteriorInvolution {
+                            let old_g = model.relative_log_density(
+                                relative.position,
+                                rotation(relative.orientation),
+                            )?;
+                            let new_g = model.relative_log_density(
+                                step.pose.position,
+                                rotation(step.pose.orientation),
+                            )?;
+                            let log_source = weights[trace.source].ln() + source - old_g;
+                            let log_reverse_source = weights[trace.target].ln() + target - new_g;
+                            let labels = log_reverse_source + weights[trace.source].ln()
+                                - log_source
+                                - weights[trace.target].ln();
+                            near(info["source_log_probability"].as_f64().unwrap(), log_source);
+                            near(
+                                info["inverse_source_log_probability"].as_f64().unwrap(),
+                                log_reverse_source,
+                            );
+                            near(info["label_log_reverse_forward"].as_f64().unwrap(), labels);
+                            near(step.log_correction + labels, old_g - new_g);
+                            old_g - new_g
+                        } else {
+                            step.log_correction
+                        };
                         near_pose(
                             new,
                             Pose {
@@ -362,7 +386,7 @@ fn replay(
     assert!(anchors.iter().all(|&n| n > 20));
     assert!(uniform > 10 && rejected > 10 && nonzero_gates > 10);
     assert!(counts[0].accepted_pose_changes > 20 && counts[1].accepted_pose_changes > 2);
-    if method == DockingMethod::Involution {
+    if method != DockingMethod::Mixture {
         assert!(mapped > 80);
         if c == 1. {
             assert!(identities > 30);
@@ -390,6 +414,9 @@ fn conditional_dumbbell_runner_replays_all_factors_and_restarts_exactly() -> Res
         ("c0", DockingMethod::Involution, 0.),
         ("c05", DockingMethod::Involution, 0.5),
         ("c1", DockingMethod::Involution, 1.),
+        ("posterior-c0", DockingMethod::PosteriorInvolution, 0.),
+        ("posterior-c09", DockingMethod::PosteriorInvolution, 0.9),
+        ("posterior-c1", DockingMethod::PosteriorInvolution, 1.),
     ] {
         docking::run(options(&root, name, method, c, 192, None))?;
         let part = format!("{name}-part");

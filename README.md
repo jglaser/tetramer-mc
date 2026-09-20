@@ -78,6 +78,10 @@ implicit many-body depletion and compares correlations against independent
 redraw. The [matched docking pilot](docs/involution-docking-pilot.md) measures
 one-way entries and completed contact roundtrips separately. It is not yet an
 option in the all-mobile assembly runner.
+The [posterior-source variant](docs/posterior-chart-involution.md) now selects
+its source chart using the current pose and cancels the corresponding label
+factor against the map correction. Its zero-correlation arm supplies the
+matched independent-redraw control with a separate uniform branch.
 The [independent basin normalizer](docs/basin-normalizers.md) integrates the
 same physical density using positive Poisson importance weights and an
 exhaustive contact-region partition. It provides a separate check on trapped

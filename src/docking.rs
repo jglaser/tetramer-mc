@@ -2,7 +2,7 @@
 //! This conditional docking experiment uses the full immutable learned atlas.
 //! Registry labels never enter proposal construction or physical acceptance.
 use crate::{
-    basin_involution::{BasinPair, FixedBasinInvolution},
+    basin_involution::{BasinPair, BasinTrace, FixedBasinInvolution},
     depletion::{self, GateOptions},
     geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
@@ -10,7 +10,7 @@ use crate::{
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
 };
 use anyhow::{Context, Result, ensure};
-use rand::{RngExt, SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, distr::Open01, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -99,6 +99,9 @@ impl DockingConfig {
 pub enum DockingMethod {
     Mixture,
     Involution,
+    /// Posterior source chart, independent weight-distributed destination.
+    /// At correlation zero this is the branch-separated independent redraw.
+    PosteriorInvolution,
 }
 
 #[derive(Clone, Debug)]
@@ -138,11 +141,12 @@ pub struct DockingCheckpoint {
     pub counts: [DockingCounts; 2],
 }
 
-/// Static chart-pair selection and full-mixture control share physical support.
+/// Frozen atlas controls with a separately labeled uniform branch for transport.
 pub struct DockingProposal {
     model: FrozenRelativePoseProposal,
     map: FixedBasinInvolution,
     components: Vec<FrozenRelativePoseProposal>,
+    log_component_weights: Vec<f64>,
     method: DockingMethod,
     correlation: f64,
     center: Vec3,
@@ -196,6 +200,7 @@ impl DockingProposal {
             model,
             map,
             components,
+            log_component_weights: weights.iter().map(|w| w.ln()).collect(),
             method,
             correlation,
             center: capture_center,
@@ -240,7 +245,40 @@ impl DockingProposal {
             position: matvec(transpose(ar), sub(old.position, anchor.position)),
             orientation: quaternion(matmul(transpose(ar), rotation(old.orientation))),
         };
-        let trace = self.map.draw_trace(rng);
+        let posterior = self.method == DockingMethod::PosteriorInvolution;
+        let source_logs = if posterior {
+            self.components
+                .iter()
+                .map(|component| {
+                    component
+                        .relative_log_density(relative.position, rotation(relative.orientation))
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        let trace = if posterior {
+            let probabilities: Vec<_> = source_logs
+                .iter()
+                .zip(&self.log_component_weights)
+                .map(|(q, w)| q + w)
+                .collect();
+            let Some(source) = draw_log_category(rng, &probabilities)? else {
+                return Ok((
+                    None,
+                    json!({"branch":"involution","anchor_index":j,
+                    "source_law":"posterior","null_reason":"No finite Gaussian source density"}),
+                ));
+            };
+            BasinTrace {
+                source,
+                target: draw_log_category(rng, &self.log_component_weights)?
+                    .context("No destination component")?,
+                noise: std::array::from_fn(|_| StandardNormal.sample(rng)),
+            }
+        } else {
+            self.map.draw_trace(rng)
+        };
         let result = self.map.apply(relative, &trace);
         let step = match result {
             Ok(step) => step,
@@ -272,12 +310,64 @@ impl DockingProposal {
         let full_new = self
             .model
             .relative_log_density(step.pose.position, rotation(step.pose.orientation))?;
+        let mut label_correction = None;
+        let mut source_probability = None;
+        let mut inverse_source_probability = None;
+        let mut expanded_correction = None;
+        let correction = if posterior {
+            // The selected-source responsibility and the independent destination
+            // law cancel the component-specific Gaussian/Jacobian correction.
+            // G excludes the separate uniform branch. The spectator anchor is
+            // retained as a state-independent move label in both directions.
+            ensure!(
+                full_old.is_finite() && full_new.is_finite(),
+                "Nonfinite posterior mixture density"
+            );
+            let forward_source = self.log_component_weights[trace.source] + source - full_old;
+            let reverse_source = self.log_component_weights[trace.target] + target - full_new;
+            let labels = reverse_source + self.log_component_weights[trace.source]
+                - forward_source
+                - self.log_component_weights[trace.target];
+            source_probability = Some(forward_source);
+            inverse_source_probability = Some(reverse_source);
+            label_correction = Some(labels);
+            expanded_correction = Some(step.log_correction + labels);
+            full_old - full_new
+        } else {
+            step.log_correction
+        };
         let info = json!({"branch":"involution","anchor_index":j,"trace":trace,"step":step,"identity":identity,
+            "source_law":if posterior {"posterior"} else {"static_pair"},
             "selected_source_log_density":source,"selected_target_log_density":target,
             "full_old_gaussian_log_density":full_old,"full_new_gaussian_log_density":full_new,
-            "log_reverse_forward":if identity {0.} else {step.log_correction}});
+            "source_log_probability":source_probability,"inverse_source_log_probability":inverse_source_probability,
+            "label_log_reverse_forward":label_correction,"expanded_log_reverse_forward":expanded_correction,
+            "log_reverse_forward":if identity {0.} else {correction}});
         Ok((Some(proposed), info))
     }
+}
+
+/// Gumbel-max avoids exponentiating tiny component responsibilities or silently
+/// imposing a responsibility cutoff. The finite RNG still has finite precision.
+fn draw_log_category(rng: &mut StdRng, log_weights: &[f64]) -> Result<Option<usize>> {
+    let mut best = f64::NEG_INFINITY;
+    let mut index = None;
+    for (i, &weight) in log_weights.iter().enumerate() {
+        ensure!(
+            weight.is_finite() || weight == f64::NEG_INFINITY,
+            "Invalid log category weight"
+        );
+        if weight == f64::NEG_INFINITY {
+            continue;
+        }
+        let u: f64 = Open01.sample(rng);
+        let score = weight - (-u.ln()).ln();
+        if score > best {
+            best = score;
+            index = Some(i);
+        }
+    }
+    Ok(index)
 }
 
 fn stream(seed: u64, cycle: u64, attempt: usize, kind: &str) -> StdRng {

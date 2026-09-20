@@ -6,8 +6,9 @@ unrelated source chart. With an appropriate destination law, the complete
 nonphysical acceptance correction becomes **the full Gaussian-mixture density
 ratio**, for every fixed latent correlation. This construction is reversible
 with respect to the fitted mixture; the physical MH/depletion correction
-still remains necessary. This note specifies a design, not an implemented
-Rust kernel or a performance result.
+still remains necessary. The conditional Rust docking runner now implements
+this law as `--method posterior-involution`. Validation is summarized below;
+it does not establish a protein contact-mixing speedup.
 
 ## Extended target and cancellation
 
@@ -195,11 +196,21 @@ retry or source-label substitution.
 
 ## Existing implementations and minimum validation
 
-The current Rust `src/docking.rs` constructs static pair weights `w_a w_b`
-and calls `FixedBasinInvolution::draw_trace`; it does not condition its source
-on the old pose. Its correction is the selected component ratio and is valid
-for that existing law. Replacing the source law requires replacing that
-correction, even though the geometric map itself can be reused.
+The original `--method involution` in `src/docking.rs` retains static pair
+weights `w_a w_b`, `FixedBasinInvolution::draw_trace`, and its selected-component
+correction. The new `--method posterior-involution` uses source log weights
+`log w_a + log q_a(x)` and independent destination weights `w_b`. A Gumbel-max
+draw avoids exponentiating very small responsibilities or applying a component
+cutoff. Ordinary finite random-number and floating-point precision remain
+implementation limits.
+
+Both methods reuse the same deterministic map and inverse trace. The new
+method **replaces** the old correction by `log G(x)-log G(y)`. Logs retain the
+old map factor, forward and reverse source responsibilities, label correction,
+and independently expanded result for auditing. The uniform branch is
+separate and has unit proposal ratio; chart responsibilities never include
+that branch. At correlation one, an identical source and destination gives
+the exact unchanged input pose and zero correction.
 
 The earlier Python prototype already implements the deterministic `c=1`
 version with posterior source labels and a weight-reversible destination graph:
@@ -214,15 +225,43 @@ version with posterior source labels and a weight-reversible destination graph:
 
 That Python implementation keeps additional corrections when mapping between
 different radial families. The simple orthogonal Gaussian proof above does
-not transfer unchanged to unequal Student-t families. The proposed noisy
-Gaussian extension for `c<1` is not present in the current Rust docking code.
+not transfer unchanged to unequal Student-t families. The noisy Gaussian
+extension for `c<1` is now implemented by the new Rust method; the older
+Python result is not used as evidence of its correctness.
 
-Before interpreting performance, an implementation should check the expanded
-trace versus simplified correction for multiple covariances and proper
-chart rotations; the `c=0` branch-matched redraw law; invariance when the
-target is exactly `G`; and physical sphere-reference distributions under
-depletion. A target-`G` check should have unit acceptance for the unbounded
-Gaussian transport branch in exact arithmetic. Separate coverage and contact
-exchange tests remain necessary. Eliminating wrong-source penalties cannot
-supply contact entropy absent from the fitted proposal or guarantee physical
-acceptance of an unfavorable destination.
+Release validation now includes:
+
+- `tests/posterior_docking.rs`: unequal mixture weights, coupled anisotropic
+  covariances, nontrivial chart/spectator rotations, posterior-source
+  frequencies, and the independent destination/normal-latent law at c=0.
+  Independent exact draws from G remain distributed as G after the Gaussian
+  branch at c=−0.6, 0, 0.9 and 1. The largest paired observable discrepancy is
+  2.12 observed standard errors; the expanded/simplified correction agrees
+  within 1.8×10⁻¹⁴. Target-G acceptance factors are one to numerical precision.
+- `tests/involution_depletion.rs`: 6,000 independent exact physical starts
+  per arm, three updates each, c=0 and c=0.9. One-neighbor sphere results use
+  the analytic depletion lens law; the two-neighbor reference samples the
+  full exclusion union, including triple overlap. The largest paired change
+  is 2.12 observed standard errors. This checks the actual new proposal
+  together with the existing conditional Poisson gate, including its uniform
+  branch; it is not a comparison to fitted Gaussian weights.
+- `tests/docking_runner.rs`: actual asymmetric-dumbbell runs with two fixed
+  neighbors replay the source/label/map/depletion factors and reproduce
+  uninterrupted trajectories exactly after restart, for c=0, 0.9 and 1.
+
+```bash
+cargo test --locked --release --test posterior_docking \
+  --test docking_runner --test involution_depletion
+```
+
+For a matched performance comparison, use `--method posterior-involution`
+in both arms and change only `--correlation 0` versus `--correlation 0.9`.
+Keep the complete frozen atlas, local proposals, branch probabilities,
+physical target and starts identical. This c=0 arm is an independent
+Gaussian redraw with the same separate uniform kernel; the existing
+`--method mixture` is a distinct control at nonzero uniform probability.
+
+Separate coverage and contact-exchange tests remain necessary. Eliminating
+wrong-source penalties cannot supply missing contact volume, guarantee
+physical acceptance of an unfavorable destination, or make unequal physical
+occupancies yield equal transition rates.

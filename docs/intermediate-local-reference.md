@@ -206,3 +206,8 @@ reference effort to its outside, including the large-radius contacts already
 seen by the broad guide. The full q≥5 remainder and assembly thermodynamics
 also remain unresolved. Increasing cloud counts alone would not address the
 dominant remaining pose-coverage problem.
+
+The subsequent [complete radial allocation](intermediate-complete-partition.md)
+measures the outer shells and explicitly covers the remaining intermediate
+space. It finds further reproducible high-weight poses, but the total
+depletion-weighted estimate remains concentrated and unconverged.

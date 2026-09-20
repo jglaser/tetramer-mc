@@ -117,6 +117,10 @@ the competing-weight comparison is not yet converged.
 [Independent local references](docs/intermediate-local-reference.md) now
 reproduce the weighted guide's fixed-neighborhood masses and explain its
 training outlier. The remaining intermediate complement is still unresolved.
+A [complete radial reference allocation](docs/intermediate-complete-partition.md)
+now covers that complement and finds additional high-weight poses. Its hard
+volume is consistent across proposals, while one draw still dominates its
+physical estimate.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

@@ -31,7 +31,7 @@ ROOT=Path(__file__).resolve().parents[1]
 WINDOW=dict(minimum=2.,maximum=5.,lower_inclusive=True,upper_inclusive=False)
 DEFAULT_CHART=ROOT/'runs/ab-intermediate-guide-preparation-20260920/model-weighted.json'
 DEFAULT_GUIDES=tuple(ROOT/f'runs/ab-intermediate-{kind}-4x16384-l64-20260920' for kind in ('mixture','geometry'))
-KEYS=('full','ball','complement','shell0','shell1','shell2','shell3')
+KEYS=('full','ball','complement','inner_half','outer_half','shell0','shell1','shell2','shell3')
 
 
 def partition(radius,limit):
@@ -39,7 +39,7 @@ def partition(radius,limit):
     require(math.isfinite(limit) and limit>0 and radius>=0,'Invalid chart radius')
     if radius>limit:return ('full','complement')
     shell=next(i for i in range(4) if radius<=limit*(i+1)/4)
-    return ('full','ball',f'shell{shell}')
+    return ('full','ball',f'shell{shell}','inner_half' if radius<=limit/2 else 'outer_half')
 
 
 class PartitionMoments:
@@ -130,7 +130,7 @@ def load_reference(root,model):
     validate_region(region,model,cfg,shape_hash)
     radius=region['mahalanobis_radius'];logv=shell_log_volume(region)
     aggregate=PartitionMoments(radius);populations=[];hashes={};cpu=0.;errors=dict(radius=0.,jacobian=0.,original_q=0.)
-    supported=('ball','shell0','shell1','shell2','shell3')
+    supported=('ball','inner_half','outer_half','shell0','shell1','shell2','shell3')
     for job in master['jobs']:
         path=Path(job['directory']);run=read(path/'manifest.json');summary=read(path/'summary.json')
         require(summary['complete'] and summary['manifest']==run,'Incomplete or inconsistent reference manifest')
@@ -233,7 +233,10 @@ def compare(reference,chart_model,guided_roots,out):
         'Each source keeps its original proposal density, paired clouds and full unconditional N; no source training rows or campaign estimates are pooled. '
         'The uniform reference cannot estimate the complement or the full intermediate region. Hard flags are from the archived kernel; this audit reconstructs poses, metrics, densities and weights, not atom overlaps. '
         'All-zero supported regions are unresolved, not physical zeros or upper bounds. Observed errors do not certify unseen mass or equilibrium mixing.')
-    result=dict(complete=True,q_window=WINDOW,radius=radius,shells=[dict(minimum=radius*i/4,maximum=radius*(i+1)/4,lower_inclusive=i==0,upper_inclusive=True) for i in range(4)],
+    result=dict(complete=True,q_window=WINDOW,radius=radius,
+        halves=dict(inner_half=dict(minimum=0.,maximum=radius/2,lower_inclusive=True,upper_inclusive=True),
+                    outer_half=dict(minimum=radius/2,maximum=radius,lower_inclusive=False,upper_inclusive=True)),
+        shells=[dict(minimum=radius*i/4,maximum=radius*(i+1)/4,lower_inclusive=i==0,upper_inclusive=True) for i in range(4)],
         chart_model_sha256=sha(chart_model),reference=ref,guided_campaigns=guides,physical=ref['physical_signature'],shape_sha256=ref['shape_sha256'],
         source_sha256={name:sha(out/'provenance'/name) for name in dependencies},scope=scope)
     write(out/'comparison.json',result)
@@ -247,7 +250,8 @@ def compare(reference,chart_model,guided_roots,out):
             if key.startswith('shell'):
                 i=int(key[-1]);label=f"{'[' if i==0 else '('}{radius*i/4:g},{radius*(i+1)/4:g}]"
             lines.append(f"| {name} | {label} | {row['draws']} | {row['nonzero']} | {number(row['logQ'])} | {number(row['row_RSE'])} / {number(row['independent_population_RSE'])} | {number(row['maximum_fraction'])} | {number(row['paired_cloud_variance_fraction'])} |")
-    lines+=['',scope,'','Hard masses, population results, source hashes and reconstruction errors are in comparison.json.','']
+    lines+=['',f'inner_half means 0<=r<={radius/2:g}; outer_half means {radius/2:g}<r<={radius:g}. Their variances are computed from original per-row weights, including covariance between their constituent quarter-radius bins.',
+        '',scope,'','Hard masses, population results, source hashes and reconstruction errors are in comparison.json.','']
     (out/'report.md').write_text('\n'.join(lines));return result
 
 

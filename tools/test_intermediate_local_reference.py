@@ -14,12 +14,13 @@ from compare_intermediate_local_reference import (KEYS,PartitionMoments,finish,p
 class LocalReferenceControls(unittest.TestCase):
     def test_closed_ball_and_shell_boundaries_are_an_exact_partition(self):
         for radius,shell in [(0.,0),(1.,0),(2.,1),(3.,2),(4.,3)]:
-            self.assertEqual(partition(radius,4.),('full','ball',f'shell{shell}'))
+            self.assertEqual(partition(radius,4.),('full','ball',f'shell{shell}',
+                                                 'inner_half' if radius<=2 else 'outer_half'))
         for i,boundary in enumerate((1.,2.,3.)):
-            self.assertEqual(partition(math.nextafter(boundary,math.inf),4.)[-1],f'shell{i+1}')
+            self.assertEqual(partition(math.nextafter(boundary,math.inf),4.)[2],f'shell{i+1}')
         self.assertEqual(partition(math.nextafter(4.,math.inf),4.),('full','complement'))
         self.assertEqual(partition(math.inf,4.),('full','complement'))
-        self.assertEqual(partition(.25,1.),('full','ball','shell0'))
+        self.assertEqual(partition(.25,1.),('full','ball','shell0','inner_half'))
         with self.assertRaises(ValueError):partition(math.nan,4.)
 
     def test_original_full_n_partition_moments_match_direct_linear_weights(self):
@@ -45,6 +46,12 @@ class LocalReferenceControls(unittest.TestCase):
             mass=lambda key:math.exp(result[kind][key]['logQ'])
             self.assertAlmostEqual(mass('full'),mass('ball')+mass('complement'))
             self.assertAlmostEqual(mass('ball'),sum(mass(f'shell{i}') for i in range(4)))
+            self.assertAlmostEqual(mass('ball'),mass('inner_half')+mass('outer_half'))
+        # Shared-row shell sums carry covariance. The half estimator above is
+        # checked against direct row variance, not independent-shell variances.
+        inner=np.where([r is not None and r<=2 for r in radii],pair.mean(axis=1),0.)
+        outer=np.where([r is not None and 2<r<=4 for r in radii],pair.mean(axis=1),0.)
+        self.assertLess(float(np.cov(inner,outer,ddof=1)[0,1]),0.)
 
     def test_reference_report_does_not_turn_unsupported_complement_into_zero(self):
         aggregate=PartitionMoments(4.);pops=[];supported=('ball','shell0','shell1','shell2','shell3')

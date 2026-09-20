@@ -39,6 +39,7 @@ for axioms in axiom_lists:
 files = ["lean-toolchain", "lakefile.toml", "lake-manifest.json",
          "ReversibleSampling.lean", "ReversibleSampling/Balance.lean",
          "ReversibleSampling/MetropolisHastings.lean", "ReversibleSampling/Involution.lean",
+         "ReversibleSampling/ImportanceSampling.lean",
          "Audit.lean", "check.py"]
 record = {
     "checked_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -50,7 +51,10 @@ record = {
     "source_sha256": {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in files},
     "scope": "General measurable-state accept/reject balance; finite-density MH and "
              "measure-preserving deterministic-involution specializations; conditional "
-             "auxiliary marginal and hybrid invariance. Not a proof of Rust code, "
+             "auxiliary marginal and hybrid invariance; nonnegative importance-weight "
+             "expectation, unbiased auxiliary-weight marginal, and randomized importance "
+             "expectation identities. Not a proof "
+             "of concrete geometric proposal densities, Rust code, "
              "numerical arithmetic, ergodicity, or mixing.",
 }
 (root / "validation.json").write_text(json.dumps(record, indent=2) + "\n")

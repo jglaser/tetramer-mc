@@ -1,10 +1,12 @@
-# Measurable-state balance proofs
+# Measurable-state balance and importance-weight proofs
 
 This subproject proves that an acceptance rule with symmetric accepted flow,
 completed by rejection at the current state, preserves its target. It also
 constructs that symmetry for the usual Metropolis–Hastings rule, including
 asymmetric proposals. The raw proposal is **not** required to preserve the
-target. All results use general measurable spaces, not a finite-state model.
+target. It also proves exact nonnegative importance-weight expectation and
+conditional auxiliary-weight marginal identities. All results use general
+measurable spaces, not a finite-state model.
 
 ## Proven statements
 
@@ -78,6 +80,61 @@ result applies on an augmented state space, but proving that our particular
 Gaussian-coordinate, chart, or Poisson-cloud map is measurable, involutive,
 and reference-measure-preserving remains separate work. It does not silently
 absorb omitted Jacobian or auxiliary-law factors into the acceptance rule.
+
+`ReversibleSampling/ImportanceSampling.lean` proves
+
+\[
+ \int \frac{f(x)}{g(x)}\,(\mu.withDensity\ g)(dx)
+ =\int f(x)\,\mu(dx)
+\]
+
+for measurable `f,g : X → ℝ≥0∞`, assuming that, for `μ`-almost every `x`,
+`f(x) ≠ 0` implies `g(x) ≠ 0` and `g(x) ≠ ∞`.
+`importance_sampling_lintegral` needs neither s-finiteness nor normalization.
+Zero target values and zero proposal values outside target support are allowed.
+`normalized_importance_sampling` additionally assumes `∫g dμ = 1` and proves
+that `μ.withDensity g` is a probability law with that exact expectation.
+The equality is in the extended nonnegative reals; a finite target integral is
+needed for a finite first moment. No finite variance or sampling convergence
+follows. Applying this result to a geometric proposal still requires proving
+its actual density, normalization, support, and any coordinate/Jacobian factors.
+
+`unbiased_auxiliary_weight_marginal` assumes an s-finite base measure `μ`, a
+normalized measurable auxiliary kernel `η`, and a jointly measurable
+nonnegative weight `w(x,u)` satisfying `∫w(x,u) η(x,du) = f(x)` for `μ`-almost
+every `x`. It proves
+
+\[
+ \bigl[(\mu(dx)\,\eta(x,du))\,w(x,u)\bigr].fst
+ =\mu.withDensity\ f.
+\]
+
+This is the marginal identity for an unbiased nonnegative auxiliary weight.
+Correct conditional mean is an explicit premise, not a proved property of a
+particular Poisson or geometric estimator. Preserving this joint law remains
+an obligation for any proposed transition, covered abstractly by the balance
+results above. Strict positivity of the weight is unnecessary for this
+marginal identity; nonnegativity is built into its type.
+
+`randomized_importance_sampling` combines conditional averaging and importance
+weighting: with the same normalized `g` and support condition, and
+`E_η[w(x,U)] = f(x)` almost everywhere, it proves
+
+\[
+ \int \frac{w(x,u)}{g(x)}\,
+       (\mu.withDensity\ g)(dx)\,\eta(x,du)
+ =\int f(x)\,\mu(dx).
+\]
+
+For the intended positive Poisson estimator, take `w(x,u)=h(x) W̄(x,u)`
+and `f(x)=h(x) exp[z C(x)]` after separately establishing the conditional
+mean `E[W̄|x]=exp[z C(x)]`. For the nested cover mixture, the proposal is the
+full marginal density `g(x)=Σ_i α_i 1_(C_i)(x)/V_i`; this complete sum belongs
+in the denominator. These substitutions connect the two abstract steps.
+The concrete Poisson conditional-mean formula, geometric cover volumes,
+mixture normalization, support, and floating-point implementation are still
+outside this Lean proof. The theorem proves an expectation identity and
+does not imply convergence or accurate estimates from a finite sample.
 
 Additional results establish:
 

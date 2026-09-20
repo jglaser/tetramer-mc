@@ -1,3 +1,4 @@
 import ReversibleSampling.Balance
 import ReversibleSampling.MetropolisHastings
 import ReversibleSampling.Involution
+import ReversibleSampling.ImportanceSampling

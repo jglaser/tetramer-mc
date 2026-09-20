@@ -17,3 +17,7 @@ import ReversibleSampling
 #print axioms ReversibleSampling.conditional_auxiliary_marginal
 #print axioms ReversibleSampling.conditional_auxiliary_update_preserves_marginal
 #print axioms ReversibleSampling.invariant_hybrid
+#print axioms ReversibleSampling.importance_sampling_lintegral
+#print axioms ReversibleSampling.normalized_importance_sampling
+#print axioms ReversibleSampling.unbiased_auxiliary_weight_marginal
+#print axioms ReversibleSampling.randomized_importance_sampling

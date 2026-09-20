@@ -114,6 +114,9 @@ An [intermediate-band reference](docs/ab-intermediate-reference.md) checks the
 complete original 2≤q<5 region separately. Its [new frozen guides](docs/intermediate-proposal-guides.md)
 produce many valid poses, but their physical weights remain concentrated;
 the competing-weight comparison is not yet converged.
+[Independent local references](docs/intermediate-local-reference.md) now
+reproduce the weighted guide's fixed-neighborhood masses and explain its
+training outlier. The remaining intermediate complement is still unresolved.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

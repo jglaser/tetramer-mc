@@ -4,7 +4,8 @@ The new guides target the original interval **2 ≤ q < 5**, with both AB
 neighbors, capture radius 18 Å, depletant radius 1.5 Å, and activity
 0.035 Å⁻³. They address a demonstrated mismatch between the earlier
 shoulder guides and the intermediate contacts. Fitting and geometry probes
-produce proposals; fresh independent physical integration is still required.
+produce proposals; their physical validation and remaining limitations are
+reported below and in the [independent local controls](intermediate-local-reference.md).
 
 ## Why the existing shoulder guides were unsuitable
 
@@ -227,10 +228,12 @@ Paired clouds account for only **2.858%** of observed mixture variance
 and **15.317%** of geometry variance. Pose heterogeneity dominates.
 The global weighted fit does not describe all observed important contacts,
 and moderate geometry radii coexist with rare, dominant physical weights.
-A prespecified local reference integral in the weighted chart, with a
-complementary guide check, would distinguish a noisy reference outlier
-from unresolved local mass more directly than another fit. No such
-integration or additional fitting is performed here.
+The subsequent [fixed local references](intermediate-local-reference.md)
+measure radius-one and radius-four neighborhoods in this chart and agree
+with original-density mixture restrictions. The training outlier's large
+realized contribution does not represent their integrated mass. Remaining
+dominant guide contributions lie outside radius four; neither that
+complement nor the complete intermediate region is converged.
 
 `tools/diagnose_intermediate_guided_tails.py` independently reproduces the
 new raw-row moments and checks the 16 largest poses from each guide plus

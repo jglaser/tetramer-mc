@@ -5,33 +5,86 @@ import os
 for key in ("OPENBLAS_NUM_THREADS","OMP_NUM_THREADS","MKL_NUM_THREADS"):
     os.environ[key]="1"
 import argparse
+import math
 import json
 from pathlib import Path
 import numpy as np
 from scipy.special import logsumexp
 from prepare_smc_normalizer_atlas import Density,relative_poses,read,write,sha
 from analyze_basin_normalizers import moments,paired_noise
+from analyze_native_region_reference import native_q
+
+
+def shell_log_volume(region):
+    outer=region['mahalanobis_radius'];inner=region.get('minimum_mahalanobis_radius',0.)
+    assert math.isfinite(outer) and math.isfinite(inner) and 0<=inner<outer
+    result=3*np.log(np.pi)+6*np.log(outer)-np.log(6)
+    if inner:
+        result+=math.log(-math.expm1(6*math.log1p((inner-outer)/outer)))
+    return result
 
 def analyze(root):
     manifest=read(root/"manifest.json");region=read(root/"provenance/region.json")
-    all_logs=[];all_hard=[];all_pairs=[];populations=[];cpu=0.;backmap=0.;density_error=0.
+    for name,digest in manifest['archive_sha256'].items():
+        assert sha(root/'provenance'/name)==digest, f'Changed archived input: {name}'
+    assert sha(root/'provenance/region.json')==manifest['region_sha256']
+    all_logs=[];all_hard=[];all_pairs=[];populations=[];cpu=0.;backmap=0.;density_error=0.;audited_poses=0
     chart=Density(region["gaussian_chart"])
-    log_volume=3*np.log(np.pi)+6*np.log(region["mahalanobis_radius"])-np.log(6)
+    log_volume=shell_log_volume(region)
+    inner=region.get('minimum_mahalanobis_radius',0.)
+    qmax=region.get('maximum_original_q',math.inf)
+    assert math.isfinite(region['minimum_original_q']) and 0<=region['minimum_original_q']<=qmax
+    assert 'maximum_original_q' not in region or math.isfinite(qmax)
+    config=read(root/'provenance/config.json')
+    fixed=region.get('physical_fixed_neighbors',[region['fixed_neighbor']])
+    assert fixed==config['fixed_poses'] and region['fixed_neighbor'] in fixed
+    assert region['physical_metric']==config['metadata']
+    assert region['capture_center']==config['capture_center'] and region['capture_radius']==config['capture_radius']
+    assert region['activity']==config['reservoir_density'] and region['depletant_radius']==config['depletant_radius']
     for job in manifest["jobs"]:
         directory=Path(job["directory"]);summary=read(directory/"summary.json")
         assert summary["complete"] and summary["samples"]==job["samples"]
         assert summary["manifest"]["region_sha256"]==manifest["region_sha256"]
         assert summary["manifest"]["executable_sha256"]==manifest["archive_sha256"]["latent-region-normalizer"]
+        assert summary['manifest']['config_sha256']==sha(root/'provenance/config.json')
+        assert summary['manifest']['shape_sha256']==region['shape_sha256']==sha(root/'provenance/shape.json')
+        assert summary['manifest']['seed']==job['seed']
+        assert summary['manifest']['samples']==job['samples']
+        assert summary['manifest']['activity']==region['activity']
+        assert summary['manifest']['lambda_ratio']==manifest['lambda_ratio']
+        expected_lambda=region['activity']*manifest['lambda_ratio'] if region['activity']>0 else 1.
+        assert summary['manifest']['lambda']==expected_lambda
+        assert summary['manifest']['cloud_replicates']==manifest['cloud_replicates']==2
+        for name,field in [('input-config.json','config_sha256'),('region.json','region_sha256'),
+                           ('shape.json','shape_sha256'),('source-bundle.json','source_bundle_sha256')]:
+            assert sha(directory/'provenance'/name)==summary['manifest'][field]
+        extended=summary['manifest']['schema']=='uniform-latent-region-normalizer-v2'
+        sample_hash=sha(directory/'samples.jsonl')
+        if extended:
+            assert sample_hash==summary['samples_sha256']
+            assert summary['manifest']['physical_fixed_neighbors']==fixed
+            assert summary['manifest']['chart_anchor']==region['fixed_neighbor']
+            assert summary['manifest']['minimum_latent_radius']==inner
+            assert summary['manifest']['maximum_original_q']==region.get('maximum_original_q')
+            assert abs(summary['manifest']['log_latent_shell_volume']-log_volume)<1e-10
         rows=[json.loads(line) for line in (directory/"samples.jsonl").open()]
         assert len(rows)==job["samples"] and [r["draw"] for r in rows]==list(range(job["samples"]))
         logs=[];hard_logs=[];pairs=[]
         for r in rows:
             valid=r["hard_valid"] and r["region_valid"]
-            assert r["latent_radius"]<=region["mahalanobis_radius"]*(1+1e-12)
+            assert inner*(1-1e-12)<=r["latent_radius"]<=region["mahalanobis_radius"]*(1+1e-12)
+            assert r['region_valid']==(region['minimum_original_q']<=r['q']<=qmax)
+            if extended:
+                assert abs(native_q(region['physical_metric'],r['pose'])-r['q'])<2e-8
+                assert r['capture_valid']==(math.dist(r['pose']['position'],region['capture_center'])<=region['capture_radius'])
             if valid:
                 assert r["capture_valid"] and r["q"]>=region["minimum_original_q"]
                 assert len(r["clouds"])==2
                 p=[log_volume+r["log_physical_jacobian"]+c["log_weight"] for c in r["clouds"]]
+                assert abs(r['log_hard_weight']-log_volume-r['log_physical_jacobian'])<1e-10
+                for cloud in r['clouds']:
+                    expected=summary['manifest']['activity']*cloud['lower_volume']+cloud['overlap_points']*math.log1p(summary['manifest']['activity']/summary['manifest']['lambda'])
+                    assert abs(cloud['log_weight']-expected)<1e-10
                 assert abs(logsumexp(p)-np.log(2)-r["log_importance_weight"])<1e-10
                 logs.append(r["log_importance_weight"]);hard_logs.append(r["log_hard_weight"]);pairs.append(p)
             else:
@@ -40,10 +93,11 @@ def analyze(root):
         estimate=moments(logs)
         recorded=summary["estimates"]["region"]["logQ"]
         assert recorded is None if estimate["logQ"] is None else abs(estimate["logQ"]-recorded)<1e-10
-        populations.append(dict(id=job["id"],seed=job["seed"],estimate=estimate,hard_region=moments(hard_logs)))
+        populations.append(dict(id=job["id"],seed=job["seed"],estimate=estimate,hard_region=moments(hard_logs),samples_sha256=sample_hash))
         all_logs.extend(logs);all_hard.extend(hard_logs);all_pairs.extend(pairs);cpu+=summary["sampler_cpu_seconds"]
         backmap=max(backmap,summary["maximum_backmap_error"])
-        selected=[rows[i] for i in np.linspace(0,len(rows)-1,32,dtype=int)]
+        selected=rows if extended else [rows[i] for i in np.linspace(0,len(rows)-1,32,dtype=int)]
+        audited_poses+=len(selected)
         poses=relative_poses([r["pose"] for r in selected],region["fixed_neighbor"])
         gaussian,norms,_=chart.evaluate(poses)
         for r,logg,md in zip(selected,gaussian,norms[:,0]):
@@ -63,14 +117,16 @@ def analyze(root):
         log_regional_depletion_enhancement=enhancement,
         enhancement_scope="Correlated ratio Qz/Q0 from the same poses, relative to uniform physical measure in this fixed valid region. Point value only; no independent-error assumption or substitution of mean overlap.",populations=populations,
         sampler_cpu_seconds=cpu,maximum_backmap_error=backmap,independent_jacobian_reconstruction_max_error=density_error,
-        scope="ONLY the predeclared fixed ellipsoid physical mass, not a global normalizer; no conditioning away invalid zeros")
+        independently_reconstructed_poses=audited_poses,log_latent_volume=log_volume,
+        minimum_mahalanobis_radius=inner,maximum_original_q=region.get('maximum_original_q'),physical_fixed_neighbors=fixed,
+        scope="ONLY the predeclared fixed ellipsoid or shell physical mass, not a global normalizer; no conditioning away invalid zeros")
     out=root/"assessment";out.mkdir(exist_ok=True)
     write(out/"analysis.json",result)
     observed=(f"log Q = {estimate['logQ']:.6f}, ESS {estimate['ess']:.1f}, "
         f"largest contribution {estimate['max_fraction']:.2%}, observed relative SE {estimate['relative_se']:.2%}."
         if estimate["logQ"] is not None else "no nonzero observations: unresolved regional mass, not a physical zero or upper bound.")
     report=(f"# Direct integration of the frozen region\n\n"
-        f"{len(all_logs):,} unconditional uniform six-ball draws; {observed}\n\n"
+        f"{len(all_logs):,} unconditional uniform six-dimensional ball/shell draws; {observed}\n\n"
         f"Only the predeclared ellipsoid is integrated. This is not a global normalizer. "
         f"The region hash is `{manifest['region_sha256']}`. Invalid draws remain zeros.\n\n"
         f"Independent population log Q values: "+", ".join("unresolved" if p['estimate']['logQ'] is None else f"{p['estimate']['logQ']:.6f}" for p in populations)+".\n\n"

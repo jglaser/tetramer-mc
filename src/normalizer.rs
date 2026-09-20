@@ -31,6 +31,9 @@ pub struct NormalizerOptions {
     /// Multiply Gaussian standard deviations, retaining means and chart anchors.
     pub covariance_scale: f64,
     pub uniform_probability: Option<f64>,
+    /// Optional fixed-neighbor index for the proposal coordinate frame only.
+    /// All fixed neighbors remain in the hard and depletion environment.
+    pub proposal_anchor_index: Option<usize>,
     pub cloud_replicates: usize,
     pub activity: Option<f64>,
 }
@@ -172,6 +175,12 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
     let raw = fs::read(&options.config)?;
     let mut cfg: DockingConfig = serde_json::from_slice(&raw)?;
     cfg.validate()?;
+    if let Some(index) = options.proposal_anchor_index {
+        ensure!(
+            index < cfg.fixed_poses.len(),
+            "Proposal anchor index outside fixed-neighbor list"
+        );
+    }
     if cfg.shape.is_relative() {
         cfg.shape = options.config.parent().unwrap().join(&cfg.shape);
     }
@@ -232,7 +241,12 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         orientation: p.orientation,
     };
     let mut poses = vec![centered(cfg.initial_pose)];
-    poses.extend(cfg.fixed_poses.iter().copied().map(centered));
+    if let Some(index) = options.proposal_anchor_index {
+        poses.push(centered(cfg.fixed_poses[index]));
+    } else {
+        // Preserve the original anchor-selection order and RNG stream.
+        poses.extend(cfg.fixed_poses.iter().copied().map(centered));
+    }
     let lambda = if cfg.reservoir_density > 0. {
         cfg.poisson_lambda_ratio * cfg.reservoir_density
     } else {
@@ -255,12 +269,14 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
-    let manifest = json!({"schema":1,"samples":options.samples,"seed":options.seed,
+    let manifest = json!({"schema":if options.proposal_anchor_index.is_some(){2}else{1},"samples":options.samples,"seed":options.seed,
         "cloud_replicates":options.cloud_replicates,"covariance_scale":options.covariance_scale,
         "uniform_probability":epsilon,"lambda":lambda,"activity":cfg.reservoir_density,
         "config_sha256":hash_bytes(&raw),"model_sha256":hash_bytes(&model_raw),"shape_sha256":shape_sha,
         "source_bundle_sha256":hash_bytes(source.as_bytes()),"executable_sha256":hash_file(&std::env::current_exe()?)?,
-        "proposal":"Full normalized atlas+uniform cube/Haar density averaged over all fixed anchors; no retry",
+        "proposal":if options.proposal_anchor_index.is_some(){"Full normalized atlas+uniform cube/Haar density at the selected fixed anchor; no retry"}else{"Full normalized atlas+uniform cube/Haar density averaged over all fixed anchors; no retry"},
+        "proposal_anchor_index":options.proposal_anchor_index,
+        "physical_fixed_neighbor_count":cfg.fixed_poses.len(),
         "target":"hard(x,S) capture(x) exp[z |E(x) intersect union E(S)|] with Lebesgue and normalized Haar measure",
         "partition":"q<=.8; .8<q<=1; 1<q<2; 2<=q<5; q>=5, each split by exclusion contact; exhaustive within target support",
         "estimator":"zero for invalid; exp(z lower_volume)*(1+z/lambda)^K / full_proposal_density; average independent clouds in linear scale",
@@ -303,6 +319,11 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
     for draw in 0..options.samples {
         let before = cpu_seconds();
         let outcome = model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
+        ensure!(
+            options.proposal_anchor_index.is_none() || outcome.candidate.is_some(),
+            "Selected-anchor importance draw produced a numerical null: {:?}; stop instead of censoring",
+            outcome.null_reason
+        );
         let candidate = outcome.candidate.map(|p| Pose {
             position: add(p.position, cfg.capture_center),
             orientation: p.orientation,

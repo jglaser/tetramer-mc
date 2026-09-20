@@ -264,3 +264,161 @@ fn broad_rotational_volume_and_unconditional_zeros() -> Result<()> {
     fs::remove_dir_all(root)?;
     Ok(())
 }
+
+fn shell_reference(inner: f64, capture: f64, qmin: f64, qmax: f64, z: f64) -> f64 {
+    // Independent radial quadrature of translation volume and normalized Haar.
+    // Only the second, central physical sphere interacts (core .3, inflated .7).
+    let lo = ELL / SR * (qmin * PI / 12.).tan();
+    let hi = (ELL / SR * (qmax * PI / 12.).tan()).min(R);
+    let nr = 1024;
+    let nt = 512;
+    let dh = (hi - lo) / nr as f64;
+    let integrand = |rho: f64| {
+        let low = (ST * (inner * inner - rho * rho).max(0.).sqrt()).max(0.6);
+        let high = (ST * (R * R - rho * rho).max(0.).sqrt()).min(capture);
+        if high <= low {
+            return 0.;
+        }
+        let h = (high - low) / nt as f64;
+        let f = |d: f64| {
+            let overlap = if d < 1.4 {
+                PI * (2.8 + d) * (1.4 - d).powi(2) / 12.
+            } else {
+                0.
+            };
+            d * d * (z * overlap).exp()
+        };
+        let radial = (f(low)
+            + f(high)
+            + (1..nt)
+                .map(|i| (if i % 2 == 0 { 2. } else { 4. }) * f(low + i as f64 * h))
+                .sum::<f64>())
+            * h
+            / 3.;
+        16. * (SR / ELL).powi(3) * rho * rho * radial / (1. + (SR / ELL * rho).powi(2)).powi(2)
+    };
+    (integrand(lo)
+        + integrand(hi)
+        + (1..nr)
+            .map(|i| (if i % 2 == 0 { 2. } else { 4. }) * integrand(lo + i as f64 * dh))
+            .sum::<f64>())
+        * dh
+        / 3.
+}
+
+#[test]
+fn shell_q_window_and_second_neighbor_depletion() -> Result<()> {
+    let root = std::env::temp_dir().join(format!("tetramer-latent-shell-{}", std::process::id()));
+    fs::create_dir_all(&root)?;
+    let (inner, capture, qmin, qmax, z): (f64, f64, f64, f64, f64) = (1.2, 1.0, 1.0, 4.0, 2.0);
+    fixture(&root, capture, qmin)?;
+    let mut shape: Value = serde_json::from_slice(&fs::read(root.join("shape.json"))?)?;
+    shape["atoms"][0]["radius"] = json!(0.3);
+    shape["volume"] = json!(4. * PI * 0.3_f64.powi(3) / 3.);
+    fs::write(root.join("shape.json"), shape.to_string())?;
+    let shape_hash = hash_file(&root.join("shape.json"))?;
+    let mut cfg: Value = serde_json::from_slice(&fs::read(root.join("config.json"))?)?;
+    cfg["fixed_poses"].as_array_mut().unwrap().push(json!(Pose {
+        position: CENTER,
+        orientation: [1., 0., 0., 0.]
+    }));
+    cfg["reservoir_density"] = json!(z);
+    fs::write(root.join("config.json"), cfg.to_string())?;
+    let mut region: Value = serde_json::from_slice(&fs::read(root.join("region.json"))?)?;
+    region["physical_fixed_neighbors"] = cfg["fixed_poses"].clone();
+    region["activity"] = json!(z);
+    region["shape_sha256"] = json!(shape_hash);
+    region["gaussian_chart"]["shape_sha256"] = json!(shape_hash);
+    region["minimum_mahalanobis_radius"] = json!(inner);
+    region["maximum_original_q"] = json!(qmax);
+    fs::write(root.join("region.json"), region.to_string())?;
+    let options = LatentRegionOptions {
+        config: root.join("config.json"),
+        region: root.join("region.json"),
+        out: root.join("run"),
+        samples: 32768,
+        seed: 883917,
+        cloud_replicates: 2,
+        lambda_ratio: 64.,
+    };
+    let summary = latent_region::run(options.clone())?;
+    let volume = PI.powi(3) * (R.powi(6) - inner.powi(6)) / 6.;
+    near(
+        summary["manifest"]["log_latent_shell_volume"]
+            .as_f64()
+            .unwrap(),
+        volume.ln(),
+    );
+    let (mut mass, mut hard, mut uniform6, mut r2) = (
+        Moment::default(),
+        Moment::default(),
+        Moment::default(),
+        Moment::default(),
+    );
+    let mut zero_hard = 0;
+    let mut zero_q = 0;
+    for line in fs::read_to_string(root.join("run/samples.jsonl"))?.lines() {
+        let row: Value = serde_json::from_str(line)?;
+        let radius = row["latent_radius"].as_f64().unwrap();
+        assert!(radius >= inner * (1. - 1e-12) && radius <= R * (1. + 1e-12));
+        uniform6.push((radius.powi(6) - inner.powi(6)) / (R.powi(6) - inner.powi(6)));
+        r2.push(radius * radius);
+        let pose: Pose = serde_json::from_value(row["pose"].clone())?;
+        let d = norm(sub(pose.position, CENTER));
+        let q = row["q"].as_f64().unwrap();
+        let hard_ok = d <= capture && d >= 0.6;
+        let region_ok = q >= qmin && q <= qmax;
+        assert_eq!(row["hard_valid"].as_bool(), Some(hard_ok));
+        assert_eq!(row["region_valid"].as_bool(), Some(region_ok));
+        zero_hard += usize::from(!hard_ok);
+        zero_q += usize::from(!region_ok);
+        let h = volume * row["physical_jacobian"].as_f64().unwrap();
+        if hard_ok && region_ok {
+            near(row["log_hard_weight"].as_f64().unwrap(), h.ln());
+            mass.push(row["log_importance_weight"].as_f64().unwrap().exp());
+            hard.push(h);
+        } else {
+            assert!(
+                row["log_importance_weight"].is_null()
+                    && row["clouds"].as_array().unwrap().is_empty()
+            );
+            mass.push(0.);
+            hard.push(0.);
+        }
+    }
+    assert!(zero_hard > 0 && zero_q > 0);
+    mass.check(
+        shell_reference(inner, capture, qmin, qmax, z),
+        "AO shell with second neighbor",
+    );
+    hard.check(
+        shell_reference(inner, capture, qmin, qmax, 0.),
+        "hard shell with second neighbor",
+    );
+    uniform6.check(0.5, "uniform scaled sixth power");
+    r2.check(
+        0.75 * (R.powi(8) - inner.powi(8)) / (R.powi(6) - inner.powi(6)),
+        "shell E r²",
+    );
+    // The full frozen neighbor list and nonempty radial interval are mandatory.
+    for (label, key, bad_value) in [
+        (
+            "missing-neighbor",
+            "physical_fixed_neighbors",
+            json!([fixed()]),
+        ),
+        ("empty-shell", "minimum_mahalanobis_radius", json!(R)),
+        ("inverted-q", "maximum_original_q", json!(0.5)),
+    ] {
+        let mut bad = region.clone();
+        bad[key] = bad_value;
+        let path = root.join(format!("{label}.json"));
+        fs::write(&path, bad.to_string())?;
+        let mut invalid = options.clone();
+        invalid.region = path;
+        invalid.out = root.join(label);
+        assert!(latent_region::run(invalid).is_err());
+    }
+    fs::remove_dir_all(root)?;
+    Ok(())
+}

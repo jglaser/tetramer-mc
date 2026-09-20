@@ -1,4 +1,4 @@
-//! Direct integration of a frozen six-dimensional chart ellipsoid.
+//! Direct integration of a frozen six-dimensional chart ball or shell.
 //!
 //! Uniform latent ball draws have density 1/V6. The exact pose Jacobian is
 //! det(L)/(ell^3*pi^2*(1+|c|^2)^2), relative to center volume and normalized
@@ -257,9 +257,14 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     let region_raw = fs::read(&options.region)?;
     let region: Value = serde_json::from_slice(&region_raw)?;
     let fixed: Pose = serde_json::from_value(region["fixed_neighbor"].clone())?;
+    let physical_fixed: Vec<Pose> = if let Some(value) = region.get("physical_fixed_neighbors") {
+        serde_json::from_value(value.clone())?
+    } else {
+        vec![fixed]
+    };
     ensure!(
-        cfg.fixed_poses == vec![fixed],
-        "Frozen region neighbor differs from physical configuration"
+        cfg.fixed_poses == physical_fixed && physical_fixed.contains(&fixed),
+        "Frozen physical neighbors or chart anchor differ from configuration"
     );
     ensure!(
         region["capture_center"] == json!(cfg.capture_center)
@@ -283,11 +288,42 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     let minimum_q = region["minimum_original_q"]
         .as_f64()
         .context("Missing original q cutoff")?;
+    let inner_radius = region
+        .get("minimum_mahalanobis_radius")
+        .map(|value| value.as_f64().context("Invalid inner latent radius"))
+        .transpose()?
+        .unwrap_or(0.);
+    let maximum_q = region
+        .get("maximum_original_q")
+        .map(|value| value.as_f64().context("Invalid maximum original q"))
+        .transpose()?;
     ensure!(
-        radius.is_finite() && radius > 0. && minimum_q.is_finite() && minimum_q >= 0.,
+        radius.is_finite()
+            && radius > 0.
+            && minimum_q.is_finite()
+            && minimum_q >= 0.
+            && inner_radius.is_finite()
+            && inner_radius >= 0.
+            && inner_radius < radius
+            && maximum_q.is_none_or(|q| q.is_finite() && q >= minimum_q),
         "Invalid frozen region"
     );
-    let log_volume = 3. * PI.ln() + 6. * radius.ln() - 6_f64.ln();
+    // Keep the exact legacy arithmetic when the inner radius is zero. In a
+    // shell, the scaled sixth power is uniform and its volume is the difference
+    // of two six-ball volumes. expm1 avoids cancellation for narrow shells.
+    let shell_fraction = if inner_radius == 0. {
+        1.
+    } else {
+        -(6. * ((inner_radius - radius) / radius).ln_1p()).exp_m1()
+    };
+    ensure!(
+        shell_fraction.is_finite() && shell_fraction > 0.,
+        "Unresolved shell volume"
+    );
+    let mut log_volume = 3. * PI.ln() + 6. * radius.ln() - 6_f64.ln();
+    if inner_radius > 0. {
+        log_volume += shell_fraction.ln();
+    }
     let shape_raw = fs::read(&cfg.shape)?;
     let shape_hash = hash_bytes(&shape_raw);
     ensure!(
@@ -298,10 +334,22 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
     let env = Environment {
         tree: &tree,
-        fixed: vec![Placed::new(fixed)],
-        labels: vec![(0, [0; 3])],
+        fixed: physical_fixed.iter().copied().map(Placed::new).collect(),
+        labels: physical_fixed
+            .iter()
+            .enumerate()
+            .map(|(i, _)| (i, [0; 3]))
+            .collect(),
         rd: cfg.depletant_radius,
     };
+    for i in 0..env.fixed.len() {
+        for j in 0..i {
+            ensure!(
+                !tree.overlaps(&env.fixed[i], &env.fixed[j]),
+                "Fixed neighbors overlap"
+            );
+        }
+    }
     let lambda = if cfg.reservoir_density > 0. {
         options.lambda_ratio * cfg.reservoir_density
     } else {
@@ -328,7 +376,10 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
-    let manifest = json!({"schema":"uniform-latent-region-normalizer-v1","samples":options.samples,"seed":options.seed,
+    let extended = inner_radius > 0.
+        || maximum_q.is_some()
+        || region.get("physical_fixed_neighbors").is_some();
+    let mut manifest = json!({"schema":if extended {"uniform-latent-region-normalizer-v2"} else {"uniform-latent-region-normalizer-v1"},"samples":options.samples,"seed":options.seed,
         "cloud_replicates":options.cloud_replicates,"activity":cfg.reservoir_density,"lambda":lambda,"lambda_ratio":options.lambda_ratio,
         "config_sha256":hash_bytes(&config_raw),"region_sha256":hash_bytes(&region_raw),"shape_sha256":shape_hash,
         "source_bundle_sha256":hash_bytes(source.as_bytes()),"executable_sha256":hash_file(&std::env::current_exe()?)?,
@@ -336,6 +387,19 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
         "target":"REGION ONLY: integral of H_capture H_hard I(q>=q_min) exp(z*C) over the frozen latent ellipsoid; center volume times normalized SO(3) Haar",
         "estimator":"V6 * mean over all unconditional uniform6-ball draws of H Iq J * independent-cloud average W; invalid draws zero",
         "jacobian":"det(L)/(ell^3*pi^2*(1+|Cayley|^2)^2)","inference":"No global normalizer or global basin coverage claim"});
+    if extended {
+        manifest["minimum_latent_radius"] = json!(inner_radius);
+        manifest["maximum_original_q"] = json!(maximum_q);
+        manifest["physical_fixed_neighbors"] = json!(physical_fixed);
+        manifest["chart_anchor"] = json!(fixed);
+        manifest["log_latent_shell_volume"] = json!(log_volume);
+        manifest["target"] = json!(
+            "REGION ONLY: full physical-neighbor union, frozen latent shell and original inclusive q interval; capture/hard-invalid draws zero"
+        );
+        manifest["estimator"] = json!(
+            "V6_shell * mean over unconditional uniform6-shell draws of H Iq J * independent-cloud average W"
+        );
+    }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
     let cpu_start = cpu_seconds();
@@ -355,7 +419,12 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
             norm.is_finite() && norm > 0.,
             "Invalid normal direction (stop; never silently redraw)"
         );
-        let radial = radius * rng.random::<f64>().powf(1. / 6.);
+        let uniform = rng.random::<f64>();
+        let radial = if inner_radius == 0. {
+            radius * uniform.powf(1. / 6.)
+        } else {
+            radius * (1. - shell_fraction * (1. - uniform)).powf(1. / 6.)
+        };
         let latent = direction.map(|x| x * radial / norm);
         let (pose, log_jacobian) = chart.decode(latent);
         pose.validate()?;
@@ -376,7 +445,7 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
         ensure!(q.is_finite(), "Invalid physical q");
         let capture_valid = cfg.contains(pose);
         let hard_valid = capture_valid && env.hard_valid(pose);
-        let region_valid = q >= minimum_q;
+        let region_valid = q >= minimum_q && maximum_q.is_none_or(|limit| q <= limit);
         capture_rejected += u64::from(!capture_valid);
         hard_rejected += u64::from(capture_valid && !hard_valid);
         region_rejected += u64::from(hard_valid && !region_valid);
@@ -426,10 +495,13 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
         }
     }
     writer.flush()?;
-    let summary = json!({"complete":true,"samples":options.samples,"estimates":{"region":weighted.value(options.samples),"hard_region":hard.value(options.samples)},
+    let mut summary = json!({"complete":true,"samples":options.samples,"estimates":{"region":weighted.value(options.samples),"hard_region":hard.value(options.samples)},
         "capture_rejected":capture_rejected,"hard_rejected":hard_rejected,"region_rejected":region_rejected,
         "maximum_backmap_error":maximum_backmap_error,"raw_points":raw_points,
         "sampler_cpu_seconds":cpu_seconds()-cpu_start,"wall_seconds":start.elapsed().as_secs_f64(),"manifest":manifest});
+    if extended {
+        summary["samples_sha256"] = json!(hash_file(&options.out.join("samples.jsonl"))?);
+    }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
 }

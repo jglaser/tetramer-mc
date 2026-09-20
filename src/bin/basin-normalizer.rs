@@ -22,6 +22,9 @@ struct Cli {
     covariance_scale: f64,
     #[arg(long)]
     uniform_probability: Option<f64>,
+    /// Use one fixed neighbor as the proposal frame, retaining all physical neighbors.
+    #[arg(long)]
+    proposal_anchor_index: Option<usize>,
     #[arg(long, default_value_t = 2)]
     cloud_replicates: usize,
     #[arg(long)]
@@ -37,6 +40,7 @@ fn main() -> Result<()> {
         seed: c.seed,
         covariance_scale: c.covariance_scale,
         uniform_probability: c.uniform_probability,
+        proposal_anchor_index: c.proposal_anchor_index,
         cloud_replicates: c.cloud_replicates,
         activity: c.activity,
     })?;

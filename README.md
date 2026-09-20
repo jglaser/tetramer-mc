@@ -94,6 +94,12 @@ The [complete-native integrator](docs/native-guided-cover.md) combines a
 geometric cover with an optional frozen translation–rotation covariance guide.
 Its full-density correction and fresh width controls distinguish improved
 proposal concentration from a change in the native-region target.
+The [two-neighbor region controls](docs/cooperative-region-normalizers.md)
+separate a proposal's coordinate anchor from its complete physical environment,
+and compare global importance weights with independent uniform chart-shell
+integrals. See the [refined native guide](docs/native-ab-refined-guide.md),
+[native-tail references](docs/native-ab-uniform-tail-reference.md), and
+[surviving competing contacts](docs/ab-competing-contact-proposals.md).
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run independent uniform-latent-ball integrals of one immutable region."""
+"""Run independent uniform-latent-ball/shell integrals of one immutable region."""
 from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -42,6 +42,7 @@ def main():
              "analyze_latent_region.py":Path(__file__).with_name("analyze_latent_region.py"),
              "prepare_smc_normalizer_atlas.py":Path(__file__).with_name("prepare_smc_normalizer_atlas.py"),
              "analyze_basin_normalizers.py":Path(__file__).with_name("analyze_basin_normalizers.py"),
+             "analyze_native_region_reference.py":Path(__file__).with_name("analyze_native_region_reference.py"),
              "analyze_latent_region_shells.py":Path(__file__).with_name("analyze_latent_region_shells.py")}
     for name,path in sources.items():
         shutil.copy2(path,archive/name)
@@ -60,7 +61,7 @@ def main():
         cloud_replicates=args.cloud_replicates,region_sha256=sha(archive/"region.json"),
         archive_sha256={p.name:sha(p) for p in archive.iterdir()},
         source_inputs={name:str(path.resolve()) for name,path in sources.items()},
-        scope="REGION ONLY. Uniform6ball latent integration of one previously frozen ellipsoid. Independent fixed-N zeros retained; no model fitting or global mass inference.")
+        scope="REGION ONLY. Uniform six-dimensional latent ball/shell integration of one frozen region with all prescribed physical neighbors. Independent fixed-N zeros retained; no model fitting or global mass inference.")
     write(out/"manifest.json",manifest)
     def execute(job):
         args_command=[str(archive/"latent-region-normalizer"),"--config",str(archive/"config.json"),

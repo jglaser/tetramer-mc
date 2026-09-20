@@ -83,14 +83,82 @@ def selection(row, name):
     return row['region'] == name
 
 
+def audit_selected_anchor(root, job, manifest, rows):
+    """Independent schema2 proposal/metric reconstruction for all actual poses.
+
+    Matrix/SciPy left-Cayley densities are independent of the Rust sampler.
+    No sampled weight is changed or conditioned on capture/hard acceptance.
+    """
+    from prepare_smc_normalizer_atlas import Density, relative_poses
+    from prepare_deep_far_normalizer_atlas import registration
+    config=read(root/'config.json')
+    raw_config=root/'provenance/input-config.json'
+    model_path=root/'provenance/model.json'
+    shape_path=root/'provenance/shape.json'
+    assert sha(raw_config)==manifest['config_sha256']
+    assert sha(model_path)==manifest['model_sha256']
+    assert sha(shape_path)==manifest['shape_sha256']
+    original_config=read(raw_config)
+    for key in ('fixed_poses','capture_center','capture_radius','depletant_radius','metadata'):
+        assert config[key]==original_config[key]
+    assert config['reservoir_density']==manifest['activity']
+    index=manifest['proposal_anchor_index']
+    assert type(index) is int and index==job.get('proposal_anchor_index')
+    assert 0<=index<len(config['fixed_poses'])
+    assert manifest['physical_fixed_neighbor_count']==len(config['fixed_poses'])
+    raw_model=read(model_path)
+    assert raw_model.get('dfs') is None or all(v is None for v in raw_model['dfs']), 'Audit supports Gaussian components only'
+    model=dict(raw_model,covariances=(np.asarray(raw_model['covariances'])*manifest['covariance_scale']**2).tolist())
+    assert model['shape_sha256']==manifest['shape_sha256']
+    actual=[r for r in rows if r.get('pose') is not None]
+    assert len(actual)==len(rows), 'Open selected-anchor proposal has no intentional null: numerical failures require diagnosis'
+    assert actual, 'Positive fixed sample budget is required'
+    poses=[r['pose'] for r in actual]
+    log_gaussian=Density(model).evaluate(relative_poses(poses,config['fixed_poses'][index]))[0]
+    displacement=np.asarray([p['position'] for p in poses])-config['capture_center']
+    radius=config['capture_radius'];epsilon=manifest['uniform_probability']
+    cube=np.all((displacement>=-radius)&(displacement<radius),axis=1)
+    uniform=np.where(cube,np.log(epsilon)-3*np.log(2*radius),-np.inf)
+    expected_density=np.logaddexp(uniform,np.log1p(-epsilon)+log_gaussian) if epsilon<1 else uniform
+    recorded_density=np.asarray([r['log_proposal_density'] for r in actual])
+    error=np.abs(recorded_density-expected_density)
+    assert np.isfinite(error).all() and np.max(error)<2e-8
+    capture=np.linalg.norm(displacement,axis=1)<=radius
+    assert np.array_equal(capture,np.asarray([r['capture_valid'] for r in actual]))
+    expected_q=registration(poses,config['metadata'])
+    qerrors=[]
+    for row,q,inside in zip(actual,expected_q,capture):
+        if row['hard_valid']:
+            assert inside and row['q'] is not None
+            qerrors.append(abs(q-row['q']))
+            assert qerrors[-1]<2e-8
+        else:
+            assert row['q'] is None and row['region'] is None
+    # The normalizer's model list contains only one selected frame; logged
+    # local anchor index1 refers to that list, while manifest stores the
+    # physical-neighbor index. Do not silently reinterpret one as the other.
+    return dict(checked_actual_poses=len(actual),checked_q=len(qerrors),
+        maximum_log_density_error=float(max(error)),maximum_q_error=max(qerrors,default=0.),
+        proposal_anchor_index=index,physical_fixed_neighbor_count=len(config['fixed_poses']),
+        oracle='Independent full Gaussian sum with exact left-Cayley/Haar Jacobian plus half-open lab cube; no retry or valid-only normalization')
+
+
 def population(job):
     root = Path(job['directory'])
     summary, manifest = read(root/'summary.json'), read(root/'manifest.json')
     assert summary['complete'] and manifest['seed'] == job['seed']
+    assert summary['manifest']==manifest
     assert manifest['covariance_scale'] == job['covariance_std_scale']
     rows = [json.loads(line) for line in (root/'samples.jsonl').read_text().splitlines()]
     assert [r['draw'] for r in rows] == list(range(job['samples']))
     assert manifest['samples'] == len(rows) and manifest['cloud_replicates'] == 2
+    proposal_audit=None
+    if manifest['schema']==2:
+        assert summary['numerical_nulls']==0 and all(r.get('pose') is not None for r in rows)
+        proposal_audit=audit_selected_anchor(root,job,manifest,rows)
+    else:
+        assert manifest['schema']==1
+        assert manifest.get('proposal_anchor_index') is None and job.get('proposal_anchor_index') is None
     for row in rows:
         if row['hard_valid']:
             assert row['capture_valid'] and row['region'] in REGIONS
@@ -129,13 +197,16 @@ def population(job):
         components['uniform' if label == 'None' else label] = dict(draws=len(selected),
             hard_valid=sum(r['hard_valid'] for r in selected), contribution=moments(logs))
     bounds = [manifest['activity']**2*c['uncertain_volume']/manifest['lambda'] for r in rows if r['hard_valid'] for c in r['clouds'][:1]]
-    return dict(job=job, estimates=estimates, components=components, summary=summary,
+    return dict(job=job, estimates=estimates, components=components, summary=summary,proposal_audit=proposal_audit,
                 conditional_cloud_log_relative_second_moment_upper_quantiles=dict(zip(['min','median','p90','max'], np.quantile(bounds,[0,.5,.9,1]).tolist())) if bounds else None,
                 rows=rows)
 
 
 def analyze(root):
     manifest = read(root/'manifest.json')
+    if manifest.get('proposal_anchor_index') is not None:
+        for name,digest in manifest['archive_sha256'].items():
+            assert sha(root/'provenance'/name)==digest, f'Frozen campaign input changed: {name}'
     complete, pending = [], []
     for job in manifest['jobs']:
         path = Path(job['directory'])/'summary.json'
@@ -148,6 +219,13 @@ def analyze(root):
         assert m['shape_sha256'] == manifest['archive_sha256']['shape.json']
         assert m['executable_sha256'] == manifest['archive_sha256']['basin-normalizer']
         assert m['activity'] == manifest['physical']['activity']
+        assert m.get('proposal_anchor_index')==manifest.get('proposal_anchor_index')
+        if m['schema']==2:
+            cfg=read(Path(p['job']['directory'])/'config.json')
+            assert cfg['fixed_poses']==manifest['physical']['fixed_poses']
+            assert cfg['capture_center']==manifest['physical']['capture_center']
+            assert cfg['capture_radius']==manifest['physical']['capture_radius']
+            assert cfg['depletant_radius']==manifest['physical']['depletant_radius']
         assert math.isclose(m['lambda'], m['activity']*manifest['physical']['lambda_ratio'], rel_tol=1e-14)
     groups = {}
     for scale in sorted({j['covariance_std_scale'] for j in complete}):

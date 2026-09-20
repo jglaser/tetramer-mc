@@ -169,10 +169,15 @@ fn fixture(root: &Path, duplicate: bool) -> Result<Value> {
 
 /// Independent diagonal-Gaussian density reconstruction using the matrix
 /// inverse Cayley formula and the normalized-Haar Jacobian. No model methods.
-fn proposal_density(pose: Pose, model: &Value, epsilon: f64, covariance_scale: f64) -> f64 {
+fn proposal_density(
+    pose: Pose,
+    model: &Value,
+    epsilon: f64,
+    covariance_scale: f64,
+    anchors: &[Pose],
+) -> f64 {
     let mut learned = 0.;
-    let anchors = fixed_poses();
-    for anchor in &anchors {
+    for anchor in anchors {
         let inverse = transpose(rotation(anchor.orientation));
         let t = matvec(inverse, sub(pose.position, anchor.position));
         let r = matmul(inverse, rotation(pose.orientation));
@@ -214,6 +219,7 @@ fn run_check(
     seed: u64,
     activity: f64,
     covariance_scale: f64,
+    proposal_anchor_index: Option<usize>,
 ) -> Result<()> {
     let cloud_replicates = if activity > 0. { 2 } else { 1 };
     let summary = normalizer::run(NormalizerOptions {
@@ -224,9 +230,25 @@ fn run_check(
         seed,
         covariance_scale,
         uniform_probability: Some(EPSILON),
+        proposal_anchor_index,
         cloud_replicates,
         activity: Some(activity),
     })?;
+    let config: Value = serde_json::from_slice(&fs::read(root.join("config.json"))?)?;
+    let physical_anchors: Vec<Pose> = serde_json::from_value(config["fixed_poses"].clone())?;
+    let proposal_anchors = if let Some(index) = proposal_anchor_index {
+        vec![physical_anchors[index]]
+    } else {
+        physical_anchors.clone()
+    };
+    assert_eq!(
+        summary["manifest"]["proposal_anchor_index"],
+        json!(proposal_anchor_index)
+    );
+    assert_eq!(
+        summary["manifest"]["physical_fixed_neighbor_count"],
+        physical_anchors.len()
+    );
     let mut moments = [Moment::default(); 14];
     let mut counts = [0_u64; 3];
     let names = [
@@ -263,7 +285,8 @@ fn run_check(
         } else {
             counts[2] += 1;
             assert_eq!(row["hard_valid"], true);
-            let density = proposal_density(pose, model, EPSILON, covariance_scale);
+            let density =
+                proposal_density(pose, model, EPSILON, covariance_scale, &proposal_anchors);
             near(
                 row["log_proposal_density"].as_f64().unwrap(),
                 density.ln(),
@@ -384,16 +407,16 @@ fn fixed_budget_physical_regions_match_radial_and_haar_reference() -> Result<()>
     fs::create_dir_all(&root)?;
     let physical = root.join("physical");
     let model = fixture(&physical, false)?;
-    run_check(&physical, &model, 24_000, 402731, Z, 1.)?;
+    run_check(&physical, &model, 24_000, 402731, Z, 1., None)?;
     let zero = root.join("zero");
     let model = fixture(&zero, false)?;
-    run_check(&zero, &model, 16_000, 840257, 0., 1.)?;
+    run_check(&zero, &model, 16_000, 840257, 0., 1., None)?;
     let duplicated = root.join("duplicated");
     let model = fixture(&duplicated, true)?;
-    run_check(&duplicated, &model, 16_000, 910637, 0., 1.)?;
+    run_check(&duplicated, &model, 16_000, 910637, 0., 1., None)?;
     let inflated = root.join("inflated");
     let model = fixture(&inflated, false)?;
-    run_check(&inflated, &model, 16_000, 729813, 0., 2.)?;
+    run_check(&inflated, &model, 16_000, 729813, 0., 2., None)?;
     // Exercise every public CLI override and compare the complete draw stream
     // with the library call. A different output path must not alter RNG state.
     let cli = Command::new(env!("CARGO_BIN_EXE_basin-normalizer"))
@@ -432,6 +455,7 @@ fn fixed_budget_physical_regions_match_radial_and_haar_reference() -> Result<()>
         seed: 927451,
         covariance_scale: 2.,
         uniform_probability: Some(0.73),
+        proposal_anchor_index: None,
         cloud_replicates: 1,
         activity: Some(0.),
     })?;
@@ -440,6 +464,142 @@ fn fixed_budget_physical_regions_match_radial_and_haar_reference() -> Result<()>
         fs::read(root.join("cli/samples.jsonl"))?,
         fs::read(root.join("api/samples.jsonl"))?
     );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn selected_proposal_anchor_retains_the_second_physical_neighbor() -> Result<()> {
+    let root = std::env::temp_dir().join(format!(
+        "tetramer-normalizer-selected-anchor-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root)?;
+    for index in 0..2 {
+        let path = root.join(format!("anchor-{index}"));
+        let model = fixture(&path, false)?;
+        let mut cfg: Value = serde_json::from_slice(&fs::read(path.join("config.json"))?)?;
+        // Anchor zero is harmless. All hard and depletion effects arise from
+        // physical neighbor one, which must remain even when not proposing.
+        cfg["fixed_poses"].as_array_mut().unwrap().reverse();
+        fs::write(path.join("config.json"), cfg.to_string())?;
+        run_check(
+            &path,
+            &model,
+            16_000,
+            994231 + index as u64,
+            Z,
+            1.,
+            Some(index),
+        )?;
+    }
+    let path = root.join("anchor-0");
+    let bad = normalizer::run(NormalizerOptions {
+        config: path.join("config.json"),
+        model: path.join("model.json"),
+        out: root.join("invalid-anchor"),
+        samples: 1,
+        seed: 1,
+        covariance_scale: 1.,
+        uniform_probability: None,
+        proposal_anchor_index: Some(2),
+        cloud_replicates: 1,
+        activity: Some(0.),
+    });
+    assert!(
+        bad.unwrap_err()
+            .to_string()
+            .contains("Proposal anchor index")
+    );
+    assert!(!root.join("invalid-anchor").exists());
+    let cli = Command::new(env!("CARGO_BIN_EXE_basin-normalizer"))
+        .arg("--config")
+        .arg(path.join("config.json"))
+        .arg("--model")
+        .arg(path.join("model.json"))
+        .arg("--out")
+        .arg(root.join("cli"))
+        .args([
+            "--proposal-anchor-index",
+            "0",
+            "--samples",
+            "64",
+            "--seed",
+            "943561",
+            "--activity",
+            "0",
+        ])
+        .output()?;
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    let api = normalizer::run(NormalizerOptions {
+        config: path.join("config.json"),
+        model: path.join("model.json"),
+        out: root.join("api"),
+        samples: 64,
+        seed: 943561,
+        covariance_scale: 1.,
+        uniform_probability: None,
+        proposal_anchor_index: Some(0),
+        cloud_replicates: 2,
+        activity: Some(0.),
+    })?;
+    let cli_summary: Value = serde_json::from_slice(&cli.stdout)?;
+    assert_eq!(api["estimates"], cli_summary["estimates"]);
+    assert_eq!(
+        fs::read(root.join("cli/samples.jsonl"))?,
+        fs::read(root.join("api/samples.jsonl"))?
+    );
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn unrepresentable_open_gaussian_draw_stops_selected_anchor_estimation() -> Result<()> {
+    let root = std::env::temp_dir().join(format!(
+        "tetramer-normalizer-overflow-{}",
+        std::process::id()
+    ));
+    let mut model = fixture(&root, false)?;
+    // Every input parameter remains finite. The translated Gaussian has a
+    // finite mathematical center that cannot be represented as a lab pose
+    // in f64; dropping those draws would censor the stated proposal law.
+    for index in 0..model["weights"].as_array().unwrap().len() {
+        model["anchors"][index]["position"][0] = json!(f64::MAX * 0.75);
+        model["means"][index][0] = json!(f64::MAX * 0.75);
+    }
+    fs::write(root.join("model.json"), model.to_string())?;
+    let options = NormalizerOptions {
+        config: root.join("config.json"),
+        model: root.join("model.json"),
+        out: root.join("legacy"),
+        samples: 64,
+        seed: 930819,
+        covariance_scale: 1.,
+        uniform_probability: Some(1e-12),
+        proposal_anchor_index: None,
+        cloud_replicates: 1,
+        activity: Some(0.),
+    };
+    // First establish this fixture actually exercises the existing numerical
+    // null outcome; the default path remains backward compatible.
+    let legacy = normalizer::run(options.clone())?;
+    assert_eq!(legacy["numerical_nulls"], 64);
+    let result = normalizer::run(NormalizerOptions {
+        out: root.join("selected"),
+        proposal_anchor_index: Some(0),
+        ..options
+    });
+    let message = result.unwrap_err().to_string();
+    assert!(
+        message.contains("Selected-anchor importance draw produced a numerical null")
+            && message.contains("learned_numerical_null"),
+        "{message}"
+    );
+    assert!(!root.join("selected/summary.json").exists());
     fs::remove_dir_all(root)?;
     Ok(())
 }

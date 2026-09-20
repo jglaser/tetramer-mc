@@ -468,6 +468,72 @@ impl FrozenRelativePoseProposal {
         self.components.iter().map(|c| c.weight).collect()
     }
 
+    /// Append one normalized Gaussian chart at every current memory pose.
+    /// Atlas order and weights are fixed: original base first with mass 1-m,
+    /// then M memory slots with mass m/M each. Pose changes affect chart centers
+    /// and orientations only. Build from the ORIGINAL frozen base every time.
+    /// Covariance is full rank, independent translation/Cayley coordinates;
+    /// the angular input is a per-axis small-angle standard deviation.
+    pub fn with_contact_components(
+        &self,
+        poses: &[Pose],
+        mass: f64,
+        translation_std: f64,
+        small_angle_std_degrees: f64,
+    ) -> Result<Self> {
+        ensure!(
+            !poses.is_empty(),
+            "Contact-memory dictionary cannot be empty"
+        );
+        ensure!(
+            mass.is_finite() && mass > 0. && mass < 1.,
+            "Contact-memory mass must lie strictly between zero and one"
+        );
+        ensure!(
+            [translation_std, small_angle_std_degrees]
+                .iter()
+                .all(|x| x.is_finite() && *x > 0.),
+            "Invalid contact-memory Gaussian widths"
+        );
+        let angular_std = self.angular_length * small_angle_std_degrees.to_radians() / 2.;
+        let mut covariance = [[0.; 6]; 6];
+        for (i, row) in covariance.iter_mut().enumerate() {
+            row[i] = if i < 3 {
+                translation_std * translation_std
+            } else {
+                angular_std * angular_std
+            };
+        }
+        let (lower, log_normalizer) = prepare_cholesky(covariance)?;
+        let memory_weight = mass / poses.len() as f64;
+        ensure!(
+            memory_weight.is_finite() && memory_weight > 0.,
+            "Unrepresentable contact-memory component weight"
+        );
+        let mut result = self.clone();
+        for component in &mut result.components {
+            component.weight *= 1. - mass;
+            ensure!(
+                component.weight.is_finite() && component.weight > 0.,
+                "Unrepresentable contact-memory base weight"
+            );
+            component.log_weight = component.weight.ln();
+        }
+        for pose in poses {
+            pose.validate()?;
+            result.components.push(Gaussian {
+                mean: [0.; 6],
+                lower,
+                log_normalizer,
+                anchor_position: pose.position,
+                anchor_rotation: rotation(pose.orientation),
+                weight: memory_weight,
+                log_weight: memory_weight.ln(),
+            });
+        }
+        Ok(result)
+    }
+
     /// Ordered active components with replacement, each with weight 1/K.
     /// Duplicate labels are distinct auxiliary slots; never sort or merge them.
     pub fn selected_components(&self, labels: &[usize]) -> Result<Self> {

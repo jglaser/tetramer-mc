@@ -13,6 +13,7 @@ use serde_json::json;
 use std::f64::consts::PI;
 use tetramer_mc::{
     auxiliary::{self, AuxiliaryConfig},
+    contact_memory::{MemoryConfig, MemoryState, ResolvedMemoryConfig},
     depletion::{self, GateOptions},
     geometry::{Atom, Environment, Placed, Shape, SphereTree},
     math::*,
@@ -170,6 +171,8 @@ struct Exercised {
     gca_partial: usize,
     shifts: usize,
     stale_log_correction_max: f64,
+    memory_attempts: usize,
+    memory_accepted: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -184,9 +187,38 @@ fn compose(
     rng: &mut StdRng,
     stale_reverse: bool,
     exercised: &mut Exercised,
+    mut memory: Option<(&mut MemoryState, &ResolvedMemoryConfig)>,
 ) -> Result<()> {
-    let labels = base.component_weights();
     for _ in 0..ROUNDS {
+        if let Some((bank, config)) = &mut memory {
+            for _ in 0..config.attempts_per_sweep {
+                let outcome = bank.update(
+                    tree,
+                    config,
+                    GateOptions {
+                        max_cells: 1,
+                        max_depth: 0,
+                        min_width: 0.,
+                    },
+                    rng,
+                )?;
+                exercised.memory_attempts += 1;
+                exercised.memory_accepted += usize::from(outcome.accepted);
+            }
+        }
+        let expanded = memory
+            .as_ref()
+            .map(|(bank, c)| {
+                base.with_contact_components(
+                    &bank.poses,
+                    c.proposal_mass,
+                    c.proposal_translation_std_a,
+                    c.proposal_small_angle_std_degrees,
+                )
+            })
+            .transpose()?;
+        let base = expanded.as_ref().unwrap_or(base);
+        let labels = base.component_weights();
         rj_state.refresh_eta(rng);
         for _ in 0..rj_config.attempts_per_sweep {
             let jump = rj_state.update(rj_config, &labels, rng)?;
@@ -454,6 +486,7 @@ fn actual_rj_learned_poisson_gca_shift_preserves_exact_two_sphere_marginal() -> 
             &mut rng,
             false,
             &mut counters,
+            None,
         )?;
         let values = observables(&state, &rj, &exact);
         let mut bad_state = start;
@@ -469,6 +502,7 @@ fn actual_rj_learned_poisson_gca_shift_preserves_exact_two_sphere_marginal() -> 
             &mut stale_rng,
             true,
             &mut stale_counters,
+            None,
         )?;
         let bad = observables(&bad_state, &bad_rj, &exact);
         for j in 0..15 {
@@ -525,6 +559,163 @@ fn actual_rj_learned_poisson_gca_shift_preserves_exact_two_sphere_marginal() -> 
     assert!(
         counters.stale_log_correction_max > 1.,
         "fixture must exercise a materially different reverse model"
+    );
+    Ok(())
+}
+
+#[test]
+fn contact_memory_with_different_auxiliary_bath_preserves_production_marginal() -> Result<()> {
+    let base = dictionary()?;
+    let tree = SphereTree::new(Shape {
+        name: "sphere".into(),
+        volume: 4. * PI / 3.,
+        atoms: vec![Atom {
+            center: [0.; 3],
+            radius: CORE,
+        }],
+    })?;
+    let wall = Container::new(WALL, &tree)?;
+    let settings = RjConfig {
+        min_components: 1,
+        max_components: 6,
+        initial_components: 2,
+        poisson_mean: 2.5,
+        attempts_per_sweep: 2,
+    };
+    let guidance = AuxiliaryConfig {
+        gain: 1.2,
+        noise: 0.35,
+        cutoff: 8.,
+        clip: 4.,
+        shrinkage: 1.,
+    };
+    // A different bath in memory must NOT replace the production activity.
+    let m = MemoryConfig {
+        slots: 2,
+        attempts_per_sweep: 2,
+        radius: Some(3.8),
+        depletant_radius: Some(RD),
+        depletant_activity: Some(0.8),
+        proposal_mass: 0.5,
+        proposal_translation_std_a: 0.5,
+        proposal_small_angle_std_degrees: 15.,
+        global_probability: 0.25,
+        ..Default::default()
+    }
+    .resolve(&tree, RD, ACTIVITY)?;
+    let prior = count_prior(&settings);
+    let exact = reference(&prior);
+    let expected = [
+        exact.distance,
+        exact.distance2,
+        exact.contact,
+        exact.midpoint2,
+        0.,
+        1. / 3.,
+        0.,
+        1. / 3.,
+        exact.count,
+        0.,
+        0.,
+        0.,
+        0.2,
+        0.,
+        1.,
+    ];
+    let mut starts = StdRng::seed_from_u64(202609240118);
+    let mut after = [Moments::default(); 15];
+    let mut change = [Moments::default(); 15];
+    let mut cross = Moments::default();
+    let mut cross_change = Moments::default();
+    let mut counters = Exercised::default();
+    let memory_weight = |r: f64| r * r * (m.depletant_activity * overlap(CORE + RD, r)).exp();
+    let memory_mean = integrate(|r| r * memory_weight(r), 2. * CORE, m.radius)
+        / integrate(memory_weight, 2. * CORE, m.radius);
+    for replicate in 0..REPLICATES {
+        let mut bank = MemoryState { poses: Vec::new() };
+        while bank.poses.len() < m.slots {
+            let mut pose = independent_pose(&mut starts);
+            pose.position = scale(
+                direction(&mut starts),
+                m.radius * starts.random::<f64>().cbrt(),
+            );
+            let r = norm(pose.position);
+            if r < 2. * CORE {
+                continue;
+            }
+            let log_ratio =
+                m.depletant_activity * (overlap(CORE + RD, r) - overlap(CORE + RD, 2. * CORE));
+            if starts.random::<f64>().max(f64::MIN_POSITIVE).ln() < log_ratio {
+                bank.poses.push(pose);
+            }
+        }
+        bank.validate(&tree, &m)?;
+        let expanded = base.with_contact_components(
+            &bank.poses,
+            m.proposal_mass,
+            m.proposal_translation_std_a,
+            m.proposal_small_angle_std_degrees,
+        )?;
+        let (mut state, mut rj) = exact_joint_start(
+            &settings,
+            &prior,
+            &expanded.component_weights(),
+            &mut starts,
+        );
+        let before = observables(&state, &rj, &exact);
+        let prior_cross =
+            (before[0] - exact.distance) * (norm(bank.poses[0].position) - memory_mean);
+        let mut rng = StdRng::seed_from_u64(8742221 + replicate as u64);
+        compose(
+            &mut state,
+            &mut rj,
+            &base,
+            &tree,
+            &wall,
+            &settings,
+            &guidance,
+            &mut rng,
+            false,
+            &mut counters,
+            Some((&mut bank, &m)),
+        )?;
+        let values = observables(&state, &rj, &exact);
+        for j in 0..15 {
+            after[j].add(values[j]);
+            change[j].add(values[j] - before[j]);
+        }
+        let posterior_cross =
+            (values[0] - exact.distance) * (norm(bank.poses[0].position) - memory_mean);
+        cross.add(posterior_cross);
+        cross_change.add(posterior_cross - prior_cross);
+    }
+    for j in 0..15 {
+        eprintln!(
+            "memory joint {}: exact={:.7}, after={:.7}, paired_z={:.3}",
+            NAMES[j],
+            expected[j],
+            after[j].mean(),
+            change[j].score(0.)
+        );
+        assert!(
+            after[j].score(expected[j]).abs() < 5.5,
+            "production+memory marginal {}",
+            NAMES[j]
+        );
+        assert!(
+            change[j].score(0.).abs() < 5.5,
+            "production+memory stationarity {}",
+            NAMES[j]
+        );
+    }
+    eprintln!(
+        "memory-production distance cross: z={:.3}, paired_z={:.3}; counters={counters:?}",
+        cross.score(0.),
+        cross_change.score(0.)
+    );
+    assert!(cross.score(0.).abs() < 5.5 && cross_change.score(0.).abs() < 5.5);
+    assert!(
+        counters.memory_accepted > 1000 && counters.accepted > 300 && counters.gate_points > 10000
     );
     Ok(())
 }

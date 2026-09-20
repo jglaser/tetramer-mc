@@ -46,3 +46,10 @@ fluid samples. The second config enables auxiliary transport; both enable GCA
 and center shifts. Add `"reversible_jump": {}` to the transport config for
 variable proposal-component counts. The [campaign guide](../docs/rj-assembly.md)
 explains a matched test with and without explicit inter-tetramer native charts.
+
+`contact-memory-defaults.json` is an options object for the campaign launcher's
+`--memory-json` flag, not a complete simulation input. Equivalently, add
+`"contact_memory": {}` to a spherical learned-proposal config. The fixed bank
+uses geometry-only pair preparations and reversible pair updates; this does
+not remove native information from any supplied base atlas. See the
+[balance argument and matched controls](../docs/contact-memory-balance.md).

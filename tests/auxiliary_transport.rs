@@ -118,13 +118,15 @@ fn options(root: &Path, name: &str, sweeps: u64, resume: Option<&str>) -> RunOpt
 #[test]
 fn transported_runner_replays_reverse_models_and_resumes_full_joint_state() -> Result<()> {
     for variable_k in [false, true] {
-        check_runner(variable_k)?;
+        for memory in [false, true] {
+            check_runner(variable_k, memory)?;
+        }
     }
     Ok(())
 }
-fn check_runner(variable_k: bool) -> Result<()> {
+fn check_runner(variable_k: bool, memory: bool) -> Result<()> {
     let root = std::env::temp_dir().join(format!(
-        "tetramer-aux-runner-{}-{variable_k}",
+        "tetramer-aux-runner-{}-{variable_k}-{memory}",
         std::process::id()
     ));
     if root.exists() {
@@ -146,6 +148,9 @@ fn check_runner(variable_k: bool) -> Result<()> {
         "learned_uniform_weight":0.2,"auxiliary_transport":aux,"endpoint_gate":{"max_cells":63,"max_depth":6,"min_width":0.25}});
     if variable_k {
         config["reversible_jump"] = json!({"min_components":1,"max_components":6,"initial_components":2,"poisson_mean":3.,"attempts_per_sweep":4});
+    }
+    if memory {
+        config["contact_memory"] = json!({"slots":3,"attempts_per_sweep":3,"radius":3.5,"proposal_mass":0.4,"proposal_translation_std_A":0.4,"proposal_small_angle_std_degrees":15.});
     }
     fs::write(root.join("config.json"), config.to_string())?;
     run(options(&root, "full", 32, None))?;
@@ -174,9 +179,29 @@ fn check_runner(variable_k: bool) -> Result<()> {
     )?;
     let mut verified = 0;
     let mut nontrivial = 0;
+    let mut memory_accepted = 0;
+    let mut bank: Option<tetramer_mc::contact_memory::MemoryState> =
+        serde_json::from_value(frames[0]["contact_memory_state"].clone())?;
     for text in fs::read_to_string(root.join("full/moves.jsonl"))?.lines() {
         let row: Value = serde_json::from_str(text)?;
         let sweep = row["sweep"].as_u64().unwrap() as usize;
+        if row["kind"] == "contact_memory" {
+            let slot = row["result"]["slot"].as_u64().unwrap() as usize;
+            let b = bank.as_mut().unwrap();
+            assert_eq!(json!(b.poses[slot]), row["result"]["old_pose"]);
+            b.poses[slot] = serde_json::from_value(row["result"]["retained_pose"].clone())?;
+            memory_accepted += usize::from(row["result"]["accepted"].as_bool().unwrap());
+            continue;
+        }
+        let expanded;
+        let base = if memory {
+            assert_eq!(json!(bank), frames[sweep]["contact_memory_state"]);
+            expanded =
+                base.with_contact_components(&bank.as_ref().unwrap().poses, 0.4, 0.4, 15.)?;
+            &expanded
+        } else {
+            &base
+        };
         let selected;
         let (base, eta) = if variable_k {
             let state: tetramer_mc::rj::RjState =
@@ -185,7 +210,7 @@ fn check_runner(variable_k: bool) -> Result<()> {
             (&selected, state.eta)
         } else {
             (
-                &base,
+                base,
                 serde_json::from_value::<Vec<[f64; 6]>>(frames[sweep]["auxiliary_eta"].clone())?,
             )
         };
@@ -236,6 +261,10 @@ fn check_runner(variable_k: bool) -> Result<()> {
         verified > 20 && nontrivial > 5,
         "must exercise changing reverse model"
     );
+    if memory {
+        assert!(memory_accepted > 5);
+        assert_eq!(json!(bank), read("full")?["contact_memory_state"]);
+    }
     let final_state: Vec<Pose> = serde_json::from_value(read("full")?["poses"].clone())?;
     for (a, b) in state.iter().zip(final_state) {
         for d in 0..3 {

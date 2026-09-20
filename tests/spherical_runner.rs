@@ -148,6 +148,36 @@ fn spherical_collective_schedules_resume_exactly_and_record_unwrapped_coordinate
                 }
             }
             let gsd = GsdFile::open(&root.join(&full).join("trajectory.gsd"), Mode::Read)?;
+            let mut center = [0_f64; 3];
+            let mut centers = std::collections::BTreeMap::from([(0_u64, center)]);
+            for line in fs::read_to_string(root.join(&full).join("moves.jsonl"))?.lines() {
+                let row: Value = serde_json::from_str(line)?;
+                if row["kind"] == "center_shift" {
+                    let d: [f64; 3] =
+                        serde_json::from_value(row["result"]["displacement"].clone())?;
+                    // A center shift leaves coordinate-frame body positions
+                    // invariant: (p+d)+(C-d) = p+C.
+                    let probe = [0.3, -0.4, 0.5];
+                    for k in 0..3 {
+                        let before = probe[k] + center[k];
+                        center[k] -= d[k];
+                        assert!(((probe[k] + d[k]) + center[k] - before).abs() < 1e-12);
+                    }
+                }
+                centers.insert(row["sweep"].as_u64().unwrap(), center);
+            }
+            for (f, frame) in frames.iter().enumerate() {
+                let expected = centers[&frame["sweep"].as_u64().unwrap()];
+                assert_eq!(frame["coordinate_wall_center"], json!(expected));
+                assert_eq!(frame["coordinate_origin_sweep"], 0);
+                let saved: Vec<f64> = gsd
+                    .iter_scalars(f as u64, "log/tetramer_mc/coordinate_wall_center")?
+                    .collect();
+                assert_eq!(saved, expected.to_vec());
+            }
+            if shift > 0. {
+                assert!(center.iter().any(|x| x.abs() > 1e-3));
+            }
             let periodic: Vec<u8> = gsd.iter_scalars(0, "log/tetramer_mc/periodic")?.collect();
             assert_eq!(periodic, vec![0, 0, 0]);
             let positions: Vec<[f32; 3]> = gsd.iter_arrays(0, "particles/position")?.collect();

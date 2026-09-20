@@ -3,6 +3,8 @@
 
 Use --atlas LABEL=PATH twice with --reversible-jump for native-on/off controls,
 and --reuse-starts to preserve earlier preparations and paired MC seeds exactly.
+Use --memory-json PATH --compare-memory to compare the same atlas with and
+without a persistent evolving contact-pose bank.
 Every production atlas is explicitly labelled; the default contains native
 examples and is NOT a no-native-prior experiment. No fit is trained here.
 Run this supervisor under nohup for durable background execution.
@@ -70,12 +72,17 @@ def main():
     parser.add_argument('--workers',type=int,default=8)
     parser.add_argument('--master-seed',type=int,default=2026092017)
     parser.add_argument('--auxiliary-json',type=Path)
+    parser.add_argument('--memory-json',type=Path,help='Contact-memory configuration; absent disables memory')
+    parser.add_argument('--compare-memory',action='store_true',help='Matched memory-off/on arms for each model/mode')
+    parser.add_argument('--freeze-memory',action='store_true',help='Keep the same initialized bank but set bank update attempts to zero')
     parser.add_argument('--write-examples',action='store_true')
     parser.add_argument('--prepare-only',action='store_true')
     parser.add_argument('--no-gsd',action='store_true')
     args=parser.parse_args()
     if min(args.sweeps,args.sample_every,args.replicates,args.workers)<1:
         parser.error('Positive run sizes and worker count required')
+    if args.compare_memory and not args.memory_json:parser.error('--compare-memory requires --memory-json')
+    if args.freeze_memory and (not args.memory_json or args.compare_memory):parser.error('--freeze-memory requires --memory-json and a single memory arm')
     out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
     if any(out.iterdir()):parser.error('Output must be empty')
     for name in ('configs','logs','runs','provenance'):(out/name).mkdir()
@@ -92,6 +99,7 @@ def main():
         'shape.json':ROOT/'examples/tetramer-shape.json','monomer-shape.json':ROOT/'examples/monomer-shape.json',
         'native-pair-motifs.json':ROOT/'examples/native-pair-motifs.json','launcher.py':Path(__file__).resolve()}
     inputs.update({a['archive_name']:a['source'] for a in atlases})
+    if args.memory_json:inputs['memory-options.json']=args.memory_json.resolve()
     for name,path in inputs.items():shutil.copy2(path,archive/name)
     binary=archive/'tetramer-mc'
     shape=json.loads((archive/'shape.json').read_text())
@@ -101,10 +109,13 @@ def main():
         atlas['model']=str(archive/atlas['archive_name']);atlas['sha256']=sha(atlas['model']);atlas['source']=str(atlas['source'])
     source_bundle=subprocess.run(['git','rev-parse','HEAD'],cwd=ROOT,check=True,capture_output=True,text=True).stdout.strip()
     auxiliary=json.loads(args.auxiliary_json.read_text()) if args.auxiliary_json else {}
+    memory=json.loads((archive/'memory-options.json').read_text()) if args.memory_json else None
+    if args.freeze_memory:memory['attempts_per_sweep']=0
+    memory_choices=(False,True) if args.compare_memory else (memory is not None,)
     rj=(json.loads(args.rj_config.read_text()) if args.rj_config else dict(min_components=1,max_components=24,
         initial_components=8,poisson_mean=8.,attempts_per_sweep=4)) if args.reversible_jump else None
     reused=read_reused(args.reuse_starts,args.replicates) if args.reuse_starts else None
-    if args.write_examples and (len(atlases)>1 or args.reversible_jump):parser.error('--write-examples supports only the original fixed-K pair')
+    if args.write_examples and (len(atlases)>1 or args.reversible_jump or memory is not None):parser.error('--write-examples supports only the original fixed-K pair')
     radius=354.50820786337056;rd=1.5;activity=.035
     jobs=[];preparations=[]
     for replicate in range(args.replicates):
@@ -116,9 +127,15 @@ def main():
         pose_hash=hashlib.sha256(json.dumps(poses,sort_keys=True).encode()).hexdigest()
         preparations.append(dict(replicate=replicate,preparation_seed=prepare_seed,mc_seed=mc_seed,
             initial_poses_sha256=pose_hash,certificate=certificate))
-        for atlas,mode in [(atlas,mode) for atlas in atlases for mode in (('rj',) if args.reversible_jump else ('frozen','transport'))]:
+        modes=('rj',) if args.reversible_jump else ('frozen','transport')
+        for atlas,mode,memory_enabled in [(atlas,mode,memory_enabled) for atlas in atlases for mode in modes for memory_enabled in memory_choices]:
             model=Path(atlas['model'])
             identifier=f"free-r{replicate:02d}-{atlas['label']}-{mode}" if len(atlases)>1 else f'free-r{replicate:02d}-{mode}'
+            variant=atlas['label'] if len(atlases)>1 else mode
+            if memory is not None:
+                memory_label=('memory-frozen' if args.freeze_memory else 'memory-on') if memory_enabled else 'memory-off'
+                identifier+='-'+memory_label
+                variant=memory_label if len(atlases)==len(modes)==1 else variant+'-'+memory_label
             cfg=dict(shape=str(archive/'shape.json'),monomer_shape=str(archive/'monomer-shape.json'),
                 initial_poses=copy.deepcopy(poses),box_lengths=[2*radius]*3,boundary=dict(kind='spherical',radius=radius),
                 depletant_radius=rd,reservoir_density=activity,poisson_lambda_ratio=16.,
@@ -128,6 +145,7 @@ def main():
                 fixed_body_indices=[],seed_labels=[],seed=mc_seed,sweeps=args.sweeps,sample_every=args.sample_every,
                 metadata=dict(arm='dispersed-free',replicate=replicate,proposal_mode=mode,
                     model_label=atlas['label'],model_sha256=sha(model),native_pair_motifs=str(archive/'native-pair-motifs.json'),
+                    contact_memory_enabled=memory_enabled,
                     initial_fragments=[[i] for i in range(12)],initial_free_tetramers=12,
                     preparation_seed=prepare_seed,initial_poses_sha256=pose_hash,
                     preparation_equilibrated=False,training_feedback=False,
@@ -135,11 +153,13 @@ def main():
                     preparation_certificate=certificate))
             if mode in ('transport','rj'):cfg['auxiliary_transport']=copy.deepcopy(auxiliary)
             if mode=='rj':cfg['reversible_jump']=copy.deepcopy(rj)
+            if memory_enabled:cfg['contact_memory']=copy.deepcopy(memory)
             if reused:cfg['metadata']['reused_start_source']=record['source']
             cfg_path=out/'configs'/f'{identifier}.json';write(cfg_path,cfg)
             jobs.append(dict(id=identifier,replicate=replicate,mode=mode,config=str(cfg_path),
                 config_sha256=sha(cfg_path),directory=str(out/'runs'/identifier),model=str(model),
                 model_sha256=sha(model),model_label=atlas['label'],variant=atlas['label'] if len(atlases)>1 else mode))
+            jobs[-1].update(variant=variant,contact_memory_enabled=memory_enabled)
             if args.write_examples and replicate==0:
                 example=copy.deepcopy(cfg);example['shape']='tetramer-shape.json';example['monomer_shape']='monomer-shape.json'
                 example['metadata']['native_pair_motifs']='native-pair-motifs.json'
@@ -152,6 +172,8 @@ def main():
         binary_sha256=sha(binary),model_sha256=atlases[0]['sha256'] if len(atlases)==1 else None,
         model_label=atlases[0]['label'] if len(atlases)==1 else 'paired-atlas-comparison',atlases=atlases,git_head=source_bundle,
         reversible_jump=rj,reuse_starts=str(args.reuse_starts.resolve()) if args.reuse_starts else None,
+        contact_memory=memory,compare_memory=args.compare_memory,
+        memory_frozen=args.freeze_memory,
         input_sha256={name:sha(archive/name) for name in inputs},
         scope='Independent separated preparations or exact reuses, paired MC streams. Model prior information is explicitly labelled. Optional labelled variable-K RJ with conditional-mean transport. No learning from campaign history; native templates are analysis inputs only beyond the labelled atlas.')
     write(out/'manifest.json',manifest)

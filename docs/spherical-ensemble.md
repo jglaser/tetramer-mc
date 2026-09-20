@@ -51,6 +51,22 @@ GCA alone preserves body-frame radial vectors. Center shifts change this
 invariant; local/learned moves also allow internal rearrangement. These facts
 are not an ergodicity or mixing-time proof.
 
+## Display coordinates
+
+The physical kernels store sphere-centered body positions `p`, with the wall
+at zero. The viewer also supports a coordinate-origin representation with a
+persisted display wall center `C`: body positions are `r = p + C`. Initially
+`C = 0`. A common shift `p -> p + d` records `C -> C - d`, so the same operation
+shows a moving wall and fixed bodies in coordinate-origin view. A subsequent
+GCA rotation `S` acts as `r -> C + S(r - C)`, about that displayed wall center.
+
+`C` is path-dependent display bookkeeping, not an additional physical target
+variable or a freely diffusing wall model. Checkpoints, JSONL and FP64 GSD logs
+retain it. Older checkpoint continuation establishes a new display origin if
+the old origin was not recorded; `coordinate_origin_sweep` makes that explicit.
+The default sphere-centered view remains available. See the
+[viewer documentation](../web/README.md) for legacy-log reconstruction.
+
 ## Optional transported Gaussian auxiliary model
 
 The implemented first case is a **fixed number of components with fluctuating
@@ -59,6 +75,11 @@ This is a useful subcase of the general normalized auxiliary construction.
 The Rust runner additionally supports [RJ component births/deaths](rj-assembly.md)
 from a finite atlas; the Python prototype retains this fixed-K mode. Neither
 mode accumulates unlimited training data.
+
+The Rust runner can additionally maintain an independent finite
+[contact-memory bank](contact-memory-balance.md). Its current poses supply
+extra charts; memory, labels and latent residuals are all held fixed within a
+production move, and the reverse model is rebuilt at the proposed state.
 
 For every ordered pair in the current configuration, compute its standardized
 residual in each frozen component chart. Assign the smallest squared residual,

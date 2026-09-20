@@ -213,6 +213,9 @@ The paired component-history figure is
 Open `runs/free-tetramer-rj-1000/native-on-viewer.html` or
 `native-off-viewer.html` for actual atom-sphere trajectories. Both offer
 sphere-center/default versus coordinate-origin frames and optional native
-monomer coordination bonds. In these runs the two coordinate origins coincide.
+monomer coordination bonds. The origins coincide initially. The corrected
+viewer accumulates common center shifts to show wall motion in coordinate-origin
+view; sphere-center view keeps the wall fixed. Re-export old HTML files to use
+this correction. See [the coordinate convention](spherical-ensemble.md#display-coordinates).
 The overlay tests individual monomer contacts; its bond count is distinct from
 the stricter registered tetramer motifs tabulated above.

@@ -12,3 +12,4 @@ pub mod spherical;
 pub mod trajectory;
 
 pub mod auxiliary;
+pub mod contact_memory;

@@ -3,6 +3,7 @@
 //! allowing exact checkpoint continuation without serializing opaque RNG state.
 use crate::{
     auxiliary::{self, AuxiliaryConfig},
+    contact_memory::{MemoryConfig, MemoryState, ResolvedMemoryConfig},
     depletion::{self, GateOptions},
     geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
@@ -97,6 +98,8 @@ pub struct Config {
     #[serde(default)]
     pub reversible_jump: Option<RjConfig>,
     #[serde(default)]
+    pub contact_memory: Option<MemoryConfig>,
+    #[serde(default)]
     pub seed_labels: Vec<usize>,
     #[serde(default)]
     pub fixed_body_indices: Vec<usize>,
@@ -178,6 +181,13 @@ impl Config {
                 "reversible jump requires auxiliary transport"
             );
         }
+        if let Some(options) = &self.contact_memory {
+            options.validate()?;
+            ensure!(
+                self.boundary.radius().is_some(),
+                "contact memory currently requires a spherical/open proposal"
+            );
+        }
         self.endpoint_gate.validate()
     }
 }
@@ -206,6 +216,8 @@ pub struct RunCounts {
     pub center_shift: CollectiveCounts,
     #[serde(default)]
     pub model_jumps: JumpCounts,
+    #[serde(default)]
+    pub contact_memory: Counts,
     pub selected_body_updates: u64,
     pub selected_body_updates_by_body: Vec<u64>,
 }
@@ -242,6 +254,14 @@ pub struct Checkpoint {
     pub auxiliary_eta: Option<Vec<[f64; 6]>>,
     #[serde(default)]
     pub rj_state: Option<RjState>,
+    #[serde(default)]
+    pub contact_memory_state: Option<MemoryState>,
+    /// Display bookkeeping only: r_coordinate = r_sphere + C. A common
+    /// sphere-frame translation d is equivalently a wall shift C -> C-d.
+    #[serde(default)]
+    pub coordinate_wall_center: Vec3,
+    #[serde(default)]
+    pub coordinate_origin_sweep: u64,
 }
 
 impl Counts {
@@ -263,6 +283,7 @@ impl RunCounts {
             gca: self.gca.since(&old.gca),
             center_shift: self.center_shift.since(&old.center_shift),
             model_jumps: self.model_jumps.since(&old.model_jumps),
+            contact_memory: self.contact_memory.since(&old.contact_memory),
             selected_body_updates: self.selected_body_updates - old.selected_body_updates,
             selected_body_updates_by_body: self
                 .selected_body_updates_by_body
@@ -399,6 +420,23 @@ pub struct RunOptions {
     pub record_moves: bool,
 }
 
+fn memory_dictionary(
+    base: &Option<FrozenRelativePoseProposal>,
+    state: &Option<MemoryState>,
+    config: &Option<ResolvedMemoryConfig>,
+) -> Result<Option<FrozenRelativePoseProposal>> {
+    match (base, state, config) {
+        (Some(base), Some(state), Some(c)) => Ok(Some(base.with_contact_components(
+            &state.poses,
+            c.proposal_mass,
+            c.proposal_translation_std_a,
+            c.proposal_small_angle_std_degrees,
+        )?)),
+        (base, None, None) => Ok(base.clone()),
+        _ => anyhow::bail!("inconsistent contact memory/model state"),
+    }
+}
+
 pub fn run(options: RunOptions) -> Result<Value> {
     ensure!(
         options.sweeps > 0 && options.sample_every > 0,
@@ -493,17 +531,36 @@ pub fn run(options: RunOptions) -> Result<Value> {
         config.auxiliary_transport.is_none() || proposal.is_some(),
         "auxiliary transport requires --method learned and a model"
     );
+    ensure!(
+        config.contact_memory.is_none() || proposal.is_some(),
+        "contact memory requires --method learned and a model"
+    );
+    let memory_initialization_start = cpu_seconds();
+    let resolved_contact_memory = config
+        .contact_memory
+        .as_ref()
+        .map(|m| m.resolve(&tree, config.depletant_radius, config.reservoir_density))
+        .transpose()?;
+    let mut contact_memory_state = resolved_contact_memory
+        .as_ref()
+        .map(|m| {
+            MemoryState::initialize(&tree, m, &mut stream(config.seed, 0, "contact-memory-init"))
+        })
+        .transpose()?;
+    let memory_initialization_cpu = cpu_seconds() - memory_initialization_start;
+    let mut dictionary =
+        memory_dictionary(&proposal, &contact_memory_state, &resolved_contact_memory)?;
     let mut auxiliary_eta = config
         .auxiliary_transport
         .as_ref()
         .filter(|_| config.reversible_jump.is_none())
         .map(|_| {
             auxiliary::draw_eta(
-                proposal.as_ref().unwrap(),
+                dictionary.as_ref().unwrap(),
                 &mut stream(config.seed, 0, "auxiliary"),
             )
         });
-    let label_weights = proposal.as_ref().map(|p| p.component_weights());
+    let label_weights = dictionary.as_ref().map(|p| p.component_weights());
     let mut rj_state = config
         .reversible_jump
         .as_ref()
@@ -526,8 +583,11 @@ pub fn run(options: RunOptions) -> Result<Value> {
         ..Default::default()
     };
     let mut completed = 0;
+    let mut coordinate_wall_center = [0.; 3];
+    let mut coordinate_origin_sweep = 0;
     if let Some(path) = &options.resume {
-        let mut checkpoint: Checkpoint = serde_json::from_slice(&fs::read(path)?)?;
+        let checkpoint_json: Value = serde_json::from_slice(&fs::read(path)?)?;
+        let mut checkpoint: Checkpoint = serde_json::from_value(checkpoint_json.clone())?;
         if checkpoint.shape_sha256.is_empty() {
             // Support the first pre-release checkpoints only when BOTH archived
             // provenance records independently identify the same physical shape.
@@ -561,12 +621,13 @@ pub fn run(options: RunOptions) -> Result<Value> {
         ensure!(
             checkpoint.auxiliary_eta.is_some()
                 == (config.auxiliary_transport.is_some() && config.reversible_jump.is_none())
-                && checkpoint.rj_state.is_some() == config.reversible_jump.is_some(),
+                && checkpoint.rj_state.is_some() == config.reversible_jump.is_some()
+                && checkpoint.contact_memory_state.is_some() == config.contact_memory.is_some(),
             "checkpoint auxiliary mode mismatch"
         );
         if let Some(eta) = &checkpoint.auxiliary_eta {
             ensure!(
-                eta.len() == proposal.as_ref().unwrap().component_count()
+                eta.len() == dictionary.as_ref().unwrap().component_count()
                     && eta.iter().flatten().all(|x| x.is_finite()),
                 "checkpoint auxiliary residual mismatch"
             );
@@ -575,13 +636,37 @@ pub fn run(options: RunOptions) -> Result<Value> {
         if let Some(state) = &checkpoint.rj_state {
             state.validate(
                 config.reversible_jump.as_ref().unwrap(),
-                proposal.as_ref().unwrap().component_count(),
+                dictionary.as_ref().unwrap().component_count(),
             )?;
         }
         rj_state = checkpoint.rj_state;
+        if let Some(state) = &checkpoint.contact_memory_state {
+            state.validate(&tree, resolved_contact_memory.as_ref().unwrap())?;
+        }
+        contact_memory_state = checkpoint.contact_memory_state;
+        dictionary = memory_dictionary(&proposal, &contact_memory_state, &resolved_contact_memory)?;
         poses = checkpoint.poses;
         counts = checkpoint.counts;
         completed = checkpoint.completed_sweeps;
+        ensure!(
+            checkpoint
+                .coordinate_wall_center
+                .iter()
+                .all(|x| x.is_finite()),
+            "invalid checkpoint coordinate-frame center"
+        );
+        coordinate_wall_center = checkpoint.coordinate_wall_center;
+        coordinate_origin_sweep = if checkpoint_json.get("coordinate_wall_center").is_some() {
+            checkpoint.coordinate_origin_sweep
+        } else {
+            // Legacy checkpoints did not preserve the display gauge. Start a
+            // declared new display origin; never invent missing prior shifts.
+            completed
+        };
+        ensure!(
+            coordinate_origin_sweep <= completed,
+            "coordinate origin is after checkpoint"
+        );
     }
     ensure!(
         completed < options.sweeps,
@@ -624,11 +709,16 @@ pub fn run(options: RunOptions) -> Result<Value> {
     effective["sample_every"] = json!(options.sample_every);
     effective["initial_poses"] = json!(poses);
     effective["uniform_proposal_cube_lengths"] = json!(uniform_lengths);
+    effective["coordinate_origin_sweep"] = json!(coordinate_origin_sweep);
+    effective["resolved_contact_memory"] = json!(resolved_contact_memory);
+    effective["coordinate_frame_convention"] = json!(
+        "Stored poses use sphere-centered coordinates; coordinate positions = stored positions + coordinate_wall_center; center shifts subtract their common displacement from the wall center. Origin established at coordinate_origin_sweep."
+    );
     save(&options.out.join("config.json"), &effective)?;
     let executable_sha = hash_file(&std::env::current_exe()?)?;
     save(
         &options.out.join("manifest.json"),
-        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"scope":"Frozen dictionary; optional normalized conditional mean law and reversible component births/deaths; no accumulated fitting; algorithmic MC time, not physical kinetics"}),
+        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"scope":"Frozen base dictionary plus optional reversible contact-memory charts; normalized conditional mean law and component births/deaths; no unrecorded training history; algorithmic MC time, not physical kinetics"}),
     )?;
     let mut trajectory = BufWriter::new(File::create(options.out.join("trajectory.jsonl"))?);
     let mut moves = if options.record_moves {
@@ -653,17 +743,21 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let mut proposal_cpu = 0.;
     let mut gca_cpu = 0.;
     let mut shift_cpu = 0.;
+    let mut memory_cpu = 0.;
+    let mut memory_gate_points = 0_u64;
     let snapshot = |sweep: u64,
                     poses: &[Pose],
                     counts: &RunCounts,
                     auxiliary_eta: &Option<Vec<[f64; 6]>>,
                     rj_state: &Option<RjState>,
+                    contact_memory_state: &Option<MemoryState>,
+                    coordinate_wall_center: Vec3,
                     trajectory: &mut BufWriter<File>,
                     gsd: &mut Option<Trajectory>|
      -> Result<()> {
         jsonline(
             trajectory,
-            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta,"rj_state":rj_state}),
+            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"coordinate_wall_center":coordinate_wall_center,"coordinate_origin_sweep":coordinate_origin_sweep,"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta,"rj_state":rj_state,"contact_memory_state":contact_memory_state}),
         )?;
         trajectory.flush()?;
         if let Some(writer) = gsd {
@@ -671,12 +765,14 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 .boundary
                 .radius()
                 .map_or(config.box_lengths, |r| [2. * r; 3]);
-            writer.append_with_spherical_wall(
+            writer.append_with_coordinate_frame(
                 sweep,
                 poses,
                 display_lengths,
                 &tree,
                 config.boundary.radius(),
+                coordinate_wall_center,
+                coordinate_origin_sweep,
             )?;
             writer.sync()?;
         }
@@ -688,10 +784,43 @@ pub fn run(options: RunOptions) -> Result<Value> {
         &counts,
         &auxiliary_eta,
         &rj_state,
+        &contact_memory_state,
+        coordinate_wall_center,
         &mut trajectory,
         &mut gsd,
     )?;
     for sweep in (completed + 1)..=options.sweeps {
+        if let Some(state) = &mut contact_memory_state {
+            let before = cpu_seconds();
+            let m = resolved_contact_memory.as_ref().unwrap();
+            let mut rng = stream(config.seed, sweep, "contact-memory");
+            for attempt in 0..m.attempts_per_sweep {
+                let result = state.update(&tree, m, config.endpoint_gate, &mut rng)?;
+                counts.contact_memory.attempted += 1;
+                counts.contact_memory.hard_valid += u64::from(result.hard_valid);
+                counts.contact_memory.accepted += u64::from(result.accepted);
+                counts.contact_memory.hard_rejected += u64::from(!result.hard_valid);
+                if let Some(gate) = &result.gate {
+                    memory_gate_points += gate.raw_points;
+                }
+                if let Some(writer) = &mut moves {
+                    jsonline(
+                        writer,
+                        &json!({"sweep":sweep,"kind":"contact_memory","attempt":attempt,"result":result,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
+                    )?;
+                }
+            }
+            dictionary =
+                memory_dictionary(&proposal, &contact_memory_state, &resolved_contact_memory)?;
+            // Fixed slot identities and fixed mixture mass are essential to
+            // retaining the existing independent RJ label prior.
+            ensure!(
+                dictionary.as_ref().unwrap().component_weights()
+                    == *label_weights.as_ref().unwrap(),
+                "contact memory changed the RJ label prior"
+            );
+            memory_cpu += cpu_seconds() - before;
+        }
         if let Some(state) = &mut rj_state {
             state.refresh_eta(&mut stream(config.seed, sweep, "auxiliary"));
             let r = config.reversible_jump.as_ref().unwrap();
@@ -708,7 +837,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
             }
         } else if config.auxiliary_transport.is_some() {
             auxiliary_eta = Some(auxiliary::draw_eta(
-                proposal.as_ref().unwrap(),
+                dictionary.as_ref().unwrap(),
                 &mut stream(config.seed, sweep, "auxiliary"),
             ));
         }
@@ -749,7 +878,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                         config.local_small_angle_std_degrees.to_radians() / 2.,
                     )
                 })
-            } else if let Some(base) = &proposal {
+            } else if let Some(base) = &dictionary {
                 let selected = rj_state
                     .as_ref()
                     .map(|s| base.selected_components(&s.labels))
@@ -779,6 +908,16 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     result.log_reverse_forward = Some(correction);
                 }
                 proposal_info = serde_json::to_value(result)?;
+                if contact_memory_state.is_some() {
+                    let component = proposal_info["component_index"]
+                        .as_u64()
+                        .map(|c| c as usize);
+                    let label = component.map(|c| rj_state.as_ref().map_or(c, |r| r.labels[c]));
+                    let base_count = proposal.as_ref().unwrap().component_count();
+                    proposal_info["dictionary_label"] = json!(label);
+                    proposal_info["contact_memory_slot"] =
+                        json!(label.and_then(|c| c.checked_sub(base_count)));
+                }
                 if config.auxiliary_transport.is_some() {
                     proposal_info["transported_reverse_log_density"] = json!(reverse_log);
                     proposal_info["auxiliary_transport"] = json!(true);
@@ -886,6 +1025,11 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 // upper endpoint (53-bit midpoint addition could round to one).
                 let open_u = ((shift_rng.random::<u64>() >> 12) as f64 + 0.5) / 4503599627370496.;
                 let result = wall.center_shift(&mut poses, direction, open_u)?;
+                coordinate_wall_center = sub(coordinate_wall_center, result.displacement);
+                ensure!(
+                    coordinate_wall_center.iter().all(|x| x.is_finite()),
+                    "unrepresentable coordinate-frame center"
+                );
                 shift_cpu += cpu_seconds() - before;
                 counts.center_shift.completed += 1;
                 counts.center_shift.transformed_bodies += poses.len() as u64;
@@ -905,6 +1049,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 &counts,
                 &auxiliary_eta,
                 &rj_state,
+                &contact_memory_state,
+                coordinate_wall_center,
                 &mut trajectory,
                 &mut gsd,
             )?;
@@ -924,6 +1070,9 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 rng_protocol: "sha256-master-sweep-stream-v1".into(),
                 auxiliary_eta: auxiliary_eta.clone(),
                 rj_state: rj_state.clone(),
+                contact_memory_state: contact_memory_state.clone(),
+                coordinate_wall_center,
+                coordinate_origin_sweep,
             };
             save(&options.out.join("checkpoint.json"), &checkpoint)?;
             save(
@@ -932,7 +1081,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
             )?;
         }
     }
-    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump});
+    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu,"contact_memory_cpu_seconds":memory_cpu,"contact_memory_gate_raw_points":memory_gate_points,"contact_memory_initialization_cpu_seconds":memory_initialization_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory});
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
 }

@@ -7,6 +7,7 @@ No external scripts, libraries, fonts or network resources are referenced.
 """
 from __future__ import annotations
 import argparse
+import gzip
 import hashlib
 import json
 import math
@@ -34,6 +35,130 @@ def poses(frame):
             raise ValueError('Saved orientation must be a scalar-first unit quaternion')
         normalized.append(dict(position=p, orientation=q))
     return normalized
+
+
+def vector3(value, name):
+    if not isinstance(value, (list, tuple)) or len(value) != 3 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in value):
+        raise ValueError(name + ' must contain three finite coordinates')
+    return list(map(float, value))
+
+
+def shift_count(record):
+    counts = record.get('counts', {})
+    if 'center_shift' in counts:
+        return counts['center_shift'].get('completed')
+    if 'shift' in counts:
+        return counts['shift'].get('accepted')
+    return None
+
+
+def coordinate_history(run, frames, rows, initial_center):
+    """Use persisted coordinate origins or certify their reconstruction from logs.
+
+    Stored poses stay in the sphere frame. In the accumulated-shift convention,
+    p_lab=p_sphere+C and an accepted common shift d changes C to C-d.
+    A missing origin is never inferred from a center of mass or later frame.
+    """
+    convention = 'Accumulated center-shift convention: p_coordinate = p_sphere + C; C_new = C_old - accepted_common_displacement. This changes the display frame, not the physical target.'
+    try:
+        if all('coordinate_wall_center' in row for row in rows):
+            origins = [row.get('coordinate_origin_sweep', 0) for row in rows]
+            if any(not isinstance(s, int) or s < 0 or s > rows[0].get('sweep', rows[0].get('step', 0)) for s in origins) or len(set(origins)) != 1:
+                raise ValueError('Persisted coordinate origin sweeps are invalid or inconsistent')
+            for frame, row in zip(frames, rows):
+                frame['coordinate_wall_center'] = vector3(row['coordinate_wall_center'], 'coordinate_wall_center')
+                frame['coordinate_origin_sweep'] = origins[0]
+            return dict(available=True, source='persisted trajectory field', origin_sweep=origins[0], convention=convention)
+        first, last = frames[0]['sweep'], frames[-1]['sweep']
+        if any(not isinstance(f['sweep'], int) for f in frames) or any(a['sweep'] >= b['sweep'] for a, b in zip(frames, frames[1:])):
+            raise ValueError('Saved sweeps must increase strictly to reconstruct shift history')
+        manifest_path = run/'manifest.json'
+        manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else {}
+        if manifest.get('initial_sweep', first) != first:
+            raise ValueError('First saved sweep differs from the segment start')
+        origin_sources = {}
+        origin_sweep = rows[0].get('coordinate_origin_sweep', 0)
+        if 'coordinate_wall_center' in rows[0]:
+            center = vector3(rows[0]['coordinate_wall_center'], 'initial coordinate_wall_center')
+        elif first == 0 and not manifest.get('resume'):
+            center = vector3(initial_center, 'initial coordinate wall center')
+        else:
+            resume = manifest.get('resume')
+            if not resume:
+                raise ValueError('Resumed/trimmed trajectory has no known initial coordinate wall center')
+            path = Path(resume)
+            candidates = [path] if path.is_absolute() else [run/path, Path.cwd()/path]
+            path = next((p for p in candidates if p.is_file()), None)
+            if path is None:
+                raise ValueError('Resume checkpoint unavailable; initial coordinate wall center cannot be reconstructed')
+            checkpoint = json.loads(path.read_text())
+            if checkpoint.get('completed_sweeps', checkpoint.get('sweep')) != first or 'coordinate_wall_center' not in checkpoint:
+                raise ValueError('Legacy resume checkpoint lacks the coordinate origin; provide its full earlier shift history')
+            center = vector3(checkpoint['coordinate_wall_center'], 'checkpoint coordinate_wall_center')
+            origin_sweep = checkpoint.get('coordinate_origin_sweep', 0)
+            origin_sources[str(path.resolve())] = sha(path)
+        baseline = shift_count(rows[0])
+        if baseline is None and first == 0:
+            baseline = 0
+        if baseline is None or not isinstance(baseline, int) or baseline < 0 or (first == 0 and baseline != 0):
+            raise ValueError('Initial shift counter is missing or inconsistent with the segment start')
+        for row in rows[1:]:
+            count = shift_count(row)
+            if not isinstance(count, int) or count < baseline:
+                raise ValueError('Saved shift counters are missing or inconsistent')
+        path = next((run/name for name in ('moves.jsonl', 'moves.jsonl.gz') if (run/name).is_file()), None)
+        if path is None:
+            raise ValueError('Move log unavailable; cumulative shifts cannot be reconstructed')
+        events = []
+        previous_sweep = first
+        with (gzip.open(path, 'rt') if path.suffix == '.gz' else path.open()) as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                move = json.loads(line)
+                sweep = move.get('sweep')
+                if not isinstance(sweep, int) or sweep < previous_sweep or sweep <= first:
+                    raise ValueError('Move log does not start after the initial frame or is out of sweep order')
+                previous_sweep = sweep
+                if move.get('kind') not in ('shift', 'center_shift') or move.get('accepted') is False:
+                    continue
+                if move['kind'] == 'center_shift':
+                    displacement = move.get('result', {}).get('displacement')
+                else:
+                    direction = vector3(move.get('direction'), 'shift direction')
+                    distance = move.get('distance')
+                    if not isinstance(distance, (int, float)) or not math.isfinite(distance):
+                        raise ValueError('Invalid logged shift distance')
+                    displacement = [distance * v for v in direction]
+                events.append((sweep, vector3(displacement, 'shift displacement')))
+        event_index = 0
+        centers = []
+        for frame, row in zip(frames, rows):
+            while event_index < len(events) and events[event_index][0] <= frame['sweep']:
+                center = [c-d for c, d in zip(center, events[event_index][1])]
+                event_index += 1
+            expected = shift_count(row)
+            if expected is None and frame['sweep'] == 0:
+                expected = 0
+            if expected != baseline + event_index:
+                raise ValueError(f"Shift log/count mismatch at sweep {frame['sweep']}: {event_index} segment shifts, counter {expected}, baseline {baseline}")
+            if 'coordinate_wall_center' in row and any(abs(a-b) > 1e-9*(1+abs(a)+abs(b)) for a,b in zip(center,vector3(row['coordinate_wall_center'],'coordinate_wall_center'))):
+                raise ValueError('Persisted coordinate origin disagrees with logged displacements')
+            centers.append(center[:])
+        for frame, center in zip(frames, centers):
+            frame['coordinate_wall_center'] = center
+            frame['coordinate_origin_sweep'] = origin_sweep
+        origin_sources[str(path.resolve())] = sha(path)
+        if manifest_path.is_file():
+            origin_sources[str(manifest_path.resolve())] = sha(manifest_path)
+        return dict(available=True, source='validated cumulative accepted shift log',
+                    initial_sweep=first, last_sweep=last, origin_sweep=origin_sweep, segment_shifts=event_index,
+                    convention=convention, source_sha256=origin_sources)
+    except (ValueError, TypeError, KeyError, OSError) as error:
+        for frame in frames:
+            frame.pop('coordinate_wall_center', None)
+            frame.pop('coordinate_origin_sweep', None)
+        return dict(available=False, reason=str(error), convention=convention)
 
 
 def native_bonds(config, shape, frames, run, boundary, wall_radius, reference, mode):
@@ -125,11 +250,12 @@ def bundle(run, output, native_mode='auto', reference=None):
         atoms.append(row)
     if not atoms:
         raise ValueError('No sphere geometry to display')
-    frames = []
+    frames, rows = [], []
     for line in trajectory_path.read_text().splitlines():
         if not line.strip():
             continue
         row = json.loads(line)
+        rows.append(row)
         frame = dict(sweep=row.get('sweep', row.get('step', len(frames))), poses=poses(row),
                      seed_labels=row.get('seed_labels', config.get('seed_labels', [])))
         if 'contact_edges' in row:
@@ -161,11 +287,14 @@ def bundle(run, output, native_mode='auto', reference=None):
     for frame in frames:
         if any(not isinstance(i, int) or i < 0 or i >= count for i in frame['seed_labels']):
             raise ValueError('Seed label outside body index range')
+    coordinate_frame = coordinate_history(run, frames, rows, wall_center) if boundary == 'spherical' else dict(available=False, reason='Periodic view uses its existing image convention')
+    if coordinate_frame['available']:
+        coordinate_frame['fixed_view_extent'] = wall_radius + max(math.hypot(*f['coordinate_wall_center']) for f in frames)
     reference = (reference or Path(__file__).resolve().parents[2]/'protein-nucleation').resolve()
     native = native_bonds(config, shape, frames, run, boundary, wall_radius, reference, native_mode)
     data = dict(schema='tetramer-offline-viewer-v1', run_name=run.name, atoms=atoms, frames=frames,
         body_count=count, box_lengths=box, boundary=boundary, spherical_wall_radius=wall_radius,
-        spherical_wall_center=wall_center, native_bonds=native,
+        spherical_wall_center=wall_center, coordinate_frame=coordinate_frame, stored_pose_frame='sphere-centered' if boundary == 'spherical' else 'periodic', native_bonds=native,
         body_bound=max(math.hypot(*a[:3])+a[3] for a in atoms),
         depletant_radius=config.get('depletant_radius', 0.),
         source_sha256=dict(config=sha(config_path), trajectory=sha(trajectory_path), shape=sha(shape_path)),
@@ -185,7 +314,7 @@ def bundle(run, output, native_mode='auto', reference=None):
         output_sha256=sha(output), sources=data['source_sha256'],
         native_bonds_available=native['available'],
         native_bonds_per_frame=[len(f.get('native_bonds', [])) for f in frames],
-        native_bonds_unavailable_reason=native.get('reason'))
+        native_bonds_unavailable_reason=native.get('reason'), coordinate_frame=coordinate_frame)
 
 
 def main():

@@ -1,0 +1,4378 @@
+{
+  "schema": "contact-memory-pilot-assessment-v1",
+  "passed": true,
+  "scope": "Finite matched 1000-sweep accessibility and cost pilot, not equilibrium or mixing-time proof",
+  "physics": {
+    "bodies": 12,
+    "wall_radius_A": 354.50820786337056,
+    "depletant_radius_A": 1.5,
+    "activity_A_minus3": 0.035,
+    "sweeps": 1000,
+    "sample_every": 10,
+    "independent_preparations": 4
+  },
+  "pair_checks": [
+    {
+      "replicate": 0,
+      "physical_initial_poses_equal": true,
+      "mc_seeds_equal": true,
+      "frozen_and_dynamic_initial_banks_equal": true,
+      "resolved_bank_parameters_only_differ_in_update_attempts": true
+    },
+    {
+      "replicate": 1,
+      "physical_initial_poses_equal": true,
+      "mc_seeds_equal": true,
+      "frozen_and_dynamic_initial_banks_equal": true,
+      "resolved_bank_parameters_only_differ_in_update_attempts": true
+    },
+    {
+      "replicate": 2,
+      "physical_initial_poses_equal": true,
+      "mc_seeds_equal": true,
+      "frozen_and_dynamic_initial_banks_equal": true,
+      "resolved_bank_parameters_only_differ_in_update_attempts": true
+    },
+    {
+      "replicate": 3,
+      "physical_initial_poses_equal": true,
+      "mc_seeds_equal": true,
+      "frozen_and_dynamic_initial_banks_equal": true,
+      "resolved_bank_parameters_only_differ_in_update_attempts": true
+    }
+  ],
+  "pooled": {
+    "memory-off": {
+      "total_cpu_seconds": 135.264108094,
+      "proposal_counts": {
+        "base_attempted": 21537,
+        "base_hard_valid": 9631,
+        "base_accepted": 0,
+        "uniform_attempted": 2357,
+        "uniform_hard_valid": 569,
+        "uniform_accepted": 475
+      },
+      "accepted_global_per_cpu_second": 3.511648483054389,
+      "observed_nonspecific_environment_returns": 166,
+      "native_formations": 0,
+      "native_breakages": 0,
+      "memory_native_slots_ever": 0,
+      "memory_update_cpu_seconds": 0.0
+    },
+    "memory-frozen": {
+      "total_cpu_seconds": 136.80702380099999,
+      "proposal_counts": {
+        "base_attempted": 10990,
+        "base_hard_valid": 4887,
+        "base_accepted": 0,
+        "uniform_attempted": 2357,
+        "uniform_hard_valid": 568,
+        "uniform_accepted": 442,
+        "memory_attempted": 10547,
+        "memory_hard_valid": 4420,
+        "memory_accepted": 0
+      },
+      "accepted_global_per_cpu_second": 3.23082826977462,
+      "observed_nonspecific_environment_returns": 158,
+      "native_formations": 0,
+      "native_breakages": 0,
+      "memory_native_slots_ever": 0,
+      "memory_update_cpu_seconds": 0.025783817000131354
+    },
+    "memory-on": {
+      "total_cpu_seconds": 207.955872107,
+      "proposal_counts": {
+        "base_attempted": 10990,
+        "base_hard_valid": 4821,
+        "base_accepted": 0,
+        "uniform_attempted": 2357,
+        "uniform_hard_valid": 572,
+        "uniform_accepted": 375,
+        "memory_attempted": 10547,
+        "memory_hard_valid": 4906,
+        "memory_accepted": 0
+      },
+      "accepted_global_per_cpu_second": 1.8032671845258132,
+      "observed_nonspecific_environment_returns": 147,
+      "native_formations": 0,
+      "native_breakages": 0,
+      "memory_native_slots_ever": 0,
+      "memory_update_cpu_seconds": 33.02418487099985
+    }
+  },
+  "binary_sha256": [
+    "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+    "c54e0de8f0ad6149f75ae84bbbf7a299c146df4e28e05006d7d1f799ab92dd1d"
+  ],
+  "source_campaigns": [
+    {
+      "path": "/home/xvg/tetramer-mc/runs/contact-memory-free-1000",
+      "manifest_sha256": "b1375b93eacd8e523a04cf8c76ce4a6f56f6d6c5baa60140de36402140e87720",
+      "assessment_sha256": "350f1b638d23e2d622de75ab9571d28d4e5b9f088e613653c2bb877969641f06"
+    },
+    {
+      "path": "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000",
+      "manifest_sha256": "b404a54b8801f58af9010c5dafc0bb9af7e311e364194486eb80a57c8280a2a1",
+      "assessment_sha256": "6d89a8857b1889f0106cc04982d22cf7fe2166dc17fdb0914a45dfb4adbadebc"
+    }
+  ],
+  "runs": [
+    {
+      "id": "free-r00-rj-memory-off",
+      "variant": "memory-off",
+      "replicate": 0,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            2,
+            4
+          ],
+          [
+            8,
+            10
+          ]
+        ],
+        "components": [
+          [
+            2,
+            4
+          ],
+          [
+            8,
+            10
+          ],
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            3
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            9
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          2,
+          4
+        ],
+        "largest_component_size": 2,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 4,
+        "bonds": 2
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 38
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 5984
+        },
+        "global": {
+          "accepted": 112,
+          "attempted": 5985,
+          "hard_rejected": 3486,
+          "hard_valid": 2499,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 4687,
+          "attempted": 6015,
+          "hard_rejected": 811,
+          "hard_valid": 5204,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1718,
+          "accepted_deaths": 1713,
+          "births": 2111,
+          "boundary_nulls": 0,
+          "deaths": 1889
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.187720304999923,
+        "contact_memory_cpu_seconds": 0.0,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 3.137999999999752e-06,
+        "gate_cpu_seconds": 37.19131807200008,
+        "gate_raw_points": 5366521,
+        "gca_cpu_seconds": 2.9103016090000775,
+        "geometry_cpu_seconds": 0.32800287100001335,
+        "proposal_cpu_seconds": 1.093632254999883
+      },
+      "cpu_seconds": 42.751424022,
+      "proposal_source_diagnostics": {
+        "base": {
+          "attempted": 5353,
+          "hard_valid": 2355,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -25.929258187642848,
+            "median": -24.350012302848796,
+            "minimum": -45.534476175058714,
+            "maximum": -13.761103178292249,
+            "samples": 2355
+          },
+          "conditional_acceptance_probability": {
+            "mean": 1.8640644205195204e-09,
+            "median": 2.660259621465952e-11,
+            "minimum": 1.6773676420148084e-20,
+            "maximum": 1.055914672721189e-06,
+            "samples": 2355
+          },
+          "log_reverse_forward": {
+            "mean": -25.016799707692304,
+            "median": -25.29477301782477,
+            "minimum": -29.70222338294662,
+            "maximum": -13.11716307332373,
+            "samples": 2355
+          },
+          "gate_log_weight": {
+            "mean": -0.9124584799505449,
+            "median": 0.9699939490629574,
+            "minimum": -20.127374443056368,
+            "maximum": 10.063687221528184,
+            "samples": 2355
+          },
+          "expected_acceptances_given_sampled_gates": 4.38987171032347e-06
+        },
+        "uniform": {
+          "attempted": 632,
+          "hard_valid": 144,
+          "accepted": 112,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -1.8486299610830927,
+            "median": 0.0,
+            "minimum": -15.701777050456624,
+            "maximum": 0.0,
+            "samples": 144
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.7683023876659566,
+            "median": 1.0,
+            "minimum": 1.516368907813044e-07,
+            "maximum": 1.0,
+            "samples": 144
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 144
+          },
+          "gate_log_weight": {
+            "mean": -1.8427359006287172,
+            "median": 0.0,
+            "minimum": -15.701777050456624,
+            "maximum": 0.6668708399807832,
+            "samples": 144
+          },
+          "expected_acceptances_given_sampled_gates": 110.63554382389775
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 4.263256414560601e-13,
+        "maximum_rotation_error": 1.6930901125533637e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.00271733175777622,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "84eeaf50143a48fcab39b82868294aafe84df8f52dd08f3161eb16ab31e421e0",
+      "initial_bank_sha256": null,
+      "memory": null,
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-off/config.json": "c05a54d9204eabacd319763e315cc53083d3d30e62ae9ac99dc64d002dcb9129",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-off/manifest.json": "065e4a45131f121801017e6fd474e35880700123b66cea87a5d8b00b062b08f6",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-off/summary.json": "83373b43e7de6b60602aeb7e99aa378819e9bf325ece55eade1e61cbc9df6645",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-off/trajectory.jsonl": "d903eb45621d711e695f641ebfa842ea49d90e345fbcbc99bf6b85aca122f4e3",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-off/moves.jsonl": "4e566c795285bf5f986d15bf53e8571e91166b11fac8f26afc97a6c15a026f18"
+      }
+    },
+    {
+      "id": "free-r00-rj-memory-frozen",
+      "variant": "memory-frozen",
+      "replicate": 0,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            0,
+            11
+          ],
+          [
+            7,
+            10
+          ]
+        ],
+        "components": [
+          [
+            0,
+            11
+          ],
+          [
+            7,
+            10
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ]
+        ],
+        "largest_component": [
+          0,
+          11
+        ],
+        "largest_component_size": 2,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 4,
+        "bonds": 2
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 52
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 6108
+        },
+        "global": {
+          "accepted": 96,
+          "attempted": 5985,
+          "hard_rejected": 3704,
+          "hard_valid": 2281,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 4174,
+          "attempted": 6015,
+          "hard_rejected": 1315,
+          "hard_valid": 4700,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1718,
+          "accepted_deaths": 1713,
+          "births": 2111,
+          "boundary_nulls": 0,
+          "deaths": 1889
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.1931249319999678,
+        "contact_memory_cpu_seconds": 0.005743988000027969,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 0.011754401999999997,
+        "gate_cpu_seconds": 34.11767677000018,
+        "gate_raw_points": 5036452,
+        "gca_cpu_seconds": 3.4150085360000553,
+        "geometry_cpu_seconds": 0.330628309999827,
+        "proposal_cpu_seconds": 1.1001201009998411
+      },
+      "cpu_seconds": 40.460998301,
+      "proposal_source_diagnostics": {
+        "base": {
+          "attempted": 2631,
+          "hard_valid": 1078,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -26.574956022122393,
+            "median": -24.88932953666012,
+            "minimum": -43.22177298745663,
+            "maximum": -15.74335238304904,
+            "samples": 1078
+          },
+          "conditional_acceptance_probability": {
+            "mean": 8.663732403016602e-10,
+            "median": 1.551329674853466e-11,
+            "minimum": 1.694425557785679e-19,
+            "maximum": 1.4546179195764803e-07,
+            "samples": 1078
+          },
+          "log_reverse_forward": {
+            "mean": -24.958055742118386,
+            "median": -25.251359232076723,
+            "minimum": -28.294912880616863,
+            "maximum": -16.76058699504507,
+            "samples": 1078
+          },
+          "gate_log_weight": {
+            "mean": -1.6169002800040055,
+            "median": 0.5456215963479135,
+            "minimum": -17.944888057664713,
+            "maximum": 9.51806562518027,
+            "samples": 1078
+          },
+          "expected_acceptances_given_sampled_gates": 9.339503530451897e-07
+        },
+        "uniform": {
+          "attempted": 632,
+          "hard_valid": 147,
+          "accepted": 96,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -3.0642240822864686,
+            "median": 0.0,
+            "minimum": -17.763014192215408,
+            "maximum": 0.0,
+            "samples": 147
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.6392160245713077,
+            "median": 1.0,
+            "minimum": 1.9302828599488047e-08,
+            "maximum": 1.0,
+            "samples": 147
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 147
+          },
+          "gate_log_weight": {
+            "mean": -3.05473859724036,
+            "median": 0.0,
+            "minimum": -17.763014192215408,
+            "maximum": 1.091243192695827,
+            "samples": 147
+          },
+          "expected_acceptances_given_sampled_gates": 93.96475561198223
+        },
+        "memory": {
+          "attempted": 2722,
+          "hard_valid": 1056,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -26.991026567443868,
+            "median": -25.238119450290164,
+            "minimum": -44.667186513353215,
+            "maximum": -14.29253840927908,
+            "samples": 1056
+          },
+          "conditional_acceptance_probability": {
+            "mean": 2.243377131952275e-09,
+            "median": 1.094522552161775e-11,
+            "minimum": 3.9928902676651455e-20,
+            "maximum": 6.206252438236845e-07,
+            "samples": 1056
+          },
+          "log_reverse_forward": {
+            "mean": -25.051440537076207,
+            "median": -25.455171243817265,
+            "minimum": -28.413992326823518,
+            "maximum": -13.113081805892682,
+            "samples": 1056
+          },
+          "gate_log_weight": {
+            "mean": -1.939586030367662,
+            "median": 0.24249848726573936,
+            "minimum": -19.27862973762628,
+            "maximum": 6.668708399807833,
+            "samples": 1056
+          },
+          "expected_acceptances_given_sampled_gates": 2.369006251341602e-06
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 4.547473508864641e-13,
+        "maximum_rotation_error": 1.9984014443252818e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.002478103228054307,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "84eeaf50143a48fcab39b82868294aafe84df8f52dd08f3161eb16ab31e421e0",
+      "initial_bank_sha256": "3b0206206d8a478fa9562663062f1c7ad14f1ffd89bc1a56ee6e44c77fcfd6c2",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 0,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {},
+        "proposal_kinds": {},
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 16,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "final_slot_rotation_changes_degrees": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.7075472925031877e-06,
+          1.7075472925031877e-06,
+          0.0
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "c54e0de8f0ad6149f75ae84bbbf7a299c146df4e28e05006d7d1f799ab92dd1d",
+        "source_bundle_sha256": "5cff7708207d3eaa896995a0cd9a11581ba9d5ac2dc52adab29067780048f838"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r00-rj-memory-frozen/config.json": "085237b55319213f26f464212484e9521e9c6ce012046ab184656f0a98b70ec6",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r00-rj-memory-frozen/manifest.json": "3a33b774055670bd91e5448ca4cc5a44ed84c5626ef6e813c64acf6262c4dea5",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r00-rj-memory-frozen/summary.json": "11b5278a9df7242175c5d1b6634b4f72a908ebccd6667eca29f454ceee42ed23",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r00-rj-memory-frozen/trajectory.jsonl": "f20156690226981cd9a21c7dcb8fa79b1fdb39f8347e6b9340575e92235592e0",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r00-rj-memory-frozen/moves.jsonl": "bf4a4c92742d0567ab6eb35de2a19ba09258fbf0ce80c30fb569b793e484bdd0"
+      }
+    },
+    {
+      "id": "free-r00-rj-memory-on",
+      "variant": "memory-on",
+      "replicate": 0,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            3,
+            7
+          ],
+          [
+            5,
+            6
+          ],
+          [
+            9,
+            11
+          ]
+        ],
+        "components": [
+          [
+            3,
+            7
+          ],
+          [
+            5,
+            6
+          ],
+          [
+            9,
+            11
+          ],
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            4
+          ],
+          [
+            8
+          ],
+          [
+            10
+          ]
+        ],
+        "largest_component": [
+          3,
+          7
+        ],
+        "largest_component_size": 2,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 6,
+        "bonds": 3
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 24
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 1042,
+          "attempted": 2000,
+          "hard_rejected": 572,
+          "hard_valid": 1428,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 5954
+        },
+        "global": {
+          "accepted": 75,
+          "attempted": 5985,
+          "hard_rejected": 3330,
+          "hard_valid": 2655,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 3685,
+          "attempted": 6015,
+          "hard_rejected": 1726,
+          "hard_valid": 4289,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1718,
+          "accepted_deaths": 1713,
+          "births": 2111,
+          "boundary_nulls": 0,
+          "deaths": 1889
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.18271788800013364,
+        "contact_memory_cpu_seconds": 7.448864145999946,
+        "contact_memory_gate_raw_points": 763456,
+        "contact_memory_initialization_cpu_seconds": 0.011647735999999999,
+        "gate_cpu_seconds": 47.10940362300019,
+        "gate_raw_points": 7717724,
+        "gca_cpu_seconds": 6.464724457000128,
+        "geometry_cpu_seconds": 0.5525882640002839,
+        "proposal_cpu_seconds": 1.10557091299995
+      },
+      "cpu_seconds": 64.190244403,
+      "proposal_source_diagnostics": {
+        "base": {
+          "attempted": 2631,
+          "hard_valid": 1150,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -28.467893612224877,
+            "median": -25.26159216540386,
+            "minimum": -47.883200764058216,
+            "maximum": -15.704512366138253,
+            "samples": 1150
+          },
+          "conditional_acceptance_probability": {
+            "mean": 8.736328724415873e-10,
+            "median": 1.0691388244183603e-11,
+            "minimum": 1.6017330332002008e-21,
+            "maximum": 1.512226827691293e-07,
+            "samples": 1150
+          },
+          "log_reverse_forward": {
+            "mean": -24.959625823301465,
+            "median": -25.252493629757772,
+            "minimum": -29.701912431719535,
+            "maximum": -16.760586995044946,
+            "samples": 1150
+          },
+          "gate_log_weight": {
+            "mean": -3.5082677889234106,
+            "median": 0.3031231090821742,
+            "minimum": -22.06736234118228,
+            "maximum": 8.548071676117312,
+            "samples": 1150
+          },
+          "expected_acceptances_given_sampled_gates": 1.0046778033078255e-06
+        },
+        "uniform": {
+          "attempted": 632,
+          "hard_valid": 143,
+          "accepted": 75,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -5.985727520463242,
+            "median": 0.0,
+            "minimum": -22.188611584815153,
+            "maximum": 0.0,
+            "samples": 143
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.515543257428328,
+            "median": 1.0,
+            "minimum": 2.309981105643873e-10,
+            "maximum": 1.0,
+            "samples": 143
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 143
+          },
+          "gate_log_weight": {
+            "mean": -5.985727520463242,
+            "median": 0.0,
+            "minimum": -22.188611584815153,
+            "maximum": 0.0,
+            "samples": 143
+          },
+          "expected_acceptances_given_sampled_gates": 73.7226858122509
+        },
+        "memory": {
+          "attempted": 2722,
+          "hard_valid": 1362,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -29.79692365501436,
+            "median": -26.624102402070633,
+            "minimum": -49.29777872630248,
+            "maximum": -14.55796323089804,
+            "samples": 1362
+          },
+          "conditional_acceptance_probability": {
+            "mean": 7.706964751813084e-10,
+            "median": 2.737154543994667e-12,
+            "minimum": 3.8926623005501955e-22,
+            "maximum": 4.759451450258978e-07,
+            "samples": 1362
+          },
+          "log_reverse_forward": {
+            "mean": -25.05262413891559,
+            "median": -25.350327453462356,
+            "minimum": -28.44463888591484,
+            "maximum": -14.55796323089804,
+            "samples": 1362
+          },
+          "gate_log_weight": {
+            "mean": -4.744299516098769,
+            "median": 0.0,
+            "minimum": -23.279854777510977,
+            "maximum": 8.972444028832356,
+            "samples": 1362
+          },
+          "expected_acceptances_given_sampled_gates": 1.049688599196942e-06
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 20000,
+        "frames": 101,
+        "maximum_position_error_A": 3.410605131648481e-13,
+        "maximum_rotation_error": 1.887379141862766e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.002082870677877491,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "84eeaf50143a48fcab39b82868294aafe84df8f52dd08f3161eb16ab31e421e0",
+      "initial_bank_sha256": "3b0206206d8a478fa9562663062f1c7ad14f1ffd89bc1a56ee6e44c77fcfd6c2",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 2,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {
+          "attempted": 2000,
+          "hard_valid": 1428,
+          "accepted": 1042,
+          "hard_rejected": 572,
+          "outside_ball": 7
+        },
+        "proposal_kinds": {
+          "local": 1789,
+          "global": 211
+        },
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 1058,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          0.5115342923917682,
+          106.22157230101746,
+          105.42091422650743,
+          54.671147616688685,
+          125.0254253561622,
+          0.8575903395177218,
+          1.8002545845344224,
+          31.271046232481538,
+          1.175103449989973,
+          99.7214940367569,
+          1.667639564609436,
+          98.92368680660365,
+          118.85914345943202,
+          64.7671826352135,
+          1.5146181989077616,
+          133.22240390559753
+        ],
+        "final_slot_rotation_changes_degrees": [
+          10.879429884680368,
+          58.752819910503554,
+          167.08614059549342,
+          173.92138140264896,
+          81.05767643106181,
+          17.261348296657697,
+          8.021426688800426,
+          84.29165513813508,
+          11.341037748016126,
+          138.1104698190641,
+          6.304397558902728,
+          82.85860291718049,
+          83.98726565302925,
+          132.52583333692462,
+          4.389797817271153,
+          90.15797389876892
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-on/config.json": "069a2c5b89e75cc3f4a51fbbf35d2c67b62b8d71868084d0ef6aa5ae61c2bfae",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-on/manifest.json": "dfe2e88bcb9c835fdb90673d3dd1dbf88048e8afe2c0d885b41f130f6aca0682",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-on/summary.json": "0ca668e49f5847476478d847c7617827b33511d2ef0948509fdeabda3bf8662f",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-on/trajectory.jsonl": "cb493fb1a7703f9c1719799947b71ce1dc416ee78f40b634edeb44c7ed7816bc",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r00-rj-memory-on/moves.jsonl": "e640a0dffe66392a76e89994653a6b4563e1797b638a9d3092f7932c6503d4ce"
+      }
+    },
+    {
+      "id": "free-r01-rj-memory-off",
+      "variant": "memory-off",
+      "replicate": 1,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 49
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 5932
+        },
+        "global": {
+          "accepted": 131,
+          "attempted": 5927,
+          "hard_rejected": 3220,
+          "hard_valid": 2707,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 5637,
+          "attempted": 6073,
+          "hard_rejected": 269,
+          "hard_valid": 5804,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1723,
+          "accepted_deaths": 1723,
+          "births": 2031,
+          "boundary_nulls": 1,
+          "deaths": 1969
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.1867671400000055,
+        "contact_memory_cpu_seconds": 0.0,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 2.9660000000000797e-06,
+        "gate_cpu_seconds": 26.878450671000078,
+        "gate_raw_points": 3441593,
+        "gca_cpu_seconds": 1.4175387630000256,
+        "geometry_cpu_seconds": 0.18497043800016813,
+        "proposal_cpu_seconds": 1.0125061520000975
+      },
+      "cpu_seconds": 30.671251799,
+      "proposal_source_diagnostics": {
+        "uniform": {
+          "attempted": 565,
+          "hard_valid": 144,
+          "accepted": 131,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -0.5102572336216599,
+            "median": 0.0,
+            "minimum": -11.51867814512262,
+            "maximum": 0.0,
+            "samples": 144
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.8918505804787006,
+            "median": 1.0,
+            "minimum": 9.942638348284338e-06,
+            "maximum": 1.0,
+            "samples": 144
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 144
+          },
+          "gate_log_weight": {
+            "mean": -0.5102572336216599,
+            "median": 0.0,
+            "minimum": -11.51867814512262,
+            "maximum": 0.0,
+            "samples": 144
+          },
+          "expected_acceptances_given_sampled_gates": 128.42648358893288
+        },
+        "base": {
+          "attempted": 5362,
+          "hard_valid": 2563,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -23.710543026135756,
+            "median": -23.73387119152395,
+            "minimum": -37.49378269067688,
+            "maximum": -12.352045129308234,
+            "samples": 2563
+          },
+          "conditional_acceptance_probability": {
+            "mean": 4.053110989094897e-09,
+            "median": 4.9261848846838295e-11,
+            "minimum": 5.207833270192706e-17,
+            "maximum": 4.320907409334715e-06,
+            "samples": 2563
+          },
+          "log_reverse_forward": {
+            "mean": -25.036739152309007,
+            "median": -25.36728481462977,
+            "minimum": -29.24374018608835,
+            "maximum": -16.684246818734387,
+            "samples": 2563
+          },
+          "gate_log_weight": {
+            "mean": 1.3261961261732549,
+            "median": 1.3337416799615665,
+            "minimum": -10.730558061508967,
+            "maximum": 10.7911826833254,
+            "samples": 2563
+          },
+          "expected_acceptances_given_sampled_gates": 1.0388123465050222e-05
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 3.694822225952521e-13,
+        "maximum_rotation_error": 1.3322676295501878e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.2067328407588207,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "bc7e27852c32a8efdd18784679c84e5d967d01e33a0e9792028fecee93cbe23f",
+      "initial_bank_sha256": null,
+      "memory": null,
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-off/config.json": "170a85cc471524059abae39416f6123b4c7f30a2a99b76fe88b9eb83be244aff",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-off/manifest.json": "7ee698036b56e851de4ef9cd851fff25eaf450a626cba9f56e0686be1559ef4f",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-off/summary.json": "6374553b501b6d68af38d9db431397ec8c46e8374366ca704d508300b2cf2422",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-off/trajectory.jsonl": "77715fce3b60d844627ccd642071d86d05c2ca239d3ff4e4129d801767ff22c4",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-off/moves.jsonl": "62cf52412bd3fd0475cbc6caabf9f93dc4f1e76ea41a5d817ef3edfdd001c8ed"
+      }
+    },
+    {
+      "id": "free-r01-rj-memory-frozen",
+      "variant": "memory-frozen",
+      "replicate": 1,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            0,
+            3
+          ]
+        ],
+        "components": [
+          [
+            0,
+            3
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0,
+          3
+        ],
+        "largest_component_size": 2,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 2,
+        "bonds": 1
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 20
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 6020
+        },
+        "global": {
+          "accepted": 110,
+          "attempted": 5927,
+          "hard_rejected": 3423,
+          "hard_valid": 2504,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 4552,
+          "attempted": 6073,
+          "hard_rejected": 1169,
+          "hard_valid": 4904,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1723,
+          "accepted_deaths": 1723,
+          "births": 2031,
+          "boundary_nulls": 1,
+          "deaths": 1969
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.19092199599995918,
+        "contact_memory_cpu_seconds": 0.0068446110000576765,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 0.013498927,
+        "gate_cpu_seconds": 31.02530132199996,
+        "gate_raw_points": 4217674,
+        "gca_cpu_seconds": 2.270560145999958,
+        "geometry_cpu_seconds": 0.29396466899991014,
+        "proposal_cpu_seconds": 1.0298128349996611
+      },
+      "cpu_seconds": 36.168785662999994,
+      "proposal_source_diagnostics": {
+        "uniform": {
+          "attempted": 565,
+          "hard_valid": 151,
+          "accepted": 110,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -2.434219086576453,
+            "median": 0.0,
+            "minimum": -12.731170581451316,
+            "maximum": 0.0,
+            "samples": 151
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.7291607805567126,
+            "median": 1.0,
+            "minimum": 2.9574871634207087e-06,
+            "maximum": 1.0,
+            "samples": 151
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 151
+          },
+          "gate_log_weight": {
+            "mean": -2.434219086576453,
+            "median": 0.0,
+            "minimum": -12.731170581451316,
+            "maximum": 0.0,
+            "samples": 151
+          },
+          "expected_acceptances_given_sampled_gates": 110.1032778640636
+        },
+        "base": {
+          "attempted": 2741,
+          "hard_valid": 1228,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -25.565380161202942,
+            "median": -24.530659581813218,
+            "minimum": -39.13910513947695,
+            "maximum": -14.859945148800453,
+            "samples": 1228
+          },
+          "conditional_acceptance_probability": {
+            "mean": 1.7587588098653624e-09,
+            "median": 2.2206048896911195e-11,
+            "minimum": 1.0048531801357969e-17,
+            "maximum": 3.5189072538192397e-07,
+            "samples": 1228
+          },
+          "log_reverse_forward": {
+            "mean": -24.992605843357442,
+            "median": -25.33047645789479,
+            "minimum": -28.568028794951193,
+            "maximum": -16.330113363753217,
+            "samples": 1228
+          },
+          "gate_log_weight": {
+            "mean": -0.5727743178455024,
+            "median": 0.9093693272465226,
+            "minimum": -13.27679217779923,
+            "maximum": 10.669933439692532,
+            "samples": 1228
+          },
+          "expected_acceptances_given_sampled_gates": 2.159755818514665e-06
+        },
+        "memory": {
+          "attempted": 2621,
+          "hard_valid": 1125,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -26.2305914833655,
+            "median": -25.14928494793333,
+            "minimum": -39.75698220473107,
+            "maximum": -12.942297305871545,
+            "samples": 1125
+          },
+          "conditional_acceptance_probability": {
+            "mean": 2.9417925649052934e-09,
+            "median": 1.1962014466526795e-11,
+            "minimum": 5.4170396118814595e-18,
+            "maximum": 2.394592935442639e-06,
+            "samples": 1125
+          },
+          "log_reverse_forward": {
+            "mean": -25.139240513564225,
+            "median": -25.495295362649248,
+            "minimum": -29.02521047421877,
+            "maximum": -15.779333477284721,
+            "samples": 1125
+          },
+          "gate_log_weight": {
+            "mean": -1.0913509698012787,
+            "median": 0.4849969745314787,
+            "minimum": -12.731170581451316,
+            "maximum": 9.214942516098096,
+            "samples": 1125
+          },
+          "expected_acceptances_given_sampled_gates": 3.309516635518455e-06
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 4.547473508864641e-13,
+        "maximum_rotation_error": 1.9984014443252818e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.14066657644947322,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "bc7e27852c32a8efdd18784679c84e5d967d01e33a0e9792028fecee93cbe23f",
+      "initial_bank_sha256": "a7171fd6329a3b4213ee43847ac16e5b7fc41b98d6489dbcd236913f8830171b",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 0,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {},
+        "proposal_kinds": {},
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 16,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "final_slot_rotation_changes_degrees": [
+          0.0,
+          0.0,
+          0.0,
+          1.7075472925031877e-06,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "c54e0de8f0ad6149f75ae84bbbf7a299c146df4e28e05006d7d1f799ab92dd1d",
+        "source_bundle_sha256": "5cff7708207d3eaa896995a0cd9a11581ba9d5ac2dc52adab29067780048f838"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r01-rj-memory-frozen/config.json": "42238e175b35fcb7d0f063f007cfbccdb928f0481ba2f2223ebde298768c0fc1",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r01-rj-memory-frozen/manifest.json": "b00b68b92520908f0ce3d575e68dfd31e04e6d2b3f9393684d6c939571d0403f",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r01-rj-memory-frozen/summary.json": "a95d955a1d49d0b6e437fc2b0c23ddaa785618d5b793244840d6ebd06561d1c8",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r01-rj-memory-frozen/trajectory.jsonl": "fe78274c3fd184cda274f32d7314ccf4eceedf66b246a0bd63829a323ad17e0e",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r01-rj-memory-frozen/moves.jsonl": "ca7971a19f223035128861ae5a3e628cce70f5c783822b909bed545be15361a7"
+      }
+    },
+    {
+      "id": "free-r01-rj-memory-on",
+      "variant": "memory-on",
+      "replicate": 1,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            4,
+            9
+          ],
+          [
+            5,
+            9
+          ],
+          [
+            7,
+            9
+          ]
+        ],
+        "components": [
+          [
+            4,
+            5,
+            7,
+            9
+          ],
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            6
+          ],
+          [
+            8
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          4,
+          5,
+          7,
+          9
+        ],
+        "largest_component_size": 4,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 4,
+        "bonds": 3
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 46
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 816,
+          "attempted": 2000,
+          "hard_rejected": 733,
+          "hard_valid": 1267,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 5994
+        },
+        "global": {
+          "accepted": 109,
+          "attempted": 5927,
+          "hard_rejected": 3472,
+          "hard_valid": 2455,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 4795,
+          "attempted": 6073,
+          "hard_rejected": 924,
+          "hard_valid": 5149,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1723,
+          "accepted_deaths": 1723,
+          "births": 2031,
+          "boundary_nulls": 1,
+          "deaths": 1969
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.1915021769999868,
+        "contact_memory_cpu_seconds": 9.339151484999908,
+        "contact_memory_gate_raw_points": 1068287,
+        "contact_memory_initialization_cpu_seconds": 0.012716697000000006,
+        "gate_cpu_seconds": 34.18096574999983,
+        "gate_raw_points": 5032694,
+        "gca_cpu_seconds": 4.33642643600005,
+        "geometry_cpu_seconds": 0.35897998499987527,
+        "proposal_cpu_seconds": 1.0223693039999124
+      },
+      "cpu_seconds": 50.724738183,
+      "proposal_source_diagnostics": {
+        "uniform": {
+          "attempted": 565,
+          "hard_valid": 152,
+          "accepted": 109,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -3.189971876893723,
+            "median": 0.0,
+            "minimum": -32.43417267179264,
+            "maximum": 0.0,
+            "samples": 152
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.721703051597001,
+            "median": 1.0,
+            "minimum": 8.203851368722908e-15,
+            "maximum": 1.0,
+            "samples": 152
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 152
+          },
+          "gate_log_weight": {
+            "mean": -3.171226105674167,
+            "median": 0.0,
+            "minimum": -32.43417267179264,
+            "maximum": 2.728107981739568,
+            "samples": 152
+          },
+          "expected_acceptances_given_sampled_gates": 109.69886384274416
+        },
+        "base": {
+          "attempted": 2741,
+          "hard_valid": 1198,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -25.87822082753762,
+            "median": -24.22956435325966,
+            "minimum": -60.763720639378825,
+            "maximum": -13.260835900766885,
+            "samples": 1198
+          },
+          "conditional_acceptance_probability": {
+            "mean": 3.7257754059211624e-09,
+            "median": 3.00078232800795e-11,
+            "minimum": 4.0799179236464665e-27,
+            "maximum": 1.7413743489925406e-06,
+            "samples": 1198
+          },
+          "log_reverse_forward": {
+            "mean": -24.968446661414195,
+            "median": -25.272567561083655,
+            "minimum": -28.568028794951193,
+            "maximum": -16.33011336375315,
+            "samples": 1198
+          },
+          "gate_log_weight": {
+            "mean": -0.9097741661234271,
+            "median": 1.0306185708793922,
+            "minimum": -34.01041283901994,
+            "maximum": 12.003675119654098,
+            "samples": 1198
+          },
+          "expected_acceptances_given_sampled_gates": 4.463478936293552e-06
+        },
+        "memory": {
+          "attempted": 2621,
+          "hard_valid": 1105,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -26.83634546292058,
+            "median": -25.183539394129653,
+            "minimum": -63.55562211917132,
+            "maximum": -12.231418295957184,
+            "samples": 1105
+          },
+          "conditional_acceptance_probability": {
+            "mean": 5.099044331537822e-09,
+            "median": 1.1559200752522795e-11,
+            "minimum": 2.5011746578473144e-28,
+            "maximum": 4.874864269981275e-06,
+            "samples": 1105
+          },
+          "log_reverse_forward": {
+            "mean": -25.165465048966258,
+            "median": -25.44243874282616,
+            "minimum": -29.02521047421877,
+            "maximum": -17.921992827461864,
+            "samples": 1105
+          },
+          "gate_log_weight": {
+            "mean": -1.6708804139543196,
+            "median": 0.0,
+            "minimum": -37.82976401345534,
+            "maximum": 9.336191759730966,
+            "samples": 1105
+          },
+          "expected_acceptances_given_sampled_gates": 5.6344439863492926e-06
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 20000,
+        "frames": 101,
+        "maximum_position_error_A": 5.684341886080801e-13,
+        "maximum_rotation_error": 1.5543122344752192e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.14066657644947322,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "bc7e27852c32a8efdd18784679c84e5d967d01e33a0e9792028fecee93cbe23f",
+      "initial_bank_sha256": "a7171fd6329a3b4213ee43847ac16e5b7fc41b98d6489dbcd236913f8830171b",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 2,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {
+          "attempted": 2000,
+          "hard_valid": 1267,
+          "hard_rejected": 733,
+          "accepted": 816
+        },
+        "proposal_kinds": {
+          "local": 1782,
+          "global": 218
+        },
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 832,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          2.4884194353645914,
+          57.524875827365015,
+          132.31062150210656,
+          95.06884883916382,
+          140.03434879266527,
+          2.4717922882633356,
+          131.2536103006067,
+          114.38007043881025,
+          3.839312955311731,
+          116.5400364049114,
+          96.76607335127832,
+          93.48146257539848,
+          112.62284481167447,
+          110.7486232127118,
+          0.8582202841247799,
+          2.4217105530922987
+        ],
+        "final_slot_rotation_changes_degrees": [
+          45.207534273542244,
+          174.57594608240018,
+          137.38369051292352,
+          162.4951485503911,
+          112.0523153135041,
+          12.577649066922174,
+          156.0877690956888,
+          147.39273351108704,
+          32.44067738717571,
+          172.23049956329257,
+          173.40869089289566,
+          83.8733161154344,
+          98.72180856638826,
+          120.74358267507786,
+          11.037700539224884,
+          9.279263577520972
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-on/config.json": "f7953399bee8af9ef9abe57f5006640648f39f5f337e121c813f3f10148ee777",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-on/manifest.json": "ad26244f4c9f58069e147cf0ba20812a6bb408726fc5265a956d25de61e12ccb",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-on/summary.json": "26c79e8b3a8ccedf11ac835dd6280c86fd8abff2a5fe2af28a797513b6001e76",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-on/trajectory.jsonl": "da1d3ed71812c177db4f00e4cf085935fc6746072505b76a5812212578185154",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r01-rj-memory-on/moves.jsonl": "aee0f72765534eb7eb475643570b20b2444161c8f4ecc5c54e356e53d30e0c5d"
+      }
+    },
+    {
+      "id": "free-r02-rj-memory-off",
+      "variant": "memory-off",
+      "replicate": 2,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            0,
+            8
+          ],
+          [
+            2,
+            8
+          ]
+        ],
+        "components": [
+          [
+            0,
+            2,
+            8
+          ],
+          [
+            1
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0,
+          2,
+          8
+        ],
+        "largest_component_size": 3,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 3,
+        "bonds": 2
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 50
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 5895
+        },
+        "global": {
+          "accepted": 104,
+          "attempted": 5988,
+          "hard_rejected": 3525,
+          "hard_valid": 2463,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 5186,
+          "attempted": 6012,
+          "hard_rejected": 517,
+          "hard_valid": 5495,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1726,
+          "accepted_deaths": 1725,
+          "births": 1960,
+          "boundary_nulls": 3,
+          "deaths": 2040
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.18760102400003686,
+        "contact_memory_cpu_seconds": 0.0,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 3.3380000000055032e-06,
+        "gate_cpu_seconds": 26.711573976000107,
+        "gate_raw_points": 3500108,
+        "gca_cpu_seconds": 2.0727162820000458,
+        "geometry_cpu_seconds": 0.2067897679999482,
+        "proposal_cpu_seconds": 0.9697653940000506
+      },
+      "cpu_seconds": 31.068937549,
+      "proposal_source_diagnostics": {
+        "base": {
+          "attempted": 5404,
+          "hard_valid": 2337,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -24.65084201578068,
+            "median": -24.15970367089049,
+            "minimum": -42.023653523427846,
+            "maximum": -13.556958721965485,
+            "samples": 2337
+          },
+          "conditional_acceptance_probability": {
+            "mean": 2.4761253882230007e-09,
+            "median": 3.217910873813004e-11,
+            "minimum": 5.615121595649863e-19,
+            "maximum": 1.2950532784931922e-06,
+            "samples": 2337
+          },
+          "log_reverse_forward": {
+            "mean": -25.14159794026648,
+            "median": -25.436850003460663,
+            "minimum": -29.4004021033391,
+            "maximum": -15.739445107357138,
+            "samples": 2337
+          },
+          "gate_log_weight": {
+            "mean": 0.49075592448579985,
+            "median": 1.151867814512262,
+            "minimum": -15.701777050456624,
+            "maximum": 9.699939490629575,
+            "samples": 2337
+          },
+          "expected_acceptances_given_sampled_gates": 5.786705032277153e-06
+        },
+        "uniform": {
+          "attempted": 584,
+          "hard_valid": 126,
+          "accepted": 104,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -1.4641327316461206,
+            "median": 0.0,
+            "minimum": -17.944888057664713,
+            "maximum": 0.0,
+            "samples": 126
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.8241015506973812,
+            "median": 1.0,
+            "minimum": 1.6092893536231025e-08,
+            "maximum": 1.0,
+            "samples": 126
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 126
+          },
+          "gate_log_weight": {
+            "mean": -1.4617269926851513,
+            "median": 0.0,
+            "minimum": -17.944888057664713,
+            "maximum": 0.24249848726573936,
+            "samples": 126
+          },
+          "expected_acceptances_given_sampled_gates": 103.83679538787003
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 3.979039320256561e-13,
+        "maximum_rotation_error": 1.942890293094024e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.1453287410516395,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "ab7ececec5e03954b7f9753754bc1a10c58caee45973dc0b408e855334c23a0f",
+      "initial_bank_sha256": null,
+      "memory": null,
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-off/config.json": "ff1b3b980316ff45d913e1f356f60d8d31dfaab80a619978b59c5bfc988442a3",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-off/manifest.json": "67a68780a277599a2d01e1274a906a85c8739be5388209ffcaad48d50b84ccab",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-off/summary.json": "51240879f7b88b6877607f06bd5cb098b2b8bca3a20eb1f6b4595c22ea110e56",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-off/trajectory.jsonl": "cd461d040a9fbe0562023789d072668ad2fef955c7c686dde135c9347b50d66e",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-off/moves.jsonl": "2e815622669abee8d45217e23a317f577de02c6836ea68b1ea8c4101c44c4f1a"
+      }
+    },
+    {
+      "id": "free-r02-rj-memory-frozen",
+      "variant": "memory-frozen",
+      "replicate": 2,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            2,
+            3
+          ]
+        ],
+        "components": [
+          [
+            2,
+            3
+          ],
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          2,
+          3
+        ],
+        "largest_component_size": 2,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 2,
+        "bonds": 1
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 40
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 5921
+        },
+        "global": {
+          "accepted": 108,
+          "attempted": 5988,
+          "hard_rejected": 3421,
+          "hard_valid": 2567,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 5367,
+          "attempted": 6012,
+          "hard_rejected": 479,
+          "hard_valid": 5533,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1726,
+          "accepted_deaths": 1725,
+          "births": 1960,
+          "boundary_nulls": 3,
+          "deaths": 2040
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.19789863199993843,
+        "contact_memory_cpu_seconds": 0.005997876999982291,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 0.013760415999999998,
+        "gate_cpu_seconds": 25.263910549000176,
+        "gate_raw_points": 3528743,
+        "gca_cpu_seconds": 1.7778276679999359,
+        "geometry_cpu_seconds": 0.22837930599995054,
+        "proposal_cpu_seconds": 0.9861278060001856
+      },
+      "cpu_seconds": 29.802356186,
+      "proposal_source_diagnostics": {
+        "memory": {
+          "attempted": 2637,
+          "hard_valid": 1163,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -25.71919269519587,
+            "median": -24.26618736787185,
+            "minimum": -47.97260875916098,
+            "maximum": -10.703651290105041,
+            "samples": 1163
+          },
+          "conditional_acceptance_probability": {
+            "mean": 2.0945916850155793e-08,
+            "median": 2.8928687448732217e-11,
+            "minimum": 1.4647406465336361e-21,
+            "maximum": 2.2462769905395946e-05,
+            "samples": 1163
+          },
+          "log_reverse_forward": {
+            "mean": -25.201876489773422,
+            "median": -25.486538695800608,
+            "minimum": -28.790298512464716,
+            "maximum": -16.55323216012762,
+            "samples": 1163
+          },
+          "gate_log_weight": {
+            "mean": -0.5173162054224415,
+            "median": 0.8487447054300877,
+            "minimum": -20.127374443056368,
+            "maximum": 12.609921337818447,
+            "samples": 1163
+          },
+          "expected_acceptances_given_sampled_gates": 2.436010129673119e-05
+        },
+        "base": {
+          "attempted": 2767,
+          "hard_valid": 1282,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -24.925340711268593,
+            "median": -23.80964107692506,
+            "minimum": -46.12997714443378,
+            "maximum": -12.433800134418622,
+            "samples": 1282
+          },
+          "conditional_acceptance_probability": {
+            "mean": 6.284440969252692e-09,
+            "median": 4.566719260651928e-11,
+            "minimum": 9.247098331693796e-21,
+            "maximum": 3.98170621053066e-06,
+            "samples": 1282
+          },
+          "log_reverse_forward": {
+            "mean": -25.115017277653717,
+            "median": -25.43526631723216,
+            "minimum": -28.822635140068517,
+            "maximum": -15.727508758793764,
+            "samples": 1282
+          },
+          "gate_log_weight": {
+            "mean": 0.18967656638511707,
+            "median": 1.3337416799615665,
+            "minimum": -19.945500577607064,
+            "maximum": 11.76117663238836,
+            "samples": 1282
+          },
+          "expected_acceptances_given_sampled_gates": 8.05665332258195e-06
+        },
+        "uniform": {
+          "attempted": 584,
+          "hard_valid": 122,
+          "accepted": 108,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -2.0234709839059235,
+            "median": 0.0,
+            "minimum": -20.55174679577141,
+            "maximum": 0.0,
+            "samples": 122
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.8742545715170996,
+            "median": 1.0,
+            "minimum": 1.1871067464243892e-09,
+            "maximum": 1.0,
+            "samples": 122
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 122
+          },
+          "gate_log_weight": {
+            "mean": -2.020986368257709,
+            "median": 0.0,
+            "minimum": -20.55174679577141,
+            "maximum": 0.3031231090821742,
+            "samples": 122
+          },
+          "expected_acceptances_given_sampled_gates": 106.65905772508616
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 3.979039320256561e-13,
+        "maximum_rotation_error": 1.4432899320127035e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.10502581151630919,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "ab7ececec5e03954b7f9753754bc1a10c58caee45973dc0b408e855334c23a0f",
+      "initial_bank_sha256": "159362918f200e7a1f5c66efb0cd8e8e18e7f7bf3056bec5fb9646cdef928160",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 0,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {},
+        "proposal_kinds": {},
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 16,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "final_slot_rotation_changes_degrees": [
+          0.0,
+          0.0,
+          0.0,
+          1.7075472925031877e-06,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.7075472925031877e-06,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "c54e0de8f0ad6149f75ae84bbbf7a299c146df4e28e05006d7d1f799ab92dd1d",
+        "source_bundle_sha256": "5cff7708207d3eaa896995a0cd9a11581ba9d5ac2dc52adab29067780048f838"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r02-rj-memory-frozen/config.json": "63d2ed30ffcbc798c716469df63aaa562822382cf8edf775dd83fdeb291415de",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r02-rj-memory-frozen/manifest.json": "dbde3ab518904dffa7c0166767b00912c78be865f026b3bfacd9724f14f1a11f",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r02-rj-memory-frozen/summary.json": "e8943223b3baa6dc7fa4bb4031c2365004a6de56f22c061befe87005db2b691f",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r02-rj-memory-frozen/trajectory.jsonl": "ee78bec0ad2d2a6993ccc8fcd21a458898a88ec2ac566dd6e46fd7f269d643f5",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r02-rj-memory-frozen/moves.jsonl": "c17e3c35513773a83723f4f4842116a4a3ead25f451f9a6dcf55b96d794bd817"
+      }
+    },
+    {
+      "id": "free-r02-rj-memory-on",
+      "variant": "memory-on",
+      "replicate": 2,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            0,
+            9
+          ],
+          [
+            2,
+            8
+          ],
+          [
+            3,
+            11
+          ],
+          [
+            6,
+            8
+          ]
+        ],
+        "components": [
+          [
+            2,
+            6,
+            8
+          ],
+          [
+            0,
+            9
+          ],
+          [
+            3,
+            11
+          ],
+          [
+            1
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            7
+          ],
+          [
+            10
+          ]
+        ],
+        "largest_component": [
+          2,
+          6,
+          8
+        ],
+        "largest_component_size": 3,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 7,
+        "bonds": 4
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 35
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 880,
+          "attempted": 2000,
+          "hard_rejected": 703,
+          "hard_valid": 1297,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 5966
+        },
+        "global": {
+          "accepted": 95,
+          "attempted": 5988,
+          "hard_rejected": 3329,
+          "hard_valid": 2659,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 4766,
+          "attempted": 6012,
+          "hard_rejected": 922,
+          "hard_valid": 5090,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1726,
+          "accepted_deaths": 1725,
+          "births": 1960,
+          "boundary_nulls": 3,
+          "deaths": 2040
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.19039262099998722,
+        "contact_memory_cpu_seconds": 7.892831684000017,
+        "contact_memory_gate_raw_points": 955818,
+        "contact_memory_initialization_cpu_seconds": 0.013626906000000001,
+        "gate_cpu_seconds": 29.914638228999888,
+        "gate_raw_points": 4446130,
+        "gca_cpu_seconds": 2.4803189689999825,
+        "geometry_cpu_seconds": 0.26666289299970114,
+        "proposal_cpu_seconds": 0.9777808129999721
+      },
+      "cpu_seconds": 43.021563582000006,
+      "proposal_source_diagnostics": {
+        "memory": {
+          "attempted": 2637,
+          "hard_valid": 1293,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -26.954414508043886,
+            "median": -25.570028940892463,
+            "minimum": -45.26776720827109,
+            "maximum": -13.405578886387602,
+            "samples": 1293
+          },
+          "conditional_acceptance_probability": {
+            "mean": 2.0230904169091897e-09,
+            "median": 7.853758248806322e-12,
+            "minimum": 2.1900725072415708e-20,
+            "maximum": 1.50671483014677e-06,
+            "samples": 1293
+          },
+          "log_reverse_forward": {
+            "mean": -25.192221324479394,
+            "median": -25.480993401748783,
+            "minimum": -28.79029851246471,
+            "maximum": -13.405578886387602,
+            "samples": 1293
+          },
+          "gate_log_weight": {
+            "mean": -1.7621931835644913,
+            "median": 0.0,
+            "minimum": -18.91488200672767,
+            "maximum": 11.215555036040445,
+            "samples": 1293
+          },
+          "expected_acceptances_given_sampled_gates": 2.615855909063582e-06
+        },
+        "base": {
+          "attempted": 2767,
+          "hard_valid": 1244,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -25.201856300805662,
+            "median": -24.208978497426767,
+            "minimum": -42.739759435983025,
+            "maximum": -14.19592145976586,
+            "samples": 1244
+          },
+          "conditional_acceptance_probability": {
+            "mean": 2.144948360214598e-09,
+            "median": 3.0631920861117854e-11,
+            "minimum": 2.7438370689717054e-19,
+            "maximum": 6.835804670510489e-07,
+            "samples": 1244
+          },
+          "log_reverse_forward": {
+            "mean": -25.11408705330454,
+            "median": -25.41064865340967,
+            "minimum": -28.875241951336978,
+            "maximum": -16.577387850546117,
+            "samples": 1244
+          },
+          "gate_log_weight": {
+            "mean": -0.08776924750112472,
+            "median": 1.0306185708793922,
+            "minimum": -18.005512679481146,
+            "maximum": 10.912431926958272,
+            "samples": 1244
+          },
+          "expected_acceptances_given_sampled_gates": 2.6683157601069594e-06
+        },
+        "uniform": {
+          "attempted": 584,
+          "hard_valid": 122,
+          "accepted": 95,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -1.981232517886276,
+            "median": 0.0,
+            "minimum": -19.157380493993408,
+            "maximum": 0.0,
+            "samples": 122
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.7784382437206342,
+            "median": 1.0,
+            "minimum": 4.7869111184067314e-09,
+            "maximum": 1.0,
+            "samples": 122
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 122
+          },
+          "gate_log_weight": {
+            "mean": -1.9772571328491328,
+            "median": 0.0,
+            "minimum": -19.157380493993408,
+            "maximum": 0.4849969745314787,
+            "samples": 122
+          },
+          "expected_acceptances_given_sampled_gates": 94.96946573391737
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 20000,
+        "frames": 101,
+        "maximum_position_error_A": 4.547473508864641e-13,
+        "maximum_rotation_error": 2.3869795029440866e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.1453287410516395,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "ab7ececec5e03954b7f9753754bc1a10c58caee45973dc0b408e855334c23a0f",
+      "initial_bank_sha256": "159362918f200e7a1f5c66efb0cd8e8e18e7f7bf3056bec5fb9646cdef928160",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 2,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {
+          "attempted": 2000,
+          "hard_rejected": 703,
+          "hard_valid": 1297,
+          "accepted": 880,
+          "outside_ball": 6
+        },
+        "proposal_kinds": {
+          "local": 1788,
+          "global": 212
+        },
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 896,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          78.93478776399661,
+          0.40634019917767844,
+          1.015382619047547,
+          0.7486238600637347,
+          3.022678192701982,
+          94.36251499825994,
+          119.71797801167942,
+          124.15024422312734,
+          2.092102620987178,
+          165.86484099606727,
+          27.67144855993195,
+          33.76469867391091,
+          3.444713324504975,
+          1.5147173531374203,
+          58.33771684862457,
+          40.68126614562113
+        ],
+        "final_slot_rotation_changes_degrees": [
+          177.41515951288994,
+          4.015937385415585,
+          18.12199959459696,
+          8.85509263820185,
+          16.81538974487644,
+          128.93396586723452,
+          176.40082368242216,
+          76.99698255139013,
+          7.961142448413645,
+          171.04318297585425,
+          116.32931622037876,
+          143.39908182121758,
+          11.973973785549411,
+          7.177857816688387,
+          175.64009868279808,
+          163.57428837254847
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-on/config.json": "a86c0fe41e2d3e48410f959c0005e35500a880ebff8ecd4ad60b6a6ff56298c9",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-on/manifest.json": "39a2e1b2e552a70acf55c52ef0ce6e5572a0144d51f31023729567aeceea6494",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-on/summary.json": "9f8879f8fd985cd2391885c9c4b7e7fcb1c556581dcc3bf91bdbc010c677bbf4",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-on/trajectory.jsonl": "fa8ea1a33ee6390bd43da70b2d062c4e58190d34c62534ad618b413e22c3e3e9",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r02-rj-memory-on/moves.jsonl": "d77c31aba9748dbf2b841f1683515efd015e8d5739edc72041ce4f2e03fa8ed5"
+      }
+    },
+    {
+      "id": "free-r03-rj-memory-off",
+      "variant": "memory-off",
+      "replicate": 3,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            0,
+            7
+          ],
+          [
+            0,
+            9
+          ],
+          [
+            2,
+            7
+          ],
+          [
+            4,
+            11
+          ]
+        ],
+        "components": [
+          [
+            0,
+            2,
+            7,
+            9
+          ],
+          [
+            4,
+            11
+          ],
+          [
+            1
+          ],
+          [
+            3
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            8
+          ],
+          [
+            10
+          ]
+        ],
+        "largest_component": [
+          0,
+          2,
+          7,
+          9
+        ],
+        "largest_component_size": 4,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 6,
+        "bonds": 4
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 29
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 6030
+        },
+        "global": {
+          "accepted": 128,
+          "attempted": 5994,
+          "hard_rejected": 3463,
+          "hard_valid": 2531,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 5408,
+          "attempted": 6006,
+          "hard_rejected": 401,
+          "hard_valid": 5605,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1712,
+          "accepted_deaths": 1709,
+          "births": 1989,
+          "boundary_nulls": 3,
+          "deaths": 2011
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.19406028199993322,
+        "contact_memory_cpu_seconds": 0.0,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 3.078000000003578e-06,
+        "gate_cpu_seconds": 26.709601302999936,
+        "gate_raw_points": 3612033,
+        "gca_cpu_seconds": 1.6790643690000224,
+        "geometry_cpu_seconds": 0.22243336300011796,
+        "proposal_cpu_seconds": 1.0061202299999892
+      },
+      "cpu_seconds": 30.772494724,
+      "proposal_source_diagnostics": {
+        "base": {
+          "attempted": 5418,
+          "hard_valid": 2376,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -24.452008667889203,
+            "median": -23.884265275721994,
+            "minimum": -43.434499406510156,
+            "maximum": -8.903039336934091,
+            "samples": 2376
+          },
+          "conditional_acceptance_probability": {
+            "mean": 6.077580779581497e-08,
+            "median": 4.238352780565105e-11,
+            "minimum": 1.369735095749596e-19,
+            "maximum": 0.00013597502389368666,
+            "samples": 2376
+          },
+          "log_reverse_forward": {
+            "mean": -25.112347562085045,
+            "median": -25.374806839344032,
+            "minimum": -29.345710702229283,
+            "maximum": -13.352093120039072,
+            "samples": 2376
+          },
+          "gate_log_weight": {
+            "mean": 0.6603388941958476,
+            "median": 1.2731170581451317,
+            "minimum": -19.521128224892017,
+            "maximum": 13.943663017780013,
+            "samples": 2376
+          },
+          "expected_acceptances_given_sampled_gates": 0.0001444033193228564
+        },
+        "uniform": {
+          "attempted": 576,
+          "hard_valid": 155,
+          "accepted": 128,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -1.528131596366522,
+            "median": 0.0,
+            "minimum": -17.459891083133233,
+            "maximum": 0.0,
+            "samples": 155
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.8218918857693832,
+            "median": 1.0,
+            "minimum": 2.6137596422942482e-08,
+            "maximum": 1.0,
+            "samples": 155
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 155
+          },
+          "gate_log_weight": {
+            "mean": -1.52695821658943,
+            "median": 0.0,
+            "minimum": -17.459891083133233,
+            "maximum": 0.1818738654493045,
+            "samples": 155
+          },
+          "expected_acceptances_given_sampled_gates": 127.39324229425442
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 5.400124791776761e-13,
+        "maximum_rotation_error": 1.609823385706477e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.06431873261051346,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "2a5a843ffd158a2670f7e859715c15cb0b589f02fa959a25758d5ba11d64eede",
+      "initial_bank_sha256": null,
+      "memory": null,
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-off/config.json": "3f982ed161a02e438173855c2ff80d40205c8e40be2fadd4d25a3bbd7294270f",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-off/manifest.json": "04f8a220898d643ec664a827c6777753a2b75963d26b2aabcec38eff97ef6858",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-off/summary.json": "76c6ac8ca678583f4577ed267a6966707fe87420191220a4fb08ef675ea8e6b2",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-off/trajectory.jsonl": "c9273fa3b979e9510994b804e59947ee0ffa7f1046c09d3639ffd1dec9a04292",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-off/moves.jsonl": "4d8b88ffe827e6fd6bf3c6534feb0147d1123a3add622de31c42fef3380ceb64"
+      }
+    },
+    {
+      "id": "free-r03-rj-memory-frozen",
+      "variant": "memory-frozen",
+      "replicate": 3,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            3,
+            7
+          ],
+          [
+            4,
+            7
+          ]
+        ],
+        "components": [
+          [
+            3,
+            4,
+            7
+          ],
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          3,
+          4,
+          7
+        ],
+        "largest_component_size": 3,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 3,
+        "bonds": 2
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 46
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 0,
+          "attempted": 0,
+          "hard_rejected": 0,
+          "hard_valid": 0,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 6051
+        },
+        "global": {
+          "accepted": 128,
+          "attempted": 5994,
+          "hard_rejected": 3471,
+          "hard_valid": 2523,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 5416,
+          "attempted": 6006,
+          "hard_rejected": 398,
+          "hard_valid": 5608,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1712,
+          "accepted_deaths": 1709,
+          "births": 1989,
+          "boundary_nulls": 3,
+          "deaths": 2011
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.1999701750000538,
+        "contact_memory_cpu_seconds": 0.0071973410000634175,
+        "contact_memory_gate_raw_points": 0,
+        "contact_memory_initialization_cpu_seconds": 0.012646775000000006,
+        "gate_cpu_seconds": 25.629131084000033,
+        "gate_raw_points": 3041086,
+        "gca_cpu_seconds": 1.9033628609999762,
+        "geometry_cpu_seconds": 0.20247135600006474,
+        "proposal_cpu_seconds": 1.0395115620001827
+      },
+      "cpu_seconds": 30.374883651,
+      "proposal_source_diagnostics": {
+        "base": {
+          "attempted": 2851,
+          "hard_valid": 1299,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -24.106773663393863,
+            "median": -23.960415229340555,
+            "minimum": -37.8722246687232,
+            "maximum": -12.97051265595156,
+            "samples": 1299
+          },
+          "conditional_acceptance_probability": {
+            "mean": 3.6579218400453767e-09,
+            "median": 3.9275695269732736e-11,
+            "minimum": 3.566989319700393e-17,
+            "maximum": 2.327972930507499e-06,
+            "samples": 1299
+          },
+          "log_reverse_forward": {
+            "mean": -25.14499948089071,
+            "median": -25.492024453948584,
+            "minimum": -29.345608881623036,
+            "maximum": -14.546752823178867,
+            "samples": 1299
+          },
+          "gate_log_weight": {
+            "mean": 1.038225817496851,
+            "median": 1.2731170581451317,
+            "minimum": -11.15493041422401,
+            "maximum": 9.51806562518027,
+            "samples": 1299
+          },
+          "expected_acceptances_given_sampled_gates": 4.7516404702189445e-06
+        },
+        "memory": {
+          "attempted": 2567,
+          "hard_valid": 1076,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -24.420175079273843,
+            "median": -24.141553489170477,
+            "minimum": -42.10875688751763,
+            "maximum": -12.089243243941054,
+            "samples": 1076
+          },
+          "conditional_acceptance_probability": {
+            "mean": 6.462372081202034e-09,
+            "median": 3.276894276353134e-11,
+            "minimum": 5.157025085258263e-19,
+            "maximum": 5.619638365296728e-06,
+            "samples": 1076
+          },
+          "log_reverse_forward": {
+            "mean": -25.08913059491188,
+            "median": -25.356720503111497,
+            "minimum": -28.50325735460614,
+            "maximum": -16.68871040293302,
+            "samples": 1076
+          },
+          "gate_log_weight": {
+            "mean": 0.6689555156380399,
+            "median": 0.9093693272465226,
+            "minimum": -16.186774024988104,
+            "maximum": 9.51806562518027,
+            "samples": 1076
+          },
+          "expected_acceptances_given_sampled_gates": 6.953512359373388e-06
+        },
+        "uniform": {
+          "attempted": 576,
+          "hard_valid": 148,
+          "accepted": 128,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -0.9331276249853957,
+            "median": 0.0,
+            "minimum": -15.580527806823754,
+            "maximum": 0.0,
+            "samples": 148
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.8687133290156918,
+            "median": 1.0,
+            "minimum": 1.7118383373358181e-07,
+            "maximum": 1.0,
+            "samples": 148
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 148
+          },
+          "gate_log_weight": {
+            "mean": -0.9200195986467071,
+            "median": 0.0,
+            "minimum": -15.580527806823754,
+            "maximum": 1.091243192695827,
+            "samples": 148
+          },
+          "expected_acceptances_given_sampled_gates": 128.56957269432237
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 18000,
+        "frames": 101,
+        "maximum_position_error_A": 3.552713678800501e-13,
+        "maximum_rotation_error": 1.609823385706477e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.04705514733309424,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "2a5a843ffd158a2670f7e859715c15cb0b589f02fa959a25758d5ba11d64eede",
+      "initial_bank_sha256": "2b77d7cb4dec8a30ee18c0b4c966425efd260688cefcad05a6382b99db7f0833",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 0,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {},
+        "proposal_kinds": {},
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 16,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "final_slot_rotation_changes_degrees": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.7075472925031877e-06,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.7075472925031877e-06,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "c54e0de8f0ad6149f75ae84bbbf7a299c146df4e28e05006d7d1f799ab92dd1d",
+        "source_bundle_sha256": "5cff7708207d3eaa896995a0cd9a11581ba9d5ac2dc52adab29067780048f838"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r03-rj-memory-frozen/config.json": "9c32a7116b6a5e0dbd55797bcf81dacd440f7c9a4bb85d9a6a5651ce955445ed",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r03-rj-memory-frozen/manifest.json": "d8962262650322beb25bfad86e9dc71684081d51aff15e6d6a38b73727c70a2d",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r03-rj-memory-frozen/summary.json": "b4ec48cf3e137e5d70e4ec978b86cf2e581799f831b46c054a19321702e52c82",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r03-rj-memory-frozen/trajectory.jsonl": "493701936c74f0c7a9c2895e5a5be93f0e2f2e2927b2f1554edcf5089a16972f",
+        "/home/xvg/tetramer-mc/runs/contact-memory-frozen-1000/runs/free-r03-rj-memory-frozen/moves.jsonl": "580c2daf3297f3edcf1bcb349d3bb0296259bc9cb27eb4ce578e49be7c2bff96"
+      }
+    },
+    {
+      "id": "free-r03-rj-memory-on",
+      "variant": "memory-on",
+      "replicate": 3,
+      "passed": true,
+      "final_native": {
+        "edges": [],
+        "components": [
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            5
+          ],
+          [
+            6
+          ],
+          [
+            7
+          ],
+          [
+            8
+          ],
+          [
+            9
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          0
+        ],
+        "largest_component_size": 1,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 0,
+        "bonds": 0
+      },
+      "final_nonspecific": {
+        "edges": [
+          [
+            5,
+            9
+          ],
+          [
+            6,
+            7
+          ]
+        ],
+        "components": [
+          [
+            5,
+            9
+          ],
+          [
+            6,
+            7
+          ],
+          [
+            0
+          ],
+          [
+            1
+          ],
+          [
+            2
+          ],
+          [
+            3
+          ],
+          [
+            4
+          ],
+          [
+            8
+          ],
+          [
+            10
+          ],
+          [
+            11
+          ]
+        ],
+        "largest_component": [
+          5,
+          9
+        ],
+        "largest_component_size": 2,
+        "seed_component": [],
+        "seed_component_size": 0,
+        "retained_original_seed_bodies": 0,
+        "seed_component_newcomer_ids": [],
+        "seed_component_newcomers": 0,
+        "bonded_bodies": 4,
+        "bonds": 2
+      },
+      "maximum_native_component": 1,
+      "motif_formations": 0,
+      "motif_breakages": 0,
+      "observed_environment_returns": {
+        "native": 0,
+        "nonspecific": 42
+      },
+      "counts": {
+        "center_shift": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 12000
+        },
+        "contact_memory": {
+          "accepted": 826,
+          "attempted": 2000,
+          "hard_rejected": 668,
+          "hard_valid": 1332,
+          "proposal_nulls": 0
+        },
+        "gca": {
+          "attempted": 1000,
+          "completed": 1000,
+          "transformed_bodies": 6045
+        },
+        "global": {
+          "accepted": 96,
+          "attempted": 5994,
+          "hard_rejected": 3464,
+          "hard_valid": 2530,
+          "proposal_nulls": 0
+        },
+        "local": {
+          "accepted": 4521,
+          "attempted": 6006,
+          "hard_rejected": 1050,
+          "hard_valid": 4956,
+          "proposal_nulls": 0
+        },
+        "model_jumps": {
+          "accepted_births": 1712,
+          "accepted_deaths": 1709,
+          "births": 1989,
+          "boundary_nulls": 3,
+          "deaths": 2011
+        },
+        "selected_body_updates": 12000,
+        "selected_body_updates_by_body": [
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000,
+          1000
+        ]
+      },
+      "cost": {
+        "center_shift_cpu_seconds": 0.18793388499994002,
+        "contact_memory_cpu_seconds": 8.343337555999973,
+        "contact_memory_gate_raw_points": 958025,
+        "contact_memory_initialization_cpu_seconds": 0.012613342,
+        "gate_cpu_seconds": 35.18246544399975,
+        "gate_raw_points": 5294268,
+        "gca_cpu_seconds": 3.683690206999974,
+        "geometry_cpu_seconds": 0.32261951199985983,
+        "proposal_cpu_seconds": 1.0056564079998214
+      },
+      "cpu_seconds": 50.019325939000005,
+      "proposal_source_diagnostics": {
+        "base": {
+          "attempted": 2851,
+          "hard_valid": 1229,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -26.27185235347518,
+            "median": -24.766393222504348,
+            "minimum": -46.0551253959797,
+            "maximum": -15.546878725718784,
+            "samples": 1229
+          },
+          "conditional_acceptance_probability": {
+            "mean": 7.869730403592525e-10,
+            "median": 1.754252430128936e-11,
+            "minimum": 9.965823175189934e-21,
+            "maximum": 1.7704202100897016e-07,
+            "samples": 1229
+          },
+          "log_reverse_forward": {
+            "mean": -25.149285617367276,
+            "median": -25.51769253661823,
+            "minimum": -29.345608881623043,
+            "maximum": -13.376409939303947,
+            "samples": 1229
+          },
+          "gate_log_weight": {
+            "mean": -1.1225667361078988,
+            "median": 0.7881200836136529,
+            "minimum": -21.764239232100106,
+            "maximum": 9.51806562518027,
+            "samples": 1229
+          },
+          "expected_acceptances_given_sampled_gates": 9.671898666015214e-07
+        },
+        "memory": {
+          "attempted": 2567,
+          "hard_valid": 1146,
+          "accepted": 0,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -27.17142560133392,
+            "median": -25.686705450850475,
+            "minimum": -46.7858317049521,
+            "maximum": -13.020321062275016,
+            "samples": 1146
+          },
+          "conditional_acceptance_probability": {
+            "mean": 3.1615754078298075e-09,
+            "median": 6.9888540863567665e-12,
+            "minimum": 4.7992288459955706e-21,
+            "maximum": 2.214860663588352e-06,
+            "samples": 1146
+          },
+          "log_reverse_forward": {
+            "mean": -25.076596282565156,
+            "median": -25.36710569016961,
+            "minimum": -28.56987109097744,
+            "maximum": -14.919047818243211,
+            "samples": 1146
+          },
+          "gate_log_weight": {
+            "mean": -2.0948293187687637,
+            "median": 0.0,
+            "minimum": -20.672996039404282,
+            "maximum": 11.215555036040445,
+            "samples": 1146
+          },
+          "expected_acceptances_given_sampled_gates": 3.6231654173729593e-06
+        },
+        "uniform": {
+          "attempted": 576,
+          "hard_valid": 155,
+          "accepted": 96,
+          "null": 0,
+          "log_acceptance": {
+            "mean": -3.364862074108316,
+            "median": 0.0,
+            "minimum": -21.27924225756863,
+            "maximum": 0.0,
+            "samples": 155
+          },
+          "conditional_acceptance_probability": {
+            "mean": 0.6288657430531699,
+            "median": 1.0,
+            "minimum": 5.735119987723654e-10,
+            "maximum": 1.0,
+            "samples": 155
+          },
+          "log_reverse_forward": {
+            "mean": 0.0,
+            "median": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "samples": 155
+          },
+          "gate_log_weight": {
+            "mean": -3.332398566942096,
+            "median": 0.0,
+            "minimum": -21.27924225756863,
+            "maximum": 3.5768526871696555,
+            "samples": 155
+          },
+          "expected_acceptances_given_sampled_gates": 97.47419017324134
+        }
+      },
+      "replay": {
+        "passed": true,
+        "records": 20000,
+        "frames": 101,
+        "maximum_position_error_A": 5.684341886080801e-13,
+        "maximum_rotation_error": 1.5543122344752192e-15
+      },
+      "minimum_observed_atom_wall_clearance_A": 0.051659144237999,
+      "stored_frames_hard_valid": true,
+      "physical_initial_poses_sha256": "2a5a843ffd158a2670f7e859715c15cb0b589f02fa959a25758d5ba11d64eede",
+      "initial_bank_sha256": "2b77d7cb4dec8a30ee18c0b4c966425efd260688cefcad05a6382b99db7f0833",
+      "memory": {
+        "resolved_config": {
+          "attempts_per_sweep": 2,
+          "depletant_activity": 0.035,
+          "depletant_radius": 1.5,
+          "global_probability": 0.1,
+          "initial_gap": 0.25,
+          "lambda_ratio": 16.0,
+          "local_small_angle_std_degrees": 3.0,
+          "local_translation_std_A": 0.3,
+          "proposal_mass": 0.5,
+          "proposal_small_angle_std_degrees": 3.0,
+          "proposal_translation_std_A": 1.0,
+          "radius": 102.22404380707819,
+          "slots": 16
+        },
+        "counts": {
+          "attempted": 2000,
+          "hard_valid": 1332,
+          "accepted": 826,
+          "hard_rejected": 668
+        },
+        "proposal_kinds": {
+          "local": 1791,
+          "global": 209
+        },
+        "native_slots_ever": [],
+        "unique_hard_audited_bank_poses": 842,
+        "state_replay_to_every_frame_and_checkpoint": true,
+        "first_native_discovery_sweep": null,
+        "final_slot_displacements_A": [
+          1.0223673886849847,
+          100.36173180681183,
+          63.02894380211935,
+          0.7964483460705213,
+          160.2649240373196,
+          90.72877948613308,
+          118.11177052131966,
+          109.21051287267275,
+          1.559495714035765,
+          2.3095786593366823,
+          139.51754264732338,
+          1.0060108511596588,
+          0.9007477020966995,
+          1.0851449298011249,
+          1.4319049576984817,
+          58.36725398783564
+        ],
+        "final_slot_rotation_changes_degrees": [
+          25.798995871094576,
+          101.17729592605802,
+          118.4808053066316,
+          34.238522948035126,
+          145.79249133637302,
+          82.73965305172038,
+          126.53451000606829,
+          96.8884185907927,
+          4.8163382869260305,
+          34.4623184876672,
+          152.0663883823152,
+          2.5674276533008773,
+          14.508703954088311,
+          8.785059842837398,
+          9.045519111456573,
+          138.70557542695278
+        ]
+      },
+      "provenance": {
+        "model_sha256": "1a39c8cc0d2977016d5dcd2072328de99612495eab76f6aac8a4aca5086e1519",
+        "binary_sha256": "9ea570c1918321f90781856a0e4dd7d484dd19ce6b1542187b081d3c7a9e50e5",
+        "source_bundle_sha256": "da9aaeb5401113b4cbaba5c0c6cfa17b3d0ddb1c5d49470daef1ed6654381746"
+      },
+      "source_sha256": {
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-on/config.json": "f7113f9067d79eecd0307be41527b9822b17af9696c12f802af8ad4c8e9b36cb",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-on/manifest.json": "c375df9a9b9e867d870119498fe4e39dd9797a25c29363236c74f3d449792792",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-on/summary.json": "aa4284eebefaf8e1a73c79f5300fefc859bfa34cb694d650ee7b672b862e37fb",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-on/trajectory.jsonl": "d723c32f3ac363b6b556cb556a0f021533cbe403336f0e593963473cabdfa824",
+        "/home/xvg/tetramer-mc/runs/contact-memory-free-1000/runs/free-r03-rj-memory-on/moves.jsonl": "9d0a6e90542f467937e36f66d6c2f6a2947e9a6a680c31e502f76d2c63961838"
+      }
+    }
+  ],
+  "independent_test": {
+    "path": "tests/contact_memory_stationary.rs",
+    "sha256": "3d926fc5958d2d28f4f290f029b6ee09a4e6910ada2dc0f883838c7e2387ccb0",
+    "passed": true,
+    "command": "cargo test --locked --release --test contact_memory_stationary -- --nocapture",
+    "exact_iid_trials": 24000,
+    "bank_slots": 3,
+    "activities": [
+      0.0,
+      1.5
+    ],
+    "global_probabilities": [
+      0.0,
+      1.0,
+      0.2
+    ],
+    "checks": [
+      "anchored-pair AO radial law including r^2 measure",
+      "direction and Haar moments",
+      "paired changes",
+      "uniform slot selection",
+      "nonselected slots unchanged",
+      "substantial nonidentity updates"
+    ]
+  },
+  "source_sha256": {
+    "tools/compare_contact_memory_campaigns.py": "da302c54d5f8001f09a089cfcd8f08368e587a8b8862f05a405d0623f8d1e62a",
+    "tools/analyze_free_tetramer_campaign.py": "d10799fe8c2821faa341cf7f56c8a207ff1a76159d6986f2e15421d35b0dc3ff",
+    "tools/run_free_tetramer_campaign.py": "cfc4478398cab8b4917db00ef0e1e1f05131e529a6f7c2ed56d4bb8b971c21e7",
+    "results/contact-memory-comparison/analysis.json": "de9b57f778769f987d92e81d2a9c583e7adb2e45580046107ca062f5fa5a200f",
+    "docs/contact-memory-pilot.md": "5f0c21e0325a4be35e5071a03bf941162bd6038dacfdd3774bb478fab6e43f6b"
+  },
+  "audit_totals": {
+    "logged_updates": 224000,
+    "stored_frames": 1212,
+    "unique_hard_audited_bank_poses": 3692,
+    "all_passed": true
+  }
+}

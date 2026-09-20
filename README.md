@@ -56,13 +56,16 @@ Use `examples/spherical-seeded.json` or `examples/spherical-oligomers.json`
 with the same Rust command. Both collective kernels are enabled in those examples.
 For initially isolated tetramers and native-on/off reversible-jump campaigns,
 see [the free-assembly guide](docs/rj-assembly.md).
+For an evolving, geometry-only bank of pair-contact proposals, see the
+[contact-memory implementation, balance argument and controls](docs/contact-memory-balance.md).
 
 ## Output and continuation
 
 - `trajectory.gsd`: standard HOOMD atom-sphere positions/diameters for external
   visualization, plus FP64 body positions and scalar-first orientations in
   `log/tetramer_mc/body_position` and `body_orientation`, and FP64 periodic
-  lengths in `log/tetramer_mc/box_lengths`.
+  lengths in `log/tetramer_mc/box_lengths`. Spherical display bookkeeping is
+  stored in `log/tetramer_mc/coordinate_wall_center` and `coordinate_origin_sweep`.
 - `trajectory.jsonl`: lossless rigid-body frames at fixed sweep cadence,
   including residence after rejections. Physical lengths are Å.
 - `moves.jsonl`: proposed and retained poses, component/anchor labels, full
@@ -106,6 +109,12 @@ optional native coordination bonds. It needs no server or network. This lightwei
 `hoomd-bevy`; the latter remains an optional future adapter. The physical kernel
 and trajectory format do not depend on a rendering engine.
 
+In coordinate-origin view the accumulated center shifts move the displayed
+wall; during a common shift the displayed body positions remain fixed. The
+default sphere-centered view keeps the wall fixed. Neither view changes the
+physical simulation. Re-export older HTML files to receive this correction;
+legacy trajectories need their center-shift logs to reconstruct wall motion.
+
 ## Modules and invariance
 
 | Module | Responsibility |
@@ -117,6 +126,7 @@ and trajectory format do not depend on a rendering engine.
 | `spherical` | Exact atomic wall, implicit many-body GCA, common-translation chord |
 | `auxiliary` | Normalized state-dependent mixture-mean law and latent transport |
 | `rj` | Reversible ordered component births/deaths under a truncated Poisson prior |
+| `contact_memory` | Independent anchored-pair auxiliary systems and evolving Gaussian chart centers |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 
@@ -152,6 +162,13 @@ in checkpoints. This preserves the physical marginal; it does not prove
 equilibration or accumulate training data. See the [implemented RJ law and
 native-prior controls](docs/rj-assembly.md), and the broader [continuing-learning
 constructions](docs/rjmcmc.md).
+
+Optional spherical `contact_memory` adds a fixed number of separately evolving
+pair configurations. Their proper, normalized auxiliary law is independent of
+production, so their search bath can differ from the physical bath without
+changing its marginal. The bank supplies proposal centers; its updates obey
+their own exact Poisson acceptance. This does not infer covariances, accumulate
+an irreversible archive, or guarantee discovery of useful basins.
 
 Mixture fitting remains in the existing Python research workflow. This Rust
 port loads a fixed base Gaussian export; it does not accumulate training data or

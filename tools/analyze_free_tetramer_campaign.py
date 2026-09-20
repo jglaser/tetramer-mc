@@ -63,7 +63,27 @@ def one(task):
     rj_cfg=cfg.get('reversible_jump');rj_labels=list(frames[0]['rj_state']['labels']) if rj_cfg else None
     rj_jumps=[];rj_counts=Counter();rj_k_hist=Counter()
     model_data=read(directory/'provenance/frozen-relative-model.json')
-    dictionary_size=len(model_data['anchors'])
+    base_dictionary_size=len(model_data['anchors']);dictionary_size=base_dictionary_size
+    memory_cfg=cfg.get('resolved_contact_memory') or manifest.get('resolved_contact_memory')
+    memory_poses=copy.deepcopy(frames[0].get('contact_memory_state',{}).get('poses',[])) if cfg.get('contact_memory') is not None else []
+    initial_memory_poses=copy.deepcopy(memory_poses)
+    memory_counts=Counter();memory_kinds=Counter();memory_events=[];memory_cache={};memory_rows=[]
+    memory_native_seen=set();accepted_global_sources=Counter();memory_selected=Counter()
+    if memory_poses:
+        assert memory_cfg is not None
+        dictionary_size+=len(memory_poses)
+        identity=dict(position=[0.,0.,0.],orientation=[1.,0.,0.,0.])
+    def bank_pose_record(pose):
+        key=tuple(pose['position'])+tuple(pose['orientation'])
+        if key not in memory_cache:
+            p,q=pose_arrays({'poses':[pose]});matrix=rotations(q)[0]
+            distance=float(np.linalg.norm(p[0]));assert distance<=memory_cfg['radius']+2e-8
+            gap=atomic.exact_gap(p[0],matrix);assert gap>=-2e-8,(job['id'],'memory overlap',gap)
+            classification=order.classify({'poses':[identity,pose]})
+            native=[r['motif_id'] for r in classification['registered_tetramer_motifs'] if r['entry']]
+            memory_cache[key]=dict(center_distance_A=distance,minimum_interbody_gap_A=gap,
+                exclusion_contact=gap<=2*memory_cfg['depletant_radius'],native_motif_ids=sorted(set(native)))
+        return memory_cache[key]
     def compare(expected):
         nonlocal maximum_position_error,maximum_rotation_error
         p,q=pose_arrays({'poses':state});ep,eq=pose_arrays({'poses':expected})
@@ -91,6 +111,13 @@ def one(task):
             assert rj_cfg['min_components']<=len(rj_labels)<=rj_cfg['max_components']
             assert all(0<=label<dictionary_size for label in rj_labels)
             rows[-1]['rj']=dict(k=len(rj_labels),labels=list(rj_labels),distinct_labels=len(set(rj_labels)),eta_square_mean=float(np.mean(eta**2)))
+        if memory_poses:
+            assert frame['contact_memory_state']['poses']==memory_poses
+            slots=[bank_pose_record(pose) for pose in memory_poses]
+            native_slots=[i for i,record in enumerate(slots) if record['native_motif_ids']]
+            memory_native_seen.update(native_slots)
+            memory_rows.append(dict(sweep=frame['sweep'],slots=slots,native_slots=native_slots,
+                exclusion_contact_slots=[i for i,record in enumerate(slots) if record['exclusion_contact']]))
         state=copy.deepcopy(frame['poses'])
     observe(frames[0]);move_count=0
     with (directory/'moves.jsonl').open() as stream:
@@ -102,7 +129,22 @@ def one(task):
                     if current_sweep in saved:observe(saved[current_sweep])
                 current_sweep=sweep;selected=set();sweep_moves=0
             changed_pairs=[];previous=set(active);counts[kind]+=1
-            if kind=='model_jump':
+            if kind=='contact_memory':
+                assert memory_poses
+                result=move['result'];slot=result['slot'];assert result['old_pose']==memory_poses[slot]
+                memory_counts['attempted']+=1;memory_kinds[result['kind']]+=1
+                if result['hard_valid']:memory_counts['hard_valid']+=1
+                else:memory_counts['hard_rejected']+=1
+                if result['outside_ball']:memory_counts['outside_ball']+=1
+                if result['accepted']:
+                    assert result['hard_valid'] and not result['outside_ball']
+                    assert result['retained_pose']==result['proposed_pose']
+                    memory_poses[slot]=copy.deepcopy(result['retained_pose']);memory_counts['accepted']+=1
+                    diagnostic=bank_pose_record(memory_poses[slot])
+                    if diagnostic['native_motif_ids']:memory_native_seen.add(slot)
+                    memory_events.append(dict(sweep=sweep,slot=slot,kind=result['kind'],**diagnostic))
+                else:assert result['retained_pose']==memory_poses[slot]
+            elif kind=='model_jump':
                 assert rj_cfg is not None
                 result=move['result'];before=len(rj_labels);assert result['before']==before
                 birth=bool(result['birth']);rj_counts['attempted_births' if birth else 'attempted_deaths']+=1
@@ -124,10 +166,15 @@ def one(task):
                 i=move['moving_index'];assert i not in selected;selected.add(i);sweep_moves+=1
                 old=move['old_pose'];p,q=pose_arrays({'poses':[state[i]]});ep,eq=pose_arrays({'poses':[old]})
                 assert np.max(np.abs(p-ep))<5e-8 and np.max(np.abs(rotations(q)-rotations(eq)))<5e-10
+                component=(move.get('proposal') or {}).get('component_index')
+                label=(rj_labels[component] if rj_cfg and component is not None else component)
+                source=('uniform' if component is None else 'memory' if label>=base_dictionary_size else 'base')
+                if kind=='global':memory_selected[source]+=1
                 if move['accepted']:
                     accepted[kind]+=1;state[i]=copy.deepcopy(move['retained_pose'])
                     assert state[i]==move['proposed_pose'];changed_pairs=[pair for pair in all_pairs if i in pair]
-                    if kind=='global':branch[move['proposal']['branch']]+=1
+                    if kind=='global':
+                        branch[move['proposal']['branch']]+=1;accepted_global_sources[source]+=1
             elif kind=='gca':
                 result=move['result'];flipped=set(result['flipped_indices']);gca_partitions[str(sorted(result['component_sizes'],reverse=True))]+=1
                 gca_flips['none' if not flipped else 'all' if len(flipped)==n else 'partial']+=1
@@ -156,6 +203,12 @@ def one(task):
         for key,actual in [('births','attempted_births'),('deaths','attempted_deaths'),
             ('accepted_births','accepted_births'),('accepted_deaths','accepted_deaths'),('boundary_nulls','boundary_nulls')]:
             assert recorded[key]==rj_counts[actual]
+    if memory_poses:
+        assert checkpoint['contact_memory_state']['poses']==memory_poses
+        assert memory_counts['attempted']==summary['completed_sweeps']*memory_cfg['attempts_per_sweep']
+        recorded=summary['counts']['contact_memory']
+        for key in ('attempted','hard_valid','accepted'):assert recorded[key]==memory_counts[key]
+        assert recorded['hard_rejected']+recorded['proposal_nulls']==memory_counts['hard_rejected']
     assert len(rows)==len(frames)
     for kind in ('local','global'):
         assert counts[kind]==summary['counts'][kind]['attempted']
@@ -188,6 +241,13 @@ def one(task):
         changes=changes,rows=rows,observed_contact_episodes=episodes,observed_environment_returns=roundtrips,
         gca_flips=dict(gca_flips),gca_partitions=dict(gca_partitions),accepted_global_branches=dict(branch),
         counts=summary['counts'],cost=summary['cost'],cpu_seconds=summary['sampler_cpu_seconds'],
+        contact_memory=(dict(resolved_config=memory_cfg,counts=dict(memory_counts),proposal_kinds=dict(memory_kinds),
+            native_slots_ever=sorted(memory_native_seen),accepted_pose_events=memory_events,rows=memory_rows,
+            unique_hard_audited_bank_poses=len(memory_cache),state_replay_to_every_frame_and_checkpoint=True,
+            first_native_discovery_sweep=min((event['sweep'] for event in memory_events if event['native_motif_ids']),default=None),
+            final_slot_displacements_A=[float(np.linalg.norm(np.asarray(p['position'])-q['position'])) for p,q in zip(memory_poses,initial_memory_poses)],
+            final_slot_rotation_changes_degrees=[float(np.degrees(2*np.arccos(np.clip(abs(np.dot(p['orientation'],q['orientation'])),0.,1.)))) for p,q in zip(memory_poses,initial_memory_poses)]) if memory_poses else None),
+        global_proposal_sources=dict(memory_selected),accepted_global_sources=dict(accepted_global_sources),
         reversible_jump=(dict(config=rj_cfg,counts=dict(rj_counts),post_attempt_k_histogram=dict(rj_k_hist),
             mean_k_after_attempt=sum(k*v for k,v in rj_k_hist.items())/len(rj_jumps),
             minimum_k=min(rj_k_hist),maximum_k=max(rj_k_hist),jumps=rj_jumps,
@@ -212,6 +272,8 @@ def main():
     with ProcessPoolExecutor(max_workers=a.workers) as pool:results=list(pool.map(one,tasks))
     save(a.out/'analysis.json',dict(passed=True,results=results,manifest=manifest,source_sha256=sha(Path(__file__))))
     model_scope=(
+        'Contact-memory controls use a geometry-only base atlas, labelled variable-K RJ, and conditional mean transport. An enabled bank supplies additional Gaussian chart centers from independent hard-pair/depletion configurations. Zero bank attempts freezes the prepared poses; positive attempts evolve them under their specified pair law, independent of the production fluid. All arms retain the same rigid tetramer shape and omit external native docking charts.'
+        if manifest.get('contact_memory') is not None else
         'Production proposals compare a geometry-only atlas (native-off) with a 50/50 blend of that atlas and native docking charts (native-on). Both use the same labelled variable-K RJ law and instantaneous conditional-mean transport. Native-off removes external intertetramer native docking charts; both arms retain the same rigid tetramer shape. The base atlas is not retrained.'
         if manifest.get('reversible_jump') else
         f"Production model: **{manifest['model_label']}**. The default atlas includes native examples; these runs test assembly accessibility with that prior, not prior-free discovery. Transport changes instantaneous conditional means; the base atlas is not retrained.")
@@ -237,7 +299,17 @@ def main():
         for r in results:
             jump=r['reversible_jump'];c=jump['counts']
             lines.append(f"| {r['replicate']} | {r['variant']} | {jump['minimum_k']}–{jump['maximum_k']} | {jump['mean_k_after_attempt']:.2f} | {c.get('accepted_births',0)}/{c.get('accepted_deaths',0)} | {c.get('boundary_nulls',0)} |")
-        lines+=['','The native-off atlas uses shape geometry only; native-on mixes that same geometry atlas with explicit native charts. The native template catalogue is read by this post-hoc classifier in both arms. It does not enter the native-off production proposal. These are comparisons of supplied proposal priors, not changes to the physical equilibrium target.','']
+        if manifest.get('contact_memory') is None:
+            lines+=['','The native-off atlas uses shape geometry only; native-on mixes that same geometry atlas with explicit native charts. The native template catalogue is read by this post-hoc classifier in both arms. It does not enter the native-off production proposal. These are comparisons of supplied proposal priors, not changes to the physical equilibrium target.','']
+    if manifest.get('contact_memory') is not None:
+        lines+=['','## Contact-memory diagnostics','',
+            'The bank has a separate finite-ball anchored-pair distribution; its slots do not interact with each other or with physical particles. Every bank update is replayed and all retained bank poses are independently hard checked. Native registration is evaluated only after simulation. Proposal source counts distinguish the dynamic memory charts, static base atlas, and uniform branch. The bank is initialized geometrically, not from equilibrium or native contacts.','',
+            '| Start | Variant | Bank accepted/attempted | Native slots ever | Physical global accepted by source | CPU s |',
+            '|---|---|---:|---:|---|---:|']
+        for result in results:
+            memory=result['contact_memory'];counts=memory['counts'] if memory else {}
+            lines.append(f"| {result['replicate']} | {result['variant']} | {counts.get('accepted',0)}/{counts.get('attempted',0)} | {len(memory['native_slots_ever']) if memory else 0} | {result['accepted_global_sources']} | {result['cpu_seconds']:.2f} |")
+        lines+=['','The explicit physical target is unchanged across the pair. Dynamic-bank movement and accepted physical moves are feasibility diagnostics; an efficiency gain requires more useful decorrelation or registered transitions per total CPU time. Bank and RJ priors are specified algorithmic distributions, not estimates of physical basin probabilities.','']
     (a.out/'report.md').write_text('\n'.join(lines))
     plot(a.out,results,manifest)
     print(json.dumps(dict(passed=True,out=str(a.out))),flush=True)
@@ -258,7 +330,7 @@ def plot(out,results,manifest):
     for column in range(4):axes[0,column].set_title(f'Independent start {column}');axes[1,column].set_xlabel('MC sweeps')
     axes[0,0].set_ylabel('Largest registered\ncomponent');axes[1,0].set_ylabel('Largest exclusion-contact\ncomponent')
     axes[0,0].legend(frameon=False,fontsize=9)
-    title='Assembly from 12 separated tetramers — '+('variable-K RJ, matched atlas controls' if manifest.get('reversible_jump') else 'native-informed atlas')
+    title='Assembly from 12 separated tetramers — '+('contact-memory controls, geometry-only base' if manifest.get('contact_memory') is not None else 'variable-K RJ, matched atlas controls' if manifest.get('reversible_jump') else 'native-informed atlas')
     figure.suptitle(title,fontsize=14)
     figure.text(.5,.01,'Four paired starts; no initial contacts. Finite assembly pilot, not an equilibrium or mixing-speedup estimate.',ha='center',fontsize=9)
     figure.tight_layout(rect=(0,.035,1,.94))

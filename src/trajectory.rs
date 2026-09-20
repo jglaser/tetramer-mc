@@ -25,7 +25,7 @@ impl Trajectory {
         self.append_with_spherical_wall(step, poses, lengths, tree, None)
     }
 
-    /// Spherical atom positions remain in the origin-centered lab frame. GSD's
+    /// Spherical atom positions remain in the sphere-centered frame. GSD's
     /// standard box is display metadata; custom boundary flags define the target.
     pub fn append_with_spherical_wall(
         &mut self,
@@ -34,6 +34,21 @@ impl Trajectory {
         lengths: Vec3,
         tree: &SphereTree,
         spherical_radius: Option<f64>,
+    ) -> Result<()> {
+        self.append_with_coordinate_frame(step, poses, lengths, tree, spherical_radius, [0.; 3], 0)
+    }
+
+    /// Also retain the accumulated moving-wall coordinate convention in FP64.
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_with_coordinate_frame(
+        &mut self,
+        step: u64,
+        poses: &[Pose],
+        lengths: Vec3,
+        tree: &SphereTree,
+        spherical_radius: Option<f64>,
+        coordinate_wall_center: Vec3,
+        coordinate_origin_sweep: u64,
     ) -> Result<()> {
         let n = poses.len() * tree.shape.atoms.len();
         let center = if spherical_radius.is_some() {
@@ -103,6 +118,14 @@ impl Trajectory {
             [u8::from(spherical_radius.is_none()); 3],
         )?;
         if let Some(radius) = spherical_radius {
+            self.gsd.write_scalars(
+                "log/tetramer_mc/coordinate_wall_center",
+                coordinate_wall_center,
+            )?;
+            self.gsd.write_scalars(
+                "log/tetramer_mc/coordinate_origin_sweep",
+                [coordinate_origin_sweep],
+            )?;
             self.gsd
                 .write_scalars("log/tetramer_mc/spherical_wall_radius", [radius])?;
             self.gsd

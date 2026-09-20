@@ -1,0 +1,177 @@
+   Compiling tetramer-mc v0.1.0 (/home/xvg/tetramer-mc)
+    Finished `release` profile [optimized] target(s) in 6.87s
+     Running unittests src/lib.rs (target/release/deps/tetramer_mc-c490f9e01cd93513)
+
+running 3 tests
+test math::tests::rotation_roundtrip ... ok
+test trajectory::tests::gsd_roundtrip ... ok
+test geometry::tests::bvh_matches_brute ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+     Running unittests src/bin/contact_atlas.rs (target/release/deps/contact_atlas-24c907146f0778e1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/gate_benchmark.rs (target/release/deps/gate_benchmark-f8d8d1be12659ec4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/main.rs (target/release/deps/tetramer_mc-12fcfc35cfec7272)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/auxiliary_transport.rs (target/release/deps/auxiliary_transport-1898fd19e98ca607)
+
+running 2 tests
+test conditional_means_and_transported_densities_match_independent_python_fixture ... ok
+test transported_runner_replays_reverse_models_and_resumes_full_joint_state ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.49s
+
+     Running tests/contact_memory.rs (target/release/deps/contact_memory-80e93a00732c0848)
+
+running 4 tests
+test memory_charts_have_correct_normalized_mixture_density_and_fixed_label_weights ... ok
+test preparation_is_deterministic_and_slots_are_independent_pairs ... ok
+test local_kernel_retains_rejected_states_and_support_includes_inner_free_pockets ... ok
+test global_redraw_has_uniform_ball_measure_and_zero_activity_accepts_every_valid_endpoint ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/contact_memory_stationary.rs (target/release/deps/contact_memory_stationary-57897e6ceb285fb9)
+
+running 1 test
+memory oracle z=0, p_global=0: 4000 iid starts PASS, accepted=2963, slots=[1334, 1323, 1343]
+memory oracle z=0, p_global=1: 4000 iid starts PASS, accepted=3466, slots=[1304, 1347, 1349]
+memory oracle z=0, p_global=0.2: 4000 iid starts PASS, accepted=3096, slots=[1343, 1310, 1347]
+memory oracle z=1.5, p_global=0: 4000 iid starts PASS, accepted=1966, slots=[1274, 1351, 1375]
+memory oracle z=1.5, p_global=1: 4000 iid starts PASS, accepted=1903, slots=[1311, 1325, 1364]
+memory oracle z=1.5, p_global=0.2: 4000 iid starts PASS, accepted=1923, slots=[1357, 1297, 1346]
+test exact_anchored_ao_equilibrium_survives_memory_local_global_and_mixture ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+
+     Running tests/depletion_reference.rs (target/release/deps/depletion_reference-248db9259e3b85ec)
+
+running 5 tests
+test invalid_inputs_do_not_escape_through_empty_or_zero_activity_paths ... ok
+test zero_activity_is_a_deterministic_unit_physical_factor ... ok
+test periodic_face_crossing_envelopes_are_symmetric_and_cover_brute_xor ... ok
+test sphere_pair_poisson_means_and_nonzero_hastings_flux ... ok
+test many_body_union_changes_match_independent_volume_sampling ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/proposal_reference.rs (target/release/deps/proposal_reference-8f4c67f6d286eec8)
+
+running 6 tests
+test ingress_quaternion_tolerance_matches_geometry ... ok
+test half_open_periodic_boundaries_are_null_without_raw_wrapping ... ok
+77 independent Python cases; maximum old-density error 1.5632480199201382e-8
+test python_reference_density_hastings_and_periodic_images ... ok
+test reject_students_incompatible_geometry_and_invalid_models ... ok
+test full_covariance_samples_and_uniform_haar_moments ... ok
+test sampling_normalization_uniform_anchor_and_null_mass ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/radial_contacts.rs (target/release/deps/radial_contacts-accb0134f457860d)
+
+running 3 tests
+test analytic_sphere_dumbbell_and_missed_ray_limits ... ok
+test rotated_concave_union_matches_brute_atomic_intervals ... ok
+test geometry_only_cli_emits_replayable_normalized_full_covariance_atlas ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running tests/rj_auxiliary.rs (target/release/deps/rj_auxiliary-9372aa5cd1c95090)
+
+running 2 tests
+test truncated_count_chain_has_exact_poisson_flux_including_boundaries ... ok
+test birth_death_chain_preserves_label_gaussian_priors_and_visits_count_limits ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests/rj_stationarity.rs (target/release/deps/rj_stationarity-a27ed053dd2e51b9)
+
+running 3 tests
+Independent Poisson-sum relative flux defect: correct=1.193e-15, stale=0.440121
+test exact_poisson_flux_control_detects_stale_reverse_reconstruction ... ok
+distance: exact=3.0613251 initial=3.0836992 after=3.0798845 paired_z=-0.303 stale_paired_z=-0.046
+distance_squared: exact=10.1972983 initial=10.3474926 after=10.3203002 paired_z=-0.306 stale_paired_z=-0.214
+depletion_contact: exact=0.6749659 initial=0.6635000 after=0.6691667 paired_z=0.805 stale_paired_z=0.787
+midpoint_squared: exact=2.7250591 initial=2.7291566 after=2.7320593 paired_z=0.100 stale_paired_z=0.243
+absolute_R00: exact=0.0000000 initial=-0.0035236 after=-0.0072893 paired_z=-0.364 stale_paired_z=-0.796
+absolute_R00_squared: exact=0.3333333 initial=0.3315505 after=0.3299934 paired_z=-0.318 stale_paired_z=-0.060
+relative_R00: exact=0.0000000 initial=-0.0109999 after=-0.0205530 paired_z=-1.072 stale_paired_z=-1.409
+relative_R00_squared: exact=0.3333333 initial=0.3338871 after=0.3303093 paired_z=-0.872 stale_paired_z=-2.018
+K: exact=2.6500764 initial=2.6418333 after=2.6696667 paired_z=1.371 stale_paired_z=1.549
+K_distance_cross: exact=0.0000000 initial=-0.0292385 after=-0.0020396 paired_z=1.312 stale_paired_z=1.163
+K_contact_cross: exact=0.0000000 initial=0.0210714 after=0.0002678 paired_z=-1.916 stale_paired_z=-1.692
+K_rotation_cross: exact=0.0000000 initial=0.0017300 after=-0.0089779 paired_z=-0.796 stale_paired_z=-0.895
+first_label0: exact=0.4000000 initial=0.3871667 after=0.3945000 paired_z=0.950 stale_paired_z=1.270
+first_eta0: exact=0.0000000 initial=-0.0267575 after=0.0132658 paired_z=2.245 stale_paired_z=1.953
+first_eta0_squared: exact=1.0000000 initial=0.9420343 after=0.9874499 paired_z=1.854 stale_paired_z=1.874
+actual implementation exercised: Exercised { physical_attempts: 18000, hard_valid: 2939, accepted: 1312, jumps: 36000, births: 12943, deaths: 12776, boundary_nulls: 4588, gate_points: 229067, gca_points: 16426, gca_partial: 4975, shifts: 18000, stale_log_correction_max: 7.171859790845485, memory_attempts: 0, memory_accepted: 0 }
+Correct composition maximum |paired z|=2.245 across 15 predeclared observables from 6000 independent exact starts and 3 rounds; acceptance bound 5.5
+Stale-reverse mean-drift control is underpowered here (not required to fail); maximum |paired z|=2.018. The separate exact Poisson-sum flux control detects this defect without a sampling-power assumption.
+test actual_rj_learned_poisson_gca_shift_preserves_exact_two_sphere_marginal ... ok
+memory joint distance: exact=3.0613251, after=3.0632144, paired_z=-1.810
+memory joint distance_squared: exact=10.1972983, after=10.2005997, paired_z=-1.807
+memory joint depletion_contact: exact=0.6749659, after=0.6730000, paired_z=1.464
+memory joint midpoint_squared: exact=2.7250591, after=2.7327031, paired_z=0.519
+memory joint absolute_R00: exact=0.0000000, after=0.0006839, paired_z=-0.227
+memory joint absolute_R00_squared: exact=0.3333333, after=0.3331833, paired_z=-0.655
+memory joint relative_R00: exact=0.0000000, after=-0.0040990, paired_z=-0.859
+memory joint relative_R00_squared: exact=0.3333333, after=0.3344977, paired_z=1.192
+memory joint K: exact=2.6500764, after=2.6655000, paired_z=0.417
+memory joint K_distance_cross: exact=0.0000000, after=0.0069588, paired_z=0.005
+memory joint K_contact_cross: exact=0.0000000, after=0.0025882, paired_z=0.739
+memory joint K_rotation_cross: exact=0.0000000, after=-0.0094547, paired_z=-0.983
+memory joint first_label0: exact=0.2000000, after=0.2040000, paired_z=0.502
+memory joint first_eta0: exact=0.0000000, after=0.0154102, paired_z=0.087
+memory joint first_eta0_squared: exact=1.0000000, after=1.0276679, paired_z=-0.461
+memory-production distance cross: z=0.464, paired_z=1.962; counters=Exercised { physical_attempts: 18000, hard_valid: 3817, accepted: 739, jumps: 36000, births: 12947, deaths: 12896, boundary_nulls: 4505, gate_points: 299023, gca_points: 16610, gca_partial: 5140, shifts: 18000, stale_log_correction_max: 8.355398357118776, memory_attempts: 36000, memory_accepted: 18526 }
+test contact_memory_with_different_auxiliary_bath_preserves_production_marginal ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+
+     Running tests/runner_restart.rs (target/release/deps/runner_restart-5e6abf1895e09115)
+
+running 1 test
+test checkpoint_continuation_is_exact_and_inputs_checked ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.52s
+
+     Running tests/spherical_kernels.rs (target/release/deps/spherical_kernels-8f549ad9c90953f1)
+
+running 6 tests
+test every_hard_component_flip_is_valid_and_reversible_for_anisotropic_bodies ... ok
+test wall_uses_oriented_atomic_spheres_and_halfturn_preserves_shape ... ok
+test zero_activity_is_the_hard_component_coin_kernel ... ok
+test common_shift_chord_matches_atomic_reference_and_reverse_interval ... ok
+test common_shift_samples_the_one_sphere_uniform_volume ... ok
+test implicit_gca_has_manybody_equilibrium_on_a_continuous_three_sphere_orbit ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/spherical_runner.rs (target/release/deps/spherical_runner-e22d9b16c8162e0a)
+
+running 2 tests
+test open_gaussian_uses_ordinary_relative_displacements_and_no_wrapping ... ok
+test spherical_collective_schedules_resume_exactly_and_record_unwrapped_coordinates ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.02s
+
+   Doc-tests tetramer_mc
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

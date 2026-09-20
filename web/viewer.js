@@ -40,11 +40,14 @@
   function displayedCenters(frame, box, focus, bodyBound, radius, boundary = "periodic", wallCenter = [0, 0, 0], origin = "sphere") {
     const poses = frame.poses;
     if (boundary === "spherical") {
-      const offset = origin === "coordinate" ? [0, 0, 0] : wallCenter;
-      const coincident = wallCenter.every(x => x === 0);
-      return { centers: poses.map(p => sub(p.position, offset)), group: poses.map((_, i) => i),
-        boundaryCenter: sub(wallCenter, offset),
-        label: (origin === "coordinate" ? "Coordinate origin" : "Sphere center") + " · fixed frame" + (coincident ? "\nBoth origins coincide in this run" : "") };
+      // The simulation stores sphere-centered poses. C is the accumulated
+      // coordinate origin, not a center of mass or a fit to the current frame.
+      const center = frame.coordinate_wall_center || wallCenter;
+      const offset = origin === "coordinate" ? center : [0, 0, 0];
+      const originSweep = frame.coordinate_origin_sweep || 0;
+      return { centers: poses.map(p => add(p.position, offset)), group: poses.map((_, i) => i),
+        boundaryCenter: [...offset],
+        label: origin === "coordinate" ? "Coordinate origin · accumulated shift convention" + (originSweep ? `\nOrigin established at sweep ${originSweep}` : "") : "Sphere-centered frame · fixed wall" };
     }
     if (focus === "box") return { centers: poses.map(p => minimumImage(p.position, box)), group: poses.map((_, i) => i), label: "Primary cell · body centers wrapped" };
     const proximity = nearbyGroups(poses, box, 2 * bodyBound + 2 * radius, frame.contact_edges);
@@ -178,7 +181,7 @@
   }
   function updateGeometry(reset) {
     const frame = data.frames[state.index];
-    const displayed = displayedCenters(frame, data.box_lengths, $("focus").value, data.body_bound, data.depletant_radius || 0, data.boundary || "periodic", data.spherical_wall_center || [0, 0, 0], $("frame-origin").value);
+    const displayed = displayedCenters(frame, data.box_lengths, $("focus").value, data.body_bound, data.depletant_radius || 0, data.boundary || "periodic", [0, 0, 0], $("frame-origin").value);
     state.centers = displayed.centers; state.group = displayed.group;
     state.boundaryCenter = displayed.boundaryCenter || [0, 0, 0];
     state.bonds = nativeBondSegments(data, frame, displayed.centers);
@@ -208,7 +211,7 @@
   function resetCamera() {
     state.pan = [0, 0];
     const [, height] = resize();
-    const extent = data.boundary === "spherical" ? data.spherical_wall_radius + norm(state.boundaryCenter) : $("focus").value === "box" ? norm(data.box_lengths) / 2 + data.body_bound : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
+    const extent = data.boundary === "spherical" ? ($("frame-origin").value === "coordinate" ? data.coordinate_frame.fixed_view_extent : data.spherical_wall_radius) : $("focus").value === "box" ? norm(data.box_lengths) / 2 + data.body_bound : Math.max(...state.group.map(i => norm(state.centers[i]))) + data.body_bound;
     state.scale = Math.min(viewport.clientWidth, viewport.clientHeight) * (global.devicePixelRatio || 1) * .43 / Math.max(extent, 1);
     // Match the pixel-ratio cap used by resize.
     if ((global.devicePixelRatio || 1) > 2) state.scale *= 2 / global.devicePixelRatio;
@@ -283,7 +286,8 @@
       gl.uniform2f(gl.getUniformLocation(program, "u_viewport"), width, height);
       gl.uniform2f(gl.getUniformLocation(program, "u_pan"), state.pan[0], state.pan[1]);
       gl.uniform1f(gl.getUniformLocation(program, "u_scale"), state.scale);
-      gl.uniform1f(gl.getUniformLocation(program, "u_depth"), 2 * (norm(data.box_lengths) + 2 * data.body_bound));
+      const wholeHistoryExtent = data.coordinate_frame && data.coordinate_frame.fixed_view_extent || 0;
+      gl.uniform1f(gl.getUniformLocation(program, "u_depth"), 2 * Math.max(norm(data.box_lengths) + 2 * data.body_bound, wholeHistoryExtent + data.body_bound));
       gl.uniform1f(gl.getUniformLocation(program, "u_max_point"), gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)[1]);
       gl.drawArrays(gl.POINTS, 0, state.geometry.length / 4);
     } else {
@@ -340,6 +344,14 @@
     $("focus-control").hidden = true;
     $("frame-origin-control").hidden = false;
     $("frame-origin").value = "sphere";
+    const coordinate = Array.from($("frame-origin").options).find(option => option.value === "coordinate");
+    if (!data.coordinate_frame || !data.coordinate_frame.available) {
+      coordinate.disabled = true;
+      coordinate.textContent = "Coordinate origin unavailable";
+      $("frame-origin-control").title = data.coordinate_frame && data.coordinate_frame.reason || "Saved shift history unavailable";
+    } else {
+      $("frame-origin-control").title = data.coordinate_frame.convention;
+    }
     $("focus").value = "box";
   }
   const nativeAvailable = Boolean(data.native_bonds && data.native_bonds.available);

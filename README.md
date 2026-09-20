@@ -138,6 +138,12 @@ finite mass around that atlas maximum. The historical single draw contributed
 radius-two estimate has about 20% uncertainty. Geometry separates this contact
 from the previous one, while their common complement still requires fresh
 coverage before a full competing-weight conclusion.
+A [two-contact expanded atlas](docs/expanded-contact-atlas.md) tests frozen
+geometric and fitted components over the complete intermediate window, with
+eight populations per width and predeclared correlated-prefix diagnostics.
+The [SMC reconciliation](docs/smc-reference-reconciliation.md) distinguishes
+the earlier one-neighbor target from these AB references and identifies the
+missing shoulder as a compact matched control.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

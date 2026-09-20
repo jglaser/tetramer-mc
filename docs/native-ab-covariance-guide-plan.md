@@ -1,9 +1,20 @@
-# Prepared reuse path for an AB covariance guide
+# Frozen native AB covariance guide
 
-This is a design-only follow-up to the completed independent AB confirmation.
-No Gaussian has been fitted by this task and no new physical simulation is
-launched. The present centered nested-cover mixture should not receive
-another larger budget unchanged.
+The offline adapter `tools/prepare_native_confirmation_atlas.py` now freezes
+a regularized Gaussian guide from the completed independent AB confirmation.
+All **18,577 original nonzero observations from all eight populations** enter
+the fit with their original importance weights. No new physical simulation,
+depletant clouds, or replacement of selected old weights was performed by
+this fitting task. The present centered nested-cover mixture should not
+receive another larger budget unchanged.
+
+The frozen output is `runs/native-ab-covariance-guide-20260920`. Its
+`predeclared-fit-protocol.json` was written before the fit, and `provenance/`
+contains the executed source, all original weighted training rows, source
+campaign/assessment manifests, physical config, and an exact byte copy of
+the physical shape. `report.json` records the input population hashes,
+geometry checks, coordinate audit, and model hashes. `cross-validation.json`
+records the eight leave-one-population-out fits and selection diagnostics.
 
 The largest confirmation contribution is just outside the scale-.2
 translation ball: `|t|≈0.441 Å` versus its 0.4 Å radius. Crossing that boundary
@@ -50,10 +61,10 @@ The existing importance fitter cannot be invoked unchanged:
    fixed neighbors; the wrapper must validate the full supplied AB list
    instead of rejecting it.
 
-A dedicated thin adapter, for example
-`tools/prepare_native_confirmation_atlas.py`, can reuse these functions
+A dedicated thin adapter,
+`tools/prepare_native_confirmation_atlas.py`, reuses these functions
 without changing the existing shoulder-fitting semantics. Its sole input
-campaign would be
+campaign is
 `runs/native-cover-mixture-ab-confirmation-8x131072-l64-20260920`, with its
 successful streaming assessment and all original source hashes required.
 
@@ -127,16 +138,56 @@ reusable; its old shoulder covariance is not automatically an appropriate
 floor for AB. A new physical-unit floor must be declared explicitly rather
 than inherited unnoticed.
 
-A leave-one-population-out weighted predictive-density check would expose
+A leave-one-population-out weighted predictive-density check exposes
 how much the dominant population controls μ and Σ. It is a training
 diagnostic, not an independent mass estimate. Freeze the final all-population
 fit and its floor before any new normalization draws. Tempered weights or
 additional broad components would be separate declared proposal choices;
 they must not replace the original physical weights.
 
+The implemented floor is additive,
+
+`F=diag(0.05² I₃, [ell tan(0.1°/2)]² I₃)`.
+
+The angular value specifies a nominal axis-angle scale in this local chart;
+it is not a claim that the nonlinear angle variance is exactly 0.1° squared.
+The two predeclared candidate families are `N(μ,Σ_raw+F)` and
+`0.8 N(μ,Σ_raw+F) + 0.2 N(μ,4(Σ_raw+F))`. The latter is selected only if
+at least six of eight heldout gains are positive, their mean after dropping
+the largest gain is at least 0.1 nat, and the pooled-mass-weighted gain is
+positive. This is a deterministic conservative design rule, not a statistical
+significance test. The common single-Gaussian branch bounds every pointwise
+mixture gain below by `log(0.8)`; the code checks this invariant.
+
+The observed gains, in population order, were
+`[-0.07310, 0.09496, -0.01331, -0.01134, 0.43419, 0.36883, 0.26312, 2.61556]`
+nats. Five of eight were positive, so the frozen selected model remains
+**one full-covariance Gaussian**. The drop-best mean was +0.15191 nat and
+the pooled-mass gain +0.07821 nat; neither overrides the failed six-fold rule.
+
+The all-population latent mean is
+`[0.232240, -0.181965, 0.197286, -0.078320, -0.135429, 0.398485] Å`
+in the specified deployment chart. The raw eigenvalues were
+`[0.000436, 0.000555, 0.002410, 0.007910, 0.011083, 0.041316] Å²`,
+and after the floor they are
+`[0.002849, 0.003018, 0.004883, 0.010281, 0.013418, 0.043678] Å²`,
+with condition number 15.33. All translation–rotation cross terms remain.
+The floor materially affects the two narrowest directions; ESS=3.97 still
+precludes claiming that this is a well-determined equilibrium covariance.
+
+A second frozen file, `model-wide.json`, multiplies **every selected
+covariance by four**, including the floor, without changing any mean,
+anchor, component weight or original model. This is a prespecified width
+sensitivity control for fresh integration, not a new data-dependent fit.
+
+| File | SHA256 |
+| --- | --- |
+| `model.json` | `86aedd9218381a47a4efef756bab82e58f03aee78f31d58873f10ab9cdc2b667` |
+| `model-wide.json` | `3fe2a1280d8f3965fb7582f81b429a9902a3ef5f59b5e3766098d5a3ba9de952` |
+
 ## Runtime reuse and defensive support
 
-The least Rust work is to feed the frozen Gaussian atlas to the existing
+One Rust reuse path is to feed the frozen Gaussian atlas to the existing
 `basin-normalizer`. Its positive uniform centered cube/Haar branch is already
 normalized and covers the original capture sphere; retain it. The estimator
 will still classify the original native region and evaluate the complete
@@ -153,9 +204,9 @@ list. Proposal generation and density evaluation must use exactly that same
 list; `Environment.fixed` must remain the complete AB list. The default
 all-neighbor behavior should remain unchanged and be replay-tested.
 
-For this native-only target, the existing outer native cover would be a
-more efficient defensive law than the entire 36 Å cube with unrestricted
-orientation. A later composition can use
+For this native-only target, the new runtime composition uses the existing
+outer native cover as the primary defense, while retaining the positive
+36 Å cube/Haar branch of the existing atlas:
 
 `g_new = δ g_cover + (1−δ) g_existing_Gaussian_plus_cube`, `0<δ<1`.
 
@@ -165,9 +216,12 @@ draw internals or setting its required uniform weight to zero. All containing
 branches enter the final denominator, including the small cube branch inside
 the existing model. Draws outside the original q≤1 target remain zeros; do
 not condition the Gaussian on that target using an unknown truncation
-constant. This composition requires a small proposal adapter in the native
-normalizer plus a matching independent density audit; it has not been
-implemented here.
+constant. The parent task owns the Rust adapter and independent runtime
+density audit. These fitter outputs use the existing atlas file format;
+there is no fitter-specific Rust serialization convention. The intended
+runtime choices are `δ=0.25`, inner cube weight `ε=0.05`, selected anchor
+index 0 (A), and the original full-size outer geometric cover. Both fixed
+neighbors remain in the physical hard and exclusion-union calculation.
 
 Before a fresh fixed-budget comparison, test chart round trips, lab/anchor
 frame density equality, finite positive covariance, component and defensive
@@ -177,3 +231,60 @@ new guide. Fresh seeds and a newly frozen budget must assess mass, contribution
 concentration and cost. No old high-weight draw is recalculated or replaced.
 This remains a native-informed integration control, not template-free basin
 discovery or an assembly demonstration.
+
+## Validation and cost screen completed
+
+Run the seven independent fitter controls with
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 /home/xvg/protein-nucleation/.venv/bin/python -B tools/test_native_confirmation_atlas.py
+```
+
+They cover pooled original weights and cross covariance, rank-zero positive
+floor with physical units, a noncommuting left-Cayley round trip, Haar
+density under a rotated/translated frame, heldout-population exclusion,
+the conservative family-selection rule, both-neighbor unequal-radius atom
+checks against brute force, and the original max-member native metric.
+All pass. On all 18,577 actual training poses, the laboratory and deployment
+frame log densities agree within `8.6e-13`; the independent SciPy density
+agrees to the same tolerance. The maximum training chart angle is 4.015°,
+well away from the Cayley seam. The original native q metric is recomputed
+independently for every training pose.
+
+A separate exact atomic KD-tree predicate checks every moving atom against
+each fixed radius class, separately for both A and B. It confirms the
+128 uniformly chosen training poses and 16 largest-weight poses, with
+smallest gaps 0.001196 Å to A and 0.000420 Å to B. These are static
+predicate checks, not re-estimates of physical weights.
+
+The independent proposal geometry screen used 512 new Gaussian draws per
+model, checking both neighbors and original native/capture criteria. All
+draws met native q and capture; hard support limited success:
+
+| Frozen guide | Native/hard-valid | Fraction (binomial SE) | Hybrid valid fraction forecast | Four × 8192 CPU forecast |
+| --- | ---: | ---: | ---: | ---: |
+| Selected covariance | 136/512 | 0.2656 (0.0195) | 0.1893 | 306 s |
+| Covariance × 4 | 44/512 | 0.08594 (0.01239) | 0.06129 | 99 s |
+
+The forecast combines the geometric-cover hard-volume estimate with the
+Gaussian checks and the original cube density. It scales the previous
+AB confirmation's mean CPU per valid pose, so changed cloud cost and fixed
+overheads may alter it. It predicts work, not accuracy or importance ESS.
+The wider guide is cheaper here because more draws are hard-invalid, not
+because it has demonstrated better sampling. The entire fitter and static
+screen completed in 18.3 s.
+
+The separate [runtime implementation and fresh validation](native-guided-cover.md)
+are now complete, including two frozen guide widths and a larger independent
+wider-guide confirmation. The wider estimate stabilizes near log Q=35.74 with
+3.8% observed error, while an 18% difference from the narrow pilot remains.
+The fitted source data above remain training only; none of their original
+weights was replaced or pooled with those validation campaigns.
+
+The next authorized integration must use fresh fixed budgets and seeds,
+retain every zero, evaluate the full hybrid denominator, and compare the
+two frozen widths without pooling their outcomes into the training fit.
+The proposed control budget is four independent populations × 8192 draws
+per model, λ/z=64 and two independent clouds, pending the runtime tests and
+separate production launch. No convergence claim follows from the fit or
+these static geometry results.

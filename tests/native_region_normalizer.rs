@@ -51,6 +51,10 @@ fn options(config: PathBuf, out: PathBuf, n: u64) -> NativeRegionOptions {
         lambda_ratio: None,
         cover_scales: vec![1.],
         cover_weights: Vec::new(),
+        model: None,
+        model_weight: 0.75,
+        model_uniform_probability: 0.05,
+        model_anchor_index: 0,
     }
 }
 

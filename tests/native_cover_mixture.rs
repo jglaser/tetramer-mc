@@ -223,6 +223,10 @@ fn sphere_depletion_and_capture_have_independent_integral_references() -> Result
             lambda_ratio: None,
             cover_scales: vec![0.1, 0.2, 0.4, 1.],
             cover_weights: vec![],
+            model: None,
+            model_weight: 0.75,
+            model_uniform_probability: 0.05,
+            model_anchor_index: 0,
         })?;
         let haar = native_region::theta_minus_sin(m.angle_error_scale_deg.to_radians()) / PI;
         let hard_expected = if activity == 0. {

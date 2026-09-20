@@ -115,6 +115,121 @@ def proposal_log_density(model,pose):
     return log_density,contains
 
 
+def multiply_quaternions(a,b):
+    v=cross(a[1:],b[1:])
+    return [a[0]*b[0]-sum(x*y for x,y in zip(a[1:],b[1:]))]+[
+        a[0]*b[i+1]+b[0]*a[i+1]+v[i] for i in range(3)]
+
+
+def matrix_quaternion(matrix):
+    """Independent stable proper-matrix to scalar-first quaternion conversion."""
+    assert len(matrix)==3 and all(len(row)==3 for row in matrix)
+    assert all(math.isfinite(x) for row in matrix for x in row)
+    for i in range(3):
+        for j in range(3):
+            assert abs(sum(matrix[k][i]*matrix[k][j] for k in range(3))-(i==j))<1e-10
+    determinant=sum(matrix[0][i]*cross(matrix[1],matrix[2])[i] for i in range(3))
+    assert abs(determinant-1)<1e-10
+    trace=sum(matrix[i][i] for i in range(3))
+    if trace>0:
+        s=2*math.sqrt(1+trace)
+        q=[s/4,(matrix[2][1]-matrix[1][2])/s,(matrix[0][2]-matrix[2][0])/s,(matrix[1][0]-matrix[0][1])/s]
+    else:
+        i=max(range(3),key=lambda j:matrix[j][j]);j=(i+1)%3;k=(i+2)%3
+        s=2*math.sqrt(1+matrix[i][i]-matrix[j][j]-matrix[k][k])
+        q=[0.,0.,0.,0.];q[0]=(matrix[k][j]-matrix[j][k])/s
+        q[i+1]=s/4;q[j+1]=(matrix[j][i]+matrix[i][j])/s;q[k+1]=(matrix[k][i]+matrix[i][k])/s
+    return normalized_quaternion(q)
+
+
+class GaussianGuide:
+    """One fixed-anchor Gaussian atlas plus a laboratory-centered uniform cube.
+
+    Pure-Python scalar reconstruction keeps the audit streaming and independent
+    of Rust's matrix inverse and linear algebra. No density is conditioned on
+    capture, hard validity, or which family actually generated the row.
+    """
+    def __init__(self,description,raw_model,config,shape_sha256):
+        self.description=description
+        self.weight=description['weight'];self.epsilon=description['uniform_probability']
+        assert math.isfinite(self.weight) and 0<self.weight<1
+        assert math.isfinite(self.epsilon) and 0<self.epsilon<=1
+        index=description['anchor_index']
+        assert type(index) is int and 0<=index<len(config['fixed_poses'])
+        assert description['anchor_pose']==config['fixed_poses'][index]
+        assert description['capture_center']==config['capture_center']
+        self.center=description['capture_center'];self.lengths=description['cube_lengths']
+        assert len(self.lengths)==3 and all(math.isfinite(x) and x>0 for x in self.lengths)
+        assert self.lengths==[2*config['capture_radius']]*3
+        self.anchor=description['anchor_pose']
+        q=normalized_quaternion(self.anchor['orientation']);self.inverse_anchor=[q[0],-q[1],-q[2],-q[3]]
+        assert raw_model['coordinate_convention']=='anchor-body-relative'
+        assert raw_model['shape_sha256']==shape_sha256
+        self.ell=raw_model['angular_length'];assert math.isfinite(self.ell) and self.ell>0
+        count=len(raw_model['anchors']);assert count>0 and len(raw_model['means'])==count
+        if raw_model.get('dfs') is not None:
+            assert len(raw_model['dfs'])==count and all(x is None for x in raw_model['dfs'])
+        assert (raw_model.get('covariances') is None)!=(raw_model.get('scales') is None)
+        covariances=raw_model.get('covariances',raw_model.get('scales'))
+        if covariances is None:covariances=raw_model['scales']
+        weights=raw_model.get('weights')
+        if weights is None:weights=[1/count]*count
+        assert len(weights)==len(covariances)==count
+        assert all(math.isfinite(w) and w>0 for w in weights) and abs(sum(weights)-1)<=2e-12
+        total=sum(weights);self.components=[]
+        for anchor,mean,covariance,weight in zip(raw_model['anchors'],raw_model['means'],covariances,weights):
+            assert len(mean)==6 and all(math.isfinite(x) for x in mean)
+            assert len(anchor['position'])==3 and all(math.isfinite(x) for x in anchor['position'])
+            assert len(covariance)==6 and all(len(row)==6 for row in covariance)
+            assert all(math.isfinite(x) for row in covariance for x in row)
+            size=max(abs(x) for row in covariance for x in row);assert size>0
+            for i in range(6):
+                for j in range(6):assert abs(covariance[i][j]-covariance[j][i])<=1e-12*(size+abs(covariance[j][i]))
+            lower=[[0.]*6 for _ in range(6)]
+            for i in range(6):
+                for j in range(i+1):
+                    value=(covariance[i][j]+covariance[j][i])/2-sum(lower[i][k]*lower[j][k] for k in range(j))
+                    if i==j:
+                        assert value>0;lower[i][j]=math.sqrt(value)
+                    else:lower[i][j]=value/lower[j][j]
+            rotation=matrix_quaternion(anchor['rotation'])
+            inverse_rotation=[rotation[0],-rotation[1],-rotation[2],-rotation[3]]
+            normalizer=-3*math.log(2*math.pi)-sum(math.log(lower[i][i]) for i in range(6))
+            self.components.append((anchor['position'],inverse_rotation,mean,lower,normalizer,math.log(weight/total)))
+
+    def log_density(self,pose):
+        displacement=[pose['position'][i]-self.anchor['position'][i] for i in range(3)]
+        position=rotate(self.inverse_anchor,displacement)
+        relative=normalized_quaternion(multiply_quaternions(self.inverse_anchor,normalized_quaternion(pose['orientation'])))
+        component_logs=[]
+        for anchor,inverse_rotation,mean,lower,normalizer,log_weight in self.components:
+            delta=normalized_quaternion(multiply_quaternions(relative,inverse_rotation))
+            if delta[0]==0:
+                component_logs.append(-math.inf);continue
+            cayley=[x/delta[0] for x in delta[1:]]
+            x=[position[i]-anchor[i] for i in range(3)]+[self.ell*c for c in cayley]
+            residual=[]
+            for i in range(6):residual.append((x[i]-mean[i]-sum(lower[i][j]*residual[j] for j in range(i)))/lower[i][i])
+            quadratic=sum(v*v for v in residual)
+            if not math.isfinite(quadratic):component_logs.append(-math.inf);continue
+            # Haar dc = dc/[pi^2 (1+|c|^2)^2]; x_rot=ell*c.
+            haar=2*math.log(math.pi)+4*math.log(math.hypot(1.,*cayley))
+            component_logs.append(log_weight+normalizer-.5*quadratic+3*math.log(self.ell)+haar)
+        gaussian=-math.inf
+        for value in component_logs:gaussian=logadd(gaussian,value)
+        inside=all(-length/2<=pose['position'][i]-self.center[i]<length/2 for i,length in enumerate(self.lengths))
+        uniform=math.log(self.epsilon)-sum(math.log(x) for x in self.lengths) if inside else -math.inf
+        learned=math.log1p(-self.epsilon)+gaussian if self.epsilon<1 else -math.inf
+        return logadd(uniform,learned),inside,component_logs
+
+
+def hybrid_log_density(cover_model,guide,pose):
+    cover_density,membership=proposal_log_density(cover_model,pose)
+    guide_density,inside_cube,component_logs=guide.log_density(pose)
+    density=logadd(math.log1p(-guide.weight)+cover_density,math.log(guide.weight)+guide_density)
+    return density,membership,inside_cube,component_logs
+
+
 def native_q(metric,pose):
     values=[]
     for reference in metric['native_poses']:
@@ -149,13 +264,29 @@ def analyze(path_string):
     log_volume = math.log(cover["volume"])
     model=proposal_model(manifest,cover)
     mixture_rows=model is not None and len(model['scales'])>1
-    config=json.loads((path/'provenance/config.json').read_text()) if mixture_rows else None
+    guide_description=manifest.get('guide')
+    guided_rows=guide_description is not None
+    if manifest.get('schema')==3:assert guided_rows, 'Schema3 requires the hybrid guide description'
+    detailed_rows=mixture_rows or guided_rows
+    config=json.loads((path/'provenance/config.json').read_text()) if detailed_rows else None
+    guide=None
+    if guided_rows:
+        assert manifest['schema']==3 and model is not None
+        model_bytes=(path/'provenance/guide-model.json').read_bytes()
+        assert hashlib.sha256(model_bytes).hexdigest()==guide_description['model_sha256']
+        guide=GaussianGuide(guide_description,json.loads(model_bytes),config,manifest['shape_sha256'])
     counts = {"q": 0, "capture": 0, "hard": 0, "valid": 0}
     moments = {name: fresh() for name in ["native", "native_core", "native_shell"]}
     hard_moments={name:fresh() for name in moments}
     log_cross=-math.inf
     component_counts=[0]*len(model['scales']) if model else None
     component_valid=[0]*len(model['scales']) if model else None
+    family_counts={'cover':0,'guide':0} if guide else None
+    family_valid={'cover':0,'guide':0} if guide else None
+    guide_component_counts=[0]*len(guide.components) if guide else None
+    guide_component_valid=[0]*len(guide.components) if guide else None
+    guide_uniform_count=0
+    guide_uniform_valid=0
     cloud_points=0
     top = []
     digest = hashlib.sha256()
@@ -169,14 +300,35 @@ def analyze(path_string):
             assert row["draw"] == n
             n += 1
             log_density=-log_volume
-            if mixture_rows:
+            if detailed_rows:
                 assert math.isfinite(row['q'])
                 assert abs(native_q(manifest['metric'],row['pose'])-row['q'])<2e-8
-                log_density,membership=proposal_log_density(model,row['pose'])
-                selected=row['proposal_component']
-                assert isinstance(selected,int) and 0<=selected<len(membership) and membership[selected]
+                if guide:
+                    log_density,membership,inside_cube,component_logs=hybrid_log_density(model,guide,row['pose'])
+                    family=row['proposal_family'];assert family in family_counts
+                    family_counts[family]+=1
+                    if family=='cover':
+                        assert row['guide_branch'] is None and row['guide_component'] is None
+                        selected=row['proposal_component']
+                        assert type(selected) is int and 0<=selected<len(membership) and membership[selected]
+                        component_counts[selected]+=1
+                    else:
+                        assert row['proposal_component'] is None
+                        branch=row['guide_branch'];assert branch in ('uniform','learned')
+                        if branch=='uniform':
+                            assert inside_cube and row['guide_component'] is None
+                            guide_uniform_count+=1
+                        else:
+                            selected=row['guide_component']
+                            assert guide.epsilon<1 and type(selected) is int and 0<=selected<len(component_logs)
+                            assert math.isfinite(component_logs[selected])
+                            guide_component_counts[selected]+=1
+                else:
+                    log_density,membership=proposal_log_density(model,row['pose'])
+                    selected=row['proposal_component']
+                    assert type(selected) is int and 0<=selected<len(membership) and membership[selected]
+                    component_counts[selected]+=1
                 assert math.isfinite(log_density) and abs(log_density-row['log_proposal_density'])<2e-10
-                component_counts[selected]+=1
                 distance=math.dist(row['pose']['position'],config['capture_center'])
                 reason=row.get('zero')
                 if row['q']<=1:
@@ -186,10 +338,17 @@ def analyze(path_string):
             if "zero" in row:
                 counts[row["zero"]] += 1
                 assert (row["q"] > 1) == (row["zero"] == "q")
+                if guide:
+                    assert row.get('log_importance_weight') is None and row.get('log_hard_weight') is None
                 continue
             assert row["q"] <= 1
             counts["valid"] += 1
-            if model:
+            if guide:
+                family_valid[row['proposal_family']]+=1
+                if row['proposal_family']=='cover':component_valid[row['proposal_component']]+=1
+                elif row['guide_branch']=='uniform':guide_uniform_valid+=1
+                else:guide_component_valid[row['guide_component']]+=1
+            elif model:
                 component_valid[row['proposal_component'] if mixture_rows else 0]+=1
             logs = row["cloud_log_weights"]
             assert len(logs) == manifest["cloud_replicates"]
@@ -206,7 +365,7 @@ def analyze(path_string):
             hard_weight=-log_density
             weight = mean+hard_weight
             assert abs(weight-row["log_importance_weight"]) < 1e-10
-            if mixture_rows:
+            if detailed_rows:
                 assert abs(hard_weight-row['log_hard_weight'])<2e-10
             add(moments["native"], weight)
             add(moments["native_core" if row["q"] <= .8 else "native_shell"], weight)
@@ -221,6 +380,13 @@ def analyze(path_string):
     assert n == summary["samples"] == manifest["samples"]
     assert digest.hexdigest() == summary["samples_sha256"]
     assert cloud_points==summary['raw_cloud_points']
+    if 'component_draws' in summary:assert component_counts==summary['component_draws']
+    if guide:
+        assert family_counts==summary['family_draws']
+        assert guide_component_counts==summary['guide_component_draws']
+        assert guide_uniform_count==summary['guide_uniform_draws']
+        assert sum(component_counts)==family_counts['cover']
+        assert sum(guide_component_counts)+guide_uniform_count==family_counts['guide']
     for key in ["q", "capture", "hard"]:
         assert counts[key] == summary[f"{key}_rejected"]
     for key, m in moments.items():
@@ -244,6 +410,9 @@ def analyze(path_string):
             'physical_hard_log_cross_sum':None if log_cross==-math.inf else log_cross,
             'paired_statistics':paired_statistics(moments['native'],hard_moments['native'],log_cross,n),
             'cover_mixture':model,'proposal_component_counts':component_counts,'proposal_component_valid':component_valid,
+            'guide':guide_description,'proposal_family_counts':family_counts,'proposal_family_valid':family_valid,
+            'guide_component_counts':guide_component_counts,'guide_component_valid':guide_component_valid,
+            'guide_uniform_count':guide_uniform_count if guide else None,'guide_uniform_valid':guide_uniform_valid if guide else None,
             "sample_bytes": byte_count, "sample_sha256": digest.hexdigest(),
             "summary_sha256": hashlib.sha256((path / "summary.json").read_bytes()).hexdigest(),
             "physical_signature": {key: manifest[key] for key in ["config_sha256", "shape_sha256",
@@ -262,6 +431,7 @@ def require_matching_targets(results):
         assert result["cover"] == reference["cover"], "Different native covers"
         assert result["cover_volume"] == reference["cover_volume"], "Different cover volumes"
         assert result.get('cover_mixture')==reference.get('cover_mixture'), 'Different proposal mixtures; use a separately defined combination'
+        assert result.get('guide')==reference.get('guide'), 'Different hybrid guides; use a separately defined combination'
 
 
 def replicate_relative_se(regional_results, combined_log_q):
@@ -311,7 +481,7 @@ def main():
     rep_se = replicate_relative_se([r["regions"]["native"] for r in results], qlog)
     nonzero = combined["native"]["nonzero"]
     cover_volume = results[0]["cover_volume"]
-    is_mixture=results[0]['cover_mixture'] is not None and len(results[0]['cover_mixture']['scales'])>1
+    is_mixture=results[0].get('guide') is not None or (results[0]['cover_mixture'] is not None and len(results[0]['cover_mixture']['scales'])>1)
     hard_log=hard_regions['native']['log_normalizer']
     hard_volume=math.exp(hard_log) if hard_log is not None else 0.
     hard_se=hard_volume*hard_regions['native']['relative_SE'] if hard_log is not None and n>1 else None
@@ -327,6 +497,7 @@ def main():
               'paired_statistics':paired_statistics(combined['native'],combined_hard['native'],log_cross,n),
               'physical_hard_log_cross_sum':None if log_cross==-math.inf else log_cross,
               'cover_mixture':results[0]['cover_mixture'],
+              'guide':results[0].get('guide'),
               "cpu_seconds": sum(r["cpu_seconds"] for r in results),
               "max_population_wall_seconds": max(r["wall_seconds"] for r in results),
               "raw_cloud_points": sum(r["raw_cloud_points"] for r in results),

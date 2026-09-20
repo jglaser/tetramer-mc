@@ -90,9 +90,13 @@ The [frozen-guide controls](docs/smc-normalizer-proposals.md) document substanti
 missed contact weight. A [direct regional integrator](docs/latent-region-normalizer.md)
 checks a fixed discovered pose ellipsoid with uniform latent sampling and the
 exact physical Jacobian, independently of Gaussian importance denominators.
+The [complete-native integrator](docs/native-guided-cover.md) combines a
+geometric cover with an optional frozen translation–rotation covariance guide.
+Its full-density correction and fresh width controls distinguish improved
+proposal concentration from a change in the native-region target.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
-marginals. They are mathematical proofs, not verification of this Rust program
+marginals and importance identities. They are mathematical proofs, not verification of this Rust program
 or of sampling convergence.
 
 ## Output and continuation

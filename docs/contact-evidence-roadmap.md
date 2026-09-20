@@ -138,9 +138,23 @@ much of its time outside the known radius-eight region with different contact
 statistics. This demonstrates reversible native accessibility, not a settled
 mixing speedup or equilibrium coverage. That excursion supplies another
 specific coverage test. Both arms use the same separate uniform branch.
-The [frozen extension regions](outside-r8-local-region.md) and an independent
-inside/outside-old-R8 analysis are prepared. Their production calculation
-has not yet run; trajectory dwell time is not being used as a mass estimate.
+The [frozen extension-region integrals](outside-r8-local-region.md) are now
+complete. The prolonged excursion occupied a specified region much more
+often than its independently estimated mass permits relative to old R8.
+Recorded return proposals identify a strong full-proposal-density penalty.
+A [frozen covariance extension](outside-r8-atlas-extension.md) then shortened
+first returns from 69–891 cycles to 1–16 in four matched short controls.
+This is a measured repair of that contact-coverage problem; the chains remain
+too short to establish equilibrium contact statistics or global assembly.
+
+Centered [nested native covers](nested-native-cover-mixture.md) did not resolve
+the two-neighbor mass even after a larger independent run: one sample still
+contributed 47.7%. The [frozen covariance-guided cover](native-guided-cover.md)
+uses those observations only for proposal fitting, retains full geometric
+support, and tests shifted translation–rotation covariance on fresh draws.
+Its independent guide-width and population-size controls target this specific
+integration bottleneck. They do not remove the need to measure competing
+regions or the cost of forming the prescribed neighbors.
 
 The [Lean subproject](../formal/README.md) now checks measurable-state
 accept/reject balance, asymmetric Metropolis–Hastings, normalized conditional

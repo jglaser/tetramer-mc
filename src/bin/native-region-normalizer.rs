@@ -5,7 +5,7 @@ use tetramer_mc::native_region::{self, NativeRegionOptions};
 
 #[derive(Parser)]
 #[command(
-    about = "Independent native-region normalizer with a complete geometric cover; no learned proposal"
+    about = "Independent native-region normalizer with a complete geometric cover and optional frozen Gaussian guide"
 )]
 struct Cli {
     #[arg(long)]
@@ -28,6 +28,16 @@ struct Cli {
     /// Positive mixture weights, normalized internally; equal when omitted.
     #[arg(long, value_delimiter = ',')]
     cover_weights: Vec<f64>,
+    /// Optional frozen relative-pose Gaussian atlas, mixed with geometric covers.
+    #[arg(long)]
+    model: Option<PathBuf>,
+    #[arg(long, default_value_t = 0.75)]
+    model_weight: f64,
+    #[arg(long, default_value_t = 0.05)]
+    model_uniform_probability: f64,
+    /// Proposal anchor only; every physical neighbor is retained in the target.
+    #[arg(long, default_value_t = 0)]
+    model_anchor_index: usize,
 }
 fn main() -> Result<()> {
     let c = Cli::parse();
@@ -43,6 +53,10 @@ fn main() -> Result<()> {
             lambda_ratio: c.lambda_ratio,
             cover_scales: c.cover_scales,
             cover_weights: c.cover_weights,
+            model: c.model,
+            model_weight: c.model_weight,
+            model_uniform_probability: c.model_uniform_probability,
+            model_anchor_index: c.model_anchor_index,
         })?)?
     );
     Ok(())

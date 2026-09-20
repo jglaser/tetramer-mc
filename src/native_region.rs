@@ -1,10 +1,11 @@
 //! Independent complete-native-region integration with geometric finite-volume covers.
-//! No learned atlas appears in either the sampling law or its mixture density.
+//! An optional frozen Gaussian guide shares the same full-density correction.
 use crate::{
     depletion::GateOptions,
     geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
     overlap_weight::{self, OverlapEnvelope},
+    proposal::{FrozenRelativePoseProposal, ProposalBranch},
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
 };
 use anyhow::{Result, ensure};
@@ -325,6 +326,95 @@ impl NativeCoverMixture {
     }
 }
 
+/// A normalized optional guide, evaluated in the same laboratory measure as
+/// the geometric cover. Its selected proposal anchor does not restrict the
+/// physical neighbor list used by the hard and depletion tests.
+pub struct NativeGuide {
+    model: FrozenRelativePoseProposal,
+    weight: f64,
+    capture_center: Vec3,
+    centered_anchor: Pose,
+}
+
+pub struct NativeGuideDraw {
+    pub pose: Pose,
+    pub branch: ProposalBranch,
+    pub component: Option<usize>,
+}
+
+impl NativeGuide {
+    pub fn new(
+        model: FrozenRelativePoseProposal,
+        weight: f64,
+        capture_center: Vec3,
+        anchor: Pose,
+    ) -> Result<Self> {
+        ensure!(
+            !model.is_periodic(),
+            "Native guide must be an open-space density"
+        );
+        ensure!(
+            weight.is_finite() && weight > 0. && weight < 1.,
+            "Guide weight must lie in (0,1)"
+        );
+        ensure!(
+            capture_center.iter().all(|x| x.is_finite()),
+            "Nonfinite guide cube center"
+        );
+        anchor.validate()?;
+        Ok(Self {
+            model,
+            weight,
+            capture_center,
+            centered_anchor: Pose {
+                position: sub(anchor.position, capture_center),
+                orientation: anchor.orientation,
+            },
+        })
+    }
+
+    pub fn log_density(&self, pose: Pose) -> Result<f64> {
+        self.model.log_density(
+            &Pose {
+                position: sub(pose.position, self.capture_center),
+                orientation: pose.orientation,
+            },
+            &self.centered_anchor,
+        )
+    }
+
+    pub fn full_log_density(&self, covers: &NativeCoverMixture, pose: Pose) -> Result<f64> {
+        Ok(log_add(
+            (1. - self.weight).ln() + covers.log_density(pose),
+            self.weight.ln() + self.log_density(pose)?,
+        ))
+    }
+
+    pub fn sample(&self, rng: &mut StdRng) -> Result<NativeGuideDraw> {
+        // This is an independent draw. The dummy old pose is in the uniform
+        // cube and is used only to satisfy the existing proposal interface.
+        let dummy = Pose {
+            position: [0.; 3],
+            orientation: [1., 0., 0., 0.],
+        };
+        let outcome = self.model.propose(rng, &[dummy, self.centered_anchor], 0)?;
+        ensure!(
+            outcome.candidate.is_some(),
+            "Native guide numerical null: {:?}; no retry",
+            outcome.null_reason
+        );
+        let centered = outcome.candidate.unwrap();
+        Ok(NativeGuideDraw {
+            pose: Pose {
+                position: add(centered.position, self.capture_center),
+                orientation: centered.orientation,
+            },
+            branch: outcome.branch,
+            component: outcome.component_index,
+        })
+    }
+}
+
 fn direction(rng: &mut StdRng) -> Vec3 {
     loop {
         let x: Vec3 = std::array::from_fn(|_| StandardNormal.sample(rng));
@@ -346,6 +436,10 @@ pub struct NativeRegionOptions {
     pub lambda_ratio: Option<f64>,
     pub cover_scales: Vec<f64>,
     pub cover_weights: Vec<f64>,
+    pub model: Option<PathBuf>,
+    pub model_weight: f64,
+    pub model_uniform_probability: f64,
+    pub model_anchor_index: usize,
 }
 #[derive(Deserialize)]
 struct Config {
@@ -453,6 +547,28 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         options.cover_weights.clone(),
     )?;
     let shape_raw = fs::read(&cfg.shape)?;
+    let shape_sha = hash_bytes(&shape_raw);
+    let model_raw = options.model.as_ref().map(fs::read).transpose()?;
+    let guide = if let Some(raw_model) = &model_raw {
+        ensure!(
+            options.model_anchor_index < cfg.fixed_poses.len(),
+            "Guide anchor index outside physical neighbor list"
+        );
+        let model = FrozenRelativePoseProposal::from_json_str_open(
+            std::str::from_utf8(raw_model)?,
+            [2. * cfg.capture_radius; 3],
+            options.model_uniform_probability,
+            &shape_sha,
+        )?;
+        Some(NativeGuide::new(
+            model,
+            options.model_weight,
+            cfg.capture_center,
+            cfg.fixed_poses[options.model_anchor_index],
+        )?)
+    } else {
+        None
+    };
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
     let env = Environment {
         tree: &tree,
@@ -477,6 +593,9 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
     fs::create_dir_all(options.out.join("provenance"))?;
     fs::write(options.out.join("provenance/config.json"), &raw)?;
     fs::write(options.out.join("provenance/shape.json"), &shape_raw)?;
+    if let Some(raw_model) = &model_raw {
+        fs::write(options.out.join("provenance/guide-model.json"), raw_model)?;
+    }
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("cover.json"), &cover)?;
@@ -487,17 +606,21 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         1.
     };
     ensure!(lambda.is_finite() && lambda > 0., "Invalid intensity");
-    save(
-        &options.out.join("manifest.json"),
-        &json!({"schema":2,"samples":options.samples,"seed":options.seed,
+    let mut manifest = json!({"schema":if guide.is_some(){3}else{2},"samples":options.samples,"seed":options.seed,
         "cloud_replicates":options.cloud_replicates,"lambda":lambda,"lambda_ratio":cfg.poisson_lambda_ratio,"activity":cfg.reservoir_density,
-        "depletant_radius":cfg.depletant_radius,"config_sha256":hash_bytes(&raw),"shape_sha256":hash_bytes(&shape_raw),
+        "depletant_radius":cfg.depletant_radius,"config_sha256":hash_bytes(&raw),"shape_sha256":shape_sha,
         "executable_sha256":hash_file(&std::env::current_exe()?)?,"source_bundle_sha256":hash_bytes(source.as_bytes()),
-        "proposal":"Normalized mixture of geometric SO3-cap/centroid-compensated-ball covers; original target unchanged",
+        "proposal":"Normalized geometric covers with an optional frozen Gaussian/cube guide; original target unchanged",
         "estimator":"1/N sum hard*capture*(original_q<=1)*mean_independent_cloud_W/full_mixture_density; all invalid draws zero",
         "numerical_scope":"Analytically conservative spectral-norm bound with FP64 outward guard; not formal interval arithmetic",
-        "cover":cover,"cover_mixture":mixture,"metric":metric}),
-    )?;
+        "cover":cover,"cover_mixture":mixture,"metric":metric});
+    if let Some(raw_model) = &model_raw {
+        manifest["guide"] = json!({"model_sha256":hash_bytes(raw_model),"weight":options.model_weight,
+            "uniform_probability":options.model_uniform_probability,"anchor_index":options.model_anchor_index,
+            "anchor_pose":cfg.fixed_poses[options.model_anchor_index],"cube_lengths":([2. * cfg.capture_radius;3]),
+            "capture_center":cfg.capture_center});
+    }
+    save(&options.out.join("manifest.json"), &manifest)?;
     let mut output = BufWriter::new(File::create(options.out.join("samples.jsonl"))?);
     let start = Instant::now();
     let cpu = cpu_seconds();
@@ -506,15 +629,48 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         (Moments::new(), Moments::new(), Moments::new());
     let mut cross_sum = f64::NEG_INFINITY;
     let mut component_draws = vec![0u64; mixture.covers.len()];
+    let mut guide_component_draws =
+        vec![0u64; guide.as_ref().map_or(0, |g| g.model.component_count())];
+    let (mut cover_draws, mut guide_draws, mut guide_uniform_draws) = (0u64, 0u64, 0u64);
     let (mut q_rejected, mut capture_rejected, mut hard_rejected, mut raw_points) =
         (0u64, 0u64, 0u64, 0u64);
     for draw in 0..options.samples {
-        let (component, pose) = mixture.sample(
-            &mut stream(options.seed, draw, 0, "pose"),
-            &mut stream(options.seed, draw, 0, "component"),
-        );
-        component_draws[component] += 1;
-        let log_density = mixture.log_density(pose);
+        let use_guide = guide
+            .as_ref()
+            .is_some_and(|g| stream(options.seed, draw, 0, "family").random::<f64>() < g.weight);
+        let (component, guide_branch, guide_component, pose) = if use_guide {
+            let selected =
+                guide
+                    .as_ref()
+                    .unwrap()
+                    .sample(&mut stream(options.seed, draw, 0, "guide"))?;
+            guide_draws += 1;
+            if let Some(index) = selected.component {
+                guide_component_draws[index] += 1;
+            }
+            if selected.branch == ProposalBranch::Uniform {
+                guide_uniform_draws += 1;
+            }
+            (
+                None,
+                Some(selected.branch),
+                selected.component,
+                selected.pose,
+            )
+        } else {
+            let (index, pose) = mixture.sample(
+                &mut stream(options.seed, draw, 0, "pose"),
+                &mut stream(options.seed, draw, 0, "component"),
+            );
+            component_draws[index] += 1;
+            cover_draws += 1;
+            (Some(index), None, None, pose)
+        };
+        let log_density = if let Some(g) = &guide {
+            g.full_log_density(&mixture, pose)?
+        } else {
+            mixture.log_density(pose)
+        };
         ensure!(
             log_density.is_finite(),
             "Generated pose outside mixture support; no retry"
@@ -572,13 +728,18 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
                 "cloud_log_weights":logs,"cloud_overlap_counts":counts,"cloud_raw_points":cloud_raw,
                 "lower_volume":envelope.lower_volume,"upper_volume":envelope.upper_volume()})
         };
-        if !mixture.is_legacy() {
+        if guide.is_some() || !mixture.is_legacy() {
             row["pose"] = json!(pose);
             row["proposal_component"] = json!(component);
             row["log_proposal_density"] = json!(log_density);
             if reason.is_none() {
                 row["log_hard_weight"] = json!(-log_density);
             }
+        }
+        if guide.is_some() {
+            row["proposal_family"] = json!(if use_guide { "guide" } else { "cover" });
+            row["guide_branch"] = json!(guide_branch);
+            row["guide_component"] = json!(guide_component);
         }
         serde_json::to_writer(&mut output, &row)?;
         writeln!(output)?;
@@ -596,6 +757,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         "native_shell":shell.value(options.samples),"q_rejected":q_rejected,"capture_rejected":capture_rejected,"hard_rejected":hard_rejected,
         "hard_native":hard.value(options.samples),"hard_native_core":hard_core.value(options.samples),"hard_native_shell":hard_shell.value(options.samples),
         "physical_hard_log_cross_sum":if cross_sum.is_finite(){Some(cross_sum)}else{None},"component_draws":component_draws,
+        "family_draws":{"cover":cover_draws,"guide":guide_draws},"guide_component_draws":guide_component_draws,"guide_uniform_draws":guide_uniform_draws,
         "cover_volume":cover.volume,"raw_cloud_points":raw_points,"wall_seconds":start.elapsed().as_secs_f64(),"cpu_seconds":cpu_seconds()-cpu,
         "samples_sha256":hash_file(&options.out.join("samples.jsonl"))?,
         "uncertainty":"Independent fixed-N estimator; observed ESS and uncertainty do not certify absence of unresolved within-region weight concentration"});

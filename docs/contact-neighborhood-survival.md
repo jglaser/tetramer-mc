@@ -66,8 +66,29 @@ without checking this coverage could create another false conclusion.
 The testable hypothesis is that additional crystal neighbors suppress the
 strong isolated-pair competitors more than native registry, after accounting
 for the loss of native translational and rotational freedom. One-to-two
-neighbor differences measure conditional selectivity; attributing an effect
-to nonadditivity requires the full empty/first/second/both-neighbor contrast.
+neighbor differences measure conditional selectivity. The full
+empty/first/second/both-neighbor contrast measures free-energy cooperativity,
+including correlations between pose-dependent pair weights and hard support.
+Isolating depletion nonadditivity itself requires comparison with a
+pair-additive model on the same hard support; see the
+[current protocol](contact-evidence-roadmap.md#minimum-controlled-physical-test).
 The formation cost and fluctuations of the prescribed neighbors remain
 outside this conditional calculation. Complete the independent one-neighbor
 mass controls before interpreting that extension as evidence about assembly.
+
+## Subsequent checks
+
+The [continuous cell-cover calculation](frozen-deep-region-clash-certificate.md)
+now excludes the entire frozen deep-contact balls of radii 3, 5 and 8 against
+the added second neighbor. It replaces the snapshot-only inference for these
+specific regions, with analytic motion bounds audited in floating point.
+
+A separate screen of the [uniform native-region reference](native-region-cover.md)
+retains 725 of 2,048 one-neighbor-hard-valid samples with two neighbors and
+313 with three. These geometrically sampled poses differ from the earlier
+SMC endpoint cohort, so the survival fractions need not agree. Only one of
+the twenty leading one-neighbor weight contributors survives the second
+neighbor, and none survives the third. This is a reason to recompute the
+full-union weights, not to use an unweighted surviving fraction as a binding
+probability. Details are in
+`runs/native-neighbor-survival-screen-20260920/results.json`.

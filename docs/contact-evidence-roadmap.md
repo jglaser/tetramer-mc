@@ -87,6 +87,61 @@ Most native and shoulder snapshots also clash. This
 cooperative-neighborhood free-energy test; it is not an equilibrium population
 comparison or a bound on the entire continuous contact region.
 
+A subsequent [cell-cover certificate](frozen-deep-region-clash-certificate.md)
+now excludes the **entire** frozen latent balls of radii 3, 5 and 8 against
+that second prescribed neighbor, with zero unresolved cells. Explicit atomic
+witnesses and global Cayley displacement bounds replace inference from
+snapshots. This is an analytic enclosure checked in floating point, not a
+formally rounded interval proof. It remains local to these regions and does
+not account for forming the prescribed neighbors or for other competitors.
+
+The [MIS-refined guide](mis-refined-normalizer.md), trained on independent
+regional controls and evaluated with fresh global draws, now gives log Q=21.830
+for the fixed radius-eight region with 4.0% observed relative uncertainty.
+The middle shell is much better resolved; the outer shell and remaining
+far-region mass still need coverage checks. An independent
+[uniform cover of the complete native region](native-region-cover.md) now gives
+log Q=15.260 from 33,554,432 unconditional draws in eight fresh populations.
+Its observed relative error is 29.7% and importance ESS only 11.3, with one
+pose contributing 22.4%. It is consistent with the guided estimate near 14.98
+but remains sensitive to rare poses. The smaller preliminary cover campaign
+is kept separate. Complete geometric support does not certify convergence.
+
+The point ratio of the known radius-eight competing weight to this native
+estimate is about 710 (log ratio 6.57). This is a comparison of two specified
+regions in the one-neighbor environment, not a global native probability.
+The [comparison figure](../runs/cooperative-contact-evidence-20260920-v2/regional-contact-evidence.png)
+shows independent population variation and the uniform-versus-guided controls.
+The continuous hard-clash certificate eliminates this same competing region
+when the second prescribed neighbor is present; the surviving native mass and
+other competing arrangements in that environment still require integration.
+
+The first [whole-native factorial screen](native-cooperativity-plan.md) has
+now run the empty, second-neighbor-only and both-neighbor cases, reusing the
+independent first-neighbor result. The second-neighbor estimate has observed
+ESS 81, but the both-neighbor estimate has ESS 1.03 and one pose contributes
+98.5%. The geometric hard volumes are much steadier. This identifies severe
+weight concentration in the two-neighbor native region; it does not yet
+resolve thermodynamic cooperativity. The fixed-neighbor formation cost and
+the remaining competing configurations are still separate questions.
+
+The [posterior-source transport](posterior-chart-involution.md) is now
+implemented and has passed proposal-law, exact physical-reference and runner
+replay tests. It removes the static source-label penalty while retaining the
+physical correction. In the [matched protein pilot](posterior-docking-pilot.md),
+four 5,000-cycle runs at correlation 0.9 complete three round trips between
+the native core and the frozen competing radius-three region; four matched
+zero-correlation redraw runs complete none. Only three events are observed.
+The transport arm changes poses 1.87 times faster per sampler CPU second,
+but its finite-record contact ESS per CPU is lower, and one trajectory spends
+much of its time outside the known radius-eight region with different contact
+statistics. This demonstrates reversible native accessibility, not a settled
+mixing speedup or equilibrium coverage. That excursion supplies another
+specific coverage test. Both arms use the same separate uniform branch.
+The [frozen extension regions](outside-r8-local-region.md) and an independent
+inside/outside-old-R8 analysis are prepared. Their production calculation
+has not yet run; trajectory dwell time is not being used as a mass estimate.
+
 The [Lean subproject](../formal/README.md) now checks measurable-state
 accept/reject balance, asymmetric Metropolis–Hastings, normalized conditional
 auxiliary marginals, reference-preserving deterministic involutions, and
@@ -247,12 +302,28 @@ existing site0 and site1 ladders, keeping the same domain. Measure
 \]
 
 A reduction when adding a neighbor measures conditional registration
-enhancement. To call an effect nonadditive, evaluate the full factorial
-contrast using empty, first-only, second-only and both-neighbor environments;
-the simple one-to-two-neighbor difference includes ordinary added binding.
-Fixed-neighborhood results still omit the assembly cost and fluctuations of
-those neighbors. They diagnose registry selectivity, not a bulk nucleation
-barrier.
+enhancement. The full factorial contrast using empty, first-only, second-only
+and both-neighbor environments measures conditional free-energy cooperativity.
+It includes pose correlations and hard-support changes and can be nonzero
+even for additive pair potentials. The simple one-to-two-neighbor difference
+also includes ordinary added binding.
+
+To isolate depletion nonadditivity itself, use an additional pair-additive
+reference on the **same** both-neighbor hard support:
+
+\[
+Q_b^{\rm pair}(A,B)=\int_{\mathcal D}dx\,H_A(x)H_B(x)1_b(x)
+                  e^{z[C_A(x)+C_B(x)]}.
+\]
+
+At each pose the exact union volume obeys
+`C_AB=C_A+C_B-|E(x)∩E_A∩E_B|`. Consequently
+`-log[Q_b(A,B)/Q_b^pair(A,B)] >= 0`: the triple-overlap correction reduces
+the weight compared with the pair-additive model. It can still change relative
+registry preference because the reduction differs between contact regions.
+Fixed-neighborhood results omit the assembly cost and fluctuations of the
+prescribed neighbors. They diagnose conditional selectivity, not a bulk
+nucleation barrier.
 
 ## Decision criteria
 

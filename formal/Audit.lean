@@ -1,0 +1,19 @@
+import ReversibleSampling
+
+/-! Kernel-checked dependency audit; these should use only Lean's standard logical axioms. -/
+
+#print axioms ReversibleSampling.complete_markov
+#print axioms ReversibleSampling.complete_reversible
+#print axioms ReversibleSampling.complete_invariant
+#print axioms ReversibleSampling.accept_reject_correct
+#print axioms ReversibleSampling.mass_mul_mh
+#print axioms ReversibleSampling.mh_accepted_flow_symmetric
+#print axioms ReversibleSampling.metropolis_hastings_correct
+#print axioms ReversibleSampling.deterministic_accepted_flow_density
+#print axioms ReversibleSampling.involution_accepted_flow_symmetric
+#print axioms ReversibleSampling.involution_metropolis_correct
+#print axioms ReversibleSampling.invariant_preserves_physical_marginal
+#print axioms ReversibleSampling.product_auxiliary_marginal
+#print axioms ReversibleSampling.conditional_auxiliary_marginal
+#print axioms ReversibleSampling.conditional_auxiliary_update_preserves_marginal
+#print axioms ReversibleSampling.invariant_hybrid

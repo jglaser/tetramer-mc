@@ -10,6 +10,39 @@ arrangements without native docking information. Native intratetramer geometry
 is already supplied by the body shape. This experiment cannot establish
 template-free crystallization from flexible monomers.
 
+## Current objective — revised 2026-09-20
+
+Determine whether the specified hard protein-shape plus ideal-depletant model
+supports native inter-tetramer assembly, using validated reversible sampling
+and independent physical free-energy evidence. Retain the involutive transport
+kernel as a tested building block, and distinguish inefficient proposals from
+thermodynamically rare contact environments before further compression or
+large assembly campaigns.
+
+The immediate milestone is a controlled estimate of the relative statistical
+weights of native and competing contact regions at radius 1.5 Å and activity
+0.035 Å⁻³. Keep the physical domain and region definitions fixed; include the
+remaining configuration space explicitly. Validate normalizers with independent
+populations, proposal and population-size sensitivity, and reference limits.
+Resolve disagreement with earlier SMC estimates rather than treating either
+the new one-way trajectories or the older estimates as equilibrium truth.
+
+Use those weights to set the sampling target. Improve effective independent
+contact samples per CPU and agreement between different initial conditions;
+measure completed exchanges where both regions have appreciable weight.
+Equal forward and reverse transition rates are not required when equilibrium
+occupancies differ. The observed 5.1-fold accepted-move rate increase is a
+secondary diagnostic, not completion of this milestone.
+
+Then compress and discover contact basins while retaining the physical marginal
+and measurable coverage of important regions. Test geometry-only inter-tetramer
+assembly against a native-informed positive control, extending conditional
+contact calculations to cooperative neighborhoods and assembly stability.
+An alternative successful outcome requires converged physical evidence that
+the specified conditions fail to stabilize the necessary arrangements. Failure
+of a proposal, a short assembly trajectory, or one isolated pair calculation
+does not establish that conclusion. The overall objective remains unfinished.
+
 ## What the existing evidence establishes
 
 The [matched atlas pilot](atlas-transport-pilot.md) uses a 28-component,
@@ -95,7 +128,8 @@ rare-region coverage separately from aggregate likelihood when compressing.
 Retain the current radius and activity, and first return to the two existing
 one-neighbor capture environments. Use matched native, competing-contact and
 locally unbound starts. Compare the full atlas with its compressed versions
-and with geometry-only discovery, retaining the same physical kernel,
+and with geometry-only discovery after establishing the physical basin-weight
+reference and a useful exchange baseline, retaining the same physical kernel,
 proposal widths, capture domain and CPU accounting. Separate crossing of a
 native threshold from a completed return between well-separated contact
 cores; frequent local recrossings do not establish global mixing.

@@ -127,7 +127,7 @@ already supports the needed native cap, basin filter and terminal estimator:
    original metric separately for reporting.
 2. Replace the explicit `proposal_components` override with a single
    unchanged-reference product ball of outward-rounded radius 4 Å and
-   Haar cap 30°, retaining the positive uniform capture branch. Changing
+   Haar cap 30°, retaining the positive uniform capture-ball branch. Changing
    only `proposal_position_radii` would have no effect while the explicit
    override remains present. Exactly centered rigid members make this
    product an envelope of the entire original q≤2 region. With uniform
@@ -145,8 +145,36 @@ already supports the needed native cap, basin filter and terminal estimator:
    this compact target would test the missing-shoulder explanation; it
    would still leave q≥2, the AB environment and assembly unresolved.
 
-This control is proposed here, **not prepared or launched**. It avoids a
-new region-predicate implementation while testing a specific same-target
-discrepancy. A later frozen latent-region SMC control could compare directly
-with the independently measured far-contact region, but would require a
-new chart-region predicate or carefully qualified terminal filtering.
+This reconciliation originally proposed the control. The subsequent
+[implementation and validation](smc-shoulder-control.md) freezes its
+configurations and records the analytic controls and independent protein
+populations. The capture-uniform branch in the archived executable is a
+**ball**, whereas the current atlas's uniform branch is a cube; their
+normalized densities are evaluated according to their actual proposal laws.
+The control avoids a new region-predicate implementation while testing a
+specific same-target discrepancy. A later frozen latent-region SMC control
+could compare directly with the independently measured far-contact region,
+but would require a new chart-region predicate or carefully qualified
+terminal filtering.
+
+## Outcome of the compact control
+
+The [completed A-only q≤2 pilot](smc-shoulder-control.md) recovers both pieces:
+native log Q=15.04277 (21.81% independent-population SE), shoulder
+16.97172 (33.02%), and total 17.10739 (30.05%). Its four N=512 populations
+agree with both independent proposal references in all three regions,
+within 0.29 combined observed standard errors on linear Q. The shoulder
+deficit therefore does not persist when that compact target is explicitly
+covered. Four populations and substantial ancestry loss leave this SMC
+estimate much less precise than the direct integration.
+
+The actual old `other_adsorbed` configurations use uniform probability one
+and no explicit components: initialization is uniform over the capture ball
+and full Haar orientations. The zero-activity control estimates that only
+about 0.01782 q≤2 poses would be hit per old population's 1,048,576 draws,
+even before native poses are excluded. The new cap raises density there
+by a factor of about 12,010. This gives a quantitative initialization-coverage
+explanation; it does not prove how much subsequent mutation can repair
+missing regions. The controlled pilot supplies that additional evidence
+for q≤2. The full competing capture region, the AB environment and
+equilibrium mixing remain separate requirements.

@@ -1,13 +1,50 @@
 """Finite reference tests for fixed prefixes and their shared-row covariance."""
 import math
+import copy
+from pathlib import Path
+import tempfile
 import unittest
 
 import numpy as np
 
-from analyze_expanded_contact_atlas import PrefixMoments, nested_prefix_comparison
+from analyze_expanded_contact_atlas import PrefixMoments, nested_prefix_comparison, validate_prefix_counts, validate_prefix_schedule, validate_repeat_source
+from prepare_cayley_rms_cover import sha, write
 
 
 class ExpandedAtlasPrefixTests(unittest.TestCase):
+    def test_prefix_schedule_accepts_both_frozen_run_lengths(self):
+        for total, counts in ((32768, [8192, 16384, 32768]), (65536, [16384, 32768, 65536])):
+            validate_prefix_schedule(dict(prefix_counts=counts, arms=[dict(samples_per_population=total)]*2))
+
+    def test_prefix_schedule_rejects_nonintegers_and_arm_mismatch(self):
+        for total, counts in ((8, []), (8, [2, 2, 8]), (8, [4, 2, 8]), (8, [2., 4, 8]),
+                              (8, [True, 4, 8]), (8., [2, 4, 8]), (8, [2, 4, 7]), (8, [2, 8, 16])):
+            with self.subTest(total=total, counts=counts):
+                with self.assertRaises(ValueError): validate_prefix_counts(total, counts)
+        with self.assertRaises(ValueError):
+            validate_prefix_schedule(dict(prefix_counts=[2, 4, 8], arms=[dict(samples_per_population=8), dict(samples_per_population=16)]))
+
+    def test_repeat_lineage_rejects_refitting_and_reused_streams(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); model = root/'model-narrow.json'; write(model, dict(frozen=True))
+            hashes = {'narrow': sha(model)}
+            source = dict(schema='intermediate-expanded-contact-atlas-v1', physical={}, q_window={'minimum': 2},
+                analysis_charts={}, reference_audits={}, reference_totals={}, executable_sha256='same-kernel',
+                lambda_ratio=64., cloud_replicates=2, arms=[dict(name='narrow', seeds=[10])])
+            path = root/'protocol.json'; write(path, source)
+            write(root/'freeze.json', dict(protocol_sha256=sha(path), model_sha256=hashes))
+            repeat = copy.deepcopy(source); repeat['arms'][0]['seeds'] = [20]
+            repeat['repeat_source'] = dict(path=str(path), sha256=sha(path), model_sha256=hashes)
+            verified, _ = validate_repeat_source(repeat, dict(model_sha256=hashes))
+            self.assertTrue(verified['models_unchanged'])
+            for change in ('seed', 'model', 'window'):
+                changed, seal = copy.deepcopy(repeat), dict(model_sha256=hashes)
+                if change == 'seed': changed['arms'][0]['seeds'] = [10]
+                elif change == 'model': seal['model_sha256'] = {'narrow': 'refitted'}
+                else: changed['q_window']['minimum'] = 3
+                with self.subTest(change=change):
+                    with self.assertRaises(ValueError): validate_repeat_source(changed, seal)
+
     def test_fixed_prefixes_keep_every_zero_and_unchanged_regions(self):
         accumulator = PrefixMoments(8, [2, 4, 8])
         weights = [0., 2., 4., 0., 8., 3., 0., 1.]

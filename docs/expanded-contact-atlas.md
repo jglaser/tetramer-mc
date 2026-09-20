@@ -165,6 +165,8 @@ larger samples are finding weight beyond the fitted radius-0.5 core.
 An unchanged-proposal, larger independent population comparison is the
 next useful convergence control. Increasing the number of fitted centers
 again would confound that sample-count test.
+The subsequent [larger independent repeat](contact-atlas-repeat.md) preserves
+these exact model bytes and uses four times the total draws per width.
 
 ![Expanded atlas, prefixes and disjoint physical regions](../runs/ab-intermediate-expanded-atlas-figure-20260920/expanded-contact-atlas.png)
 
@@ -204,3 +206,6 @@ earlier one-neighbor comparison from this AB problem. Its matched native
 estimates agree; the missing one-neighbor shoulder and far-contact weight
 still require a controlled SMC comparison. The current expanded atlas does
 not by itself resolve that different environment.
+The subsequent [compact SMC control](smc-shoulder-control.md) recovers the
+A-only shoulder, with about 30% population uncertainty in native plus
+shoulder weight. That result leaves the far region separate.

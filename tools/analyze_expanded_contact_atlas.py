@@ -12,6 +12,7 @@ import os
 for _key in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
     os.environ[_key] = '1'
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import hashlib
 import heapq
 import math
@@ -30,6 +31,47 @@ from diagnose_atlas_peak_regions import center_separation, threeway_add, THREEWA
 from prepare_cayley_rms_cover import read, require, sha, write
 from prepare_native_confirmation_atlas import AtomUnionAudit
 from run_shoulder_mis_campaign import local_dependencies
+
+
+def validate_prefix_counts(samples, prefix_counts):
+    """Validate frozen counts without prescribing one particular run length."""
+    require(type(samples) is int and samples >= 2, 'Require an integer unconditional sample budget')
+    require(isinstance(prefix_counts, (list, tuple)) and bool(prefix_counts) and
+            all(type(count) is int and count >= 2 for count in prefix_counts),
+            'Require nonempty integer prefix counts')
+    require(all(a < b for a, b in zip(prefix_counts, prefix_counts[1:])) and prefix_counts[-1] == samples,
+            'Require increasing fixed prefix counts ending at full N')
+
+
+def validate_prefix_schedule(protocol):
+    require(protocol['arms'], 'Require at least one frozen arm')
+    for arm in protocol['arms']:
+        validate_prefix_counts(arm['samples_per_population'], protocol['prefix_counts'])
+
+
+def validate_repeat_source(protocol, freeze):
+    """A larger repeat may change allocations, never the frozen model bytes."""
+    declared = protocol.get('repeat_source')
+    if declared is None:
+        return None, {}
+    path = Path(declared['path']).resolve(); require(sha(path) == declared['sha256'], 'Original preparation protocol changed')
+    source, source_freeze = read(path), read(path.parent/'freeze.json')
+    require(source['schema'] == protocol['schema'] and source_freeze['protocol_sha256'] == sha(path),
+            'Original source preparation is not frozen consistently')
+    require(declared['model_sha256'] == source_freeze['model_sha256'] == freeze['model_sha256'],
+            'Repeat proposal models were changed or refitted')
+    for key in ('physical', 'q_window', 'analysis_charts', 'reference_audits', 'reference_totals',
+                'executable_sha256', 'lambda_ratio', 'cloud_replicates'):
+        require(protocol[key] == source[key], f'Repeat changed a physical/proposal control: {key}')
+    source_seeds = {seed for arm in source['arms'] for seed in arm['seeds']}
+    repeat_seeds = {seed for arm in protocol['arms'] for seed in arm['seeds']}
+    require(not source_seeds.intersection(repeat_seeds), 'Repeat reuses original population streams')
+    for arm, digest in declared['model_sha256'].items():
+        require(sha(path.parent/f'model-{arm}.json') == digest, 'Original model bytes changed')
+    return dict(path=str(path), sha256=sha(path), model_sha256=declared['model_sha256'],
+        disjoint_population_seeds=True, models_unchanged=True,
+        qualification='Independent fixed-model repetition, conditional on the already selected physical domain and analysis regions. Original and repeated estimates remain separate.'), {
+            'repeat-source-protocol.json': path, 'repeat-source-freeze.json': path.parent/'freeze.json'}
 
 
 class ExpandedMoments:
@@ -70,9 +112,7 @@ class ExpandedMoments:
 class PrefixMoments:
     """Fixed first-m-draw estimates; invalid trials still advance every prefix."""
     def __init__(self, samples, prefix_counts):
-        require(samples >= 2 and bool(prefix_counts) and sorted(set(prefix_counts)) == list(prefix_counts) and
-                prefix_counts[-1] == samples and min(prefix_counts) >= 2,
-                'Require increasing fixed prefix counts ending at full N')
+        validate_prefix_counts(samples, prefix_counts)
         self.samples = samples; self.count = 0
         self.prefixes = {count: ExpandedMoments() for count in prefix_counts}
 
@@ -253,9 +293,10 @@ def reference_comparisons(campaigns, protocol):
     return rows
 
 
-def analyze(preparation, campaign_paths, out):
+def analyze(preparation, campaign_paths, out, workers=1):
     preparation, out = Path(preparation).resolve(), Path(out).resolve()
     require(not out.exists(), 'Use a fresh audit directory'); started = time.monotonic()
+    require(type(workers) is int and workers >= 1, 'Require a positive independent-audit worker count')
     protocol, freeze = read(preparation/'protocol.json'), read(preparation/'freeze.json')
     require(protocol['schema'] == 'intermediate-expanded-contact-atlas-v1', 'Unexpected frozen protocol')
     require(sha(preparation/'protocol.json') == freeze['protocol_sha256'] and
@@ -266,10 +307,11 @@ def analyze(preparation, campaign_paths, out):
     require(cfg['capture_radius'] == 18. and cfg['depletant_radius'] == 1.5 and cfg['reservoir_density'] == .035,
             'Physical baseline changed')
     require(all(cfg[key] == protocol['physical'][key] for key in PHYSICAL_KEYS), 'Protocol target changed')
-    require(protocol['prefix_counts'] == [8192, 16384, 32768], 'Predeclared prefix schedule changed')
+    validate_prefix_schedule(protocol)
+    repeat_source, repeat_inputs = validate_repeat_source(protocol, freeze)
     models, selected, geometries = {}, {}, {}
     sources = {'protocol.json': preparation/'protocol.json', 'freeze.json': preparation/'freeze.json',
-               'config.json': preparation/'config.json'}
+               'config.json': preparation/'config.json', **repeat_inputs}
     for name, declaration in protocol['analysis_charts'].items():
         path = Path(declaration['path']); require(sha(path) == declaration['sha256'], 'Frozen chart changed')
         models[name] = read(path); sources[f'chart-{name}.json'] = path
@@ -292,7 +334,7 @@ def analyze(preparation, campaign_paths, out):
     for name, path in {**local_dependencies([Path(__file__)]), **sources}.items():
         (archive/name).write_bytes(path.read_bytes())
     input_hashes = {str(path): sha(path) for path in sources.values()}
-    records = []; arm_names = set(); seeds = set()
+    records = []; arm_names = set(); seeds = set(); requests = []
     for path in campaign_paths:
         path = Path(path).resolve()
         arm = next((a for a in protocol['arms'] if Path(a['output']).resolve() == path), None)
@@ -300,11 +342,26 @@ def analyze(preparation, campaign_paths, out):
         arm_names.add(arm['name']); require(not seeds.intersection(arm['seeds']), 'Repeated population stream')
         require(len(set(arm['seeds'])) == len(arm['seeds']), 'Repeated seed within arm')
         seeds.update(arm['seeds'])
-        record = audit_campaign(path, arm['name'], preparation, protocol, models, selected)
-        write(out/f'{arm["name"]}.json', record); records.append(record)
+        requests.append((path, arm['name'], preparation, protocol, models, selected))
     require(arm_names == {a['name'] for a in protocol['arms']}, 'Missing frozen arm')
+    if workers == 1:
+        for request in requests:
+            record = audit_campaign(*request)
+            write(out/f'{record["arm"]}.json', record); records.append(record)
+    else:
+        # Independent arms read disjoint population files. Parent alone writes
+        # derived outputs, and no source row is audited by both workers.
+        with ProcessPoolExecutor(max_workers=min(workers, len(requests))) as executor:
+            futures = [executor.submit(audit_campaign, *request) for request in requests]
+            for future in as_completed(futures):
+                record = future.result()
+                write(out/f'{record["arm"]}.json', record); records.append(record)
+    order = {arm['name']: i for i, arm in enumerate(protocol['arms'])}
+    records.sort(key=lambda record: order[record['arm']])
     for path, digest in input_hashes.items(): require(sha(Path(path)) == digest, 'Input changed during audit')
     result = dict(complete=True, campaigns=records, original_q_window=WINDOW, prefix_counts=protocol['prefix_counts'],
+        repeat_source_verification=repeat_source,
+        independent_arm_audit_workers=min(workers, len(requests)),
         reference_comparisons=reference_comparisons(records, protocol), geometry_reconstructions=geometries,
         center_separation=separation, input_sha256=input_hashes,
         archived_sha256={p.name: sha(p) for p in archive.iterdir()}, elapsed_seconds=time.monotonic()-started,
@@ -322,4 +379,5 @@ if __name__ == '__main__':
     parser.add_argument('--preparation', type=Path, required=True)
     parser.add_argument('--campaign', type=Path, action='append', required=True)
     parser.add_argument('--out', type=Path, required=True)
-    args = parser.parse_args(); analyze(args.preparation, args.campaign, args.out)
+    parser.add_argument('--workers', type=int, default=1, help='Independent arm audit processes; does not change physical sampling')
+    args = parser.parse_args(); analyze(args.preparation, args.campaign, args.out, args.workers)

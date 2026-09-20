@@ -141,9 +141,20 @@ coverage before a full competing-weight conclusion.
 A [two-contact expanded atlas](docs/expanded-contact-atlas.md) tests frozen
 geometric and fitted components over the complete intermediate window, with
 eight populations per width and predeclared correlated-prefix diagnostics.
+An [independent larger repeat](docs/contact-atlas-repeat.md) keeps both model
+files unchanged and quadruples the total draws per width to test sample-count
+sensitivity without refitting. The earlier upward trend does not recur;
+the repeat widths agree within one observed standard error.
 The [SMC reconciliation](docs/smc-reference-reconciliation.md) distinguishes
 the earlier one-neighbor target from these AB references and identifies the
 missing shoulder as a compact matched control.
+The [matched SMC control](docs/smc-shoulder-control.md) covers both native and
+shoulder poses from initialization; analytic spheres and a zero-activity
+protein identity check its normalization before positive-activity production.
+Its completed pilot recovers the shoulder and agrees with both independent
+regional references, while retaining about 30% population uncertainty in the
+total. This reconciles that compact A-only comparison, not the full far-contact
+region or an assembly trajectory.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

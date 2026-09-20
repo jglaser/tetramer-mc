@@ -6,7 +6,7 @@ use tetramer_mc::simulation::{self, Method, RunOptions};
 #[derive(Parser)]
 #[command(
     version,
-    about = "Rigid sphere-union MC with frozen learned poses and exact ideal depletion"
+    about = "Rigid sphere-union MC with reversible learned poses and exact ideal depletion"
 )]
 struct Cli {
     #[command(subcommand)]

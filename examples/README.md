@@ -53,3 +53,9 @@ explains a matched test with and without explicit inter-tetramer native charts.
 uses geometry-only pair preparations and reversible pair updates; this does
 not remove native information from any supplied base atlas. See the
 [balance argument and matched controls](../docs/contact-memory-balance.md).
+
+`spherical-conditional.json` uses the same separated preparation as
+`spherical-free.json`, with the normalized current-geometry GMM closure and
+`s=6`. Run with `--method learned` and no model file. It fits means, full
+covariances, weights and a finite count law without a separate memory bank;
+see [the closure guide](../docs/conditional-closure.md).

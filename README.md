@@ -58,6 +58,9 @@ For initially isolated tetramers and native-on/off reversible-jump campaigns,
 see [the free-assembly guide](docs/rj-assembly.md).
 For an evolving, geometry-only bank of pair-contact proposals, see the
 [contact-memory implementation, balance argument and controls](docs/contact-memory-balance.md).
+For a variable-size, full-covariance GMM fitted to current pair geometry without
+a frozen atlas or separate bank, see the [normalized conditional closure](docs/conditional-closure.md)
+and [learned initialization options](docs/conditional-initialization.md).
 
 ## Output and continuation
 
@@ -127,6 +130,7 @@ legacy trajectories need their center-shift logs to reconstruct wall motion.
 | `auxiliary` | Normalized state-dependent mixture-mean law and latent transport |
 | `rj` | Reversible ordered component births/deaths under a truncated Poisson prior |
 | `contact_memory` | Independent anchored-pair auxiliary systems and evolving Gaussian chart centers |
+| `conditional` | Deterministic full-GMM fits, normalized count law, persistent Gaussian residuals |
 | `simulation` | Scheduling, corrected acceptance, independent RNG streams, checkpoints |
 | `trajectory` | GSD atom display and FP64 rigid-body pose chunks |
 
@@ -170,9 +174,12 @@ changing its marginal. The bank supplies proposal centers; its updates obey
 their own exact Poisson acceptance. This does not infer covariances, accumulate
 an irreversible archive, or guarantee discovery of useful basins.
 
-Mixture fitting remains in the existing Python research workflow. This Rust
-port loads a fixed base Gaussian export; it does not accumulate training data or
-include the experimental Student-t proposal variant.
+The optional spherical `conditional_closure` mode fits Gaussian means, full
+covariances and weights directly in Rust from current pair geometry. It retains
+an explicit variable-size auxiliary state, corrects every physical move and
+refreshes the model under a tractable normalized law. It uses no growing data
+archive. Frozen-mixture training also remains available in the Python research
+workflow; the experimental Student-t proposal is not included in this port.
 
 ## Validation and scope
 

@@ -3,6 +3,7 @@
 //! allowing exact checkpoint continuation without serializing opaque RNG state.
 use crate::{
     auxiliary::{self, AuxiliaryConfig},
+    conditional::{ConditionalConfig, ConditionalEngine, ConditionalFit, ConditionalState},
     contact_memory::{MemoryConfig, MemoryState, ResolvedMemoryConfig},
     depletion::{self, GateOptions},
     geometry::{Environment, Placed, Shape, SphereTree},
@@ -100,6 +101,8 @@ pub struct Config {
     #[serde(default)]
     pub contact_memory: Option<MemoryConfig>,
     #[serde(default)]
+    pub conditional_closure: Option<ConditionalConfig>,
+    #[serde(default)]
     pub seed_labels: Vec<usize>,
     #[serde(default)]
     pub fixed_body_indices: Vec<usize>,
@@ -188,6 +191,19 @@ impl Config {
                 "contact memory currently requires a spherical/open proposal"
             );
         }
+        if let Some(options) = &self.conditional_closure {
+            options.validate()?;
+            ensure!(
+                self.boundary.radius().is_some(),
+                "conditional closure requires a spherical boundary"
+            );
+            ensure!(
+                self.auxiliary_transport.is_none()
+                    && self.reversible_jump.is_none()
+                    && self.contact_memory.is_none(),
+                "conditional closure is a separate model mode; disable auxiliary_transport, reversible_jump and contact_memory"
+            );
+        }
         self.endpoint_gate.validate()
     }
 }
@@ -218,6 +234,12 @@ pub struct RunCounts {
     pub model_jumps: JumpCounts,
     #[serde(default)]
     pub contact_memory: Counts,
+    #[serde(default)]
+    pub conditional_refreshes: u64,
+    #[serde(default)]
+    pub conditional_gca_rejected: u64,
+    #[serde(default)]
+    pub conditional_shift_rejected: u64,
     pub selected_body_updates: u64,
     pub selected_body_updates_by_body: Vec<u64>,
 }
@@ -256,6 +278,8 @@ pub struct Checkpoint {
     pub rj_state: Option<RjState>,
     #[serde(default)]
     pub contact_memory_state: Option<MemoryState>,
+    #[serde(default)]
+    pub conditional_state: Option<ConditionalState>,
     /// Display bookkeeping only: r_coordinate = r_sphere + C. A common
     /// sphere-frame translation d is equivalently a wall shift C -> C-d.
     #[serde(default)]
@@ -284,6 +308,10 @@ impl RunCounts {
             center_shift: self.center_shift.since(&old.center_shift),
             model_jumps: self.model_jumps.since(&old.model_jumps),
             contact_memory: self.contact_memory.since(&old.contact_memory),
+            conditional_refreshes: self.conditional_refreshes - old.conditional_refreshes,
+            conditional_gca_rejected: self.conditional_gca_rejected - old.conditional_gca_rejected,
+            conditional_shift_rejected: self.conditional_shift_rejected
+                - old.conditional_shift_rejected,
             selected_body_updates: self.selected_body_updates - old.selected_body_updates,
             selected_body_updates_by_body: self
                 .selected_body_updates_by_body
@@ -437,6 +465,12 @@ fn memory_dictionary(
     }
 }
 
+fn conditional_diagnostic(fit: &ConditionalFit) -> Value {
+    json!({"data_count":fit.data_count,"log_probabilities":fit.log_probabilities,
+        "log_scores":fit.log_scores,"covariance_penalties":fit.covariance_penalties,
+        "mean_log_densities":fit.mean_log_densities})
+}
+
 pub fn run(options: RunOptions) -> Result<Value> {
     ensure!(
         options.sweeps > 0 && options.sample_every > 0,
@@ -499,7 +533,24 @@ pub fn run(options: RunOptions) -> Result<Value> {
     }
     let model_raw = options.model.as_ref().map(fs::read).transpose()?;
     let model_sha = model_raw.as_ref().map(|raw| hash_bytes(raw));
+    let conditional_engine = config
+        .conditional_closure
+        .as_ref()
+        .map(|c| {
+            ConditionalEngine::new(
+                tree.bound,
+                config.boundary.radius().unwrap(),
+                &shape_sha,
+                c.clone(),
+            )
+        })
+        .transpose()?;
+    ensure!(
+        conditional_engine.is_none() || (options.method == Method::Learned && model_raw.is_none()),
+        "conditional closure uses --method learned without --model; it fits current geometry"
+    );
     let proposal = match options.method {
+        Method::Learned if conditional_engine.is_some() => None,
         Method::Learned => {
             let text = std::str::from_utf8(
                 model_raw
@@ -578,6 +629,21 @@ pub fn run(options: RunOptions) -> Result<Value> {
             p.position = wrap(p.position, config.box_lengths);
         }
     }
+    let conditional_initialization_start = cpu_seconds();
+    let mut conditional_fit = conditional_engine
+        .as_ref()
+        .map(|e| e.fit(&poses))
+        .transpose()?;
+    let mut conditional_state = conditional_engine
+        .as_ref()
+        .map(|e| {
+            e.initialize(
+                conditional_fit.as_ref().unwrap(),
+                &mut stream(config.seed, 0, "conditional-init"),
+            )
+        })
+        .transpose()?;
+    let mut conditional_initialization_cpu = cpu_seconds() - conditional_initialization_start;
     let mut counts = RunCounts {
         selected_body_updates_by_body: vec![0; poses.len()],
         ..Default::default()
@@ -622,7 +688,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
             checkpoint.auxiliary_eta.is_some()
                 == (config.auxiliary_transport.is_some() && config.reversible_jump.is_none())
                 && checkpoint.rj_state.is_some() == config.reversible_jump.is_some()
-                && checkpoint.contact_memory_state.is_some() == config.contact_memory.is_some(),
+                && checkpoint.contact_memory_state.is_some() == config.contact_memory.is_some()
+                && checkpoint.conditional_state.is_some() == config.conditional_closure.is_some(),
             "checkpoint auxiliary mode mismatch"
         );
         if let Some(eta) = &checkpoint.auxiliary_eta {
@@ -646,6 +713,16 @@ pub fn run(options: RunOptions) -> Result<Value> {
         contact_memory_state = checkpoint.contact_memory_state;
         dictionary = memory_dictionary(&proposal, &contact_memory_state, &resolved_contact_memory)?;
         poses = checkpoint.poses;
+        if let Some(state) = &checkpoint.conditional_state {
+            state.validate(config.conditional_closure.as_ref().unwrap())?;
+        }
+        conditional_state = checkpoint.conditional_state;
+        let before = cpu_seconds();
+        conditional_fit = conditional_engine
+            .as_ref()
+            .map(|e| e.fit(&poses))
+            .transpose()?;
+        conditional_initialization_cpu += cpu_seconds() - before;
         counts = checkpoint.counts;
         completed = checkpoint.completed_sweeps;
         ensure!(
@@ -718,7 +795,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let executable_sha = hash_file(&std::env::current_exe()?)?;
     save(
         &options.out.join("manifest.json"),
-        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"scope":"Frozen base dictionary plus optional reversible contact-memory charts; normalized conditional mean law and component births/deaths; no unrecorded training history; algorithmic MC time, not physical kinetics"}),
+        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"scope":"Frozen atlas/contact-memory modes or normalized current-geometry conditional full-GMM closure; explicit auxiliary state and corrections; no unrecorded training history; algorithmic MC time, not physical kinetics"}),
     )?;
     let mut trajectory = BufWriter::new(File::create(options.out.join("trajectory.jsonl"))?);
     let mut moves = if options.record_moves {
@@ -745,19 +822,23 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let mut shift_cpu = 0.;
     let mut memory_cpu = 0.;
     let mut memory_gate_points = 0_u64;
+    let mut conditional_fit_cpu = 0.;
+    let mut conditional_fit_calls = 0_u64;
     let snapshot = |sweep: u64,
                     poses: &[Pose],
                     counts: &RunCounts,
                     auxiliary_eta: &Option<Vec<[f64; 6]>>,
                     rj_state: &Option<RjState>,
                     contact_memory_state: &Option<MemoryState>,
+                    conditional_state: &Option<ConditionalState>,
+                    conditional_fit: &Option<ConditionalFit>,
                     coordinate_wall_center: Vec3,
                     trajectory: &mut BufWriter<File>,
                     gsd: &mut Option<Trajectory>|
      -> Result<()> {
         jsonline(
             trajectory,
-            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"coordinate_wall_center":coordinate_wall_center,"coordinate_origin_sweep":coordinate_origin_sweep,"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta,"rj_state":rj_state,"contact_memory_state":contact_memory_state}),
+            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"coordinate_wall_center":coordinate_wall_center,"coordinate_origin_sweep":coordinate_origin_sweep,"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta,"rj_state":rj_state,"contact_memory_state":contact_memory_state,"conditional_state":conditional_state,"conditional_fit":conditional_fit.as_ref().map(conditional_diagnostic)}),
         )?;
         trajectory.flush()?;
         if let Some(writer) = gsd {
@@ -785,6 +866,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
         &auxiliary_eta,
         &rj_state,
         &contact_memory_state,
+        &conditional_state,
+        &conditional_fit,
         coordinate_wall_center,
         &mut trajectory,
         &mut gsd,
@@ -860,6 +943,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
             stats.attempted += 1;
             let before = cpu_seconds();
             let mut correction = 0.;
+            let mut conditional_forward: Option<(usize, f64)> = None;
             let mut proposal_info = json!({"branch":if is_global{"uniform"}else{"local"},"anchor_index":null,"null":false,"log_reverse_forward":0.});
             let candidate = if !is_global {
                 Some(if wall.is_some() {
@@ -878,6 +962,25 @@ pub fn run(options: RunOptions) -> Result<Value> {
                         config.local_small_angle_std_degrees.to_radians() / 2.,
                     )
                 })
+            } else if let Some(engine) = &conditional_engine {
+                let forward = engine.model(
+                    conditional_fit.as_ref().unwrap(),
+                    conditional_state.as_ref().unwrap(),
+                )?;
+                let result = forward.propose(&mut global, &poses, i)?;
+                let candidate = result.candidate;
+                if candidate.is_some() {
+                    conditional_forward = Some((
+                        result.anchor_index,
+                        result
+                            .new_log_density
+                            .context("conditional forward density missing")?,
+                    ));
+                }
+                proposal_info = serde_json::to_value(result)?;
+                proposal_info["conditional_closure"] = json!(true);
+                proposal_info["conditional_k"] = json!(conditional_state.as_ref().unwrap().k);
+                candidate
             } else if let Some(base) = &dictionary {
                 let selected = rj_state
                     .as_ref()
@@ -948,6 +1051,36 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 geometry_cpu += cpu_seconds() - before;
                 if valid {
                     stats.hard_valid += 1;
+                    let mut next_conditional_fit = None;
+                    if let Some(engine) = &conditional_engine {
+                        let before = cpu_seconds();
+                        let mut next = poses.clone();
+                        next[i] = new;
+                        let fit = engine.fit(&next)?;
+                        conditional_fit_calls += 1;
+                        let state = conditional_state.as_ref().unwrap();
+                        let count_ratio = fit.log_probabilities[state.k]
+                            - conditional_fit.as_ref().unwrap().log_probabilities[state.k];
+                        let mut q_ratio = 0.;
+                        if let Some((anchor, forward_log)) = conditional_forward {
+                            let reverse = engine.model(&fit, state)?;
+                            let reverse_log = reverse.log_density(&old, &poses[anchor])?;
+                            q_ratio = reverse_log - forward_log;
+                            proposal_info["transported_reverse_log_density"] = json!(reverse_log);
+                        }
+                        correction = count_ratio + q_ratio;
+                        ensure!(
+                            correction.is_finite(),
+                            "nonfinite conditional acceptance correction"
+                        );
+                        proposal_info["conditional_closure"] = json!(true);
+                        proposal_info["conditional_k"] = json!(state.k);
+                        proposal_info["conditional_count_log_ratio"] = json!(count_ratio);
+                        proposal_info["log_reverse_forward"] = json!(q_ratio);
+                        proposal_info["conditional_log_correction"] = json!(correction);
+                        conditional_fit_cpu += cpu_seconds() - before;
+                        next_conditional_fit = Some(fit);
+                    }
                     let before = cpu_seconds();
                     let lambda = if config.reservoir_density > 0. {
                         config.poisson_lambda_ratio * config.reservoir_density
@@ -969,6 +1102,9 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     accepted = accept.random::<f64>().max(f64::MIN_POSITIVE).ln() < alpha;
                     if accepted {
                         poses[i] = new;
+                        if let Some(fit) = next_conditional_fit {
+                            conditional_fit = Some(fit);
+                        }
                         stats.accepted += 1;
                     }
                     sampled = Some(result);
@@ -994,6 +1130,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
             if config.gca_probability > 0. && gca_rng.random::<f64>() < config.gca_probability {
                 counts.gca.attempted += 1;
                 let before = cpu_seconds();
+                let previous = conditional_engine.as_ref().map(|_| poses.clone());
                 let axis = uniform_direction(&mut gca_rng);
                 let result = spherical::update(
                     &tree,
@@ -1005,12 +1142,34 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     &mut gca_rng,
                 )?;
                 gca_cpu += cpu_seconds() - before;
+                let mut count_ratio = 0.;
+                let mut accepted = true;
+                if let Some(engine) = &conditional_engine {
+                    let before = cpu_seconds();
+                    let fit = engine.fit(&poses)?;
+                    conditional_fit_calls += 1;
+                    let k = conditional_state.as_ref().unwrap().k;
+                    count_ratio = fit.log_probabilities[k]
+                        - conditional_fit.as_ref().unwrap().log_probabilities[k];
+                    let mut rng = stream(config.seed, sweep, "conditional-gca-accept");
+                    accepted =
+                        rng.random::<f64>().max(f64::MIN_POSITIVE).ln() < count_ratio.min(0.);
+                    if accepted {
+                        conditional_fit = Some(fit);
+                    } else {
+                        poses = previous.unwrap();
+                        counts.conditional_gca_rejected += 1;
+                    }
+                    conditional_fit_cpu += cpu_seconds() - before;
+                }
                 counts.gca.completed += 1;
-                counts.gca.transformed_bodies += result.flipped_indices.len() as u64;
+                if accepted {
+                    counts.gca.transformed_bodies += result.flipped_indices.len() as u64;
+                }
                 if let Some(writer) = &mut moves {
                     jsonline(
                         writer,
-                        &json!({"sweep":sweep,"kind":"gca","axis":axis,"result":result,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
+                        &json!({"sweep":sweep,"kind":"gca","axis":axis,"result":result,"accepted":accepted,"conditional_count_log_ratio":count_ratio,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
                     )?;
                 }
             }
@@ -1020,23 +1179,72 @@ pub fn run(options: RunOptions) -> Result<Value> {
             {
                 counts.center_shift.attempted += 1;
                 let before = cpu_seconds();
+                let previous = conditional_engine.as_ref().map(|_| poses.clone());
                 let direction = uniform_direction(&mut shift_rng);
                 // Strictly interior 52-bit midpoint, representable even at the
                 // upper endpoint (53-bit midpoint addition could round to one).
                 let open_u = ((shift_rng.random::<u64>() >> 12) as f64 + 0.5) / 4503599627370496.;
                 let result = wall.center_shift(&mut poses, direction, open_u)?;
-                coordinate_wall_center = sub(coordinate_wall_center, result.displacement);
+                shift_cpu += cpu_seconds() - before;
+                let mut count_ratio = 0.;
+                let mut accepted = true;
+                if let Some(engine) = &conditional_engine {
+                    let before = cpu_seconds();
+                    let fit = engine.fit(&poses)?;
+                    conditional_fit_calls += 1;
+                    let k = conditional_state.as_ref().unwrap().k;
+                    count_ratio = fit.log_probabilities[k]
+                        - conditional_fit.as_ref().unwrap().log_probabilities[k];
+                    let mut rng = stream(config.seed, sweep, "conditional-shift-accept");
+                    accepted =
+                        rng.random::<f64>().max(f64::MIN_POSITIVE).ln() < count_ratio.min(0.);
+                    if accepted {
+                        conditional_fit = Some(fit);
+                    } else {
+                        poses = previous.unwrap();
+                        counts.conditional_shift_rejected += 1;
+                    }
+                    conditional_fit_cpu += cpu_seconds() - before;
+                }
+                if accepted {
+                    coordinate_wall_center = sub(coordinate_wall_center, result.displacement);
+                }
                 ensure!(
                     coordinate_wall_center.iter().all(|x| x.is_finite()),
                     "unrepresentable coordinate-frame center"
                 );
-                shift_cpu += cpu_seconds() - before;
                 counts.center_shift.completed += 1;
-                counts.center_shift.transformed_bodies += poses.len() as u64;
+                if accepted {
+                    counts.center_shift.transformed_bodies += poses.len() as u64;
+                }
                 if let Some(writer) = &mut moves {
                     jsonline(
                         writer,
-                        &json!({"sweep":sweep,"kind":"center_shift","direction":direction,"result":result,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
+                        &json!({"sweep":sweep,"kind":"center_shift","direction":direction,"result":result,"accepted":accepted,"conditional_count_log_ratio":count_ratio,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
+                    )?;
+                }
+            }
+        }
+        // Refresh after physical moves so an explicit initial model is actually
+        // used. This is a Gibbs draw from p(K|D(X)) times the Gaussian latent law.
+        if let (Some(engine), Some(state)) = (&conditional_engine, &mut conditional_state) {
+            let mut rng = stream(config.seed, sweep, "conditional-refresh");
+            if rng.random::<f64>()
+                < config
+                    .conditional_closure
+                    .as_ref()
+                    .unwrap()
+                    .refresh_probability
+            {
+                let previous = state.clone();
+                engine.refresh(conditional_fit.as_ref().unwrap(), state, &mut rng)?;
+                counts.conditional_refreshes += 1;
+                if let Some(writer) = &mut moves {
+                    jsonline(
+                        writer,
+                        &json!({"sweep":sweep,"kind":"conditional_refresh",
+                        "old_state":previous,"state":state,"fit":conditional_diagnostic(conditional_fit.as_ref().unwrap()),
+                        "sampler_cpu_seconds":cpu_seconds()-start_cpu}),
                     )?;
                 }
             }
@@ -1050,6 +1258,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 &auxiliary_eta,
                 &rj_state,
                 &contact_memory_state,
+                &conditional_state,
+                &conditional_fit,
                 coordinate_wall_center,
                 &mut trajectory,
                 &mut gsd,
@@ -1071,6 +1281,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 auxiliary_eta: auxiliary_eta.clone(),
                 rj_state: rj_state.clone(),
                 contact_memory_state: contact_memory_state.clone(),
+                conditional_state: conditional_state.clone(),
                 coordinate_wall_center,
                 coordinate_origin_sweep,
             };
@@ -1081,7 +1292,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
             )?;
         }
     }
-    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu,"contact_memory_cpu_seconds":memory_cpu,"contact_memory_gate_raw_points":memory_gate_points,"contact_memory_initialization_cpu_seconds":memory_initialization_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory});
+    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu,"contact_memory_cpu_seconds":memory_cpu,"contact_memory_gate_raw_points":memory_gate_points,"contact_memory_initialization_cpu_seconds":memory_initialization_cpu,"conditional_fit_cpu_seconds":conditional_fit_cpu,"conditional_fit_calls":conditional_fit_calls,"conditional_initialization_cpu_seconds":conditional_initialization_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure});
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
 }

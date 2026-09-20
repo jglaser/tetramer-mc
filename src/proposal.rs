@@ -17,6 +17,17 @@ use crate::math::{
 type Vec6 = [f64; 6];
 type Mat6 = [[f64; 6]; 6];
 
+/// Public, lossless Gaussian chart parameters in anchor-body-relative coordinates.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GaussianComponentParameters {
+    pub anchor_position: Vec3,
+    pub anchor_rotation: Mat3,
+    pub mean: [f64; 6],
+    pub covariance: [[f64; 6]; 6],
+    pub weight: f64,
+}
+
 #[derive(Deserialize)]
 struct RawAnchor {
     position: Vec3,
@@ -255,6 +266,115 @@ pub struct FrozenRelativePoseProposal {
 }
 
 impl FrozenRelativePoseProposal {
+    /// Construct an open-space normalized mixture without a serialized atlas.
+    /// Empty components are supported exactly when the proposal is uniform-only.
+    pub fn from_components_open(
+        parameters: Vec<GaussianComponentParameters>,
+        angular_length: f64,
+        uniform_cube_lengths: Vec3,
+        uniform_weight: f64,
+        shape_sha256: &str,
+        expected_shape_sha256: &str,
+    ) -> Result<Self> {
+        ensure!(
+            shape_sha256.len() == 64
+                && shape_sha256.bytes().all(|x| x.is_ascii_hexdigit())
+                && shape_sha256 == expected_shape_sha256,
+            "Proposal shape SHA256 does not match physical geometry"
+        );
+        ensure!(
+            uniform_cube_lengths
+                .iter()
+                .all(|x| x.is_finite() && *x > 0.),
+            "Uniform cube lengths must be finite and positive"
+        );
+        ensure!(
+            angular_length.is_finite() && angular_length > 0.,
+            "Invalid angular_length"
+        );
+        ensure!(
+            uniform_weight.is_finite() && uniform_weight > 0. && uniform_weight <= 1.,
+            "Uniform weight must lie in (0,1]"
+        );
+        ensure!(
+            !parameters.is_empty() || uniform_weight == 1.,
+            "An empty mixture must have unit uniform weight"
+        );
+        let weight_sum: f64 = parameters.iter().map(|c| c.weight).sum();
+        ensure!(
+            parameters.is_empty() || (weight_sum - 1.).abs() <= 2e-12,
+            "Component weights must sum to one"
+        );
+        let mut components = Vec::with_capacity(parameters.len());
+        for p in parameters {
+            ensure!(
+                finite3(p.anchor_position) && p.mean.iter().all(|x| x.is_finite()),
+                "Nonfinite Gaussian chart position or mean"
+            );
+            validate_rotation(p.anchor_rotation)?;
+            ensure!(
+                p.weight.is_finite() && p.weight > 0.,
+                "Invalid Gaussian weight"
+            );
+            let (lower, log_normalizer) = prepare_cholesky(p.covariance)?;
+            let weight = p.weight / weight_sum;
+            components.push(Gaussian {
+                mean: p.mean,
+                lower,
+                log_normalizer,
+                anchor_position: p.anchor_position,
+                anchor_rotation: p.anchor_rotation,
+                weight,
+                log_weight: weight.ln(),
+            });
+        }
+        Ok(Self {
+            components,
+            angular_length,
+            log_coordinate_scale: 3. * angular_length.ln(),
+            box_lengths: uniform_cube_lengths,
+            uniform_weight,
+            log_uniform_density: uniform_weight.ln()
+                - uniform_cube_lengths.iter().map(|x| x.ln()).sum::<f64>(),
+            log_learned_weight: if uniform_weight == 1. {
+                f64::NEG_INFINITY
+            } else {
+                (-uniform_weight).ln_1p()
+            },
+            shape_sha256: shape_sha256.into(),
+            periodic: false,
+        })
+    }
+
+    /// The K=0 model, independent of any learned model file.
+    pub fn uniform_only_open(uniform_cube_lengths: Vec3, shape_sha256: &str) -> Result<Self> {
+        Self::from_components_open(
+            Vec::new(),
+            1.,
+            uniform_cube_lengths,
+            1.,
+            shape_sha256,
+            shape_sha256,
+        )
+    }
+
+    pub fn component_parameters(&self) -> Vec<GaussianComponentParameters> {
+        self.components
+            .iter()
+            .map(|c| GaussianComponentParameters {
+                anchor_position: c.anchor_position,
+                anchor_rotation: c.anchor_rotation,
+                mean: c.mean,
+                covariance: std::array::from_fn(|i| {
+                    std::array::from_fn(|j| {
+                        (0..=i.min(j)).map(|d| c.lower[i][d] * c.lower[j][d]).sum()
+                    })
+                }),
+                weight: c.weight,
+            })
+            .collect()
+    }
+
     pub fn from_path(
         path: impl AsRef<Path>,
         box_lengths: Vec3,

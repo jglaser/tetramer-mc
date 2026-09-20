@@ -98,6 +98,28 @@ fn log_add(a: f64, b: f64) -> f64 {
     a.max(b) + (a.min(b) - a.max(b)).exp().ln_1p()
 }
 
+fn q_in_interval(
+    q: f64,
+    minimum: f64,
+    maximum: Option<f64>,
+    lower_inclusive: bool,
+    upper_inclusive: bool,
+) -> bool {
+    q.is_finite()
+        && (if lower_inclusive {
+            q >= minimum
+        } else {
+            q > minimum
+        })
+        && maximum.is_none_or(|maximum| {
+            if upper_inclusive {
+                q <= maximum
+            } else {
+                q < maximum
+            }
+        })
+}
+
 #[derive(Default)]
 struct Moments {
     count: u64,
@@ -297,6 +319,24 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
         .get("maximum_original_q")
         .map(|value| value.as_f64().context("Invalid maximum original q"))
         .transpose()?;
+    let minimum_q_inclusive = region
+        .get("minimum_original_q_inclusive")
+        .map(|value| {
+            value
+                .as_bool()
+                .context("Invalid minimum q endpoint inclusion")
+        })
+        .transpose()?
+        .unwrap_or(true);
+    let maximum_q_inclusive = region
+        .get("maximum_original_q_inclusive")
+        .map(|value| {
+            value
+                .as_bool()
+                .context("Invalid maximum q endpoint inclusion")
+        })
+        .transpose()?
+        .unwrap_or(true);
     ensure!(
         radius.is_finite()
             && radius > 0.
@@ -378,7 +418,9 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     save(&options.out.join("config.json"), &cfg)?;
     let extended = inner_radius > 0.
         || maximum_q.is_some()
-        || region.get("physical_fixed_neighbors").is_some();
+        || region.get("physical_fixed_neighbors").is_some()
+        || !minimum_q_inclusive
+        || !maximum_q_inclusive;
     let mut manifest = json!({"schema":if extended {"uniform-latent-region-normalizer-v2"} else {"uniform-latent-region-normalizer-v1"},"samples":options.samples,"seed":options.seed,
         "cloud_replicates":options.cloud_replicates,"activity":cfg.reservoir_density,"lambda":lambda,"lambda_ratio":options.lambda_ratio,
         "config_sha256":hash_bytes(&config_raw),"region_sha256":hash_bytes(&region_raw),"shape_sha256":shape_hash,
@@ -390,11 +432,13 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     if extended {
         manifest["minimum_latent_radius"] = json!(inner_radius);
         manifest["maximum_original_q"] = json!(maximum_q);
+        manifest["minimum_original_q_inclusive"] = json!(minimum_q_inclusive);
+        manifest["maximum_original_q_inclusive"] = json!(maximum_q_inclusive);
         manifest["physical_fixed_neighbors"] = json!(physical_fixed);
         manifest["chart_anchor"] = json!(fixed);
         manifest["log_latent_shell_volume"] = json!(log_volume);
         manifest["target"] = json!(
-            "REGION ONLY: full physical-neighbor union, frozen latent shell and original inclusive q interval; capture/hard-invalid draws zero"
+            "REGION ONLY: full physical-neighbor union, frozen latent shell and declared original-q endpoint inclusions; capture/hard-invalid draws zero"
         );
         manifest["estimator"] = json!(
             "V6_shell * mean over unconditional uniform6-shell draws of H Iq J * independent-cloud average W"
@@ -445,7 +489,13 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
         ensure!(q.is_finite(), "Invalid physical q");
         let capture_valid = cfg.contains(pose);
         let hard_valid = capture_valid && env.hard_valid(pose);
-        let region_valid = q >= minimum_q && maximum_q.is_none_or(|limit| q <= limit);
+        let region_valid = q_in_interval(
+            q,
+            minimum_q,
+            maximum_q,
+            minimum_q_inclusive,
+            maximum_q_inclusive,
+        );
         capture_rejected += u64::from(!capture_valid);
         hard_rejected += u64::from(capture_valid && !hard_valid);
         region_rejected += u64::from(hard_valid && !region_valid);
@@ -504,4 +554,21 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
+}
+
+#[cfg(test)]
+mod q_window_tests {
+    use super::q_in_interval;
+
+    #[test]
+    fn exact_open_closed_and_unbounded_endpoints() {
+        assert!(!q_in_interval(1., 1., Some(2.), false, false));
+        assert!(q_in_interval(1.5, 1., Some(2.), false, false));
+        assert!(!q_in_interval(2., 1., Some(2.), false, false));
+        assert!(q_in_interval(1., 1., Some(2.), true, false));
+        assert!(q_in_interval(2., 1., Some(2.), false, true));
+        assert!(q_in_interval(20., 1., None, true, true));
+        assert!(!q_in_interval(f64::NAN, 1., None, true, true));
+        assert!(!q_in_interval(f64::INFINITY, 1., None, true, true));
+    }
 }

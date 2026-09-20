@@ -23,6 +23,33 @@ def shell_log_volume(region):
         result+=math.log(-math.expm1(6*math.log1p((inner-outer)/outer)))
     return result
 
+
+def original_q_window(region):
+    """Read original-metric boundaries; omitted flags retain the legacy law."""
+    minimum=region['minimum_original_q']
+    maximum=region.get('maximum_original_q',math.inf)
+    lower=region.get('minimum_original_q_inclusive',True)
+    upper=region.get('maximum_original_q_inclusive',True)
+    assert type(lower) is bool and type(upper) is bool, 'q inclusion flags must be booleans'
+    assert math.isfinite(minimum) and 0<=minimum<=maximum
+    assert 'maximum_original_q' not in region or math.isfinite(maximum)
+    return dict(minimum=minimum,maximum=maximum,lower_inclusive=lower,upper_inclusive=upper)
+
+
+def original_q_contains(q,window):
+    return ((q>=window['minimum'] if window['lower_inclusive'] else q>window['minimum']) and
+        (q<=window['maximum'] if window['upper_inclusive'] else q<window['maximum']))
+
+
+def validate_manifest_q_window(population_manifest,region,window):
+    assert population_manifest['minimum_original_q']==window['minimum']
+    assert population_manifest.get('maximum_original_q')==region.get('maximum_original_q')
+    assert population_manifest.get('minimum_original_q_inclusive',True)==window['lower_inclusive']
+    assert population_manifest.get('maximum_original_q_inclusive',True)==window['upper_inclusive']
+    for field in ('minimum_original_q_inclusive','maximum_original_q_inclusive'):
+        assert type(population_manifest.get(field,True)) is bool
+
+
 def analyze(root):
     manifest=read(root/"manifest.json");region=read(root/"provenance/region.json")
     for name,digest in manifest['archive_sha256'].items():
@@ -32,9 +59,7 @@ def analyze(root):
     chart=Density(region["gaussian_chart"])
     log_volume=shell_log_volume(region)
     inner=region.get('minimum_mahalanobis_radius',0.)
-    qmax=region.get('maximum_original_q',math.inf)
-    assert math.isfinite(region['minimum_original_q']) and 0<=region['minimum_original_q']<=qmax
-    assert 'maximum_original_q' not in region or math.isfinite(qmax)
+    window=original_q_window(region)
     config=read(root/'provenance/config.json')
     fixed=region.get('physical_fixed_neighbors',[region['fixed_neighbor']])
     assert fixed==config['fixed_poses'] and region['fixed_neighbor'] in fixed
@@ -59,26 +84,30 @@ def analyze(root):
                            ('shape.json','shape_sha256'),('source-bundle.json','source_bundle_sha256')]:
             assert sha(directory/'provenance'/name)==summary['manifest'][field]
         extended=summary['manifest']['schema']=='uniform-latent-region-normalizer-v2'
+        if not window['lower_inclusive'] or not window['upper_inclusive']:
+            assert extended, 'Open q boundaries require the extended manifest'
         sample_hash=sha(directory/'samples.jsonl')
         if extended:
+            assert read(directory/'manifest.json')==summary['manifest'], 'Summary and on-disk population manifests disagree'
             assert sample_hash==summary['samples_sha256']
             assert summary['manifest']['physical_fixed_neighbors']==fixed
             assert summary['manifest']['chart_anchor']==region['fixed_neighbor']
             assert summary['manifest']['minimum_latent_radius']==inner
-            assert summary['manifest']['maximum_original_q']==region.get('maximum_original_q')
+            validate_manifest_q_window(summary['manifest'],region,window)
             assert abs(summary['manifest']['log_latent_shell_volume']-log_volume)<1e-10
-        rows=[json.loads(line) for line in (directory/"samples.jsonl").open()]
+        with (directory/'samples.jsonl').open() as sample_file:
+            rows=[json.loads(line) for line in sample_file]
         assert len(rows)==job["samples"] and [r["draw"] for r in rows]==list(range(job["samples"]))
         logs=[];hard_logs=[];pairs=[]
         for r in rows:
             valid=r["hard_valid"] and r["region_valid"]
             assert inner*(1-1e-12)<=r["latent_radius"]<=region["mahalanobis_radius"]*(1+1e-12)
-            assert r['region_valid']==(region['minimum_original_q']<=r['q']<=qmax)
+            assert r['region_valid']==original_q_contains(r['q'],window)
             if extended:
                 assert abs(native_q(region['physical_metric'],r['pose'])-r['q'])<2e-8
                 assert r['capture_valid']==(math.dist(r['pose']['position'],region['capture_center'])<=region['capture_radius'])
             if valid:
-                assert r["capture_valid"] and r["q"]>=region["minimum_original_q"]
+                assert r['capture_valid'] and original_q_contains(r['q'],window)
                 assert len(r["clouds"])==2
                 p=[log_volume+r["log_physical_jacobian"]+c["log_weight"] for c in r["clouds"]]
                 assert abs(r['log_hard_weight']-log_volume-r['log_physical_jacobian'])<1e-10
@@ -120,6 +149,8 @@ def analyze(root):
         independently_reconstructed_poses=audited_poses,log_latent_volume=log_volume,
         minimum_mahalanobis_radius=inner,maximum_original_q=region.get('maximum_original_q'),physical_fixed_neighbors=fixed,
         scope="ONLY the predeclared fixed ellipsoid or shell physical mass, not a global normalizer; no conditioning away invalid zeros")
+    if any(field in region for field in ('minimum_original_q_inclusive','maximum_original_q_inclusive')):
+        result['original_q_window']=dict(window,maximum=region.get('maximum_original_q'))
     out=root/"assessment";out.mkdir(exist_ok=True)
     write(out/"analysis.json",result)
     observed=(f"log Q = {estimate['logQ']:.6f}, ESS {estimate['ess']:.1f}, "

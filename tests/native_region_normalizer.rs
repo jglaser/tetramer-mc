@@ -55,6 +55,7 @@ fn options(config: PathBuf, out: PathBuf, n: u64) -> NativeRegionOptions {
         model_weight: 0.75,
         model_uniform_probability: 0.05,
         model_anchor_index: 0,
+        q_window: Default::default(),
     }
 }
 

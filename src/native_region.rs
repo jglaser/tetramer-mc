@@ -55,6 +55,75 @@ impl NativeMetric {
     }
 }
 
+/// A region defined by the original registration coordinate. The proposal cover
+/// may use enlarged tolerances; this window never rescales the reported q.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq)]
+pub struct QWindow {
+    pub minimum: f64,
+    pub maximum: f64,
+    pub lower_inclusive: bool,
+    pub upper_inclusive: bool,
+}
+impl Default for QWindow {
+    fn default() -> Self {
+        Self {
+            minimum: 0.,
+            maximum: 1.,
+            lower_inclusive: true,
+            upper_inclusive: true,
+        }
+    }
+}
+impl QWindow {
+    pub fn validate(&self) -> Result<()> {
+        ensure!(
+            self.minimum.is_finite()
+                && self.maximum.is_finite()
+                && self.minimum >= 0.
+                && self.minimum < self.maximum,
+            "Require a finite nonempty original-q window with 0 <= minimum < maximum"
+        );
+        Ok(())
+    }
+    pub fn contains(&self, q: f64) -> bool {
+        q.is_finite()
+            && (if self.lower_inclusive {
+                q >= self.minimum
+            } else {
+                q > self.minimum
+            })
+            && (if self.upper_inclusive {
+                q <= self.maximum
+            } else {
+                q < self.maximum
+            })
+    }
+    pub fn cover_metric(&self, original: &NativeMetric) -> Result<NativeMetric> {
+        self.validate()?;
+        ensure!(
+            original.member_error_scale.is_finite()
+                && original.member_error_scale > 0.
+                && original.angle_error_scale_deg.is_finite()
+                && original.angle_error_scale_deg > 0.
+                && original.angle_error_scale_deg <= 180.,
+            "Invalid original metric tolerances"
+        );
+        let mut metric = original.clone();
+        if self.maximum != 1. {
+            metric.member_error_scale *= self.maximum;
+            // SO(3) has no relative angle beyond pi. Recompute the geometric
+            // arcsin bound using the new displacement; do not scale a cap that
+            // was already derived at q=1.
+            metric.angle_error_scale_deg = (metric.angle_error_scale_deg * self.maximum).min(180.);
+        }
+        ensure!(
+            metric.member_error_scale.is_finite() && metric.member_error_scale > 0.,
+            "Unrepresentable q-window cover displacement"
+        );
+        Ok(metric)
+    }
+}
+
 pub fn relative_angle(a: [f64; 4], b: [f64; 4]) -> f64 {
     let na = a.iter().map(|x| x * x).sum::<f64>().sqrt();
     let nb = b.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -440,6 +509,7 @@ pub struct NativeRegionOptions {
     pub model_weight: f64,
     pub model_uniform_probability: f64,
     pub model_anchor_index: usize,
+    pub q_window: QWindow,
 }
 #[derive(Deserialize)]
 struct Config {
@@ -509,6 +579,8 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         options.samples > 0 && options.cloud_replicates > 0,
         "Positive draw/cloud counts required"
     );
+    options.q_window.validate()?;
+    let extended = options.q_window != QWindow::default();
     let raw = fs::read(&options.config)?;
     let mut cfg: Config = serde_json::from_slice(&raw)?;
     if cfg.shape.is_relative() {
@@ -540,7 +612,8 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         p.validate()?;
     }
     let metric: NativeMetric = serde_json::from_value(cfg.metadata.clone())?;
-    let cover = NativeCover::new(&metric)?;
+    let cover_metric = options.q_window.cover_metric(&metric)?;
+    let cover = NativeCover::new(&cover_metric)?;
     let mixture = NativeCoverMixture::new(
         &cover,
         options.cover_scales.clone(),
@@ -606,7 +679,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         1.
     };
     ensure!(lambda.is_finite() && lambda > 0., "Invalid intensity");
-    let mut manifest = json!({"schema":if guide.is_some(){3}else{2},"samples":options.samples,"seed":options.seed,
+    let mut manifest = json!({"schema":if extended{4}else if guide.is_some(){3}else{2},"samples":options.samples,"seed":options.seed,
         "cloud_replicates":options.cloud_replicates,"lambda":lambda,"lambda_ratio":cfg.poisson_lambda_ratio,"activity":cfg.reservoir_density,
         "depletant_radius":cfg.depletant_radius,"config_sha256":hash_bytes(&raw),"shape_sha256":shape_sha,
         "executable_sha256":hash_file(&std::env::current_exe()?)?,"source_bundle_sha256":hash_bytes(source.as_bytes()),
@@ -614,6 +687,16 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         "estimator":"1/N sum hard*capture*(original_q<=1)*mean_independent_cloud_W/full_mixture_density; all invalid draws zero",
         "numerical_scope":"Analytically conservative spectral-norm bound with FP64 outward guard; not formal interval arithmetic",
         "cover":cover,"cover_mixture":mixture,"metric":metric});
+    if extended {
+        manifest["q_window"] = json!(options.q_window);
+        manifest["cover_metric"] = json!(cover_metric);
+        manifest["estimator"] = json!(
+            "1/N sum hard*capture*I(original_q in declared window)*mean_independent_cloud_W/full_mixture_density; all invalid draws zero"
+        );
+        manifest["summary_subdivision"] = json!(
+            "region is the full declared original-q window; region_core/region_shell split it at original q<=0.8 / q>0.8"
+        );
+    }
     if let Some(raw_model) = &model_raw {
         manifest["guide"] = json!({"model_sha256":hash_bytes(raw_model),"weight":options.model_weight,
             "uniform_probability":options.model_uniform_probability,"anchor_index":options.model_anchor_index,
@@ -677,7 +760,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         );
         let q = metric.q(pose);
         ensure!(q.is_finite(), "Nonfinite q");
-        let reason = if q > 1. {
+        let reason = if !options.q_window.contains(q) {
             q_rejected += 1;
             Some("q")
         } else if norm(sub(pose.position, cfg.capture_center)) > cfg.capture_radius {
@@ -728,7 +811,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
                 "cloud_log_weights":logs,"cloud_overlap_counts":counts,"cloud_raw_points":cloud_raw,
                 "lower_volume":envelope.lower_volume,"upper_volume":envelope.upper_volume()})
         };
-        if guide.is_some() || !mixture.is_legacy() {
+        if extended || guide.is_some() || !mixture.is_legacy() {
             row["pose"] = json!(pose);
             row["proposal_component"] = json!(component);
             row["log_proposal_density"] = json!(log_density);
@@ -736,7 +819,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
                 row["log_hard_weight"] = json!(-log_density);
             }
         }
-        if guide.is_some() {
+        if extended || guide.is_some() {
             row["proposal_family"] = json!(if use_guide { "guide" } else { "cover" });
             row["guide_branch"] = json!(guide_branch);
             row["guide_component"] = json!(guide_component);
@@ -753,7 +836,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         }
     }
     output.flush()?;
-    let result = json!({"complete":true,"samples":options.samples,"native":total.value(options.samples),"native_core":core.value(options.samples),
+    let mut result = json!({"complete":true,"samples":options.samples,"native":total.value(options.samples),"native_core":core.value(options.samples),
         "native_shell":shell.value(options.samples),"q_rejected":q_rejected,"capture_rejected":capture_rejected,"hard_rejected":hard_rejected,
         "hard_native":hard.value(options.samples),"hard_native_core":hard_core.value(options.samples),"hard_native_shell":hard_shell.value(options.samples),
         "physical_hard_log_cross_sum":if cross_sum.is_finite(){Some(cross_sum)}else{None},"component_draws":component_draws,
@@ -761,6 +844,21 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         "cover_volume":cover.volume,"raw_cloud_points":raw_points,"wall_seconds":start.elapsed().as_secs_f64(),"cpu_seconds":cpu_seconds()-cpu,
         "samples_sha256":hash_file(&options.out.join("samples.jsonl"))?,
         "uncertainty":"Independent fixed-N estimator; observed ESS and uncertainty do not certify absence of unresolved within-region weight concentration"});
+    if extended {
+        let object = result.as_object_mut().unwrap();
+        for (old, new) in [
+            ("native", "region"),
+            ("native_core", "region_core"),
+            ("native_shell", "region_shell"),
+            ("hard_native", "hard_region"),
+            ("hard_native_core", "hard_region_core"),
+            ("hard_native_shell", "hard_region_shell"),
+        ] {
+            let value = object.remove(old).unwrap();
+            object.insert(new.into(), value);
+        }
+        object.insert("q_window".into(), json!(options.q_window));
+    }
     save(&options.out.join("summary.json"), &result)?;
     Ok(result)
 }

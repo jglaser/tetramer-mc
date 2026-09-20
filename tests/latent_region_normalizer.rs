@@ -331,6 +331,8 @@ fn shell_q_window_and_second_neighbor_depletion() -> Result<()> {
     region["gaussian_chart"]["shape_sha256"] = json!(shape_hash);
     region["minimum_mahalanobis_radius"] = json!(inner);
     region["maximum_original_q"] = json!(qmax);
+    region["minimum_original_q_inclusive"] = json!(false);
+    region["maximum_original_q_inclusive"] = json!(false);
     fs::write(root.join("region.json"), region.to_string())?;
     let options = LatentRegionOptions {
         config: root.join("config.json"),
@@ -342,6 +344,8 @@ fn shell_q_window_and_second_neighbor_depletion() -> Result<()> {
         lambda_ratio: 64.,
     };
     let summary = latent_region::run(options.clone())?;
+    assert_eq!(summary["manifest"]["minimum_original_q_inclusive"], false);
+    assert_eq!(summary["manifest"]["maximum_original_q_inclusive"], false);
     let volume = PI.powi(3) * (R.powi(6) - inner.powi(6)) / 6.;
     near(
         summary["manifest"]["log_latent_shell_volume"]
@@ -367,7 +371,7 @@ fn shell_q_window_and_second_neighbor_depletion() -> Result<()> {
         let d = norm(sub(pose.position, CENTER));
         let q = row["q"].as_f64().unwrap();
         let hard_ok = d <= capture && d >= 0.6;
-        let region_ok = q >= qmin && q <= qmax;
+        let region_ok = q > qmin && q < qmax;
         assert_eq!(row["hard_valid"].as_bool(), Some(hard_ok));
         assert_eq!(row["region_valid"].as_bool(), Some(region_ok));
         zero_hard += usize::from(!hard_ok);
@@ -409,6 +413,11 @@ fn shell_q_window_and_second_neighbor_depletion() -> Result<()> {
         ),
         ("empty-shell", "minimum_mahalanobis_radius", json!(R)),
         ("inverted-q", "maximum_original_q", json!(0.5)),
+        (
+            "malformed-endpoint",
+            "minimum_original_q_inclusive",
+            json!("false"),
+        ),
     ] {
         let mut bad = region.clone();
         bad[key] = bad_value;

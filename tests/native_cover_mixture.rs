@@ -227,6 +227,7 @@ fn sphere_depletion_and_capture_have_independent_integral_references() -> Result
             model_weight: 0.75,
             model_uniform_probability: 0.05,
             model_anchor_index: 0,
+            q_window: Default::default(),
         })?;
         let haar = native_region::theta_minus_sin(m.angle_error_scale_deg.to_radians()) / PI;
         let hard_expected = if activity == 0. {

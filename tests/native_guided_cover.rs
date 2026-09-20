@@ -194,6 +194,7 @@ fn fixture(
         model_weight: BETA,
         model_uniform_probability: EPSILON,
         model_anchor_index: 0,
+        q_window: Default::default(),
     })
 }
 

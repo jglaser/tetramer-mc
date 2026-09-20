@@ -2,6 +2,7 @@
 """Stream every native-reference row, retaining only moments and a small top-weight heap."""
 
 import argparse
+import copy
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 import hashlib
@@ -255,6 +256,73 @@ def paired_statistics(physical,hard,log_cross,n):
             'observed_SE_log_depletion_enhancement':math.sqrt(max(0.,vx+vy-2*covariance))}
 
 
+DEFAULT_Q_WINDOW=dict(minimum=0.,maximum=1.,lower_inclusive=True,upper_inclusive=True)
+
+
+def validate_q_window(window):
+    assert set(window)==set(DEFAULT_Q_WINDOW), 'Unexpected q-window fields'
+    lo,hi=window['minimum'],window['maximum']
+    assert math.isfinite(lo) and math.isfinite(hi) and 0<=lo<hi
+    assert type(window['lower_inclusive']) is bool and type(window['upper_inclusive']) is bool
+    return window
+
+
+def q_in_window(q,window):
+    lo,hi=window['minimum'],window['maximum']
+    return (q>=lo if window['lower_inclusive'] else q>lo) and (q<=hi if window['upper_inclusive'] else q<hi)
+
+
+def window_cover_metric(metric,window):
+    """Enclose the ORIGINAL q window; never change its membership metric."""
+    validate_q_window(window)
+    value=copy.deepcopy(metric)
+    value['member_error_scale']*=window['maximum']
+    value['angle_error_scale_deg']=min(180.,value['angle_error_scale_deg']*window['maximum'])
+    assert math.isfinite(value['member_error_scale']) and value['member_error_scale']>0
+    return value
+
+
+def validate_window_cover(manifest,cover,config):
+    """Independent covariance/norm calculation checks the complete outer cover.
+
+    For member covariance M, mean squared registration error implies
+    |w|² + 4 sin²(theta/2)(tr M - n^T M n) <= a².  The norm bound
+    on lambda_max(M), with the recorded outward slack, gives a complete
+    angular cap. Recomputing arcsin after scaling a matters; merely scaling
+    the previously derived cap can truncate the requested q region.
+    """
+    window=validate_q_window(manifest['q_window'])
+    metric=manifest['metric']
+    assert all(config['metadata'][key]==value for key,value in metric.items()), 'Original physical metric changed'
+    expected=window_cover_metric(metric,window)
+    assert manifest['cover_metric']==expected, 'Cover metric must scale the original metric by qmax'
+    members=expected['rigid_members'];assert members and len(expected['native_poses'])==1
+    assert cover['reference']==expected['native_poses'][0]
+    count=len(members)
+    center=[sum(p['position'][i]/count for p in members) for i in range(3)]
+    covariance=[[sum((p['position'][i]-center[i])*(p['position'][j]-center[j])/count
+        for p in members) for j in range(3)] for i in range(3)]
+    trace=sum(covariance[i][i] for i in range(3))
+    frobenius=math.sqrt(sum(x*x for row in covariance for x in row))
+    row_bound=max(sum(abs(x) for x in row) for row in covariance)
+    magnitude=sum(sum(x*x for x in p['position'])/count for p in members)
+    slack=4096.*math.ulp(1.)*(1.+magnitude)*count
+    upper=min(frobenius,row_bound)+slack
+    lower=max(0.,trace-slack-upper)
+    radius=expected['member_error_scale'];nominal=math.radians(expected['angle_error_scale_deg'])
+    cap=min(nominal,2*math.asin(min(1.,radius/(2*math.sqrt(lower)))) if lower>0 else math.pi)
+    volume=4*radius**3/3*theta_minus_sin(cap)
+    def close(a,b):
+        assert math.isfinite(a) and math.isfinite(b) and abs(a-b)<=2e-11*max(1.,abs(b))
+    for a,b in zip(cover['centroid'],center):close(a,b)
+    for ar,br in zip(cover['member_covariance'],covariance):
+        for a,b in zip(ar,br):close(a,b)
+    for field,value in [('moment_trace',trace),('lambda_max_upper',upper),('l_lower',lower),
+        ('ball_radius',radius),('nominal_angle_cap',nominal),('angle_cap',cap)]:close(cover[field],value)
+    assert math.isfinite(volume) and volume>0 and abs(cover['volume']/volume-1)<2e-10
+    return window
+
+
 def analyze(path_string):
     path = Path(path_string)
     summary = json.loads((path / "summary.json").read_text())
@@ -266,17 +334,26 @@ def analyze(path_string):
     mixture_rows=model is not None and len(model['scales'])>1
     guide_description=manifest.get('guide')
     guided_rows=guide_description is not None
+    windowed=manifest.get('schema')==4
+    target='region' if windowed else 'native'
+    window=DEFAULT_Q_WINDOW
     if manifest.get('schema')==3:assert guided_rows, 'Schema3 requires the hybrid guide description'
-    detailed_rows=mixture_rows or guided_rows
+    detailed_rows=mixture_rows or guided_rows or windowed
     config=json.loads((path/'provenance/config.json').read_text()) if detailed_rows else None
+    if windowed:
+        assert model is not None, 'Schema4 requires the normalized complete cover mixture'
+        assert hashlib.sha256((path/'provenance/config.json').read_bytes()).hexdigest()==manifest['config_sha256']
+        assert hashlib.sha256((path/'provenance/shape.json').read_bytes()).hexdigest()==manifest['shape_sha256']
+        assert config['depletant_radius']==manifest['depletant_radius']
+        window=validate_window_cover(manifest,cover,config)
     guide=None
     if guided_rows:
-        assert manifest['schema']==3 and model is not None
+        assert manifest['schema'] in (3,4) and model is not None
         model_bytes=(path/'provenance/guide-model.json').read_bytes()
         assert hashlib.sha256(model_bytes).hexdigest()==guide_description['model_sha256']
         guide=GaussianGuide(guide_description,json.loads(model_bytes),config,manifest['shape_sha256'])
     counts = {"q": 0, "capture": 0, "hard": 0, "valid": 0}
-    moments = {name: fresh() for name in ["native", "native_core", "native_shell"]}
+    moments = {name: fresh() for name in [target,target+'_core',target+'_shell']}
     hard_moments={name:fresh() for name in moments}
     log_cross=-math.inf
     component_counts=[0]*len(model['scales']) if model else None
@@ -325,23 +402,26 @@ def analyze(path_string):
                             guide_component_counts[selected]+=1
                 else:
                     log_density,membership=proposal_log_density(model,row['pose'])
+                    if windowed:
+                        assert row['proposal_family']=='cover'
+                        assert row.get('guide_branch') is None and row.get('guide_component') is None
                     selected=row['proposal_component']
                     assert type(selected) is int and 0<=selected<len(membership) and membership[selected]
                     component_counts[selected]+=1
                 assert math.isfinite(log_density) and abs(log_density-row['log_proposal_density'])<2e-10
                 distance=math.dist(row['pose']['position'],config['capture_center'])
                 reason=row.get('zero')
-                if row['q']<=1:
+                if q_in_window(row['q'],window):
                     assert (distance>config['capture_radius'])==(reason=='capture')
             elif model:
                 component_counts[0]+=1
             if "zero" in row:
                 counts[row["zero"]] += 1
-                assert (row["q"] > 1) == (row["zero"] == "q")
-                if guide:
+                assert (not q_in_window(row['q'],window)) == (row["zero"] == "q")
+                if guide or windowed:
                     assert row.get('log_importance_weight') is None and row.get('log_hard_weight') is None
                 continue
-            assert row["q"] <= 1
+            assert q_in_window(row['q'],window)
             counts["valid"] += 1
             if guide:
                 family_valid[row['proposal_family']]+=1
@@ -349,7 +429,7 @@ def analyze(path_string):
                 elif row['guide_branch']=='uniform':guide_uniform_valid+=1
                 else:guide_component_valid[row['guide_component']]+=1
             elif model:
-                component_valid[row['proposal_component'] if mixture_rows else 0]+=1
+                component_valid[row['proposal_component'] if detailed_rows else 0]+=1
             logs = row["cloud_log_weights"]
             assert len(logs) == manifest["cloud_replicates"]
             assert len(row['cloud_overlap_counts'])==len(row['cloud_raw_points'])==len(logs)
@@ -367,10 +447,10 @@ def analyze(path_string):
             assert abs(weight-row["log_importance_weight"]) < 1e-10
             if detailed_rows:
                 assert abs(hard_weight-row['log_hard_weight'])<2e-10
-            add(moments["native"], weight)
-            add(moments["native_core" if row["q"] <= .8 else "native_shell"], weight)
-            add(hard_moments['native'],hard_weight)
-            add(hard_moments['native_core' if row['q']<=.8 else 'native_shell'],hard_weight)
+            add(moments[target], weight)
+            add(moments[target+'_core' if row['q']<=.8 else target+'_shell'], weight)
+            add(hard_moments[target],hard_weight)
+            add(hard_moments[target+'_core' if row['q']<=.8 else target+'_shell'],hard_weight)
             log_cross=logadd(log_cross,weight+hard_weight)
             item = (weight, row["draw"], row)
             if len(top) < 12:
@@ -394,7 +474,7 @@ def analyze(path_string):
         if m["nonzero"]:
             assert abs(m["sum"]-summary[key]["log_sum_weights"]) < 1e-8
             assert abs(m["square"]-summary[key]["log_sum_squared_weights"]) < 1e-8
-    if 'hard_native' in summary:
+    if 'hard_'+target in summary:
         for key,m in hard_moments.items():
             assert m['nonzero']==summary['hard_'+key]['nonzero']
             if m['nonzero']:
@@ -404,11 +484,11 @@ def analyze(path_string):
             assert abs(log_cross-summary['physical_hard_log_cross_sum'])<1e-8
         else:
             assert summary['physical_hard_log_cross_sum'] is None
-    return {"replicate": path.name, "samples": n, "counts": counts, "moments": moments,
+    result = {"replicate": path.name, "samples": n, "counts": counts, "moments": moments,
             "regions": {key: present(m, n) for key, m in moments.items()},
             'hard_moments':hard_moments,'hard_regions':{key:present(m,n) for key,m in hard_moments.items()},
             'physical_hard_log_cross_sum':None if log_cross==-math.inf else log_cross,
-            'paired_statistics':paired_statistics(moments['native'],hard_moments['native'],log_cross,n),
+            'paired_statistics':paired_statistics(moments[target],hard_moments[target],log_cross,n),
             'cover_mixture':model,'proposal_component_counts':component_counts,'proposal_component_valid':component_valid,
             'guide':guide_description,'proposal_family_counts':family_counts,'proposal_family_valid':family_valid,
             'guide_component_counts':guide_component_counts,'guide_component_valid':guide_component_valid,
@@ -421,6 +501,14 @@ def analyze(path_string):
             "top_weights": [dict(item[2], replicate=path.name) for item in sorted(top, reverse=True)],
             "cover_volume": cover["volume"], "cpu_seconds": summary["cpu_seconds"],
             "wall_seconds": summary["wall_seconds"], "raw_cloud_points": summary["raw_cloud_points"]}
+    if windowed:
+        result.update(q_window=window,cover_metric=manifest['cover_metric'],target_key=target,
+            independent_q_and_density_rows=n,independent_complete_cover_validated=True)
+        result['physical_signature']['q_window']=window
+        result['physical_signature']['physical_fixed_neighbors']=config['fixed_poses']
+        result['physical_signature']['capture_center']=config['capture_center']
+        result['physical_signature']['capture_radius']=config['capture_radius']
+    return result
 
 
 def require_matching_targets(results):
@@ -457,7 +545,22 @@ def main():
     require_matching_targets(results)
     n = sum(r["samples"] for r in results)
     assert n == manifest["total_unconditional_draws"]
-    combined = {key: fresh() for key in ["native", "native_core", "native_shell"]}
+    target=results[0].get('target_key','native')
+    if target=='region':
+        assert manifest['q_window']==results[0]['q_window'], 'Campaign window differs from population window'
+        assert manifest['config_sha256']==results[0]['physical_signature']['config_sha256']
+        assert all(hashlib.sha256((args.root/'provenance'/name).read_bytes()).hexdigest()==digest
+            for name,digest in manifest['archive_sha256'].items()), 'Frozen campaign archive changed'
+        source_config=json.loads((args.root/'provenance/input-config.json').read_text())
+        effective_config=json.loads((args.root/'provenance/config.json').read_text())
+        assert {k:v for k,v in source_config.items() if k!='shape'}=={k:v for k,v in effective_config.items() if k!='shape'}
+        assert hashlib.sha256((args.root/'provenance/input-config.json').read_bytes()).hexdigest()==manifest['source_config_sha256']
+        assert hashlib.sha256((args.root/'provenance/shape.json').read_bytes()).hexdigest()==manifest['shape_sha256']
+        assert len({job['seed'] for job in manifest['jobs']})==len(results), 'Independent populations require distinct seeds'
+        for job in manifest['jobs']:
+            population=json.loads((Path(job['output'])/'manifest.json').read_text())
+            assert population['seed']==job['seed'], 'Population seed differs from frozen campaign'
+    combined = {key: fresh() for key in [target,target+'_core',target+'_shell']}
     combined_hard={key:fresh() for key in combined}
     log_cross=-math.inf
     for result in results:
@@ -477,14 +580,14 @@ def main():
     hard_regions={key:present(m,n) for key,m in combined_hard.items()}
     # Independent equal-size population means provide a second observed error diagnostic.
     assert len({r["samples"] for r in results}) == 1
-    qlog = regions["native"]["log_normalizer"]
-    rep_se = replicate_relative_se([r["regions"]["native"] for r in results], qlog)
-    nonzero = combined["native"]["nonzero"]
+    qlog = regions[target]["log_normalizer"]
+    rep_se = replicate_relative_se([r["regions"][target] for r in results], qlog)
+    nonzero = combined[target]["nonzero"]
     cover_volume = results[0]["cover_volume"]
     is_mixture=results[0].get('guide') is not None or (results[0]['cover_mixture'] is not None and len(results[0]['cover_mixture']['scales'])>1)
-    hard_log=hard_regions['native']['log_normalizer']
+    hard_log=hard_regions[target]['log_normalizer']
     hard_volume=math.exp(hard_log) if hard_log is not None else 0.
-    hard_se=hard_volume*hard_regions['native']['relative_SE'] if hard_log is not None and n>1 else None
+    hard_se=hard_volume*hard_regions[target]['relative_SE'] if hard_log is not None and n>1 else None
     if not is_mixture:
         # Retain the legacy arithmetic as well as its sampling law.
         hard_volume=cover_volume*nonzero/n
@@ -493,8 +596,8 @@ def main():
               "analyzed_utc": datetime.now(timezone.utc).isoformat(), "samples": n,
               "regions": regions, "independent_population_relative_SE": rep_se,
               'hard_regions':hard_regions,
-              'hard_independent_population_relative_SE':replicate_relative_se([r['hard_regions']['native'] for r in results],hard_log),
-              'paired_statistics':paired_statistics(combined['native'],combined_hard['native'],log_cross,n),
+              'hard_independent_population_relative_SE':replicate_relative_se([r['hard_regions'][target] for r in results],hard_log),
+              'paired_statistics':paired_statistics(combined[target],combined_hard[target],log_cross,n),
               'physical_hard_log_cross_sum':None if log_cross==-math.inf else log_cross,
               'cover_mixture':results[0]['cover_mixture'],
               'guide':results[0].get('guide'),
@@ -512,6 +615,11 @@ def main():
               "scope": "Complete geometric proposal support; fixed-budget independent estimate. "
                        "Observed errors and ESS do not certify unobserved weight concentration. "
                        "Previous campaign not pooled."}
+    if target=='region':
+        result.update(target_key=target,q_window=results[0]['q_window'],cover_metric=results[0]['cover_metric'],
+            independent_complete_cover_validated=True,
+            independent_q_and_density_rows=sum(r['independent_q_and_density_rows'] for r in results),
+            subregion_rule='region_core uses original q <= 0.8; region_shell is the remaining part of the declared window')
     (args.root / "assessment-streaming.json").write_text(json.dumps(result, indent=2)+"\n")
     print(json.dumps({key: value for key, value in result.items()
                       if key not in ["populations", "top_weights"]}, indent=2), flush=True)

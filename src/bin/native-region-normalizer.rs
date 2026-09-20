@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tetramer_mc::native_region::{self, NativeRegionOptions};
+use tetramer_mc::native_region::{self, NativeRegionOptions, QWindow};
 
 #[derive(Parser)]
 #[command(
@@ -38,6 +38,15 @@ struct Cli {
     /// Proposal anchor only; every physical neighbor is retained in the target.
     #[arg(long, default_value_t = 0)]
     model_anchor_index: usize,
+    /// Bounds on the original registration coordinate; the cover grows with q-max.
+    #[arg(long, default_value_t = 0.0)]
+    q_min: f64,
+    #[arg(long, default_value_t = 1.0)]
+    q_max: f64,
+    #[arg(long)]
+    q_lower_open: bool,
+    #[arg(long)]
+    q_upper_open: bool,
 }
 fn main() -> Result<()> {
     let c = Cli::parse();
@@ -57,6 +66,12 @@ fn main() -> Result<()> {
             model_weight: c.model_weight,
             model_uniform_probability: c.model_uniform_probability,
             model_anchor_index: c.model_anchor_index,
+            q_window: QWindow {
+                minimum: c.q_min,
+                maximum: c.q_max,
+                lower_inclusive: !c.q_lower_open,
+                upper_inclusive: !c.q_upper_open,
+            },
         })?)?
     );
     Ok(())

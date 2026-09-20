@@ -321,3 +321,18 @@ matching the recorded assessment hash was archived before these robustness
 changes. Existing nonzero population statistics and replicate uncertainty are
 bit-identical under the updated formulas; all eight physical manifests and
 covers match. See `analyzer-edge-controls.json` in the large campaign.
+
+## Optional mixture of smaller geometric covers
+
+The integrator now also accepts `--cover-scales 0.1,0.2,0.4,1` and optional
+positive `--cover-weights`. The original native metric remains the target.
+Each draw divides by the sum of the densities of every cover containing
+that pose; the scale-1 component preserves complete target support. The
+default single cover reproduces the original sample records byte for byte.
+
+The [nested-cover implementation and controlled pilot](nested-native-cover-mixture.md)
+describe the density, reference-limit tests, independent audit, and results.
+That pilot reduced the observed concentration of the two-neighbor native
+integral, while performing poorly for the broader single-neighbor target.
+It is a targeted integration option, not an established general sampling
+speedup. Earlier uniform estimates and files remain separate.

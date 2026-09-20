@@ -1,5 +1,5 @@
-//! Independent complete-native-region integration with a uniform finite-volume cover.
-//! No learned atlas appears in either the sampling law or its constant density.
+//! Independent complete-native-region integration with geometric finite-volume covers.
+//! No learned atlas appears in either the sampling law or its mixture density.
 use crate::{
     depletion::GateOptions,
     geometry::{Environment, Placed, Shape, SphereTree},
@@ -106,7 +106,7 @@ impl NativeCover {
     pub fn new(metric: &NativeMetric) -> Result<Self> {
         ensure!(
             metric.native_poses.len() == 1,
-            "MVP requires exactly one native reference; overlapping covers need full-mixture correction"
+            "Exactly one native reference required; covers around multiple references are not implemented"
         );
         ensure!(
             !metric.rigid_members.is_empty(),
@@ -218,6 +218,111 @@ impl NativeCover {
             && relative_angle(pose.orientation, self.reference.orientation)
                 <= self.angle_cap + 1e-12
     }
+
+    /// Membership for a probability density: no tolerance-expanded shell.
+    /// The atan2 form retains small angular differences that acos can erase.
+    pub fn contains_support(&self, pose: Pose) -> bool {
+        let w = add(
+            sub(pose.position, self.reference.position),
+            sub(
+                matvec(rotation(pose.orientation), self.centroid),
+                matvec(rotation(self.reference.orientation), self.centroid),
+            ),
+        );
+        let [a, b, c, d] = self.reference.orientation;
+        let [e, f, g, h] = pose.orientation;
+        let scalar = a * e + b * f + c * g + d * h;
+        let vector = [
+            a * f - b * e - c * h + d * g,
+            a * g + b * h - c * e - d * f,
+            a * h - b * g + c * f - d * e,
+        ];
+        let angle = 2. * norm(vector).atan2(scalar.abs());
+        norm(w) <= self.ball_radius && angle <= self.angle_cap
+    }
+}
+
+/// A normalized geometric proposal; its components do not redefine the target.
+#[derive(Clone, Debug, Serialize)]
+pub struct NativeCoverMixture {
+    pub scales: Vec<f64>,
+    pub weights: Vec<f64>,
+    pub covers: Vec<NativeCover>,
+}
+
+impl NativeCoverMixture {
+    pub fn new(base: &NativeCover, scales: Vec<f64>, mut weights: Vec<f64>) -> Result<Self> {
+        ensure!(
+            !scales.is_empty()
+                && scales.iter().all(|s| s.is_finite() && *s > 0. && *s <= 1.)
+                && scales.contains(&1.),
+            "Cover scales must be in (0,1] and include 1 for complete target support"
+        );
+        if weights.is_empty() {
+            weights = vec![1.; scales.len()];
+        }
+        ensure!(
+            weights.len() == scales.len() && weights.iter().all(|w| w.is_finite() && *w > 0.),
+            "Need one finite positive weight per cover"
+        );
+        let sum: f64 = weights.iter().sum();
+        ensure!(sum.is_finite() && sum > 0., "Invalid weight sum");
+        for weight in &mut weights {
+            *weight /= sum;
+            ensure!(*weight > 0., "Normalized weight underflow");
+        }
+        let mut covers = Vec::new();
+        for &s in &scales {
+            let mut cover = base.clone();
+            if s != 1. {
+                cover.ball_radius *= s;
+                cover.angle_cap *= s;
+                cover.nominal_angle_cap *= s;
+                cover.volume =
+                    4. * cover.ball_radius.powi(3) / 3. * theta_minus_sin(cover.angle_cap);
+            }
+            ensure!(
+                cover.volume.is_finite() && cover.volume > 0.,
+                "Underflowed cover volume"
+            );
+            covers.push(cover);
+        }
+        Ok(Self {
+            scales,
+            weights,
+            covers,
+        })
+    }
+
+    pub fn is_legacy(&self) -> bool {
+        self.scales == [1.] && self.weights == [1.]
+    }
+
+    pub fn sample(&self, pose_rng: &mut StdRng, component_rng: &mut StdRng) -> (usize, Pose) {
+        let mut selected = 0;
+        if self.covers.len() > 1 {
+            let u = component_rng.random::<f64>();
+            let mut sum = 0.;
+            selected = self.covers.len() - 1;
+            for (index, weight) in self.weights.iter().enumerate() {
+                sum += weight;
+                if u < sum {
+                    selected = index;
+                    break;
+                }
+            }
+        }
+        (selected, self.covers[selected].sample(pose_rng))
+    }
+
+    pub fn log_density(&self, pose: Pose) -> f64 {
+        self.covers
+            .iter()
+            .zip(&self.weights)
+            .filter(|(cover, _)| cover.contains_support(pose))
+            .map(|(cover, weight)| weight.ln() - cover.volume.ln())
+            .fold(f64::NEG_INFINITY, log_add)
+    }
 }
 
 fn direction(rng: &mut StdRng) -> Vec3 {
@@ -239,6 +344,8 @@ pub struct NativeRegionOptions {
     pub cloud_replicates: usize,
     pub activity: Option<f64>,
     pub lambda_ratio: Option<f64>,
+    pub cover_scales: Vec<f64>,
+    pub cover_weights: Vec<f64>,
 }
 #[derive(Deserialize)]
 struct Config {
@@ -340,6 +447,11 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
     }
     let metric: NativeMetric = serde_json::from_value(cfg.metadata.clone())?;
     let cover = NativeCover::new(&metric)?;
+    let mixture = NativeCoverMixture::new(
+        &cover,
+        options.cover_scales.clone(),
+        options.cover_weights.clone(),
+    )?;
     let shape_raw = fs::read(&cfg.shape)?;
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
     let env = Environment {
@@ -368,6 +480,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("cover.json"), &cover)?;
+    save(&options.out.join("cover-mixture.json"), &mixture)?;
     let lambda = if cfg.reservoir_density > 0. {
         cfg.poisson_lambda_ratio * cfg.reservoir_density
     } else {
@@ -376,23 +489,36 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
     ensure!(lambda.is_finite() && lambda > 0., "Invalid intensity");
     save(
         &options.out.join("manifest.json"),
-        &json!({"schema":1,"samples":options.samples,"seed":options.seed,
+        &json!({"schema":2,"samples":options.samples,"seed":options.seed,
         "cloud_replicates":options.cloud_replicates,"lambda":lambda,"lambda_ratio":cfg.poisson_lambda_ratio,"activity":cfg.reservoir_density,
         "depletant_radius":cfg.depletant_radius,"config_sha256":hash_bytes(&raw),"shape_sha256":hash_bytes(&shape_raw),
         "executable_sha256":hash_file(&std::env::current_exe()?)?,"source_bundle_sha256":hash_bytes(source.as_bytes()),
-        "proposal":"Uniform whole-native-region cover: reference-relative SO3 cap and centroid-compensated translation ball; no Gaussian",
-        "estimator":"Vcover/N sum hard*capture*(q<=1)*mean_independent_cloud_W; all invalid draws zero",
+        "proposal":"Normalized mixture of geometric SO3-cap/centroid-compensated-ball covers; original target unchanged",
+        "estimator":"1/N sum hard*capture*(original_q<=1)*mean_independent_cloud_W/full_mixture_density; all invalid draws zero",
         "numerical_scope":"Analytically conservative spectral-norm bound with FP64 outward guard; not formal interval arithmetic",
-        "cover":cover,"metric":metric}),
+        "cover":cover,"cover_mixture":mixture,"metric":metric}),
     )?;
     let mut output = BufWriter::new(File::create(options.out.join("samples.jsonl"))?);
     let start = Instant::now();
     let cpu = cpu_seconds();
     let (mut total, mut core, mut shell) = (Moments::new(), Moments::new(), Moments::new());
+    let (mut hard, mut hard_core, mut hard_shell) =
+        (Moments::new(), Moments::new(), Moments::new());
+    let mut cross_sum = f64::NEG_INFINITY;
+    let mut component_draws = vec![0u64; mixture.covers.len()];
     let (mut q_rejected, mut capture_rejected, mut hard_rejected, mut raw_points) =
         (0u64, 0u64, 0u64, 0u64);
     for draw in 0..options.samples {
-        let pose = cover.sample(&mut stream(options.seed, draw, 0, "pose"));
+        let (component, pose) = mixture.sample(
+            &mut stream(options.seed, draw, 0, "pose"),
+            &mut stream(options.seed, draw, 0, "component"),
+        );
+        component_draws[component] += 1;
+        let log_density = mixture.log_density(pose);
+        ensure!(
+            log_density.is_finite(),
+            "Generated pose outside mixture support; no retry"
+        );
         let q = metric.q(pose);
         ensure!(q.is_finite(), "Nonfinite q");
         let reason = if q > 1. {
@@ -407,7 +533,7 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
         } else {
             None
         };
-        let row = if let Some(reason) = reason {
+        let mut row = if let Some(reason) = reason {
             json!({"draw":draw,"q":q,"zero":reason})
         } else {
             let envelope = OverlapEnvelope::build(&env, pose, cfg.endpoint_gate)?;
@@ -430,17 +556,30 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
             }
             let log_mean = logs.iter().copied().fold(f64::NEG_INFINITY, log_add)
                 - (options.cloud_replicates as f64).ln();
-            let log_weight = cover.volume.ln() + log_mean;
+            let log_hard = -log_density;
+            let log_weight = log_hard + log_mean;
             total.add(log_weight);
+            hard.add(log_hard);
+            cross_sum = log_add(cross_sum, log_weight + log_hard);
             if q <= 0.8 {
-                core.add(log_weight)
+                core.add(log_weight);
+                hard_core.add(log_hard);
             } else {
-                shell.add(log_weight)
+                shell.add(log_weight);
+                hard_shell.add(log_hard);
             };
             json!({"draw":draw,"q":q,"pose":pose,"log_importance_weight":log_weight,"log_boltzmann_mean":log_mean,
                 "cloud_log_weights":logs,"cloud_overlap_counts":counts,"cloud_raw_points":cloud_raw,
                 "lower_volume":envelope.lower_volume,"upper_volume":envelope.upper_volume()})
         };
+        if !mixture.is_legacy() {
+            row["pose"] = json!(pose);
+            row["proposal_component"] = json!(component);
+            row["log_proposal_density"] = json!(log_density);
+            if reason.is_none() {
+                row["log_hard_weight"] = json!(-log_density);
+            }
+        }
         serde_json::to_writer(&mut output, &row)?;
         writeln!(output)?;
         if (draw + 1) % 4096 == 0 || draw + 1 == options.samples {
@@ -455,6 +594,8 @@ pub fn run(options: NativeRegionOptions) -> Result<Value> {
     output.flush()?;
     let result = json!({"complete":true,"samples":options.samples,"native":total.value(options.samples),"native_core":core.value(options.samples),
         "native_shell":shell.value(options.samples),"q_rejected":q_rejected,"capture_rejected":capture_rejected,"hard_rejected":hard_rejected,
+        "hard_native":hard.value(options.samples),"hard_native_core":hard_core.value(options.samples),"hard_native_shell":hard_shell.value(options.samples),
+        "physical_hard_log_cross_sum":if cross_sum.is_finite(){Some(cross_sum)}else{None},"component_draws":component_draws,
         "cover_volume":cover.volume,"raw_cloud_points":raw_points,"wall_seconds":start.elapsed().as_secs_f64(),"cpu_seconds":cpu_seconds()-cpu,
         "samples_sha256":hash_file(&options.out.join("samples.jsonl"))?,
         "uncertainty":"Independent fixed-N estimator; observed ESS and uncertainty do not certify absence of unresolved within-region weight concentration"});

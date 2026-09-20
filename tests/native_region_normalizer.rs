@@ -49,6 +49,8 @@ fn options(config: PathBuf, out: PathBuf, n: u64) -> NativeRegionOptions {
         cloud_replicates: 2,
         activity: None,
         lambda_ratio: None,
+        cover_scales: vec![1.],
+        cover_weights: Vec::new(),
     }
 }
 

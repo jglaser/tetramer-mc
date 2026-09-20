@@ -35,7 +35,18 @@ def target(path):
     assert data['all_rows_and_hashes_validated']
     rows=data['populations'];assert len({r['samples'] for r in rows})==1
     physical=data['regions']['native'];logs=[r['regions']['native']['log_normalizer'] for r in rows]
-    volumes=[r['cover_volume']*r['counts']['valid']/r['samples'] for r in rows]
+    if 'hard_regions' in data:
+        # Nonuniform proposals require the audited mean I_valid/g, paired with
+        # each population's physical mean. Counts alone are not a volume.
+        volumes=[math.exp(r['hard_regions']['native']['log_normalizer'])
+                 if r['hard_regions']['native']['log_normalizer'] is not None else 0.
+                 for r in rows]
+        hard_source='audited inverse-proposal-weighted hard-region means'
+    else:
+        model=data.get('cover_mixture')
+        assert model is None or len(model['scales'])==1, 'Mixture missing weighted hard-region audit'
+        volumes=[r['cover_volume']*r['counts']['valid']/r['samples'] for r in rows]
+        hard_source='legacy uniform cover volume times valid fraction'
     mean_hard=sum(volumes)/len(volumes);logz=physical['log_normalizer']
     if logz is None or mean_hard<=0:
         return {'resolved':False,'physical':physical,'hard_volume':mean_hard,'populations':rows}
@@ -43,6 +54,7 @@ def target(path):
     yr=[v/mean_hard for v in volumes];k=len(rows)
     vz=sample_variance(xr);vh=sample_variance(yr);vd=sample_variance([x-y for x,y in zip(xr,yr)])
     return {'resolved':True,'physical':physical,'hard_volume':mean_hard,'log_hard_volume':math.log(mean_hard),
+            'hard_volume_source':hard_source,
             'log_depletion_enhancement':logz-math.log(mean_hard),'population_count':k,
             'population_logQz':logs,'population_hard_volumes':volumes,
             'variance_logQz':None if vz is None else vz/k,
@@ -59,7 +71,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('root',type=Path);args=parser.parse_args()
     run=json.loads((args.root/'manifest.json').read_text())
-    paths={label:args.root/label for label in ['empty','B','AB']};paths['A']=Path(run['reused_A_root'])
+    paths={label:args.root/label for label in ['empty','A','B','AB']}
+    if 'reused_A_root' in run:
+        paths['A']=Path(run['reused_A_root'])
     signatures={label:physical_signature(path) for label,path in paths.items()}
     signature=signatures['A'][0];cover=signatures['A'][2]
     assert all(s[0]==signature and s[2]==cover for s in signatures.values()),'Different physical region/bath/reference measure'

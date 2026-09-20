@@ -22,6 +22,12 @@ struct Cli {
     activity: Option<f64>,
     #[arg(long)]
     lambda_ratio: Option<f64>,
+    /// Proposal scales only; the original native metric always defines the target.
+    #[arg(long, value_delimiter = ',', default_value = "1")]
+    cover_scales: Vec<f64>,
+    /// Positive mixture weights, normalized internally; equal when omitted.
+    #[arg(long, value_delimiter = ',')]
+    cover_weights: Vec<f64>,
 }
 fn main() -> Result<()> {
     let c = Cli::parse();
@@ -34,7 +40,9 @@ fn main() -> Result<()> {
             seed: c.seed,
             cloud_replicates: c.cloud_replicates,
             activity: c.activity,
-            lambda_ratio: c.lambda_ratio
+            lambda_ratio: c.lambda_ratio,
+            cover_scales: c.cover_scales,
+            cover_weights: c.cover_weights,
         })?)?
     );
     Ok(())

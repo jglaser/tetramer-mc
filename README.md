@@ -105,6 +105,11 @@ extends the same physical calculation to the competing shoulder without
 changing the registration metric. Its [frozen guide comparison](docs/shoulder-proposal-guides.md)
 exposes missed tails, while a [rigid-member moment cover](docs/rms-quaternion-cover.md)
 provides a smaller, geometrically derived independent reference proposal.
+The [fixed-allocation MIS control](docs/deterministic-mixture-mis.md) combines
+fresh guide and geometric draws with one full proposal denominator. It retains
+the component estimates and uses stratified uncertainty and paired comparisons;
+the completed control agrees with the guide-only estimate but does not improve
+precision per CPU.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

@@ -56,6 +56,22 @@ theorem alone does not verify floating-point geometry or executable code.
 
 ## Latest controlled results — 2026-09-21
 
+The present milestone is **native accessibility with a validated,
+native-informed proposal**, not equilibrium assembly. The exact reciprocal
+control reaches registry in four of four small mobile runs and allows registry
+excursions, but it has not produced a neighbor exchange. Portable
+[twelve-body free and seeded examples](../examples/README.md) now bundle this
+model with local moves, GCA and center shifts. Both pass short execution and
+trajectory-readback checks; their long-run assembly outcome is for measurement.
+
+The remaining thermodynamic scope is concrete: the
+[domain coverage review](mobile-domain-coverage.md) finds no whole-domain
+normalizer on the exact observed scaffold. Even the current 170 Å capture
+ball omits demonstrated wall-valid native placements. Also, the old q>1 label
+includes native sites absent from its original reference list. Existing finite
+region estimates must retain their definitions; a full assembly verdict needs
+explicit remainder coverage and a separate all-site registry classification.
+
 The [regional weight ledger](ab-regional-weight-status.md) now combines
 independent native, shoulder, intermediate and far controls for the original
 AB capture target. Current point estimates favor native over the combined
@@ -122,6 +138,13 @@ exchange. A return to an unregistered pair lies at geometric chart radius
 Thus both domain coverage and stationary exchange remain unresolved. Both
 atlases remain native-informed; neither target weights nor new contact fits
 are supplied by symmetrizing the proposal.
+
+The fresh [guided outer-shell control](mobile-outer-importance-design.md)
+has now completed all eight populations and both audits. Observed relative
+errors fall to about 19–21%, from 39–58%, at the same attempted sample count.
+The outer shell's log weight rises from 19.30 to 20.29, and effective sample
+sizes remain only 23–28. Thus the guide helps measured precision, while the
+physical comparison still needs remainder coverage and sensitivity controls.
 
 ## Earlier evidence and the coverage problems it revealed
 

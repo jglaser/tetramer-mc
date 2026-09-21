@@ -176,37 +176,56 @@ fn proposal_density(
     covariance_scale: f64,
     anchors: &[Pose],
 ) -> f64 {
+    let flags = model.get("reciprocal_components");
+    let model = model.get("base_model").unwrap_or(model);
     let mut learned = 0.;
     for anchor in anchors {
         let inverse = transpose(rotation(anchor.orientation));
         let t = matvec(inverse, sub(pose.position, anchor.position));
         let r = matmul(inverse, rotation(pose.orientation));
         for k in 0..model["weights"].as_array().unwrap().len() {
-            let a: Vec3 = serde_json::from_value(model["anchors"][k]["position"].clone()).unwrap();
-            let ar: Mat3 = serde_json::from_value(model["anchors"][k]["rotation"].clone()).unwrap();
-            let delta = matmul(r, transpose(ar));
-            let denominator = 1. + delta[0][0] + delta[1][1] + delta[2][2];
-            if denominator <= 1e-13 {
-                // The Gaussian tends to zero faster than its polynomial
-                // Jacobian at this measure-zero chart seam.
-                continue;
+            let branch_count = if flags.is_some_and(|f| f[k] == true) {
+                2
+            } else {
+                1
+            };
+            for branch in 0..branch_count {
+                // Independent physical inverse: no reciprocal proposal helper.
+                let (t, r) = if branch == 1 {
+                    let ir = transpose(r);
+                    (matvec(ir, t).map(|v| -v), ir)
+                } else {
+                    (t, r)
+                };
+                let a: Vec3 =
+                    serde_json::from_value(model["anchors"][k]["position"].clone()).unwrap();
+                let ar: Mat3 =
+                    serde_json::from_value(model["anchors"][k]["rotation"].clone()).unwrap();
+                let delta = matmul(r, transpose(ar));
+                let denominator = 1. + delta[0][0] + delta[1][1] + delta[2][2];
+                if denominator <= 1e-13 {
+                    // The Gaussian tends to zero faster than its polynomial
+                    // Jacobian at this measure-zero chart seam.
+                    continue;
+                }
+                let c = [
+                    (delta[2][1] - delta[1][2]) / denominator,
+                    (delta[0][2] - delta[2][0]) / denominator,
+                    (delta[1][0] - delta[0][1]) / denominator,
+                ];
+                let latent: [f64; 6] =
+                    std::array::from_fn(|i| if i < 3 { t[i] - a[i] } else { ELL * c[i - 3] });
+                let mut log_g = -3. * (2. * PI).ln();
+                for (i, &value) in latent.iter().enumerate() {
+                    let variance =
+                        model["covariances"][k][i][i].as_f64().unwrap() * covariance_scale.powi(2);
+                    let displacement = value - model["means"][k][i].as_f64().unwrap();
+                    log_g -= 0.5 * variance.ln() + 0.5 * displacement * displacement / variance;
+                }
+                log_g += 3. * ELL.ln() + 2. * PI.ln() + 2. * dot(c, c).ln_1p();
+                learned += model["weights"][k].as_f64().unwrap() * log_g.exp()
+                    / (anchors.len() * branch_count) as f64;
             }
-            let c = [
-                (delta[2][1] - delta[1][2]) / denominator,
-                (delta[0][2] - delta[2][0]) / denominator,
-                (delta[1][0] - delta[0][1]) / denominator,
-            ];
-            let latent: [f64; 6] =
-                std::array::from_fn(|i| if i < 3 { t[i] - a[i] } else { ELL * c[i - 3] });
-            let mut log_g = -3. * (2. * PI).ln();
-            for (i, &value) in latent.iter().enumerate() {
-                let variance =
-                    model["covariances"][k][i][i].as_f64().unwrap() * covariance_scale.powi(2);
-                let displacement = value - model["means"][k][i].as_f64().unwrap();
-                log_g -= 0.5 * variance.ln() + 0.5 * displacement * displacement / variance;
-            }
-            log_g += 3. * ELL.ln() + 2. * PI.ln() + 2. * dot(c, c).ln_1p();
-            learned += model["weights"][k].as_f64().unwrap() * log_g.exp() / anchors.len() as f64;
         }
     }
     epsilon / (2. * RADIUS).powi(3) + (1. - epsilon) * learned
@@ -558,6 +577,99 @@ fn selected_proposal_anchor_retains_the_second_physical_neighbor() -> Result<()>
 }
 
 #[test]
+fn reciprocal_full_domain_weights_match_radial_haar_and_anchor_references() -> Result<()> {
+    let root = std::env::temp_dir().join(format!(
+        "tetramer-normalizer-reciprocal-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&root)?;
+    for (label, flags, anchor, activity) in [
+        ("partial-average", [true, false], None, Z),
+        ("all-selected-spectator", [true, true], Some(1), Z),
+        ("all-selected-physical", [true, true], Some(0), 0.),
+    ] {
+        let path = root.join(label);
+        let base = fixture(&path, false)?;
+        let model = json!({"schema":"reciprocal-pose-mixture-v1","base_model":base,
+            "reciprocal_components":flags});
+        fs::write(path.join("model.json"), model.to_string())?;
+        run_check(
+            &path,
+            &model,
+            24_000,
+            120901011 + anchor.unwrap_or(2) as u64,
+            activity,
+            1.,
+            anchor,
+        )?;
+        let summary: Value = serde_json::from_slice(&fs::read(path.join("output/summary.json"))?)?;
+        assert_eq!(summary["manifest"]["schema"], 3);
+        assert_eq!(summary["manifest"]["base_component_count"], 2);
+        assert_eq!(
+            summary["manifest"]["virtual_component_count"],
+            2 + flags.iter().filter(|f| **f).count()
+        );
+        assert_eq!(summary["manifest"]["reciprocal_components"], json!(flags));
+        let mut inverted = 0;
+        for line in fs::read_to_string(path.join("output/samples.jsonl"))?.lines() {
+            let row: Value = serde_json::from_str(line)?;
+            let proposal = &row["proposal"];
+            if proposal["branch"] == "learned" {
+                let k = proposal["component_index"].as_u64().unwrap() as usize;
+                assert!(proposal["component_inverted"].is_boolean());
+                if proposal["component_inverted"] == true {
+                    assert!(flags[k]);
+                    inverted += 1;
+                }
+            } else {
+                assert!(proposal.get("component_inverted").is_none());
+            }
+        }
+        assert!(inverted > 100);
+        assert_eq!(summary["numerical_nulls"], 0);
+    }
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn reciprocal_normalizer_refuses_rescaling_without_partial_outputs() -> Result<()> {
+    let root = std::env::temp_dir().join(format!(
+        "tetramer-normalizer-reciprocal-scale-{}",
+        std::process::id()
+    ));
+    let base = fixture(&root, false)?;
+    fs::write(
+        root.join("model.json"),
+        json!({"schema":"reciprocal-pose-mixture-v1",
+        "base_model":base,"reciprocal_components":[true,false]})
+        .to_string(),
+    )?;
+    let output = root.join("must-not-exist");
+    let result = normalizer::run(NormalizerOptions {
+        config: root.join("config.json"),
+        model: root.join("model.json"),
+        out: output.clone(),
+        samples: 1,
+        seed: 120901020,
+        covariance_scale: 1.1,
+        uniform_probability: Some(EPSILON),
+        proposal_anchor_index: None,
+        cloud_replicates: 2,
+        activity: Some(Z),
+    });
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("covariance scale 1")
+    );
+    assert!(!output.exists());
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn unrepresentable_open_gaussian_draw_stops_selected_anchor_estimation() -> Result<()> {
     let root = std::env::temp_dir().join(format!(
         "tetramer-normalizer-overflow-{}",
@@ -591,7 +703,7 @@ fn unrepresentable_open_gaussian_draw_stops_selected_anchor_estimation() -> Resu
     let result = normalizer::run(NormalizerOptions {
         out: root.join("selected"),
         proposal_anchor_index: Some(0),
-        ..options
+        ..options.clone()
     });
     let message = result.unwrap_err().to_string();
     assert!(
@@ -600,6 +712,23 @@ fn unrepresentable_open_gaussian_draw_stops_selected_anchor_estimation() -> Resu
         "{message}"
     );
     assert!(!root.join("selected/summary.json").exists());
+    fs::write(
+        root.join("model.json"),
+        json!({"schema":"reciprocal-pose-mixture-v1",
+        "base_model":model,"reciprocal_components":[true,true]})
+        .to_string(),
+    )?;
+    let result = normalizer::run(NormalizerOptions {
+        out: root.join("reciprocal"),
+        ..options
+    });
+    let message = result.unwrap_err().to_string();
+    assert!(
+        message.contains("Reciprocal importance draw produced a numerical null")
+            && message.contains("learned_numerical_null"),
+        "{message}"
+    );
+    assert!(!root.join("reciprocal/summary.json").exists());
     fs::remove_dir_all(root)?;
     Ok(())
 }

@@ -231,19 +231,27 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         epsilon,
         &shape_sha,
     )?;
-    ensure!(
-        !original.has_reciprocal_components(),
-        "Reciprocal charts are not supported by the Gaussian-rescaling normalizer"
-    );
-    let mut parameters = original.component_parameters();
-    for p in &mut parameters {
-        for row in &mut p.covariance {
-            for v in row {
-                *v *= options.covariance_scale.powi(2);
+    let reciprocal = original.has_reciprocal_components();
+    // Exact nonlinear inverse branches are already normalized proposal laws.
+    // Keep the immutable model intact instead of exporting its base Gaussians
+    // and silently dropping those branches during covariance replacement.
+    let model = if reciprocal {
+        ensure!(
+            options.covariance_scale == 1.,
+            "Reciprocal normalizer proposals require covariance scale 1"
+        );
+        original
+    } else {
+        let mut parameters = original.component_parameters();
+        for p in &mut parameters {
+            for row in &mut p.covariance {
+                for v in row {
+                    *v *= options.covariance_scale.powi(2);
+                }
             }
         }
-    }
-    let model = original.with_component_parameters(parameters)?;
+        original.with_component_parameters(parameters)?
+    };
     let centered = |p: Pose| Pose {
         position: sub(p.position, cfg.capture_center),
         orientation: p.orientation,
@@ -277,7 +285,7 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
-    let manifest = json!({"schema":if options.proposal_anchor_index.is_some(){2}else{1},"samples":options.samples,"seed":options.seed,
+    let mut manifest = json!({"schema":if options.proposal_anchor_index.is_some(){2}else{1},"samples":options.samples,"seed":options.seed,
         "cloud_replicates":options.cloud_replicates,"covariance_scale":options.covariance_scale,
         "uniform_probability":epsilon,"lambda":lambda,"activity":cfg.reservoir_density,
         "config_sha256":hash_bytes(&raw),"model_sha256":hash_bytes(&model_raw),"shape_sha256":shape_sha,
@@ -289,6 +297,13 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         "partition":"q<=.8; .8<q<=1; 1<q<2; 2<=q<5; q>=5, each split by exclusion contact; exhaustive within target support",
         "estimator":"zero for invalid; exp(z lower_volume)*(1+z/lambda)^K / full_proposal_density; average independent clouds in linear scale",
         "inference":"Independent importance draws. Observed ESS/RSE cannot rule out unobserved high-weight modes."});
+    if reciprocal {
+        manifest["schema"] = json!(3);
+        manifest["proposal_model_kind"] = json!("reciprocal-pose-mixture-v1");
+        manifest["base_component_count"] = json!(model.component_count());
+        manifest["virtual_component_count"] = json!(model.virtual_branches().len());
+        manifest["reciprocal_components"] = json!(model.reciprocal_components());
+    }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
     let cpu_start = cpu_seconds();
@@ -328,8 +343,13 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         let before = cpu_seconds();
         let outcome = model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
         ensure!(
-            options.proposal_anchor_index.is_none() || outcome.candidate.is_some(),
-            "Selected-anchor importance draw produced a numerical null: {:?}; stop instead of censoring",
+            (!reciprocal && options.proposal_anchor_index.is_none()) || outcome.candidate.is_some(),
+            "{} importance draw produced a numerical null: {:?}; stop instead of censoring",
+            if reciprocal {
+                "Reciprocal"
+            } else {
+                "Selected-anchor"
+            },
             outcome.null_reason
         );
         let candidate = outcome.candidate.map(|p| Pose {

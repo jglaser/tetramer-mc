@@ -1,6 +1,6 @@
 # A controlled extension for the unresolved outer contact shells
 
-**Implemented and reference-tested; protein performance not yet measured.**
+**Implemented, reference-tested, and measured in a fresh protein control.**
 The optional `--importance-guide` path now exists in the Rust normalizer and
 Python campaign runner. Its independent auditor checks the full latent
 density, pose/Jacobian reconstruction, immutable guide binding and retained
@@ -15,6 +15,27 @@ populations, followed by one archived Python audit. All 512 rows were
 reconstructed, including 250 outside-shell zeros. Maximum density, latent
 coordinate and log-Jacobian differences are 3.56e-15. This checks the
 launcher/serialization/auditor boundary; it is not a protein efficiency test.
+
+The [completed protein comparison](../runs/mobile-competing-importance-comparison-20260921/report.md)
+uses eight fresh populations, four of 8,192 draws per unchanged shell, with
+two independent clouds and λ/z=64. All populations and both archived audits
+passed. The frozen guide keeps uniform mass 0.5; its old training rows are
+not pooled with the new estimates.
+
+| Shell | Uniform log Qz | Guided log Qz | Guided row / population RSE | Guided ESS | Largest guided row |
+|---|---:|---:|---:|---:|---:|
+| 5 < rho <= 8 | 19.985885 | 20.065829 | 19.02% / 21.27% | 27.6 | 17.57% |
+| 8 < rho <= 12 | 19.295288 | 20.285648 | 20.74% / 19.89% | 23.2 | 15.64% |
+
+The corresponding uniform row errors were 38.65% and 57.60%. Guided CPU
+costs are 243.60 and 284.05 seconds, versus 205.66 and 164.98 seconds.
+The observed `CPU * RSE^2` ratios favor the guide by 3.49 and 4.48, but
+low ESS and the large outer-shell estimate change prevent treating these
+ratios as validated speedups. Population errors come from only four means.
+Hard-volume estimates agree within observed errors; 5,438 and 2,786
+outside-shell draws remain zero contributions in the fixed denominators.
+This is progress in finite-region precision, without a convergence claim or
+a bound on the remaining contact space.
 
 The two outer shells need better pose coverage. Increasing the number of
 Poisson clouds alone cannot resolve their dominant uncertainty. This note

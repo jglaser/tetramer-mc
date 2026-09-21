@@ -14,7 +14,9 @@ The implemented format is a `reciprocal-pose-mixture-v1` envelope containing
 `base_model` and one Boolean `reciprocal_components` flag per base component.
 Older Gaussian readers reject the envelope because it has no top-level
 Gaussian arrays. Active reciprocal models reject periodic boundaries and
-unsupported adaptive/normalizer consumers. Bare legacy models and envelopes
+unsupported adaptive or single-Gaussian region consumers. The whole-domain
+`basin-normalizer` now supports unchanged reciprocal models at covariance
+scale 1, with complete anchor-marginalized importance density. Bare legacy models and envelopes
 whose flags are all false retain their previous draw and trace behavior.
 
 Capture records keep base-component indices plus an optional inversion flag.

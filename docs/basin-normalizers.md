@@ -34,10 +34,12 @@ without retrying invalid draws. For each region b estimate
  \left[\frac1m\sum_{j=1}^m W(x_i,K_{ij})\right].
 \]
 
-Each cloud is independent of pose selection and the other clouds. Hard-invalid,
-out-of-capture and numerical-null draws remain zero contributions in the fixed
-denominator N. The finite-precision null cases are recorded explicitly; their
-frequency must be inspected. Cloud and population averages are taken on the
+Each cloud is independent of pose selection and the other clouds. Hard-invalid
+and out-of-capture draws remain zero contributions in the fixed denominator N.
+Legacy all-anchor proposals also record finite-precision null draws as zeros;
+their frequency must be inspected. Selected-anchor and active reciprocal
+proposals instead stop on numerical nulls, since censoring their open Gaussian
+tails changes the proposal law. Cloud and population averages are taken on the
 linear weight scale before any logarithm or ratio. A ratio of unbiased
 normalizers need not itself be unbiased.
 
@@ -48,6 +50,16 @@ g(x)=sum_j g(x|j)/number_of_anchors. Gaussian component and anchor labels are
 never substituted for this full denominator. `--covariance-scale s` multiplies
 Gaussian standard deviations, so Σ becomes s²Σ. Means and chart anchors stay
 fixed. These changes affect importance efficiency but not the physical target.
+
+An exact reciprocal envelope is also supported with `--covariance-scale 1`.
+It uses the original base mixture and its nonlinear inverse branches without
+exporting them as Gaussian approximations. The full `F(T) = [G(T)+G(T^-1)]/2`
+law (or the explicitly flagged partial mixture) remains inside each anchor's
+uniform-plus-learned density. Both fixed-anchor and marginalized-anchor
+estimation are supported. Rescaling an active reciprocal model is rejected;
+nonrepresentable reciprocal draws stop the calculation instead of silently
+changing the proposal law. Reciprocal populations use manifest schema 3 with
+base/virtual component counts and inversion flags.
 
 ## Exhaustive region definitions
 
@@ -87,6 +99,15 @@ density, zero-activity hard volumes, duplicated Gaussian components and
 covariance scaling. Separate overlap-estimator tests check both first and
 second moments, traversal budgets, anisotropic dumbbells and the fixed-neighbor
 union. These validate the estimator, not convergence for proteins.
+
+The reciprocal extension passes seven targeted Rust checks (including the
+existing target guards) and eleven Python auditor checks. A separate
+[256-draw sphere integration](../runs/reciprocal-normalizer-cross-language-20260921/validation.json)
+checks actual serialized Rust output against the Python auditor with shifted
+capture, two rotated anchors and a partially reciprocal mixture. All 256
+rows are reconstructed, including 162 invalid zeros and 17 inverse-branch
+proposals; the maximum full-density difference is 3.56e-15. This validates
+the integration/auditor interface, not whole-domain protein coverage.
 
 ## Running
 

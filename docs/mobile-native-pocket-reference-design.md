@@ -1,6 +1,7 @@
 # Independent finite reference for the alternative native pocket
 
-This is a proposed control, not a completed integration. The
+This design was frozen before the [completed independent integration](mobile-native-pocket-reference-results.md).
+The original design and its limits are retained below. The
 [saved full-D170 comparison](../runs/mobile-full-capture-comparison-20260921/analysis.json)
 places almost all observed high weight in an alternative registered triangle:
 body 2 (A)→moving motif 7 and body 1 (B)→moving motif 4. Its original q is
@@ -38,7 +39,9 @@ ideal centers has whitened norm 0.853976. Therefore
 The unchanged covariance is a geometric coordinate choice, not a physical
 Gaussian prior. Freeze the final single-component chart bytes, region file,
 map/Jacobian convention and hashes before drawing new samples. The final
-region-file hash does not yet exist at this design stage.
+region-file hash did not yet exist at this design stage. The executed R5
+region has SHA-256 `76ea65088e302d6b6478ac033af9b67b7cf21cb7cea1f854f70cdcd6db0473ae`;
+the separate 5–8 shell has `2d9a8e704415e89958d8b9a987a98b26edacb68a8532cf4f3c42e27d8949e88e`.
 
 ## Estimate with uniform latent volume
 

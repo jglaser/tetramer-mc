@@ -70,8 +70,18 @@ poses register with both neighbors; they belonged to the old q>1 remainder
 because that score described only the original native site. However, total
 importance ESS is only 1.2–2.7, and both global proposal arms completely miss
 the independently measured original native R4. These are useful discoveries,
-not converged equilibrium occupancies. An independent regional reference for
-the new pocket is the next test. The [domain coverage review](mobile-domain-coverage.md)
+not converged equilibrium occupancies. The subsequent
+[independent regional reference](mobile-native-pocket-reference-results.md)
+confirms substantial weight in the new pocket without a global mixture
+denominator. A larger independent repeat gives log Qz=60.68 for R5 with
+7.67% observed relative error and ESS170; its finite-region log ratio against
+the original native R4 is about 24.60. Independent outer strata extend to
+R32, with log Qz=61.03 for the cumulative finite region. They add about 5.65%
+of observed mass beyond R8 but do not bound unmeasured tails. The next
+discriminating uncertainty is the entire competing-contact remainder in
+the original physical wall, followed by mobile growth beyond the known
+triangle. Another core cutoff is secondary to those tests.
+The [domain coverage review](mobile-domain-coverage.md)
 also identifies wall-valid native sites outside D170; full-vessel weights
 remain unresolved.
 

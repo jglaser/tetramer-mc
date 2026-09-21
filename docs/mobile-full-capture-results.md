@@ -1,7 +1,8 @@
 # Full captured-domain integration and an alternative native pocket
 
-The full-support calculation found an alternative cooperative native pocket
-outside the original registration score. It did **not** converge the physical
+The full-support calculation found an alternative native pocket with registered
+contacts to both fixed neighbors, outside the original registration score.
+It did **not** converge the physical
 normalizer. This improves our contact inventory and identifies the next
 regional reference; it is not evidence against the model or a demonstration
 of equilibrium assembly.
@@ -50,8 +51,9 @@ identifies directed motifs 7 and 4 against original bodies 2 and 1,
 respectively. The original native site uses motifs 4 and 10. The new ideal
 site is about 87.15 Å away with a 180° relative orientation difference;
 it was not a small fluctuation of the originally scored site.
-The catalogue prescribes four external monomer contacts there (two C3 and
-two C4), compared with three at the original site (two C3 and one C4).
+The catalogue prescribes four external monomer contacts there (two C4 from
+body 2 and two C3 from body 1), compared with three at the original site
+(two C3 from body 2 and one C4 from body 1).
 This is a geometric distinction; the saved cloud factors alone do not
 establish the resulting free-energy difference or its mechanism.
 
@@ -71,6 +73,9 @@ new covariance as if it represented the basin. The next
 uses an existing well-conditioned chart, an ideal-site center and uniform
 latent-volume integration, avoiding the global mixture denominator.
 Region-size sensitivity and continued remainder coverage remain necessary.
+That [independent core/shell calculation is now complete](mobile-native-pocket-reference-results.md)
+and confirms the signal, while demonstrating consequential mass at the
+outer boundary of the newly measured region.
 
 ## Audit correction and reproducibility
 

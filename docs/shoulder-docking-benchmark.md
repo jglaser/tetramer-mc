@@ -156,7 +156,63 @@ optional stopping and pooling chain boundaries into a single autocorrelation.
 The repeat's manifest SHA-256 is
 `b27ab410f2fcad7d6d7d1056b517816ba8d46e443c89d2386f702a220dc463ea`.
 Its rebuilt executable includes the two integrator guards in the embedded
-source archive; the docking kernel is unchanged. Results are pending.
+source archive; the docking kernel is unchanged. All twelve runs and the
+automatic independent observer have now completed successfully.
+
+## Independent 40,000-cycle results
+
+The longer, independently seeded control retains 32,000 endpoints per run
+after its fixed burn. The comparison uses the original physical reference,
+not a reference chosen after seeing these trajectories.
+
+| Mode | Direct–geometry roundtrips (four runs) | Full post-burn sampling CPU s | Roundtrips / CPU s | Initialization-mean TV | Largest run half TV |
+|---|---|---:|---:|---:|---:|
+| Local | 3 (3, 0, 0, 0) | 1267.63 | 0.002367 | 0.13113 | 0.62525 |
+| Posterior c=0 | 202 (51, 57, 46, 48) | 1672.72 | 0.120761 | 0.07248 | 0.15419 |
+| Posterior c=0.9 | 508 (138, 106, 128, 136) | 2190.84 | 0.231875 | 0.02964 | 0.12831 |
+
+Correlated transport retains **1.920 times** the observed roundtrips per
+full post-burn sampling CPU of independent redraw, versus 2.107 in the
+short pilot. All four transport runs contribute exchanges. These are additive
+event counts divided by summed CPU, not a pooled-chain autocorrelation or
+an equilibrium kinetic rate. Total sampling cost, including burn, is
+6,410.47 CPU seconds across all twelve runs.
+
+The stronger check is the improvement in coverage: transport's difference
+between initialization means falls from 0.10963 to 0.02964, and its largest
+within-run half difference falls from 0.333 to 0.12831. Nevertheless, this is
+not a stationarity certificate. Individual transport occupancies differ
+from the frozen importance reference by TV 0.039–0.088, and the reference
+itself has finite-sample uncertainty. Local sampling remains strongly
+heterogeneous; its smaller initialization-mean discrepancy hides one run
+with half TV 0.62525 and three runs with no direct–geometry roundtrip.
+
+Individual apparent joint atomic-contact ESS/CPU ranges are 0.049–0.129
+for local, 0.190–0.471 for redraw and 0.251–0.531 for transport. These are
+lower than several short-pilot values as slower modes enter the longer
+records. Their ranges overlap between redraw and transport, and they remain
+descriptive. The demonstrated gain is sustained contact exchange per CPU
+with improved occupancy agreement, not a certified stationary ESS speedup.
+
+The [completed repeat audit](../runs/ab-shoulder-docking-repeat-assessment-20260921/analysis.json)
+replays all **1,440,000 attempts**, independently checks all **303,878 learned
+full-mixture corrections**, checks 2,044 representative chart maps, and
+audits **384,000 post-burn atomic-contact frames** against both neighbors.
+The [frozen-plan comparison](../runs/ab-shoulder-docking-repeat-comparison-20260921/comparison.md)
+retains all 24 separate short/long records and the slot/kernel flux matrices.
+`tools/compare_shoulder_docking_repeat.py --out NEW_DIRECTORY` reproduces
+the comparison from completed audits and source identities, without
+rerunning trajectories or physical audits. Its synthetic tests cover missing
+runs, changed targets, unequal CPU denominators and constant descriptors.
+
+![Independent longer contact benchmark](../runs/ab-shoulder-docking-repeat-figure-20260921/shoulder-docking-benchmark.png)
+
+This supports testing the kernel with mobile neighbors. It does not establish
+the cost of forming the AB neighborhood, native escape in the unrestricted
+target, or assembly. The next all-mobile control retains the full-mixture
+capture kernel alongside frozen posterior transport; the Gaussian-only
+transport correction by itself lacks the capture kernel's uniform reverse
+density floor at dilute configurations.
 
 `tests/docking_region.rs` checks strict/closed support boundaries, unchanged
 default configuration semantics, spectator-only anchor effects, both physical

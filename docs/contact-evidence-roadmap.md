@@ -54,7 +54,47 @@ and recovery of the physical marginal. Keep the theorem's mathematical
 assumptions explicit and connect them to the implemented moves; the general
 theorem alone does not verify floating-point geometry or executable code.
 
-## Current evidence update
+## Latest controlled results — 2026-09-21
+
+The [regional weight ledger](ab-regional-weight-status.md) now combines
+independent native, shoulder, intermediate and far controls for the original
+AB capture target. Current point estimates favor native over the combined
+other regions by 10.65–10.74 kBT. This is an envelope of controlled estimates,
+not a confidence interval; remaining competing-region uncertainty is explicit.
+Missing native mass would strengthen the one-sided comparison. A separately
+measured native subset already provides evidence in that direction, without
+needing every native tail resolved first. Formation and motion of the AB
+neighbors are absent from this conditional calculation.
+
+The [conditional shoulder benchmark](shoulder-docking-benchmark.md) therefore
+tests regions with appreciable conditional weight rather than demanding
+frequent exits from an overwhelmingly populated native region. Its independent
+40,000-cycle repeat yields 3, 202 and 508 direct–geometry roundtrips for local,
+posterior redraw and correlated transport. Transport retains a 1.92-fold
+observed roundtrip-per-CPU advantage over redraw, with initialization-mean
+TV 0.030. Half-record discrepancies persist, so apparent ESS is not promoted
+to a stationary speedup. Every attempted move and every post-burn contact
+frame was audited; all runs and repeats remain in the comparison.
+
+The [all-mobile native-informed control](mobile-posterior-pilot.md) is now
+complete: twelve 2,000-sweep runs retain the full-mixture capture kernel,
+posterior transport, known one-neighbor competitors, native charts and AB
+shoulder charts. Five of six dispersed starts reached a native-connected
+three-tetramer group. All six preassociated starts remained native-connected.
+Four native pair edges were lost and three returned, but these changes left
+the exclusion contacts intact. No partner exchange or exclusion-contact
+detachment occurred. In particular, the conditional transport gain does not
+yet establish improved mobile-cluster equilibration.
+
+The next discriminating comparison must resolve the competing attachment
+seen in the remaining dispersed run, retain independent initial conditions,
+and count contact-environment changes rather than whole-cluster motion. A
+geometry-only control must remove native-derived charts throughout the atlas,
+not merely its separately allocated native block. Current successful access
+uses supplied inter-tetramer registry; it is not completion of the discovery
+or equilibrium objectives.
+
+## Earlier evidence and the coverage problems it revealed
 
 The independent normalization work has exposed a substantial coverage
 problem in the earlier one-neighbor estimates. Recentered frozen proposals

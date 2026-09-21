@@ -76,12 +76,22 @@ Gaussian auxiliary and translation/Haar Jacobian factors. The
 [conditional docking runner](docs/involution-docking.md) combines it with
 implicit many-body depletion and compares correlations against independent
 redraw. The [matched docking pilot](docs/involution-docking-pilot.md) measures
-one-way entries and completed contact roundtrips separately. It is not yet an
-option in the all-mobile assembly runner.
+one-way entries and completed contact roundtrips separately.
 The [posterior-source variant](docs/posterior-chart-involution.md) now selects
 its source chart using the current pose and cancels the corresponding label
 factor against the map correction. Its zero-correlation arm supplies the
 matched independent-redraw control with a separate uniform branch.
+The [all-mobile spherical integration](docs/frozen-posterior-assembly.md)
+now mixes this frozen posterior kernel with the original full-mixture capture
+move, retaining the complete many-body bath, GCA and center shifts. Tiny-system
+tests cover inverse traces, non-anchor shielding, restart and unchanged defaults.
+The [three-mobile-tetramer control](docs/mobile-posterior-pilot.md) tests released
+and dispersed preparations with known native and competing charts supplied.
+All twelve 2,000-sweep runs passed the recovered audit. Five of six dispersed
+starts reached a native-connected three-body group, but no exclusion contacts
+detached and no partner exchanges occurred. Native-informed access is therefore
+established for these small groups; equilibrium assembly and a mobile-system
+transport speedup remain unresolved.
 The [independent basin normalizer](docs/basin-normalizers.md) integrates the
 same physical density using positive Poisson importance weights and an
 exhaustive contact-region partition. It provides a separate check on trapped
@@ -126,11 +136,12 @@ A [conditional shoulder benchmark](docs/shoulder-docking-benchmark.md) compares
 matched local, Gaussian redraw and reversible transport kernels against
 independently measured contact-region probabilities. Its explicit support
 restriction isolates competing-contact mixing from rare full-target native
-escape. The first pilot completes 0, 23 and 66 direct–geometry contact
-roundtrips respectively; transport yields 2.1× more roundtrips per sampling
-CPU than redraw. Initialization and trajectory-half differences remain,
-so this is demonstrated contact exchange rather than a converged global
-mixing rate, assembly result or physical kinetic measurement.
+escape. A longer independent control completes 3, 202 and 508 direct–geometry
+contact roundtrips respectively; transport retains 1.92× more roundtrips per
+sampling CPU than redraw. Its initialization-mean occupancy discrepancy
+falls to TV 0.030, but within-run half differences remain as large as 0.128.
+This demonstrates sustained contact exchange with improved coverage;
+stationary ESS, global mixing, assembly and physical kinetics remain separate.
 The [fixed-allocation MIS control](docs/deterministic-mixture-mis.md) combines
 fresh guide and geometric draws with one full proposal denominator. It retains
 the component estimates and uses stratified uncertainty and paired comparisons;

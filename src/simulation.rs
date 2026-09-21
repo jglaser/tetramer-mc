@@ -10,6 +10,7 @@ use crate::{
     conditional::{ConditionalConfig, ConditionalEngine, ConditionalFit, ConditionalState},
     contact_memory::{MemoryConfig, MemoryState, ResolvedMemoryConfig},
     depletion::{self, GateOptions},
+    docking::{DockingMethod, DockingProposal},
     geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
     proposal::FrozenRelativePoseProposal,
@@ -69,6 +70,27 @@ impl Boundary {
         }
     }
 }
+
+/// Fixed mixture of the existing capture kernel and frozen posterior transport.
+/// `probability` is conditional on an already selected global update slot.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct FrozenPosteriorConfig {
+    pub probability: f64,
+    pub correlation: f64,
+}
+impl FrozenPosteriorConfig {
+    pub fn validate(self) -> Result<()> {
+        ensure!(
+            self.probability.is_finite() && (0. ..1.).contains(&self.probability),
+            "frozen posterior probability must be in [0, 1), retaining the capture kernel"
+        );
+        ensure!(
+            self.correlation.is_finite() && (-1. ..=1.).contains(&self.correlation),
+            "frozen posterior correlation must be in [-1, 1]"
+        );
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
@@ -110,6 +132,8 @@ pub struct Config {
     pub atlas_transport: Option<AtlasTransportConfig>,
     #[serde(default)]
     pub atlas_mask: Option<AtlasMaskConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_posterior: Option<FrozenPosteriorConfig>,
     #[serde(default)]
     pub seed_labels: Vec<usize>,
     #[serde(default)]
@@ -231,6 +255,22 @@ impl Config {
             ensure!(
                 self.atlas_transport.is_some(),
                 "atlas_mask requires atlas_transport"
+            );
+        }
+        if let Some(options) = self.frozen_posterior {
+            options.validate()?;
+            ensure!(
+                self.boundary.radius().is_some(),
+                "frozen posterior transport requires a spherical boundary"
+            );
+            ensure!(
+                self.auxiliary_transport.is_none()
+                    && self.reversible_jump.is_none()
+                    && self.contact_memory.is_none()
+                    && self.conditional_closure.is_none()
+                    && self.atlas_transport.is_none()
+                    && self.atlas_mask.is_none(),
+                "frozen posterior transport requires immutable charts; disable auxiliary, RJ, contact-memory, conditional and atlas adaptations"
             );
         }
         self.endpoint_gate.validate()
@@ -465,6 +505,40 @@ fn spherical_local_pose(rng: &mut StdRng, old: Pose, dt: f64, dc: f64) -> Pose {
     }
 }
 
+/// The anchor is a retained uniform label among all other bodies. Spectators
+/// are fixed only for this attempt; the physical environment is built separately.
+fn posterior_for_body(
+    proposal: &DockingProposal,
+    rng: &mut StdRng,
+    poses: &[Pose],
+    moving: usize,
+) -> Result<(Option<Pose>, Value)> {
+    ensure!(moving < poses.len(), "invalid posterior moving index");
+    let spectators: Vec<_> = poses
+        .iter()
+        .enumerate()
+        .filter_map(|(j, &pose)| (j != moving).then_some(pose))
+        .collect();
+    let (candidate, mut info) = proposal.propose(rng, poses[moving], &spectators)?;
+    let local_anchor = info["anchor_index"]
+        .as_u64()
+        .context("posterior proposal did not retain its anchor label")?
+        as usize;
+    ensure!(
+        local_anchor < spectators.len(),
+        "invalid posterior anchor label"
+    );
+    let anchor = if local_anchor < moving {
+        local_anchor
+    } else {
+        local_anchor + 1
+    };
+    info["anchor_index"] = json!(anchor);
+    info["moving_index"] = json!(moving);
+    info["kernel"] = json!("frozen-posterior");
+    Ok((candidate, info))
+}
+
 fn uniform_direction(rng: &mut StdRng) -> Vec3 {
     let v: Vec3 = std::array::from_fn(|_| StandardNormal.sample(rng));
     let length = norm(v);
@@ -622,6 +696,20 @@ pub fn run(options: RunOptions) -> Result<Value> {
             None
         }
     };
+    let posterior_proposal = config
+        .frozen_posterior
+        .map(|settings| {
+            DockingProposal::new(
+                proposal
+                    .as_ref()
+                    .context("frozen posterior transport requires --method learned and --model")?
+                    .clone(),
+                DockingMethod::PosteriorInvolution,
+                settings.correlation,
+                [0.; 3],
+            )
+        })
+        .transpose()?;
     let atlas_engine = config
         .atlas_transport
         .as_ref()
@@ -898,10 +986,11 @@ pub fn run(options: RunOptions) -> Result<Value> {
     );
     save(&options.out.join("config.json"), &effective)?;
     let executable_sha = hash_file(&std::env::current_exe()?)?;
-    save(
-        &options.out.join("manifest.json"),
-        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask,"scope":"Frozen atlas/contact-memory modes or normalized current-geometry conditional full-GMM closure; explicit auxiliary state and corrections; no unrecorded training history; algorithmic MC time, not physical kinetics"}),
-    )?;
+    let mut manifest = json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask,"scope":"Frozen atlas/contact-memory modes or normalized current-geometry conditional full-GMM closure; explicit auxiliary state and corrections; no unrecorded training history; algorithmic MC time, not physical kinetics"});
+    if let Some(settings) = config.frozen_posterior {
+        manifest["frozen_posterior"] = json!(settings);
+    }
+    save(&options.out.join("manifest.json"), &manifest)?;
     let mut trajectory = BufWriter::new(File::create(options.out.join("trajectory.jsonl"))?);
     let mut moves = if options.record_moves {
         Some(BufWriter::new(File::create(
@@ -1041,6 +1130,14 @@ pub fn run(options: RunOptions) -> Result<Value> {
         let mut choice = stream(config.seed, sweep, "choice");
         let mut local = stream(config.seed, sweep, "local");
         let mut global = stream(config.seed, sweep, "global");
+        // Independent streams leave all preexisting streams untouched when the
+        // option is absent (or its probability is zero).
+        let mut posterior_choice = config
+            .frozen_posterior
+            .map(|_| stream(config.seed, sweep, "posterior-choice"));
+        let mut posterior_rng = config
+            .frozen_posterior
+            .map(|_| stream(config.seed, sweep, "posterior-proposal"));
         let mut gate_rng = stream(config.seed, sweep, "gate");
         let mut accept = stream(config.seed, sweep, "accept");
         let mut order: Vec<_> = (0..poses.len()).collect();
@@ -1048,6 +1145,11 @@ pub fn run(options: RunOptions) -> Result<Value> {
         for (update, &i) in order.iter().enumerate() {
             let old = poses[i];
             let is_global = choice.random::<f64>() < config.global_probability;
+            let is_posterior = is_global
+                && config.frozen_posterior.is_some_and(|settings| {
+                    settings.probability > 0.
+                        && posterior_choice.as_mut().unwrap().random::<f64>() < settings.probability
+                });
             let stats = if is_global {
                 &mut counts.global
             } else {
@@ -1076,6 +1178,21 @@ pub fn run(options: RunOptions) -> Result<Value> {
                         config.local_small_angle_std_degrees.to_radians() / 2.,
                     )
                 })
+            } else if is_posterior {
+                let (candidate, info) = posterior_for_body(
+                    posterior_proposal.as_ref().unwrap(),
+                    posterior_rng.as_mut().unwrap(),
+                    &poses,
+                    i,
+                )?;
+                if candidate.is_some() {
+                    correction = info["log_reverse_forward"]
+                        .as_f64()
+                        .context("posterior proposal correction missing")?;
+                }
+                proposal_info = info;
+                proposal_info["correlation"] = json!(config.frozen_posterior.unwrap().correlation);
+                candidate
             } else if let Some(engine) = &conditional_engine {
                 let forward = engine.model(
                     conditional_fit.as_ref().unwrap(),
@@ -1174,6 +1291,13 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 }
                 Some(pose)
             };
+            if config.frozen_posterior.is_some() && !is_posterior {
+                proposal_info["kernel"] = json!(if is_global {
+                    "full-mixture-capture"
+                } else {
+                    "local"
+                });
+            }
             proposal_cpu += cpu_seconds() - before;
             let mut valid = false;
             let mut accepted = false;
@@ -1511,7 +1635,95 @@ pub fn run(options: RunOptions) -> Result<Value> {
             )?;
         }
     }
-    let summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu,"contact_memory_cpu_seconds":memory_cpu,"contact_memory_gate_raw_points":memory_gate_points,"contact_memory_initialization_cpu_seconds":memory_initialization_cpu,"conditional_fit_cpu_seconds":conditional_fit_cpu,"conditional_fit_calls":conditional_fit_calls,"conditional_initialization_cpu_seconds":conditional_initialization_cpu,"atlas_fit_cpu_seconds":atlas_fit_cpu,"atlas_fit_calls":atlas_fit_calls,"atlas_initialization_cpu_seconds":atlas_initialization_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask});
+    let mut summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu,"contact_memory_cpu_seconds":memory_cpu,"contact_memory_gate_raw_points":memory_gate_points,"contact_memory_initialization_cpu_seconds":memory_initialization_cpu,"conditional_fit_cpu_seconds":conditional_fit_cpu,"conditional_fit_calls":conditional_fit_calls,"conditional_initialization_cpu_seconds":conditional_initialization_cpu,"atlas_fit_cpu_seconds":atlas_fit_cpu,"atlas_fit_calls":atlas_fit_calls,"atlas_initialization_cpu_seconds":atlas_initialization_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask});
+    if let Some(settings) = config.frozen_posterior {
+        summary["frozen_posterior"] = json!(settings);
+    }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
+}
+
+#[cfg(test)]
+mod frozen_posterior_tests {
+    use super::*;
+
+    fn config() -> Value {
+        json!({
+            "shape":"unused.json", "box_lengths":[12.,12.,12.],
+            "boundary":{"kind":"spherical","radius":6.}, "seed":19,
+            "depletant_radius":0.5, "reservoir_density":0.1,
+            "initial_poses":[
+                {"position":[-2.,0.,0.],"orientation":[1.,0.,0.,0.]},
+                {"position":[2.,0.,0.],"orientation":[1.,0.,0.,0.]}
+            ]
+        })
+    }
+
+    #[test]
+    fn frozen_posterior_config_requires_a_capture_branch_and_immutable_open_charts() -> Result<()> {
+        for probability in [-0.1, 1., 1.1, f64::INFINITY, f64::NAN] {
+            assert!(
+                FrozenPosteriorConfig {
+                    probability,
+                    correlation: 0.9
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        for correlation in [-1.1, 1.1, f64::INFINITY, f64::NAN] {
+            assert!(
+                FrozenPosteriorConfig {
+                    probability: 0.5,
+                    correlation
+                }
+                .validate()
+                .is_err()
+            );
+        }
+        for probability in [0., 0.5, 0.999] {
+            for correlation in [-1., 0., 0.9, 1.] {
+                FrozenPosteriorConfig {
+                    probability,
+                    correlation,
+                }
+                .validate()?;
+            }
+        }
+        let absent: Config = serde_json::from_value(config())?;
+        absent.validate()?;
+        assert!(
+            serde_json::to_value(&absent)?
+                .get("frozen_posterior")
+                .is_none()
+        );
+        let mut enabled = config();
+        enabled["frozen_posterior"] = json!({"probability":0.5,"correlation":0.9});
+        serde_json::from_value::<Config>(enabled.clone())?.validate()?;
+        let mut periodic = enabled.clone();
+        periodic["boundary"] = json!({"kind":"periodic"});
+        assert!(
+            serde_json::from_value::<Config>(periodic)?
+                .validate()
+                .is_err()
+        );
+        for mode in [
+            "auxiliary_transport",
+            "reversible_jump",
+            "contact_memory",
+            "conditional_closure",
+            "atlas_transport",
+            "atlas_mask",
+        ] {
+            let mut changed = enabled.clone();
+            changed[mode] = json!({});
+            assert!(
+                serde_json::from_value::<Config>(changed)?
+                    .validate()
+                    .is_err(),
+                "accepted {mode}"
+            );
+        }
+        Ok(())
+    }
 }

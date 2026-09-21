@@ -109,6 +109,10 @@ A [local shoulder calibration](docs/inner-shoulder-local-reference.md)
 measures the neighborhood responsible for the largest direct-reference
 outlier under a fresh uniform law. It resolves that event while retaining
 the dominant, less well measured contribution outside the checked region.
+A [three-neighborhood reference](docs/shoulder-guide-peak-references.md)
+also measures the guided maxima with exact overlap exclusions. Its finite
+union agrees with the guided estimates at about 3% observed reference
+uncertainty; a substantial outside contribution still needs a fresh control.
 The [fixed-allocation MIS control](docs/deterministic-mixture-mis.md) combines
 fresh guide and geometric draws with one full proposal denominator. It retains
 the component estimates and uses stratified uncertainty and paired comparisons;

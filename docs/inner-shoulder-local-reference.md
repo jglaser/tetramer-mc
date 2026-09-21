@@ -165,3 +165,9 @@ The assessment and executed source archive are in
 SHA-256 `a5b341daa73b8eabd2a9f9752c52055aeedfd0b96d26be5210699ba86999fb65`.
 The figure and its archived data are in
 `runs/ab-inner-shoulder-peak-reference-figure-20260921`.
+
+The subsequent [guided-peak controls](shoulder-guide-peak-references.md)
+measure both remaining recorded maxima with the same geometric construction.
+They form a disjoint three-neighborhood union using explicit exclusions,
+while preserving a separate outside-union estimate and the unchanged full
+shoulder target.

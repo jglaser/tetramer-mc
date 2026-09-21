@@ -18,7 +18,7 @@ The four unchanged windows partition all captured poses:
 | Region | Original q | Current log Q estimates | Remaining qualification |
 | --- | --- | --- | --- |
 | Native | 0≤q≤1 | 35.77224, 35.83594 | Native outer-chart tail remains incompletely referenced. |
-| Shoulder | 1<q<2 | 25.00691, 25.23622 | Direct-reference extreme is locally calibrated; most guided weight lies outside that checked region. |
+| Shoulder | 1<q<2 | 25.00691, 25.23622 | Three inner neighborhoods calibrated; 26–30% of historical guided inner weight lies outside their union. |
 | Intermediate | 2≤q<5 | 16.69976, 16.77534 | Larger frozen-model repeats agree; positive remainder is less precise. |
 | Far | 5≤q<37 | 17.68457, 17.67871 | Repeat rises from pilot; matching totals hide differing regional contributions. |
 
@@ -101,6 +101,16 @@ radius-0.25 neighborhood. Independent uniform proposals reproduce the
 small-ball result. Most guided inner-shoulder weight remains outside
 radius 0.5, so no new full-shoulder estimate has been substituted in this
 ledger.
+
+The [three-neighborhood control](shoulder-guide-peak-references.md) now
+adds independent references at both guided maxima. Its priority-disjoint
+finite union has log Q=24.42474 with 2.92% row and 3.31% population error,
+agreeing in scale with both guided estimates of that same union. Historical
+guided data place 26–30% of inner-shoulder weight outside all three balls;
+their outside estimates are log Q=23.33294 and 23.79311, with 8.58% and
+22.97% row errors. The fresh finite-union means and historical remainder
+are kept separate. A new complete-support shoulder measurement remains
+necessary; the whole-window values in the ledger are unchanged.
 
 The [native uniform references](native-ab-uniform-tail-reference.md)
 reproduce the wider guide in the 8–12 shell. Their 5–8 confirmation agrees

@@ -85,6 +85,17 @@ The [domain coverage review](mobile-domain-coverage.md)
 also identifies wall-valid native sites outside D170; full-vessel weights
 remain unresolved.
 
+The [full-vessel comparison](mobile-wall-contact-results.md) has now completed
+eight populations (131,072 poses) and two independent audits. A broader frozen
+guide recovers the original R4 and alternative R32 reference regions, although
+its R5 estimate remains low. Dominant observed weight still belongs to the
+registered native triangle. The guide improves native ESS to 12.5, but its
+unregistered-contact remainder has ESS approximately one. The conditional
+point estimates favor native contacts strongly; their missing-tail coverage
+is insufficient to call the global free-energy comparison converged. The next
+growth control should add a fourth mobile tetramer beyond the known triangle,
+alongside continued independent checks of the competing-contact remainder.
+
 The [regional weight ledger](ab-regional-weight-status.md) now combines
 independent native, shoulder, intermediate and far controls for the original
 AB capture target. Current point estimates favor native over the combined

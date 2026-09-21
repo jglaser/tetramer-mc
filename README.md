@@ -162,6 +162,13 @@ weights remain dominated by a few draws. A
 weight beyond the old competitor region and explains the coverage problem:
 the completed flat campaign expects only 0.00012 hard-valid visits there.
 Full support and observed importance errors alone do not resolve narrow contacts.
+A [calibrated complete-far atlas](docs/far-contact-atlas.md) retains all
+recorded contact geometries and the complete cover. Two independent proposal
+widths agree in its 524,288-draw pilot. The larger unchanged-model repeat
+finds more rare weight: matching full totals conceal different regional
+contributions. The [AB regional ledger](docs/ab-regional-weight-status.md)
+checks common runtime definitions while retaining native, shoulder and
+far-tail convergence qualifications.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

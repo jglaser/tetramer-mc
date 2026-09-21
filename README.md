@@ -155,6 +155,13 @@ Its completed pilot recovers the shoulder and agrees with both independent
 regional references, while retaining about 30% population uncertainty in the
 total. This reconciles that compact A-only comparison, not the full far-contact
 region or an assembly trajectory.
+The [complete far-region control](docs/far-capture-reference.md) proves finite
+capture support and passes analytic sphere tests, while its protein contact
+weights remain dominated by a few draws. A
+[fresh far-contact neighborhood](docs/far-contact-local-reference.md) measures
+weight beyond the old competitor region and explains the coverage problem:
+the completed flat campaign expects only 0.00012 hard-valid visits there.
+Full support and observed importance errors alone do not resolve narrow contacts.
 The [Lean proofs](formal/README.md) verify measurable-state accept/reject balance,
 Metropolis–Hastings, reference-preserving involutions, and conditional auxiliary
 marginals and importance identities. They are mathematical proofs, not verification of this Rust program

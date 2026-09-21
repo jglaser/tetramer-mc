@@ -65,19 +65,29 @@ These are finite-sample decompositions, not asymptotic variance certificates.
 Increasing cloud intensity alone would not resolve the coverage arm's pose
 sampling problem.
 
+The subsequent [independent threshold reference](mobile-threshold-reference-results.md)
+finds that the largest no-entry rows lie just beyond the native registration
+cutoff in the same motif7/4 environment. On an identical finite R4, its fresh
+no-entry estimate is 2.67 log units above the coverage arm, while still having
+ESS 2.7. The global comparison therefore remains unresolved; the new result
+does not justify reclassifying those rows or discarding the discrepancy.
+
 ![Separate full-wall estimates and population variation](../runs/mobile-wall-contact-comparison-20260921/wall-contact-comparison.png)
 
-The next mobile test should measure growth beyond the known three-tetramer
-triangle and retain a preassembled control. A converged conditional native
+The subsequent mobile test measures growth beyond the known three-tetramer
+triangle and retains a preassembled control. A converged conditional native
 pocket does not include the free-energy cost of forming its scaffold.
 The [four-body geometric design](../runs/mobile-four-body-design-20260921/recommendation.md)
 finds hard-valid motif3 and motif8 interfaces on the exposed third tetramer,
 each with six supported native monomer contacts. The recommended matched
 starts are the same triangle plus a free fourth tetramer or one attached at
-motif8, with all four bodies mobile. These are geometric witnesses and a
-native-informed positive-control design, not a measured association free
-energy or a completed growth simulation. The physical kernels already
-support four bodies; the current three-body observer needs generalization.
+motif8, with all four bodies mobile. The
+[completed eight-run control](mobile-four-body-growth-results.md) now produces
+catalogue-consistent four-body attachment in three of four free starts, while
+all four preattached controls stay connected and change docking motif. All
+traces pass the generalized four-body observer. This is a native-informed
+accessibility result, not a measured association free energy or converged
+assembly test.
 
 The physical wall has radius 223.32617672378387 Å, centered at the origin.
 Every atomic sphere of the mobile tetramer must fit inside it. The ideal

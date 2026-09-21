@@ -40,8 +40,8 @@ branch attempts and JSON/GSD trajectory readback. Their input hashes were
 rechecked against those completed tests on 2026-09-21. The
 [current evidence summary](../docs/contact-evidence-roadmap.md) distinguishes
 native accessibility from sustained assembly and equilibrium contact weights.
-The newer full-vessel coverage guide is a separate importance-integration
-control; these examples retain the latest validated assembly model above.
+The broader coverage atlas below is optional; these configurations retain
+the 150-component atlas as their documented default.
 
 From the repository root, with Rust and the locked dependencies available
 locally:
@@ -57,6 +57,46 @@ cargo run --offline --locked --release --bin tetramer-mc -- run \
   --model examples/frozen-reciprocal-mixture.json \
   --out runs/reciprocal-seeded-10000 --sweeps 10000 --sample-every 10
 ```
+
+### Optional broader coverage atlas
+
+`frozen-coverage-reciprocal-mixture.json` is an unchanged portable copy of the
+frozen coverage atlas, with SHA256
+`feb4011c622c3104bbe909a29685bd7f077e28f0c847f630c69d8fa87939c20e`.
+Its original 150 Gaussian components retain both reciprocal branches; 28
+additional ordinary charts give 178 base components and 328 virtual branches.
+The additional charts cover known native and competing contact geometries,
+using existing covariances without a new fit. Their mixture weights specify
+the proposal, not equilibrium contact probabilities. The separate 10%
+uniform proposal floor remains unchanged.
+
+This atlas is **native-informed**, including its original components and
+explicit native-site coverage. In the short four-body attachment control,
+the broader atlas reached native-connected attachment in 2/2 free-start runs,
+versus 1/2 with the original atlas. This is evidence of accessibility, not an
+established speedup, equilibrium preference, or template-free assembly. The
+twelve-body examples below are different initial conditions from that control.
+
+Select it with `--model` in either existing configuration:
+
+```bash
+cargo run --offline --locked --release --bin tetramer-mc -- run \
+  --config examples/spherical-reciprocal-free.json \
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --out runs/coverage-free-10000 --sweeps 10000 --sample-every 10
+
+cargo run --offline --locked --release --bin tetramer-mc -- run \
+  --config examples/spherical-reciprocal-seeded.json \
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --out runs/coverage-seeded-10000 --sweeps 10000 --sample-every 10
+```
+
+`--model` determines the loaded proposal. The configuration's descriptive
+metadata still names the default atlas; the output manifest records the
+actual model hash. Keep that same model when resuming a run.
+Both configurations passed two-sweep checks with this atlas: model hashes,
+checkpoint/final-frame agreement, and final atomic overlap and wall checks.
+These checks used JSON trajectories with `--no-gsd`.
 
 The commands retain `trajectory.gsd`, `trajectory.jsonl`, `moves.jsonl`,
 checkpoints, and input/source provenance. Use a fresh output directory for

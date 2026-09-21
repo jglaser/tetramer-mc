@@ -92,9 +92,33 @@ its R5 estimate remains low. Dominant observed weight still belongs to the
 registered native triangle. The guide improves native ESS to 12.5, but its
 unregistered-contact remainder has ESS approximately one. The conditional
 point estimates favor native contacts strongly; their missing-tail coverage
-is insufficient to call the global free-energy comparison converged. The next
-growth control should add a fourth mobile tetramer beyond the known triangle,
-alongside continued independent checks of the competing-contact remainder.
+is insufficient to call the global free-energy comparison converged.
+
+The [four-body growth control](mobile-four-body-growth-results.md) is now
+complete: three of four free starts attach a fourth tetramer in a
+catalogue-consistent native network, and all four preattached controls remain
+connected. All eight retain the original triangle. The broader atlas produces
+both of its free-start attachments, versus one of two with the original atlas;
+two seeds cannot establish a speedup. The preattached fourth bodies change
+from six-bond motif 8 to two-bond motif 7, demonstrating access to other native
+interfaces without proving an equilibrium preference. There are no complete
+attachment–detachment round trips. The next assembly comparison should retain
+this native-informed positive control and test geometry-only discovery, while
+the independent contact-weight work resolves the remaining global uncertainty.
+The [geometry-only control design](geometry-only-growth-control.md) identifies
+an existing 96-chart shape-derived atlas, with verified native-blind centers
+and covariances, for an exact reciprocal control. That campaign is not yet
+implemented or launched.
+
+The [fresh threshold-shoulder reference](mobile-threshold-reference-results.md)
+shows that the largest no-entry contacts are near the existing native-entry
+boundary. Its fixed finite R4 has a well-resolved hard-only volume, but the
+depletion-weighted no-entry estimate still has ESS 2.7 and 61% observed relative
+error. It is 2.67 log units above the broader global proposal's estimate on
+the identical R4. Native entry dominates the observed weight, yet these
+disagreements and unresolved tails still prevent a converged global
+free-energy claim. Pose coverage, rather than Poisson noise alone, is the
+main observed limitation.
 
 The [regional weight ledger](ab-regional-weight-status.md) now combines
 independent native, shoulder, intermediate and far controls for the original

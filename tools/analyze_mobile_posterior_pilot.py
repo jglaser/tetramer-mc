@@ -31,6 +31,21 @@ from mobile_posterior_metrics import summarize_graph_history
 RECOVERY_MARKER = 'reference-recovery.json'
 RECOVERY_SCHEMA = 'mobile-posterior-reference-recovery-v1'
 RECOVERY_COORDINATES = 'results/native-geometry-repair/rebuilt-hydrogens/heavy-coordinates.json'
+FOUR_BODY_SCHEMA = 'mobile-four-body-growth-campaign-v1'
+
+
+def campaign_body_count(manifest):
+    """An explicit new experiment contract, never an inferred relaxation of N=3."""
+    if manifest['schema'] == FOUR_BODY_SCHEMA:
+        assert manifest['body_count'] == 4 and type(manifest['body_count']) is int
+        assert manifest['tracked_body_index'] == 3 and type(manifest['tracked_body_index']) is int
+        assert manifest['scaffold_body_indices'] == [0, 1, 2]
+        assert all(type(i) is int for i in manifest['scaffold_body_indices'])
+        return 4
+    assert manifest['schema'] in ('mobile-frozen-posterior-pilot-campaign-v1',
+        'mobile-competing-atlas-benchmark-v1', 'mobile-reciprocal-atlas-benchmark-v1')
+    assert manifest.get('body_count', 3) == 3
+    return 3
 
 
 def archived_residue_labels(reference, shape_path):
@@ -115,6 +130,10 @@ def validate_campaign_jobs(manifest, status):
     elif schema == 'mobile-reciprocal-atlas-benchmark-v1':
         assert manifest['atlas_variant'] in ('legacy', 'reciprocal')
         expected = {('competing', mode, replicate) for mode in ('c0', 'c09') for replicate in (0, 1)}
+    elif schema == FOUR_BODY_SCHEMA:
+        assert manifest['atlas_variant'] in ('original', 'coverage')
+        campaign_body_count(manifest)
+        expected = {(start, 'c09', replicate) for start in ('triangle_free', 'retained_motif8') for replicate in (0, 1)}
     else:
         raise AssertionError('Unrecognized mobile campaign schema')
     jobs = manifest['jobs']
@@ -124,6 +143,123 @@ def validate_campaign_jobs(manifest, status):
     assert status['complete'] and not status['running']
     assert all(j['status'] == 'complete' and j['exit_code'] == 0 for j in status['jobs'])
     return jobs
+
+
+def affected_body_pairs(body_count, indices, common_isometry=False):
+    """One-body changes touch all incident pairs; common rigid moves only cross pairs."""
+    indices = list(indices)
+    assert type(body_count) is int and body_count >= 2
+    assert all(type(i) is int and 0 <= i < body_count for i in indices) and len(set(indices)) == len(indices)
+    changed = set(indices)
+    pairs = list(itertools.combinations(range(body_count), 2))
+    return ([pair for pair in pairs if (pair[0] in changed) != (pair[1] in changed)] if common_isometry else
+            [pair for pair in pairs if any(i in changed for i in pair)])
+
+
+def validate_move_indices(move, body_count, selected):
+    assert move['kind'] in ('local', 'global')
+    i = move['moving_index']
+    assert type(i) is int and 0 <= i < body_count and i not in selected
+    assert move['update_in_sweep'] == len(selected)
+    j = None
+    if move['kind'] == 'global' and move['proposed_pose'] is not None:
+        j = move['proposal']['anchor_index']
+        assert type(j) is int and 0 <= j < body_count and i != j
+    return i, j
+
+
+def supported_registered_bonds(classification, keys, motifs, entry):
+    """Deduplicate actual prescribed monomer/member/class support across motifs.
+
+    Entry uses strict entry monomer bonds; active hysteretic body motifs use
+    current relaxed stay bonds. This is support, not a separate bond-memory law.
+    The archived motif record's scalar support count uses stay even for an
+    entry body, so it is deliberately not reused as a strict entry count.
+    """
+    required = {}
+    for i, j, motif in keys:
+        assert motif in motifs
+        required.setdefault((i, j), set()).update((c['member_i'], c['member_j'], c['directed_class'])
+                                                 for c in motifs[motif]['member_contacts'])
+    bonds = set()
+    for bond in classification['native_entry_monomer_edges' if entry else 'native_stay_monomer_edges']:
+        pair = tuple(bond['bodies']);members = tuple(bond['members'])
+        if (*members, bond['class_label']) in required.get(pair, set()):
+            bonds.add((*pair, *members, bond['class_label']))
+    return sorted(bonds)
+
+
+def four_body_graph_flags(edges, registered_keys, entry_keys, initial_scaffold_keys):
+    pairs = {tuple(p) for p in edges}
+    assert pairs <= set(itertools.combinations(range(4), 2))
+    scaffold = {(0, 1), (0, 2), (1, 2)}
+    reached = {0}
+    while True:
+        new = reached | {v for p in pairs if any(i in reached for i in p) for v in p}
+        if new == reached:break
+        reached = new
+    active = {tuple(k) for k in registered_keys};entry = {tuple(k) for k in entry_keys}
+    return dict(tracked_partners=sorted(i if j == 3 else j for i, j in pairs if 3 in (i, j)),
+        tracked_attached=any(3 in p for p in pairs), scaffold_triangle=scaffold <= pairs,
+        all_four_connected=len(reached) == 4, complete_K4=len(pairs) == 6,
+        initial_scaffold_registry_retained=set(initial_scaffold_keys) <= active,
+        initial_scaffold_registry_instantaneous_entry=set(initial_scaffold_keys) <= entry)
+
+
+def summarize_four_body_growth(history, frames, graph_metrics, burn, total_cpu, post_cpu):
+    """Descriptive all-update four-body outcomes, preserving initial censoring."""
+    initial = {tuple(k) for k in history[0]['registered_keys'] if k[0] < 3 and k[1] < 3}
+    assert {k[:2] for k in initial} == {(0, 1), (0, 2), (1, 2)}
+    observations = []
+    for row in history:
+        values = dict(serial=row['serial'], sweep=row['sweep'], source=row['source'],
+            moving_index=row.get('moving_index'), anchor_index=row.get('anchor_index'),
+            tracked_registered_keys=[k for k in row['registered_keys'] if 3 in k[:2]],
+            tracked_entry_keys=[k for k in row['instantaneous_entry_keys'] if 3 in k[:2]])
+        for name, edges in (('native', row['native_edges']), ('nonspecific', row['nonspecific_edges']),
+                            ('instantaneous_entry', [k[:2] for k in row['instantaneous_entry_keys']])):
+            values[name] = four_body_graph_flags(edges, row['registered_keys'], row['instantaneous_entry_keys'], initial)
+        observations.append(values)
+    def event(row):
+        return {k:row[k] for k in ('serial', 'sweep', 'source', 'moving_index', 'anchor_index')}
+    def first(kind, field):
+        row = next((r for r in observations if r[kind][field]), None)
+        return None if row is None else dict(event(row), initial_state=row['serial'] == -1)
+    outcomes = {}
+    for kind in ('native', 'nonspecific', 'instantaneous_entry'):
+        fields = ('tracked_attached', 'scaffold_triangle', 'all_four_connected', 'complete_K4',
+                  'initial_scaffold_registry_retained', 'initial_scaffold_registry_instantaneous_entry')
+        transitions = []
+        for previous, row in zip(observations, observations[1:]):
+            for field in fields:
+                if previous[kind][field] != row[kind][field]:
+                    transitions.append(dict(event(row), field=field, value=row[kind][field]))
+        endpoints = {r['sweep']:r for r in observations}
+        kept = [r for sweep,r in sorted(endpoints.items()) if sweep > burn]
+        outcomes[kind] = dict(first_observed={field:first(kind, field) for field in fields},
+            transitions=transitions,postburn_endpoint_fractions={field:sum(r[kind][field] for r in kept)/len(kept) for field in fields},
+            scaffold_first_loss=next((t for t in transitions if t['field']=='scaffold_triangle' and not t['value']),None))
+        if kind in ('native', 'nonspecific'):
+            g = graph_metrics['graphs'][kind]
+            tracked_events = [dict(e, formed_edges=[p for p in e['formed_edges'] if 3 in p],
+                detached_edges=[p for p in e['detached_edges'] if 3 in p]) for e in g['events']
+                if any(3 in p for p in e['formed_edges']+e['detached_edges'])]
+            rates = {}
+            for label, events, cpu, attempts in (('full',tracked_events,total_cpu,len(history)-1),
+                ('postburn',[e for e in tracked_events if e['sweep']>burn],post_cpu,sum(r['sweep']>burn for r in history[1:]))):
+                counts={key:sum(len(e[key])for e in events)for key in ('formed_edges','detached_edges')}
+                rates[label]=dict(counts=counts,attempted_updates=attempts,sampling_CPU_seconds=cpu,
+                    per_attempted_update={k:v/attempts for k,v in counts.items()},per_sampling_CPU_second={k:v/cpu for k,v in counts.items()})
+            outcomes[kind].update(tracked_events=tracked_events,tracked_event_rates=rates,
+                tracked_body=copy.deepcopy(g['bodies'][3]),
+                tracked_partner_exchanges=[e for e in g['partner_exchanges']if e['body']==3],
+                tracked_same_attempt_replacements=[e for e in g['same_attempt_partner_replacements']if e['body']==3],
+                tracked_pending_partner_losses=[e for e in g['pending_partner_losses_at_end']if e['body']==3])
+    return dict(schema='mobile-four-body-growth-observables-v1',body_count=4,tracked_body_index=3,
+        scaffold_body_indices=[0,1,2],pair_labels=list(itertools.combinations(range(4),2)),
+        initial_scaffold_keys=sorted(initial),observations=observations,outcomes=outcomes,
+        supported_monomer_bonds_by_saved_sweep=[dict(sweep=r['sweep'],**r['registered_monomer_support'])for r in frames],
+        scope='All attempted updates including rejections retained; initial native attachment is left-censored occupancy, not a formation. Native connected4, ABC triangle, and six-edge K4 are separate geometric descriptors. Entry is stateless; retained registry is hysteretic. Monomer support counts actual prescribed member/class bonds, not pair count or energy. No equilibrium, template-free assembly, or physical rate inference.')
 
 
 def update_registry(active, entry, stay, affected):
@@ -327,6 +463,7 @@ def one(task):
     campaign, output, reference = map(Path, (campaign, output, reference))
     started = time.monotonic()
     manifest = read(campaign/'manifest.json')
+    expected_bodies = campaign_body_count(manifest)
     reference = reference.resolve()
     reference_validation = validate_reference(campaign, manifest, reference)
     # Importing verified observers must not add bytecode files to either the
@@ -356,6 +493,12 @@ def one(task):
     assert all(cfg.get(name) is None for name in ('auxiliary_transport', 'reversible_jump', 'contact_memory', 'conditional_closure', 'atlas_transport', 'atlas_mask'))
     assert cfg['gca_probability'] == cfg['center_shift_probability'] == 1.
     assert cfg['depletant_radius'] == 1.5 and cfg['reservoir_density'] == .035 and cfg['poisson_lambda_ratio'] == 64.
+    if expected_bodies == 4:
+        assert cfg['boundary'] == dict(kind='spherical', radius=223.32617672378387)
+        assert cfg['local_translation_std_A'] == .2 and cfg['local_small_angle_std_degrees'] == 1.
+        assert cfg['global_probability'] == .5 and cfg['learned_uniform_weight'] == .1
+        assert cfg['frozen_posterior'] == dict(probability=.5, correlation=.9)
+        assert job['mode'] == 'c09' and job['start'] in ('triangle_free', 'retained_motif8')
     model, shape = read(directory/'provenance/frozen-relative-model.json'), read(directory/'provenance/shape.json')
     audit = ChartAudit(model)
     atoms = np.asarray([a['center'] for a in shape['atoms']])
@@ -370,13 +513,16 @@ def one(task):
     frames = [json.loads(line) for line in (directory/'trajectory.jsonl').open()]
     assert [f['sweep'] for f in frames] == list(range(manifest['sweeps']+1))
     state, n = copy.deepcopy(frames[0]['poses']), len(frames[0]['poses'])
-    assert n == 3
+    assert n == expected_bodies
     pairs = list(itertools.combinations(range(n), 2))
-    def classify(poses, subset=None):
+    motif_lookup = {m['id']:m for m in order.body_motifs}
+    def classify(poses, subset=None, details=False):
         result = order.classify({'poses': poses}, pair_filter=subset)
-        return ({(*r['bodies'], r['motif_id']) for r in result['registered_tetramer_motifs'] if r['entry']},
+        keys = ({(*r['bodies'], r['motif_id']) for r in result['registered_tetramer_motifs'] if r['entry']},
                 {(*r['bodies'], r['motif_id']) for r in result['registered_tetramer_motifs']})
+        return (*keys, result) if details else keys
     active, _ = classify(state)
+    instantaneous = set(active)
     initial_native = sorted(active)
     changes, rows, density_records, graph_history = [], [], [], []
     near = set()
@@ -388,8 +534,9 @@ def one(task):
         assert len(frame['poses']) == n
         for pose, expected in zip(state, frame['poses']):
             audit.compare_pose(pose, expected, 'frame_replay')
-        entry, stay = classify(state)
+        entry, stay, classification = classify(state, details=True)
         assert active == (active & stay) | entry
+        if n == 4:assert instantaneous == entry, 'Incremental instantaneous entry graph differs from frame classification'
         p, q = pose_arrays(frame)
         world = np.einsum('bij,aj->bai', rotations(q), atoms)+p[:, None, :]
         wall = float(np.min(radius-np.linalg.norm(world, axis=2)-radii[None, :]))
@@ -408,10 +555,26 @@ def one(task):
             native=graph_summary(n, native), nonspecific=graph_summary(n, near), registered_keys=sorted(active),
             native_instantaneous_entry=graph_summary(n, {key[:2] for key in entry}),
             minimum_atomic_wall_clearance_A=wall, minimum_interbody_gap_A=result['minimum_interbody_gap_A'], hard_valid=True))
+        if n == 4:
+            entry_bonds = supported_registered_bonds(classification, entry, motif_lookup, True)
+            stay_bonds = supported_registered_bonds(classification, active, motif_lookup, False)
+            rows[-1].update(instantaneous_entry_keys=sorted(entry),
+                registered_monomer_support=dict(entry_bonds=entry_bonds,retained_bonds=stay_bonds,
+                    entry_count=len(entry_bonds),retained_count=len(stay_bonds),
+                    tracked_entry_count=sum(3 in b[:2] for b in entry_bonds),
+                    tracked_retained_count=sum(3 in b[:2] for b in stay_bonds)))
         state = copy.deepcopy(frame['poses'])
     observe(frames[0])
     graph_history.append(dict(serial=-1, sweep=0, source='initial',
         native_edges=sorted({key[:2] for key in active}), nonspecific_edges=sorted(near)))
+    if n == 4:
+        graph_history[-1].update(registered_keys=sorted(active), instantaneous_entry_keys=sorted(instantaneous),
+            moving_index=None,anchor_index=None)
+        assert {(0,1),(0,2),(1,2)} <= {k[:2]for k in active}
+        if job['start'] == 'triangle_free':
+            assert not any(3 in p for p in near), 'Fourth body must initially be exclusion-free'
+        else:
+            assert (2,3,8) in active, 'Retained start must include the prescribed C-to-D motif8'
     for pose, expected in zip(state, cfg['initial_poses']):
         audit.compare_pose(pose, expected, 'initial')
     current, selected, collective = 0, set(), []
@@ -435,15 +598,12 @@ def one(task):
             counter = counters[source]
             counter['attempted'] += 1
             if kind in ('local', 'global'):
-                i = move['moving_index']
-                assert type(i) is int and 0 <= i < n and i not in selected and not collective
-                assert move['update_in_sweep'] == len(selected)
+                i, j = validate_move_indices(move, n, selected)
+                assert not collective
                 selected.add(i)
                 audit.compare_pose(state[i], move['old_pose'], 'old_pose')
                 candidate = move['proposed_pose']
                 if kind == 'global' and candidate is not None:
-                    j = info['anchor_index']
-                    assert type(j) is int and 0 <= j < n and i != j
                     if kernel == 'frozen-posterior':
                         assert info['moving_index'] == i
                         assert info['correlation'] == cfg['frozen_posterior']['correlation']
@@ -452,10 +612,10 @@ def one(task):
                 counter['accepted'] += int(move['accepted'])
                 correction = info.get('log_reverse_forward', 0.)
                 gate_checks += audit_single_body_gate(move, cfg, audit)
-                if move['hard_valid'] and kind == 'global':
+                if move['hard_valid'] and (kind == 'global' or n == 4):
                     temporary = list(state)
                     temporary[i] = candidate
-                    entry, _ = classify(temporary, [pair for pair in pairs if i in pair])
+                    entry, _, candidate_classification = classify(temporary, affected_body_pairs(n,[i]),details=True)
                     novel = entry-active
                     counter['new_native_candidate'] += int(bool(novel))
                     counter['accepted_new_native_candidate'] += int(bool(novel) and move['accepted'])
@@ -463,26 +623,38 @@ def one(task):
                         native_candidates.append(dict(serial=serial, sweep=sweep, source=source, moving=i,
                             accepted=move['accepted'], new_registered_keys=sorted(novel),
                             proposal_correction=correction, gate_log_weight=move['gate']['log_weight'], log_acceptance=move['log_acceptance']))
+                        if n == 4:
+                            support = supported_registered_bonds(candidate_classification, novel, motif_lookup, True)
+                            native_candidates[-1].update(anchor_index=j,tracked_body_in_new_edges=any(3 in k[:2]for k in novel),
+                                new_native_supported_monomer_bonds=support,
+                                proposed_new_supported_monomer_bond_count=len(support),
+                                proposal_trace=copy.deepcopy(info.get('trace')),
+                                proposal_source_component_index=info.get('source_component_index'),
+                                proposal_target_component_index=info.get('target_component_index'),
+                                proposal_source_inverted=info.get('source_inverted'),
+                                proposal_target_inverted=info.get('target_inverted'),
+                                capture_component_index=info.get('component_index'),capture_component_inverted=info.get('component_inverted'))
                 if move['accepted']:
                     assert move['hard_valid'] and candidate is not None
                     assert move['retained_pose'] == candidate
                     accepted[kind] += 1
                     state[i] = copy.deepcopy(candidate)
-                    affected = [pair for pair in pairs if i in pair]
+                    affected = affected_body_pairs(n,[i])
                 else:
                     audit.compare_pose(state[i], move['retained_pose'], 'self_loop')
             elif kind == 'gca':
                 assert selected == set(range(n)) and not collective and move['accepted']
                 collective.append(kind)
                 accepted[kind] += 1
-                flipped = set(move['result']['flipped_indices'])
+                indices = move['result']['flipped_indices']
+                affected = affected_body_pairs(n,indices,common_isometry=True)
+                flipped = set(indices)
                 axis = np.asarray(move['axis'])
                 axis /= np.linalg.norm(axis)
                 matrix = 2*np.outer(axis, axis)-np.eye(3)
                 for i in flipped:
                     p, r = audit.arrays(state[i])
                     state[i] = audit.pose(matrix@p, matrix@r)
-                affected = [pair for pair in pairs if (pair[0] in flipped) != (pair[1] in flipped)]
                 counter['transformed_bodies'] += len(flipped)
                 counter['partial_components'] += int(0 < len(flipped) < n)
             elif kind == 'center_shift':
@@ -496,6 +668,8 @@ def one(task):
             if affected:
                 entry, stay = classify(state, affected)
                 active = update_registry(active, entry, stay, affected)
+                if n == 4:
+                    instantaneous = {key for key in instantaneous if key[:2] not in affected} | entry
                 near = update_nonspecific_graph(state, affected, near, atomic, cfg['depletant_radius'])
             assert {key[:2] for key in active} <= near
             if previous != active:
@@ -504,7 +678,11 @@ def one(task):
             graph_history.append(dict(serial=serial, sweep=sweep, source=source, kind=kind,
                 accepted=move['accepted'], native_edges=sorted({key[:2] for key in active}),
                 nonspecific_edges=sorted(near)))
+            if n == 4:
+                graph_history[-1].update(registered_keys=sorted(active),instantaneous_entry_keys=sorted(instantaneous),
+                    moving_index=move.get('moving_index'),anchor_index=info.get('anchor_index'),affected_pairs=affected)
     assert current == manifest['sweeps'] and selected == set(range(n)) and collective == ['gca', 'center_shift']
+    assert records == (n+2)*manifest['sweeps']
     observe(frames[current])
     checkpoint = read(directory/'checkpoint.json')
     assert len(checkpoint['poses']) == n
@@ -543,6 +721,9 @@ def one(task):
         observer_wall_seconds=time.monotonic()-started,
         source_sha256={name: sha(directory/name) for name in ('manifest.json', 'config.json', 'summary.json', 'checkpoint.json', 'moves.jsonl', 'trajectory.jsonl')},
         scope='Every saved sweep, attempted-update graph state and repeat retained; all-mobile native-informed preparation pilot. Native graph occupancy/ESS use path-dependent entry/retention hysteresis, not instantaneous q<=1 thermodynamic regions or AB shoulder weights; instantaneous entry graphs are separately recorded at saved frames. No equilibrium, template-free assembly, speedup or physical kinetics claim. Gate arithmetic is checked; random bath realizations and unrecorded accept uniforms are not independently regenerated.')
+    if n == 4:
+        result.update(body_count=4,atlas_variant=manifest['atlas_variant'],
+            four_body_growth=summarize_four_body_growth(graph_history,rows,graph_metrics,burn,summary['sampler_cpu_seconds'],cpu))
     target = output/'runs'/job['id']
     target.mkdir(parents=True)
     write(target/'analysis.json', result)

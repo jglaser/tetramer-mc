@@ -696,6 +696,24 @@ pub fn run(options: RunOptions) -> Result<Value> {
             None
         }
     };
+    if proposal
+        .as_ref()
+        .is_some_and(|model| model.has_reciprocal_components())
+    {
+        ensure!(
+            wall.is_some(),
+            "Reciprocal contact proposals require spherical boundaries"
+        );
+        ensure!(
+            config.auxiliary_transport.is_none()
+                && config.reversible_jump.is_none()
+                && config.contact_memory.is_none()
+                && config.conditional_closure.is_none()
+                && config.atlas_transport.is_none()
+                && config.atlas_mask.is_none(),
+            "Reciprocal contact proposals currently require immutable capture/posterior charts"
+        );
+    }
     let posterior_proposal = config
         .frozen_posterior
         .map(|settings| {

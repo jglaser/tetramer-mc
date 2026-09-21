@@ -22,9 +22,198 @@ use std::{
     f64::consts::PI,
     fs::{self, File},
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Instant,
 };
+
+/// A frozen guide changes only the latent proposal, never the physical region.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportanceFile {
+    schema: String,
+    region_sha256: String,
+    defensive_uniform_shell_probability: f64,
+    gaussian_components: Vec<ImportanceComponentFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ImportanceComponentFile {
+    weight: f64,
+    mean: [f64; 6],
+    covariance: [[f64; 6]; 6],
+}
+
+struct ImportanceComponent {
+    weight: f64,
+    mean: [f64; 6],
+    lower: [[f64; 6]; 6],
+    log_normalizer: f64,
+}
+
+struct ImportanceGuide {
+    alpha: f64,
+    components: Vec<ImportanceComponent>,
+}
+
+impl ImportanceGuide {
+    fn from_bytes(raw: &[u8], region_hash: &str) -> Result<Self> {
+        let parsed: ImportanceFile = serde_json::from_slice(raw)?;
+        ensure!(
+            parsed.schema == "defensive-latent-shell-guide-v1",
+            "Unknown latent guide schema"
+        );
+        ensure!(
+            parsed.region_sha256 == region_hash,
+            "Latent guide targets another frozen region"
+        );
+        let alpha = parsed.defensive_uniform_shell_probability;
+        ensure!(
+            alpha.is_finite() && alpha > 0. && alpha <= 1.,
+            "Uniform defensive mass must lie in (0,1]"
+        );
+        ensure!(
+            alpha == 1. || !parsed.gaussian_components.is_empty(),
+            "Missing latent Gaussian components"
+        );
+        let total: f64 = parsed.gaussian_components.iter().map(|c| c.weight).sum();
+        ensure!(
+            parsed.gaussian_components.is_empty() || (total.is_finite() && total > 0.),
+            "Invalid Gaussian mixture mass"
+        );
+        let mut components = Vec::new();
+        for c in parsed.gaussian_components {
+            ensure!(
+                c.weight.is_finite() && c.weight > 0. && c.mean.iter().all(|x| x.is_finite()),
+                "Invalid latent Gaussian mass or mean"
+            );
+            let mut lower = [[0.; 6]; 6];
+            for i in 0..6 {
+                for j in 0..6 {
+                    let a = c.covariance[i][j];
+                    let b = c.covariance[j][i];
+                    ensure!(
+                        a.is_finite()
+                            && b.is_finite()
+                            && (a - b).abs() <= 1e-12 * (1. + a.abs().max(b.abs())),
+                        "Nonfinite or asymmetric latent covariance"
+                    );
+                }
+                for j in 0..=i {
+                    let value = 0.5 * (c.covariance[i][j] + c.covariance[j][i])
+                        - (0..j).map(|k| lower[i][k] * lower[j][k]).sum::<f64>();
+                    lower[i][j] = if i == j {
+                        ensure!(
+                            value.is_finite() && value > 0.,
+                            "Latent covariance is not positive definite"
+                        );
+                        value.sqrt()
+                    } else {
+                        value / lower[j][j]
+                    };
+                }
+            }
+            let log_normalizer =
+                -3. * (2. * PI).ln() - (0..6).map(|i| lower[i][i].ln()).sum::<f64>();
+            ensure!(
+                log_normalizer.is_finite(),
+                "Unrepresentable Gaussian density"
+            );
+            ensure!(
+                c.weight / total > 0.,
+                "Unrepresentable normalized mixture mass"
+            );
+            components.push(ImportanceComponent {
+                weight: c.weight / total,
+                mean: c.mean,
+                lower,
+                log_normalizer,
+            });
+        }
+        Ok(Self { alpha, components })
+    }
+
+    fn log_density(&self, u: [f64; 6], in_shell: bool, log_volume: f64) -> f64 {
+        let mut result = if in_shell {
+            self.alpha.ln() - log_volume
+        } else {
+            f64::NEG_INFINITY
+        };
+        if self.alpha < 1. {
+            for c in &self.components {
+                let mut whitened = [0.; 6];
+                for i in 0..6 {
+                    whitened[i] = (u[i]
+                        - c.mean[i]
+                        - (0..i).map(|j| c.lower[i][j] * whitened[j]).sum::<f64>())
+                        / c.lower[i][i];
+                }
+                let log_g = c.log_normalizer - 0.5 * whitened.iter().map(|x| x * x).sum::<f64>();
+                result = log_add(result, (1. - self.alpha).ln() + c.weight.ln() + log_g);
+            }
+        }
+        result
+    }
+
+    fn draw(
+        &self,
+        rng: &mut StdRng,
+        outer: f64,
+        inner: f64,
+        shell_fraction: f64,
+    ) -> Result<([f64; 6], f64, Option<usize>)> {
+        // Alpha=1 consumes precisely the legacy uniform stream.
+        if self.alpha == 1. || rng.random::<f64>() < self.alpha {
+            let (u, radius) = draw_uniform(rng, outer, inner, shell_fraction)?;
+            return Ok((u, radius, None));
+        }
+        let p = rng.random::<f64>();
+        let mut cumulative = 0.;
+        let mut index = self.components.len() - 1;
+        for (i, c) in self.components.iter().enumerate() {
+            cumulative += c.weight;
+            if p < cumulative {
+                index = i;
+                break;
+            }
+        }
+        let component = &self.components[index];
+        let standard: [f64; 6] = std::array::from_fn(|_| StandardNormal.sample(rng));
+        let u: [f64; 6] = std::array::from_fn(|i| {
+            component.mean[i]
+                + (0..=i)
+                    .map(|j| component.lower[i][j] * standard[j])
+                    .sum::<f64>()
+        });
+        let radius = u.iter().map(|x| x * x).sum::<f64>().sqrt();
+        ensure!(
+            u.iter().all(|x| x.is_finite()) && radius.is_finite(),
+            "Nonfinite Gaussian draw; never silently redraw"
+        );
+        Ok((u, radius, Some(index)))
+    }
+}
+
+fn draw_uniform(
+    rng: &mut StdRng,
+    radius: f64,
+    inner_radius: f64,
+    shell_fraction: f64,
+) -> Result<([f64; 6], f64)> {
+    let direction: [f64; 6] = std::array::from_fn(|_| StandardNormal.sample(rng));
+    let norm = direction.iter().map(|x| x * x).sum::<f64>().sqrt();
+    ensure!(
+        norm.is_finite() && norm > 0.,
+        "Invalid normal direction (stop; never silently redraw)"
+    );
+    let uniform = rng.random::<f64>();
+    let radial = if inner_radius == 0. {
+        radius * uniform.powf(1. / 6.)
+    } else {
+        radius * (1. - shell_fraction * (1. - uniform)).powf(1. / 6.)
+    };
+    Ok((direction.map(|x| x * radial / norm), radial))
+}
 
 #[derive(Clone, Debug)]
 pub struct LatentRegionOptions {
@@ -176,6 +365,10 @@ impl Chart {
             0.1,
             shape_hash,
         )?;
+        ensure!(
+            !model.has_reciprocal_components(),
+            "A latent region requires an unwrapped Gaussian chart"
+        );
         let parameters = model.component_parameters();
         ensure!(
             parameters.len() == 1,
@@ -258,6 +451,15 @@ impl Chart {
 }
 
 pub fn run(options: LatentRegionOptions) -> Result<Value> {
+    run_inner(options, None)
+}
+
+/// Unbiased fixed-region integration under a frozen defensive latent proposal.
+pub fn run_with_importance(options: LatentRegionOptions, guide: &Path) -> Result<Value> {
+    run_inner(options, Some(guide))
+}
+
+fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<Value> {
     ensure!(
         options.samples > 0 && options.cloud_replicates > 0,
         "Positive sample and cloud counts required"
@@ -282,6 +484,11 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     }
     let region_raw = fs::read(&options.region)?;
     let region: Value = serde_json::from_slice(&region_raw)?;
+    let guide_raw = guide_path.map(fs::read).transpose()?;
+    let guide = guide_raw
+        .as_ref()
+        .map(|raw| ImportanceGuide::from_bytes(raw, &hash_bytes(&region_raw)))
+        .transpose()?;
     let fixed: Pose = serde_json::from_value(region["fixed_neighbor"].clone())?;
     let physical_fixed: Vec<Pose> = if let Some(value) = region.get("physical_fixed_neighbors") {
         serde_json::from_value(value.clone())?
@@ -417,10 +624,14 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     ] {
         fs::write(options.out.join("provenance").join(name), bytes)?;
     }
+    if let Some(raw) = &guide_raw {
+        fs::write(options.out.join("provenance/importance-guide.json"), raw)?;
+    }
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
-    let extended = inner_radius > 0.
+    let extended = guide.is_some()
+        || inner_radius > 0.
         || maximum_q.is_some()
         || region.get("physical_fixed_neighbors").is_some()
         || !minimum_q_inclusive
@@ -448,6 +659,17 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
             "V6_shell * mean over unconditional uniform6-shell draws of H Iq J * independent-cloud average W"
         );
     }
+    if let Some(g) = &guide {
+        manifest["schema"] = json!("importance-latent-region-normalizer-v1");
+        manifest["importance_guide_sha256"] = json!(hash_bytes(guide_raw.as_ref().unwrap()));
+        manifest["importance_uniform_probability"] = json!(g.alpha);
+        manifest["importance_component_count"] = json!(g.components.len());
+        manifest["proposal_density_measure"] =
+            json!("Lebesgue measure in the original six-dimensional whitened region chart");
+        manifest["estimator"] = json!(
+            "mean over all unconditional draws of I_shell H_capture H_hard I_q J * independent-cloud average W / complete latent mixture density; outside-shell and invalid draws zero, no retries"
+        );
+    }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
     let cpu_start = cpu_seconds();
@@ -457,23 +679,28 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     let mut capture_rejected = 0;
     let mut hard_rejected = 0;
     let mut region_rejected = 0;
+    let mut shell_rejected = 0;
     let mut maximum_backmap_error = 0_f64;
     let mut raw_points = 0_u64;
     for draw in 0..options.samples {
         let mut rng = stream(options.seed, draw, 0, "latent");
-        let direction: [f64; 6] = std::array::from_fn(|_| StandardNormal.sample(&mut rng));
-        let norm = direction.iter().map(|x| x * x).sum::<f64>().sqrt();
-        ensure!(
-            norm.is_finite() && norm > 0.,
-            "Invalid normal direction (stop; never silently redraw)"
-        );
-        let uniform = rng.random::<f64>();
-        let radial = if inner_radius == 0. {
-            radius * uniform.powf(1. / 6.)
+        let (latent, radial, selected_component) = if let Some(g) = &guide {
+            g.draw(&mut rng, radius, inner_radius, shell_fraction)?
         } else {
-            radius * (1. - shell_fraction * (1. - uniform)).powf(1. / 6.)
+            let (u, radial) = draw_uniform(&mut rng, radius, inner_radius, shell_fraction)?;
+            (u, radial, None)
         };
-        let latent = direction.map(|x| x * radial / norm);
+        // Preserve legacy uniform boundary arithmetic. The guide branch has an
+        // explicit target-shell indicator and never retries an exterior draw.
+        let shell_valid =
+            guide.is_none() || ((inner_radius == 0. || radial > inner_radius) && radial <= radius);
+        let log_proposal_density = guide.as_ref().map_or(-log_volume, |g| {
+            g.log_density(latent, shell_valid, log_volume)
+        });
+        ensure!(
+            log_proposal_density.is_finite(),
+            "Unrepresentable latent proposal density"
+        );
         let (pose, log_jacobian) = chart.decode(latent);
         pose.validate()?;
         let backmap = chart.encode(pose)?;
@@ -484,8 +711,14 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
             .map(|(a, b)| (a - b).abs())
             .fold(0_f64, f64::max);
         maximum_backmap_error = maximum_backmap_error.max(error);
+        let inverse_scale = if guide.is_some() {
+            radial.max(radius)
+        } else {
+            radius
+        };
         ensure!(
-            error <= 2e-7 * (1. + radius) && backmap_radius <= radius + 2e-7 * (1. + radius),
+            error <= 2e-7 * (1. + inverse_scale)
+                && (guide.is_some() || backmap_radius <= radius + 2e-7 * (1. + radius)),
             "Chart inverse failed; stop instead of censoring a draw"
         );
         ensure!(log_jacobian.is_finite(), "Nonfinite physical Jacobian");
@@ -503,10 +736,11 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
         capture_rejected += u64::from(!capture_valid);
         hard_rejected += u64::from(capture_valid && !hard_valid);
         region_rejected += u64::from(hard_valid && !region_valid);
+        shell_rejected += u64::from(!shell_valid);
         let mut clouds = Vec::new();
         let mut log_weight = None;
         let mut log_hard_weight = None;
-        if hard_valid && region_valid {
+        if hard_valid && region_valid && shell_valid {
             let envelope = OverlapEnvelope::build(&env, pose, cfg.endpoint_gate)?;
             let mut log_cloud_sum = f64::NEG_INFINITY;
             for cloud in 0..options.cloud_replicates {
@@ -522,7 +756,11 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
                 log_cloud_sum = log_add(log_cloud_sum, w.log_weight);
                 clouds.push(w);
             }
-            let h = log_volume + log_jacobian;
+            let h = if guide.is_some() {
+                log_jacobian - log_proposal_density
+            } else {
+                log_volume + log_jacobian
+            };
             let w = h + log_cloud_sum - (options.cloud_replicates as f64).ln();
             ensure!(h.is_finite() && w.is_finite(), "Invalid regional weight");
             weighted.add(w);
@@ -530,14 +768,22 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
             log_weight = Some(w);
             log_hard_weight = Some(h);
         }
-        serde_json::to_writer(
-            &mut writer,
-            &json!({"draw":draw,"latent":latent,"latent_radius":radial,
+        let mut row = json!({"draw":draw,"latent":latent,"latent_radius":radial,
             "pose":pose,"backmapped_latent":backmap,"backmapped_radius":backmap_radius,
             "log_physical_jacobian":log_jacobian,"physical_jacobian":log_jacobian.exp(),"q":q,
             "capture_valid":capture_valid,"hard_valid":hard_valid,"region_valid":region_valid,
-            "log_importance_weight":log_weight,"log_hard_weight":log_hard_weight,"clouds":clouds}),
-        )?;
+            "log_importance_weight":log_weight,"log_hard_weight":log_hard_weight,"clouds":clouds});
+        if guide.is_some() {
+            row["shell_valid"] = json!(shell_valid);
+            row["log_proposal_density"] = json!(log_proposal_density);
+            row["proposal_branch"] = json!(if selected_component.is_some() {
+                "gaussian"
+            } else {
+                "uniform-shell"
+            });
+            row["proposal_component"] = json!(selected_component);
+        }
+        serde_json::to_writer(&mut writer, &row)?;
         writer.write_all(b"\n")?;
         if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
             writer.flush()?;
@@ -555,6 +801,9 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
         "sampler_cpu_seconds":cpu_seconds()-cpu_start,"wall_seconds":start.elapsed().as_secs_f64(),"manifest":manifest});
     if extended {
         summary["samples_sha256"] = json!(hash_file(&options.out.join("samples.jsonl"))?);
+    }
+    if guide.is_some() {
+        summary["shell_rejected"] = json!(shell_rejected);
     }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
@@ -574,5 +823,133 @@ mod q_window_tests {
         assert!(q_in_interval(20., 1., None, true, true));
         assert!(!q_in_interval(f64::NAN, 1., None, true, true));
         assert!(!q_in_interval(f64::INFINITY, 1., None, true, true));
+    }
+}
+
+#[cfg(test)]
+mod importance_tests {
+    use super::*;
+
+    fn raw(alpha: f64) -> Value {
+        let mut covariance = [[0.; 6]; 6];
+        for (i, row) in covariance.iter_mut().enumerate() {
+            row[i] = 1.;
+        }
+        covariance[1][0] = 0.4;
+        covariance[0][1] = 0.4;
+        json!({"schema":"defensive-latent-shell-guide-v1", "region_sha256":"region",
+            "defensive_uniform_shell_probability":alpha,
+            "gaussian_components":[{"weight":3., "mean":[1.,0.,0.,0.,0.,0.], "covariance":covariance}]})
+    }
+
+    #[test]
+    fn latent_importance_density_support_and_correlated_gaussian() -> Result<()> {
+        let guide = ImportanceGuide::from_bytes(raw(0.5).to_string().as_bytes(), "region")?;
+        let u = [1.3, -0.7, 0.2, 0.6, -0.2, 0.1];
+        let exponent = (0.3_f64.powi(2) - 2. * 0.4 * 0.3 * (-0.7) + 0.7_f64.powi(2))
+            / (1. - 0.4_f64.powi(2))
+            + 0.2_f64.powi(2)
+            + 0.6_f64.powi(2)
+            + 0.2_f64.powi(2)
+            + 0.1_f64.powi(2);
+        let log_g = -3. * (2. * PI).ln() - 0.5 * (1. - 0.4_f64.powi(2)).ln() - 0.5 * exponent;
+        assert!((guide.log_density(u, false, 10.) - (0.5_f64.ln() + log_g)).abs() < 1e-13);
+        let inside = guide.log_density(u, true, 10.);
+        assert!((inside - (0.5 * (-10_f64).exp() + 0.5 * log_g.exp()).ln()).abs() < 1e-13);
+        assert!(inside >= 0.5_f64.ln() - 10.);
+        Ok(())
+    }
+
+    #[test]
+    fn latent_importance_rejects_missing_floor_wrong_target_and_bad_covariance() {
+        for alpha in [0., -0.1, 1.1] {
+            assert!(
+                ImportanceGuide::from_bytes(raw(alpha).to_string().as_bytes(), "region").is_err()
+            );
+        }
+        assert!(ImportanceGuide::from_bytes(raw(0.5).to_string().as_bytes(), "wrong").is_err());
+        let mut v = raw(0.5);
+        v["gaussian_components"][0]["covariance"][0][1] = json!(0.2);
+        assert!(ImportanceGuide::from_bytes(v.to_string().as_bytes(), "region").is_err());
+        v = raw(0.5);
+        v["gaussian_components"][0]["covariance"][0][0] = json!(-1.);
+        assert!(ImportanceGuide::from_bytes(v.to_string().as_bytes(), "region").is_err());
+        v = raw(0.5);
+        v["gaussian_components"] = json!([]);
+        assert!(ImportanceGuide::from_bytes(v.to_string().as_bytes(), "region").is_err());
+        v["defensive_uniform_shell_probability"] = json!(1.);
+        assert!(ImportanceGuide::from_bytes(v.to_string().as_bytes(), "region").is_ok());
+    }
+
+    #[test]
+    fn latent_importance_multiple_components_use_normalized_complete_mixture() -> Result<()> {
+        let mut data = raw(0.3);
+        let mut second = data["gaussian_components"][0].clone();
+        second["weight"] = json!(7.);
+        second["mean"] = json!([-2., 1., 0., 0., 0., 0.]);
+        data["gaussian_components"]
+            .as_array_mut()
+            .unwrap()
+            .push(second);
+        let guide = ImportanceGuide::from_bytes(data.to_string().as_bytes(), "region")?;
+        let u = [0.4, -0.1, 0., 0., 0., 0.];
+        let normal = |dx: f64, dy: f64| {
+            let md = (dx * dx - 0.8 * dx * dy + dy * dy) / 0.84;
+            (-3. * (2. * PI).ln() - 0.5 * 0.84_f64.ln() - 0.5 * md).exp()
+        };
+        let expected =
+            0.3 * (-8_f64).exp() + 0.7 * (0.3 * normal(-0.6, -0.1) + 0.7 * normal(2.4, -1.1));
+        assert!((guide.log_density(u, true, 8.) - expected.ln()).abs() < 1e-13);
+        let mut counts = [0_usize; 3];
+        let mut rng = StdRng::seed_from_u64(815711);
+        for _ in 0..100_000 {
+            let (_, _, index) = guide.draw(&mut rng, 2., 1., 1. - 1_f64 / 64.)?;
+            counts[index.map_or(0, |i| i + 1)] += 1;
+        }
+        for (count, expected) in counts.into_iter().zip([30_000, 21_000, 49_000]) {
+            assert!(count.abs_diff(expected) < 1200);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn latent_importance_uniform_limit_preserves_rng_and_unconditional_volume() -> Result<()> {
+        let outer: f64 = 2.3;
+        let inner: f64 = 1.2;
+        let fraction = 1. - (inner / outer).powi(6);
+        let log_v = (PI.powi(3) * (outer.powi(6) - inner.powi(6)) / 6.).ln();
+        let mut r0 = StdRng::seed_from_u64(27182);
+        let mut r1 = StdRng::seed_from_u64(27182);
+        let all_uniform = ImportanceGuide::from_bytes(raw(1.).to_string().as_bytes(), "region")?;
+        for _ in 0..128 {
+            let (u, r) = draw_uniform(&mut r0, outer, inner, fraction)?;
+            let (v, s, component) = all_uniform.draw(&mut r1, outer, inner, fraction)?;
+            assert_eq!((u, r), (v, s));
+            assert_eq!(component, None);
+            assert_eq!(all_uniform.log_density(u, true, log_v), -log_v);
+        }
+        let guide = ImportanceGuide::from_bytes(raw(0.5).to_string().as_bytes(), "region")?;
+        let mut sum = 0.;
+        let mut square = 0.;
+        let mut outside = 0;
+        let mut normals = 0;
+        for _ in 0..100_000 {
+            let (u, r, k) = guide.draw(&mut r0, outer, inner, fraction)?;
+            let inside = r > inner && r <= outer;
+            normals += usize::from(k.is_some());
+            outside += usize::from(!inside);
+            let w = if inside {
+                (-guide.log_density(u, true, log_v) - log_v).exp()
+            } else {
+                0.
+            };
+            sum += w;
+            square += w * w;
+        }
+        let mean = sum / 100_000.;
+        let se = ((square / 100_000. - mean * mean) / 99_999.).sqrt();
+        assert!((mean - 1.).abs() < 6. * se);
+        assert!(normals > 48_000 && normals < 52_000 && outside > 10_000);
+        Ok(())
     }
 }

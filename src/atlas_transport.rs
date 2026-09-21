@@ -180,6 +180,10 @@ impl AtlasTransportEngine {
             !base.is_periodic(),
             "Atlas transport currently requires open spherical boundaries"
         );
+        ensure!(
+            !base.has_reciprocal_components(),
+            "Adaptive atlas transport does not support reciprocal charts"
+        );
         let parameters = base.component_parameters();
         ensure!(
             !parameters.is_empty(),

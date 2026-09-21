@@ -35,6 +35,22 @@ impl Pose {
     }
 }
 
+/// Invert a relative rigid transform: I(t, R) = (-R^T t, R^T).
+///
+/// Unlike `Pose::inverse`, which transforms a point, this returns the inverse
+/// pose. It is an involution preserving translation volume times normalized
+/// rotational Haar measure, even though its translation depends on rotation.
+pub fn invert_relative_pose(pose: Pose) -> Pose {
+    let [w, x, y, z] = pose.orientation;
+    Pose {
+        position: scale(
+            matvec(transpose(rotation(pose.orientation)), pose.position),
+            -1.,
+        ),
+        orientation: [w, -x, -y, -z],
+    }
+}
+
 pub fn add(a: Vec3, b: Vec3) -> Vec3 {
     std::array::from_fn(|k| a[k] + b[k])
 }

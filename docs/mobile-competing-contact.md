@@ -222,7 +222,7 @@ paired statistics, reciprocal covariance, campaign allocation/lifecycle and
 event summaries. No Rust physical kernel changed in this stage. The exact
 reciprocal representation below was not part of those executable tests.
 
-## A possible exact reciprocal representation
+## Exact reciprocal representation
 
 For identical rigid particles, swapping which one is the anchor replaces the
 relative pose `T=(t,R)` by `I(T)=(-R^T t,R^T)`. This is an involution with unit
@@ -247,14 +247,100 @@ posterior source responsibilities and Hastings correction. In general the
 inverted component is not Gaussian in the original coordinates, so merely
 inverting the mean and covariance is not this exact construction.
 
-This would store each discovered contact once, with an analytic reciprocal
-branch. It remains an unimplemented follow-up to the frozen two-chart
-control above; correctness requires testing the composed chart maps and
-full proposal densities. Symmetrizing a pair proposal does not symmetrize
+This stores each discovered contact once, with an analytic reciprocal
+branch. It is now implemented for frozen spherical capture and posterior
+proposals, with composed chart maps and full densities checked by independent
+reference tests. Symmetrizing a pair proposal does not symmetrize
 the physical many-body environment or remove any depletion correction.
 
 The [implementation design and reference tests](reciprocal-contact-proposal-design.md)
 spell out the required joint component/inversion responsibilities, inverse
 trace and full-mixture density evaluation. The source inversion label cannot
-be chosen by an independent fair coin. This exact representation is still
-unimplemented.
+be chosen by an independent fair coin.
+
+The new [eight-run reciprocal control](../runs/mobile-reciprocal-atlas-benchmark-20260921/protocol.json)
+compares the original 150-component atlas with exact symmetrization of every
+component. It adds no fitted centers or covariances. At the initial trapped
+contact, the two ordered legacy log densities are −22.22573 and 14.03630;
+the reciprocal log density is 13.34315 in both directions. A preflight checks
+this identity across 156 probes, including every ordered physical pair.
+These are proposal densities, not physical statistical weights.
+
+All eight 2,000-sweep runs and both independent four-run audits completed.
+All 80,000 attempted updates and 16,008 stored endpoints passed the checks,
+including the exact virtual-branch density and trace reconstruction on the
+protein shapes. The complete [comparison artifact](../runs/mobile-reciprocal-atlas-comparison-20260921/comparison.json)
+retains motif IDs, rejected candidates, individual events and CPU times.
+
+| Atlas | Correlation | Replicate | First native attachment of body 0 | First native triangle | Sampler CPU, s |
+|---|---:|---:|---:|---:|---:|
+| Legacy | 0 | 0 | Not observed by 2000 | Not observed | 60.22 |
+| Legacy | 0 | 1 | 1997 | 1997 | 56.90 |
+| Legacy | 0.9 | 0 | 277 | 277 | 76.40 |
+| Legacy | 0.9 | 1 | 81 | 81 | 79.31 |
+| Reciprocal | 0 | 0 | 373 | 1063 | 83.34 |
+| Reciprocal | 0 | 1 | 637 | 718 | 71.81 |
+| Reciprocal | 0.9 | 0 | 358 | 358 | 71.69 |
+| Reciprocal | 0.9 | 1 | 14 | 14 | 88.66 |
+
+First native attachment occurs in all four reciprocal and three of four
+legacy runs. Two reciprocal runs lose and regain body 0's native registry;
+none of the legacy runs does. Another reciprocal run loses and regains
+the scaffold's native registry while body 0 stays registered. However,
+**none of these eight runs loses the original 0–2 exclusion contact or
+exchanges neighbors**. Registry changes must not be counted as detachment.
+These few independent preparations do not establish a uniform speedup.
+
+The reciprocal c=0.9, replicate 1 event at sweep 14 uses the inverse branch
+of existing base component 141 as source and ordinary component 146 as
+destination. Its log proposal correction is +3.2140 and sampled bath factor
+−3.0698, giving unit acceptance. The exact wrapper makes a useful narrow
+source chart available without fitting another Gaussian or changing the bath.
+
+Reciprocal c=0, replicate 1 supplies an explicit registry excursion. It
+registers at sweep 637 (proposal correction −0.4148, bath factor +1.9845),
+loses registry at 679 (−0.0305, −0.6512, acceptance probability about 0.506),
+and forms a native triangle at 718 (−8.6834, +51.5979). These are recorded
+auxiliary factors, not free energies. The [saved-pair diagnostic](../runs/mobile-reciprocal-contact-return-diagnostic-20260921/analysis.json)
+places the unregistered return at original competing-chart radius 18.84:
+only 2.31 Å translation and 4.10° rotation from the initial relative pose,
+but already outside R12. The other neighbor is mobile, so this is not a
+return to the fixed-scaffold integration region. It reinforces the unresolved
+coverage issue rather than contradicting its finite-region weight estimate.
+
+![Exact reciprocal and legacy proposals, all eight runs](../runs/mobile-reciprocal-atlas-comparison-20260921/mobile-reciprocal-atlas-comparison.png)
+
+This establishes a useful representation and additional registry routes.
+It does not settle equilibrium exchange efficiency, compression, geometry-only
+discovery, or crystal growth. The original native-informed atlas is still
+supplied in both arms.
+
+## Extending the competing region to radius 12
+
+Eight further independent 8,192-draw populations integrate the disjoint
+5–8 and 8–12 shells on the same observed two-neighbor scaffold. The
+[comparison](../runs/mobile-competing-outer-comparison-20260921/report.md)
+sums these with the completed R5 reference; it does not rerun previous draws
+or combine different proposal populations as though they shared a density.
+
+| Competing region | log Q with depletion | Observed row relative SE | Population relative SE |
+|---|---:|---:|---:|
+| Shell 5–8 | 19.9859 | 38.65% | 53.73% |
+| Shell 8–12 | 19.2953 | 57.60% | 64.43% |
+| R12, core and all shells | 20.7577 | 22.50% | 28.98% |
+
+The measured native-R4/competing-R12 log ratio is **15.3275**, with observed
+row SE 0.2385 and population SE 0.2968. These errors describe the sampled
+weights; they do not account for undiscovered modes. The new shells supply
+69.4% of measured R12 weight, but their effective sample sizes are only
+6.69 and 3.01. One outer-shell row supplies 56.2% of its integral, and lies
+near radius 12. Neither convergence nor a basin boundary is established.
+
+The [saved-row diagnostic and importance design](mobile-outer-importance-design.md)
+attribute about 59% and 93% of observed variance to pose variation in the
+two shells. Additional Poisson clouds alone cannot resolve the dominant
+outer-shell uncertainty. The next control keeps the regions fixed and uses
+a frozen Gaussian guide with a uniform defensive component, exact proposal
+density and fresh independent physical weights. Native R4, all unvisited
+regions outside R12, and other contact environments remain separate coverage
+questions.

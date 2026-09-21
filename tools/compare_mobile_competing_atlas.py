@@ -27,6 +27,47 @@ def sha(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 def write(path,value):Path(path).write_text(json.dumps(value,indent=2,allow_nan=False)+'\n')
 
 
+def comparison_design(protocol):
+    schema=protocol['schema']
+    if schema=='matched-mobile-competing-atlas-controller-v1':
+        variant,stem='augmented','mobile-competing-atlas'
+        label='legacy vs augmented atlas'
+        title='Does restoring the reciprocal contact proposal release the trapped configuration?'
+    elif schema=='matched-mobile-reciprocal-atlas-controller-v1':
+        variant,stem='reciprocal','mobile-reciprocal-atlas'
+        label='legacy vs exact reciprocal atlas'
+        title='Does exact reciprocal pose sampling release the trapped configuration?'
+    else:
+        raise ValueError('Unknown matched atlas comparison schema')
+    variants=('legacy',variant)
+    entries=protocol['campaigns']
+    if len(entries)!=2 or {e['atlas'] for e in entries}!=set(variants):
+        raise ValueError('Require exactly the declared legacy and comparison atlas')
+    return dict(variants=variants,campaign_schema=stem+'-benchmark-v1',
+        comparison_schema=stem+'-comparison-v1',figure_basename=stem+'-comparison',
+        label=label,title=title)
+
+
+def validate_grid(manifest,status,design):
+    if manifest['schema']!=design['campaign_schema'] or manifest['atlas_variant'] not in design['variants']:
+        raise ValueError('Wrong campaign schema/variant')
+    jobs=manifest['jobs'];terminal=status['jobs']
+    expected={('competing',mode,replicate) for mode in ('c0','c09') for replicate in (0,1)}
+    if len(jobs)!=4 or len({j['id'] for j in jobs})!=4 or {(j['start'],j['mode'],j['replicate']) for j in jobs}!=expected:
+        raise ValueError('Wrong factorial allocation')
+    if len(terminal)!=4 or {j['id'] for j in terminal}!={j['id'] for j in jobs}:
+        raise ValueError('Wrong terminal job identities')
+    if not status['complete'] or status['running'] or not all(j['status']=='complete' and j['exit_code']==0 for j in terminal):
+        raise ValueError('Incomplete physical campaign')
+    return {j['id']:j for j in jobs}
+
+
+def sort_runs(runs,design):
+    order={name:index for index,name in enumerate(design['variants'])}
+    if any(r['atlas'] not in order for r in runs):raise ValueError('Run atlas not in declared comparison')
+    return sorted(runs,key=lambda r:(order[r['atlas']],r['mode'],r['replicate']))
+
+
 def edge_set(row,kind):
     edges={tuple(sorted(edge)) for edge in row[kind+'_edges']}
     if not edges<=set(EDGES):raise ValueError('Invalid three-body graph')
@@ -158,7 +199,8 @@ def summarize(run,variant,burn,sweeps):
 
 def load_completed(benchmark,assessment):
     protocol=read(benchmark/'protocol.json');state=read(benchmark/'status.json')
-    if protocol['schema']!='matched-mobile-competing-atlas-controller-v1' or not state['complete'] or state['phase']!='complete':
+    design=comparison_design(protocol)
+    if not state['complete'] or state['phase']!='complete':
         raise ValueError('Both physical campaigns and their saved audits must be complete')
     if state['protocol_sha256']!=sha(benchmark/'protocol.json'):raise ValueError('Controller protocol binding changed')
     for name,digest in read(benchmark/'freeze.json')['files'].items():
@@ -167,10 +209,11 @@ def load_completed(benchmark,assessment):
     for entry in protocol['campaigns']:
         variant=entry['atlas'];campaign=benchmark/variant;destination=assessment/variant
         manifest,status=read(campaign/'manifest.json'),read(campaign/'status.json')
-        if manifest['schema']!='mobile-competing-atlas-benchmark-v1' or manifest['atlas_variant']!=variant:raise ValueError('Wrong campaign schema')
+        jobs=validate_grid(manifest,status,design)
+        if manifest['atlas_variant']!=variant:raise ValueError('Wrong campaign binding')
+        if (manifest['sweeps'],manifest['burn_sweeps'],manifest['sample_every'])!=(protocol['sweeps'],protocol['burn_sweeps'],protocol['sample_every']):
+            raise ValueError('Campaign duration differs from protocol')
         if sha(campaign/'manifest.json')!=entry['manifest_sha256']:raise ValueError('Campaign binding changed')
-        if not status['complete'] or status['running'] or not all(j['status']=='complete' and j['exit_code']==0 for j in status['jobs']):
-            raise ValueError('Incomplete physical campaign')
         result=read(destination/'analysis.json')
         if not result['complete'] or sha(destination/'analysis.json')!=state['audits'][variant]['analysis_sha256']:
             raise ValueError('Completed assessment identity changed')
@@ -178,10 +221,7 @@ def load_completed(benchmark,assessment):
             raise ValueError('Assessment does not match physical terminal state')
         if result['analyzer_sha256']!=manifest['observer_sha256'] or result['observer_execution']!='frozen-reference-assessment':
             raise ValueError('Wrong archived observer')
-        jobs={j['id']:j for j in manifest['jobs']}
         if len(jobs)!=4 or len(result['runs'])!=4 or {r['id'] for r in result['runs']}!=set(jobs):raise ValueError('Missing or extra runs')
-        if {(j['start'],j['mode'],j['replicate']) for j in jobs.values()}!={('competing',m,r) for m in ('c0','c09') for r in (0,1)}:
-            raise ValueError('Wrong factorial allocation')
         for run in result['runs']:
             job=jobs[run['id']]
             if not run['passed'] or any(run[k]!=job[k] for k in ('mode','start','replicate','seed')):raise ValueError('Failed/incorrect run assessment')
@@ -200,10 +240,10 @@ def load_completed(benchmark,assessment):
         'poisson_lambda_ratio','global_probability','learned_uniform_weight','local_translation_std_A','local_small_angle_std_degrees',
         'gca_probability','center_shift_probability','endpoint_gate')
     if any(any(c[k]!=configs[0][k] for k in keys) for c in configs):raise ValueError('Unmatched physical/proposal controls')
-    return protocol,sorted(summaries,key=lambda r:(r['atlas']=='augmented',r['mode'],r['replicate'])),bindings
+    return protocol,sort_runs(summaries,design),bindings
 
 
-def render(out,runs,burn,sweeps):
+def render(out,runs,burn,sweeps,design):
     palette=['#f1f1f4','#bdc5eb','#e1bad7','#9166ac','#75b6c1','#8cbc85','#dab15e','#2c704c']
     descriptions=['none','0–1','0–2','0–1 + 0–2','1–2','0–1 + 1–2','0–2 + 1–2','all three edges']
     fig=plt.figure(figsize=(14,10.5));grid=fig.add_gridspec(3,1,height_ratios=[2.4,2.4,2.1],hspace=.33,
@@ -219,7 +259,7 @@ def render(out,runs,burn,sweeps):
         ax.set_yticks(range(8),labels,fontsize=9.5);ax.axvline(burn,color='#333333',ls='--',lw=1)
         for y in (1.5,3.5,5.5):ax.axhline(y,color='white',lw=3 if y==3.5 else 1.5)
         ax.set_title(title,loc='left',fontsize=12)
-        if slot==1:ax.set_xlabel('MC sweeps · each stored endpoint and repeat retained · dashed line: burn 400')
+        if slot==1:ax.set_xlabel(f'MC sweeps · each stored endpoint and repeat retained · dashed line: burn {burn}')
         else:ax.tick_params(labelbottom=False)
     table_ax=fig.add_subplot(grid[2]);table_ax.axis('off')
     def when(event):return '—' if event is None else str(event['sweep'])
@@ -238,16 +278,16 @@ def render(out,runs,burn,sweeps):
         cell.set_edgecolor('#d4d6dd');cell.set_linewidth(.4)
         if row==0:cell.set_facecolor('#e9edf2');cell.set_text_props(weight='bold')
         elif row>=5:cell.set_facecolor('#f3f7f4')
-    fig.suptitle('Does restoring the reciprocal contact proposal release the trapped configuration?',
+    fig.suptitle(design['title'],
         x=.06,y=.975,ha='left',fontsize=16,weight='bold')
-    fig.text(.06,.94,'Eight fixed-duration runs · same three mobile tetramers · rᵈ = 1.5 Å, z = 0.035 Å⁻³ · legacy vs augmented atlas',fontsize=11)
+    fig.text(.06,.94,'Eight fixed-duration runs · same three mobile tetramers · rᵈ = 1.5 Å, z = 0.035 Å⁻³ · '+design['label'],fontsize=11)
     fig.text(.06,.905,'Colors list the complete graph edges. Body 0 is initially unregistered; bodies 1–2 form the native scaffold.',fontsize=10,color='#444444')
     fig.legend(handles=[Patch(fc=color,label=label) for color,label in zip(palette,descriptions)],ncol=8,
         loc='upper left',bbox_to_anchor=(.055,.886),frameon=False,fontsize=9,columnspacing=1.25,handlelength=1.2)
     fig.text(.06,.05,'Event columns use all attempted updates; numbers are sweeps, “—” means not observed. Returns require an observed loss first. '
         '*Body 0 exclusion-partner switches: sequential / same update.',fontsize=9)
     fig.text(.06,.022,'One selected non-equilibrium start; both atlases are native-informed. Native connectivity and apparent persistence do not establish equilibrium or crystallization.',fontsize=9,color='#444444')
-    for ext in ('png','svg','pdf'):fig.savefig(out/f'mobile-competing-atlas-comparison.{ext}',dpi=180,bbox_inches='tight')
+    for ext in ('png','svg','pdf'):fig.savefig(out/f"{design['figure_basename']}.{ext}",dpi=180,bbox_inches='tight')
     plt.close(fig)
 
 
@@ -257,7 +297,8 @@ def main():
     args=parser.parse_args();benchmark,assessment,out=[p.resolve() for p in (args.benchmark,args.assessment,args.out)]
     if out.exists():raise ValueError('Use a fresh comparison artifact directory')
     protocol,runs,bindings=load_completed(benchmark,assessment)
-    result=dict(schema='mobile-competing-atlas-comparison-v1',complete=True,
+    design=comparison_design(protocol)
+    result=dict(schema=design['comparison_schema'],complete=True,
         protocol_sha256=sha(benchmark/'protocol.json'),controller_status_sha256=sha(benchmark/'status.json'),
         inputs=bindings,runs=runs,scope=SCOPE,
         definitions=dict(graph_mask='Bits 0,1,2 encode unordered edges 0–1,0–2,1–2 respectively.',
@@ -267,13 +308,13 @@ def main():
             returns='Completed return to a descriptor’s initial Boolean state requires leaving it first. Physical 0–2 returns are reattachments after an observed contact loss.',
             efficiency='Event/CPU ratios are finite preparation-event diagnostics. No pooled stationary ESS or equilibrium speedup is inferred.'))
     out.mkdir(parents=True);write(out/'comparison.json',result)
-    render(out,runs,protocol['burn_sweeps'],protocol['sweeps'])
+    render(out,runs,protocol['burn_sweeps'],protocol['sweeps'],design)
     archive=out/'provenance';archive.mkdir();shutil.copy2(__file__,archive/'compare_mobile_competing_atlas.py')
     shutil.copy2(benchmark/'protocol.json',archive/'protocol.json');shutil.copy2(benchmark/'status.json',archive/'controller-status.json')
     write(out/'provenance.json',dict(complete=True,tool_sha256=sha(__file__),source_bindings=bindings,
         output_sha256={p.name:sha(p) for p in out.iterdir() if p.is_file()},
         archived_sha256={p.name:sha(p) for p in archive.iterdir()},scope=SCOPE))
-    print(out/'mobile-competing-atlas-comparison.png')
+    print(out/(design['figure_basename']+'.png'))
 
 
 if __name__=='__main__':main()

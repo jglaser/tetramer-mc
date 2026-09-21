@@ -73,27 +73,85 @@ def convert_model(model, fixed):
     return result
 
 
+def unwrap_proposal_model(model):
+    """Return the legacy Gaussian model and explicit exact-reciprocal flags.
+
+    The envelope deliberately lacks legacy Gaussian fields, so readers without
+    reciprocal support fail rather than silently sampling a different density.
+    Legacy dictionaries, including schema-less analysis fixtures, are returned
+    unchanged. Reciprocal models require body-relative pose coordinates.
+    """
+    if not isinstance(model, dict):
+        raise ValueError('A proposal model must be a dictionary')
+    if model.get('schema') != 'reciprocal-pose-mixture-v1':
+        if 'base_model' in model or 'reciprocal_components' in model:
+            raise ValueError('Reciprocal fields require the reciprocal-pose-mixture-v1 envelope')
+        return model, [False]*len(model['weights'])
+    if set(model) != {'schema', 'base_model', 'reciprocal_components'}:
+        raise ValueError('Reciprocal envelope requires exactly schema, base_model, reciprocal_components')
+    base, flags = model['base_model'], model['reciprocal_components']
+    if not isinstance(base, dict) or 'base_model' in base or 'reciprocal_components' in base or base.get('schema') == 'reciprocal-pose-mixture-v1':
+        raise ValueError('Nested or ambiguous reciprocal base model')
+    required = {'angular_length', 'anchors', 'means', 'covariances', 'weights'}
+    if not required <= set(base):
+        raise ValueError('Reciprocal base model lacks required Gaussian fields')
+    if base.get('coordinate_convention') != 'anchor-body-relative':
+        raise ValueError('Reciprocal proposal requires anchor-body-relative base coordinates')
+    weights = base['weights']
+    if not isinstance(weights, list) or not weights:
+        raise ValueError('Reciprocal base model needs nonempty Gaussian weights')
+    if not isinstance(flags, list) or len(flags) != len(weights) or any(type(flag) is not bool for flag in flags):
+        raise ValueError('reciprocal_components must contain one strict Boolean per base Gaussian')
+    if any(not isinstance(base[key], list) or len(base[key]) != len(weights) for key in ('anchors', 'means', 'covariances')):
+        raise ValueError('Reciprocal Gaussian arrays have inconsistent component counts')
+    return base, list(flags)
+
+
+def reciprocal_virtual_branches(base, flags):
+    """Component k, followed by its inverse if selected; selected mass splits equally."""
+    indices, inverted, weights = [], [], []
+    for index, (weight, reciprocal) in enumerate(zip(base['weights'], flags)):
+        indices.append(index)
+        inverted.append(False)
+        weights.append(weight*.5 if reciprocal else weight)
+        if reciprocal:
+            indices.append(index)
+            inverted.append(True)
+            weights.append(weight*.5)
+    return np.asarray(indices, dtype=int), np.asarray(inverted, dtype=bool), np.asarray(weights, dtype=float)
+
+
+def reciprocal_arrays(t, r):
+    """SE(3) inverse: (-R.T t,R.T), preserving d³t times Haar exactly."""
+    inverse = r.swapaxes(-1, -2)
+    return -np.einsum('nij,nj->ni', inverse, t), inverse
+
+
 class Density:
-    """Vectorized Gaussian density relative to d^3t times normalized Haar."""
+    """Physical density with virtual exact-reciprocal branches, if requested."""
     def __init__(self, model):
-        self.model = model
-        self.ell = float(model["angular_length"])
-        self.mean = np.asarray(model["means"])
-        self.covariance = np.asarray(model["covariances"])
+        self.proposal_model = model
+        self.model, self.reciprocal_components = unwrap_proposal_model(model)
+        self.base_indices, self.inverted, self.weights = reciprocal_virtual_branches(self.model, self.reciprocal_components)
+        self.ell = float(self.model["angular_length"])
+        self.mean = np.asarray(self.model["means"])[self.base_indices]
+        self.covariance = np.asarray(self.model["covariances"])[self.base_indices]
+        self.anchors = [self.model['anchors'][i] for i in self.base_indices]
         self.lower = np.linalg.cholesky(self.covariance)
         self.logdet = np.log(np.diagonal(self.lower, axis1=1, axis2=2)).sum(axis=1)
-        self.weights = np.asarray(model["weights"])
         assert np.all(self.weights > 0) and abs(self.weights.sum() - 1) < 1e-12
 
     def evaluate(self, poses):
         t, _, r = arrays(poses)
+        inverse_t, inverse_r = reciprocal_arrays(t, r) if self.inverted.any() else (None, None)
         logs, norms = [], []
-        for k, anchor in enumerate(self.model["anchors"]):
-            delta = r @ np.asarray(anchor["rotation"]).T
+        for k, anchor in enumerate(self.anchors):
+            translation, rotation = (inverse_t, inverse_r) if self.inverted[k] else (t, r)
+            delta = rotation @ np.asarray(anchor["rotation"]).T
             q = Rotation.from_matrix(delta).as_quat()
             with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
                 c = q[:, :3] / q[:, 3, None]
-                x = np.column_stack((t - anchor["position"], self.ell * c))
+                x = np.column_stack((translation - anchor["position"], self.ell * c))
                 finite = np.isfinite(x).all(axis=1)
                 z = solve_triangular(self.lower[k], (x[finite] - self.mean[k]).T, lower=True).T
                 quadratic = np.sum(z * z, axis=1)
@@ -109,10 +167,12 @@ class Density:
 
     def draw_component(self, rng, component, count):
         latent = rng.normal(size=(count, 6)) @ self.lower[component].T + self.mean[component]
-        anchor = self.model["anchors"][component]
+        anchor = self.anchors[component]
         t = latent[:, :3] + anchor["position"]
         q = np.column_stack((latent[:, 3:] / self.ell, np.ones(count)))
         r = Rotation.from_quat(q).as_matrix() @ np.asarray(anchor["rotation"])
+        if self.inverted[component]:
+            t, r = reciprocal_arrays(t, r)
         q = Rotation.from_matrix(r).as_quat()[:, [3, 0, 1, 2]]
         return [dict(position=p.tolist(), orientation=v.tolist()) for p, v in zip(t, q)]
 

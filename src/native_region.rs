@@ -423,6 +423,10 @@ impl NativeGuide {
             "Native guide must be an open-space density"
         );
         ensure!(
+            !model.has_reciprocal_components(),
+            "Reciprocal charts are not yet supported by the native-region guide"
+        );
+        ensure!(
             weight.is_finite() && weight > 0. && weight < 1.,
             "Guide weight must lie in (0,1)"
         );

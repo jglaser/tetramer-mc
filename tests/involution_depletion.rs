@@ -130,9 +130,19 @@ fn posterior_update(
 
 #[test]
 fn posterior_transport_with_poisson_gate_preserves_independent_physical_references() -> Result<()> {
+    check_posterior_physical_reference(false)
+}
+
+#[test]
+fn reciprocal_posterior_with_poisson_gate_preserves_independent_physical_references() -> Result<()>
+{
+    check_posterior_physical_reference(true)
+}
+
+fn check_posterior_physical_reference(reciprocal: bool) -> Result<()> {
     let shape = tree()?;
     let sha = "0000000000000000000000000000000000000000000000000000000000000000";
-    let model = FrozenRelativePoseProposal::from_components_open(
+    let mut model = FrozenRelativePoseProposal::from_components_open(
         parameters(),
         1.,
         [2. * CAPTURE; 3],
@@ -140,6 +150,25 @@ fn posterior_transport_with_poisson_gate_preserves_independent_physical_referenc
         sha,
         sha,
     )?;
+    if reciprocal {
+        let p = parameters();
+        let envelope = serde_json::json!({
+            "schema":"reciprocal-pose-mixture-v1", "reciprocal_components":[true,true],
+            "base_model": {
+                "coordinate_convention":"anchor-body-relative", "shape_sha256":sha,
+                "angular_length":1., "weights":[0.23,0.77],
+                "anchors":p.iter().map(|p| serde_json::json!({"position":p.anchor_position,"rotation":p.anchor_rotation})).collect::<Vec<_>>(),
+                "means":p.iter().map(|p| p.mean).collect::<Vec<_>>(),
+                "covariances":p.iter().map(|p| p.covariance).collect::<Vec<_>>()
+            }
+        });
+        model = FrozenRelativePoseProposal::from_json_str_open(
+            &envelope.to_string(),
+            [2. * CAPTURE; 3],
+            0.2,
+            sha,
+        )?;
+    }
     for (case, centers, z) in [
         ("AO", vec![[0.; 3]], Z),
         ("many-body", vec![[-1.5, 0., 0.], [1.5, 0., 0.]], 0.12),
@@ -200,7 +229,9 @@ fn posterior_transport_with_poisson_gate_preserves_independent_physical_referenc
             assert!(
                 work.accepted > 300 && work.nonself > 200 && work.gained > 100 && work.lost > 100
             );
-            eprintln!("Posterior {case} c={c}: max paired z={maximum:.3}; {work:?}");
+            eprintln!(
+                "Posterior reciprocal={reciprocal} {case} c={c}: max paired z={maximum:.3}; {work:?}"
+            );
         }
     }
     Ok(())

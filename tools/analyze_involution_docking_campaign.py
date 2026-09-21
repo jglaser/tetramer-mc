@@ -56,9 +56,14 @@ class CorePassages:
 class ChartAudit:
     def __init__(self, model):
         import numpy as np
+        from prepare_smc_normalizer_atlas import unwrap_proposal_model, reciprocal_virtual_branches
         self.np = np
-        self.mean = np.asarray(model['means'])
-        covariance = np.asarray(model['covariances'])
+        self.proposal_model = model
+        model, self.reciprocal_components = unwrap_proposal_model(model)
+        self.base_model = model
+        self.base_indices, self.inverted, self.weights = reciprocal_virtual_branches(model, self.reciprocal_components)
+        self.mean = np.asarray(model['means'])[self.base_indices]
+        covariance = np.asarray(model['covariances'])[self.base_indices]
         covariance = .5*(covariance+covariance.swapaxes(-1, -2))
         # An ill-conditioned atlas amplifies different valid Cholesky roundoff
         # into visibly different extreme-tail coordinates. Replay the specified
@@ -78,9 +83,8 @@ class ChartAudit:
         assert self.cholesky_backward_error <= 1e-14
         self.condition_numbers = np.linalg.cond(covariance)
         self.logdet = np.log(np.diagonal(self.lower, axis1=1, axis2=2)).sum(axis=1)
-        self.anchor_t = np.asarray([a['position'] for a in model['anchors']])
-        self.anchor_r = np.asarray([a['rotation'] for a in model['anchors']])
-        self.weights = np.asarray(model['weights'])
+        self.anchor_t = np.asarray([a['position'] for a in model['anchors']])[self.base_indices]
+        self.anchor_r = np.asarray([a['rotation'] for a in model['anchors']])[self.base_indices]
         self.weights /= self.weights.sum()
         self.ell = model['angular_length']
         self.checks = Counter()
@@ -104,10 +108,16 @@ class ChartAudit:
         a, ar = self.arrays(anchor)
         return self.pose(a+ar@p, ar@r)
 
+    def reciprocal(self, pose):
+        p, r = self.arrays(pose)
+        return self.pose(-r.T@p, r.T)
+
     def encode(self, label, pose):
         from scipy.spatial.transform import Rotation
         np = self.np
         p, r = self.arrays(pose)
+        if self.inverted[label]:
+            p, r = -r.T@p, r.T
         q = Rotation.from_matrix(r@self.anchor_r[label].T).as_quat()
         if q[3] == 0.:
             raise ValueError('Cayley half-turn seam')
@@ -123,7 +133,10 @@ class ChartAudit:
         quaternion /= np.linalg.norm(quaternion)
         rotation = Rotation.from_quat(quaternion).as_matrix()@self.anchor_r[label]
         volume = self.logdet[label]-3*np.log(self.ell)-2*np.log(np.pi)-2*np.log1p(u@u)
-        return self.pose(value[:3]+self.anchor_t[label], rotation), float(volume)
+        position = value[:3]+self.anchor_t[label]
+        if self.inverted[label]:
+            position, rotation = -rotation.T@position, rotation.T
+        return self.pose(position, rotation), float(volume)
 
     def gaussian(self, label, pose):
         np = self.np
@@ -157,6 +170,7 @@ class ChartAudit:
         np = self.np
         trace, step = proposal['trace'], proposal['step']
         a, b, noise = trace['source'], trace['target'], np.asarray(trace['noise'])
+        self.check_branch_metadata(proposal, a, b)
         encoded = self.encode(a, old_relative)
         z = np.asarray(step['source_latent'])
         # Inverting an almost-pi rotation amplifies tiny implementation-level
@@ -198,6 +212,18 @@ class ChartAudit:
             self.close('full_old_gaussian', self.full_gaussian(old_relative), proposal['full_old_gaussian_log_density'])
             self.close('full_new_gaussian', self.full_gaussian(new_pose), proposal['full_new_gaussian_log_density'])
         return new_pose
+
+    def check_branch_metadata(self, proposal, source, target):
+        """Trace labels index virtual charts; optional metadata gives base IDs."""
+        for label in (source, target):
+            assert type(label) is int and 0 <= label < len(self.weights), 'Invalid virtual branch label'
+        for role, label in (('source', source), ('target', target)):
+            expected = {role+'_component_index': int(self.base_indices[label]), role+'_inverted': bool(self.inverted[label])}
+            for name, value in expected.items():
+                if self.inverted.any():
+                    assert name in proposal and proposal[name] is not None, ('Missing reciprocal branch metadata', name)
+                if proposal.get(name) is not None:
+                    assert type(proposal[name]) is type(value) and proposal[name] == value, ('Incorrect reciprocal branch metadata', name)
 
 
 def one(task):

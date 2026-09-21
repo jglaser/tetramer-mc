@@ -811,6 +811,10 @@ impl ConditionalEngine {
         model: &FrozenRelativePoseProposal,
     ) -> Result<ConditionalState> {
         ensure!(
+            !model.has_reciprocal_components(),
+            "Conditional state import requires unwrapped Gaussian charts"
+        );
+        ensure!(
             model.shape_sha256() == self.shape_sha256 && !model.is_periodic(),
             "Imported conditional model must be open and match physical shape SHA256"
         );

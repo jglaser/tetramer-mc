@@ -3,12 +3,12 @@
 //! An optional explicit original-q window restricts the physical target for
 //! conditional contact diagnostics; it never changes the proposal charts.
 use crate::{
-    basin_involution::{BasinPair, BasinTrace, FixedBasinInvolution},
+    basin_involution::{BasinPair, BasinStep, BasinTrace, FixedBasinInvolution},
     depletion::{self, GateOptions},
     geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
     native_region::{NativeMetric, QWindow},
-    proposal::FrozenRelativePoseProposal,
+    proposal::{FrozenRelativePoseProposal, RelativePoseBranch},
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
 };
 use anyhow::{Context, Result, ensure};
@@ -215,6 +215,7 @@ pub struct DockingProposal {
     model: FrozenRelativePoseProposal,
     map: FixedBasinInvolution,
     components: Vec<FrozenRelativePoseProposal>,
+    branches: Vec<RelativePoseBranch>,
     log_component_weights: Vec<f64>,
     method: DockingMethod,
     correlation: f64,
@@ -233,8 +234,20 @@ impl DockingProposal {
             !model.is_periodic() && model.component_count() > 0,
             "Need a full open-space atlas"
         );
-        let weights = model.component_weights();
-        let parameters = model.component_parameters();
+        // The stored atlas contains each base Gaussian once. The numerical map
+        // has one chart per virtual branch; its reciprocal wrappers preserve
+        // translation volume times rotational Haar measure exactly.
+        let branches = model.virtual_branches();
+        let weights: Vec<_> = branches.iter().map(|b| b.weight).collect();
+        let base_parameters = model.component_parameters();
+        let parameters: Vec<_> = branches
+            .iter()
+            .map(|b| {
+                let mut p = base_parameters[b.component_index].clone();
+                p.weight = b.weight;
+                p
+            })
+            .collect();
         let mut pairs = Vec::new();
         for a in 0..weights.len() {
             for b in a..weights.len() {
@@ -270,6 +283,7 @@ impl DockingProposal {
             model,
             map,
             components,
+            branches,
             log_component_weights: weights.iter().map(|w| w.ln()).collect(),
             method,
             correlation,
@@ -280,6 +294,39 @@ impl DockingProposal {
     pub fn with_anchor_index(mut self, index: Option<usize>) -> Self {
         self.proposal_anchor_index = index;
         self
+    }
+    /// Apply a virtual-chart trace in one fixed anchor-relative frame.
+    /// The inverse trace swaps virtual labels as well as Gaussian noise. Each
+    /// reciprocal wrapper has unit absolute Jacobian in physical pose measure.
+    pub fn apply_relative_trace(&self, relative: Pose, trace: &BasinTrace) -> Result<BasinStep> {
+        relative.validate()?;
+        let source = self
+            .branches
+            .get(trace.source)
+            .context("Invalid virtual source chart")?;
+        let target = self
+            .branches
+            .get(trace.target)
+            .context("Invalid virtual target chart")?;
+        let input = if source.inverted {
+            invert_relative_pose(relative)
+        } else {
+            relative
+        };
+        let mut step = self.map.apply(input, trace)?;
+        if target.inverted {
+            step.pose = invert_relative_pose(step.pose);
+        }
+        step.pose.validate()?;
+        Ok(step)
+    }
+    fn component_log_density(&self, index: usize, relative: Pose) -> Result<f64> {
+        let pose = if self.branches[index].inverted {
+            invert_relative_pose(relative)
+        } else {
+            relative
+        };
+        self.components[index].relative_log_density(pose.position, rotation(pose.orientation))
     }
     pub fn propose(
         &self,
@@ -339,12 +386,8 @@ impl DockingProposal {
         };
         let posterior = self.method == DockingMethod::PosteriorInvolution;
         let source_logs = if posterior {
-            self.components
-                .iter()
-                .map(|component| {
-                    component
-                        .relative_log_density(relative.position, rotation(relative.orientation))
-                })
+            (0..self.branches.len())
+                .map(|index| self.component_log_density(index, relative))
                 .collect::<Result<Vec<_>>>()?
         } else {
             Vec::new()
@@ -371,7 +414,7 @@ impl DockingProposal {
         } else {
             self.map.draw_trace(rng)
         };
-        let result = self.map.apply(relative, &trace);
+        let result = self.apply_relative_trace(relative, &trace);
         let step = match result {
             Ok(step) => step,
             Err(error) => {
@@ -382,6 +425,8 @@ impl DockingProposal {
                 ));
             }
         };
+        // These are virtual indices: the same base Gaussian with opposite
+        // inversion labels is a nonidentity reciprocal move, including c=1.
         let identity = self.correlation == 1. && trace.source == trace.target;
         let proposed = if identity {
             old
@@ -392,10 +437,8 @@ impl DockingProposal {
             }
         };
         proposed.validate()?;
-        let source = self.components[trace.source]
-            .relative_log_density(relative.position, rotation(relative.orientation))?;
-        let target = self.components[trace.target]
-            .relative_log_density(step.pose.position, rotation(step.pose.orientation))?;
+        let source = self.component_log_density(trace.source, relative)?;
+        let target = self.component_log_density(trace.target, step.pose)?;
         let full_old = self
             .model
             .relative_log_density(relative.position, rotation(relative.orientation))?;
@@ -428,13 +471,21 @@ impl DockingProposal {
         } else {
             step.log_correction
         };
-        let info = json!({"branch":"involution","anchor_index":j,"trace":trace,"step":step,"identity":identity,
+        let mut info = json!({"branch":"involution","anchor_index":j,"trace":trace,"step":step,"identity":identity,
             "source_law":if posterior {"posterior"} else {"static_pair"},
             "selected_source_log_density":source,"selected_target_log_density":target,
             "full_old_gaussian_log_density":full_old,"full_new_gaussian_log_density":full_new,
             "source_log_probability":source_probability,"inverse_source_log_probability":inverse_source_probability,
             "label_log_reverse_forward":label_correction,"expanded_log_reverse_forward":expanded_correction,
             "log_reverse_forward":if identity {0.} else {correction}});
+        if self.model.has_reciprocal_components() {
+            let source = self.branches[trace.source];
+            let target = self.branches[trace.target];
+            info["source_component_index"] = json!(source.component_index);
+            info["target_component_index"] = json!(target.component_index);
+            info["source_inverted"] = json!(source.inverted);
+            info["target_inverted"] = json!(target.inverted);
+        }
         Ok((Some(proposed), info))
     }
 }

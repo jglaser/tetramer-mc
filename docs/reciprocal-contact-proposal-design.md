@@ -1,11 +1,27 @@
-# Exact reciprocal contact proposals: design only
+# Exact reciprocal contact proposals
 
-**Unimplemented.** This note proposes a later, separately reviewed change. The
-completed mobile atlas control uses two independently normalized Gaussian
-components, with a first-order covariance for the reciprocal component. This
-note does not change that control, its archived inputs, or its interpretation.
-The existing atlas remains native-informed. Exact reciprocal representation
-alone would not establish template-free discovery, adaptation, or equilibrium.
+**Implemented and reference-tested for frozen spherical capture/posterior
+proposals.** The [completed validation record](../runs/reciprocal-completed-validation-20260921/validation.json)
+binds 54 passing Rust tests, 53 distinct Python checks, the executable/source
+bundle, and all eight audited mobile runs. The earlier mobile atlas control
+used a first-order reciprocal Gaussian; its archived inputs and conclusions
+are unchanged. A [new matched control](../runs/mobile-reciprocal-atlas-benchmark-20260921/protocol.json)
+wraps all 150 unchanged base components, producing 300 exact virtual branches.
+Both controls remain native-informed. Reciprocal representation alone does
+not establish template-free discovery, adaptation, or equilibrium.
+
+The implemented format is a `reciprocal-pose-mixture-v1` envelope containing
+`base_model` and one Boolean `reciprocal_components` flag per base component.
+Older Gaussian readers reject the envelope because it has no top-level
+Gaussian arrays. Active reciprocal models reject periodic boundaries and
+unsupported adaptive/normalizer consumers. Bare legacy models and envelopes
+whose flags are all false retain their previous draw and trace behavior.
+
+Capture records keep base-component indices plus an optional inversion flag.
+Posterior traces use virtual indices, ordered by base component with ordinary
+then inverse branch; active reciprocal traces also record base indices and
+inversion flags. Density evaluation and source responsibilities always include
+every virtual branch. These index conventions matter when replaying a move.
 
 ## Physical measure and reciprocal representation
 
@@ -135,7 +151,7 @@ this proposal correction. All spectators remain in the exclusion union and
 hard test, and the original atomic wall remains active. A reciprocal proposal
 does not make the physical environment pairwise or remove its depletion factor.
 
-## Smallest implementation path
+## Implemented architecture
 
 The existing Gaussian map can remain the numerical core. Prefer a thin,
 explicit reciprocal wrapper over pretending an inverted component is another
@@ -204,7 +220,7 @@ serialized trace behavior.
   template-free discovery need their own state, inverse/support, or frozen
   epoch argument; this representation supplies none of those automatically.
 
-## Required reference-test matrix
+## Reference-test requirements
 
 | Control | Required discriminating evidence |
 |---|---|
@@ -221,3 +237,14 @@ serialized trace behavior.
 Passing these controls would validate a frozen reciprocal proposal
 representation. Sampling efficiency, discovery, reversible compression, and
 assembly remain separate empirical and algorithmic questions.
+
+The implemented tests include numerical six-dimensional volume preservation,
+exact density normalization/symmetry, source responsibilities, all inversion
+label combinations, correlations from −1 through 1, independent mixture
+reference samples, analytic sphere and many-body depletion references, and
+actual all-mobile runner replay/restart. The source/destination wrapper tests
+explicitly cover a common base index with opposite inversion labels at c=1:
+that update is a real pose inversion, not an identity shortcut. The initial
+test compile failure used a non-cloneable RNG in test code; the corrected test
+uses two independently constructed same-seed RNGs. No physical run used that
+failed build.

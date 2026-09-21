@@ -100,8 +100,13 @@ defect from the physical weight of the attachment.
 The matched eight-run control reaches native connectivity in four augmented
 and three legacy runs, with one actual partner exchange in an augmented run.
 It changes accessible routes without establishing a uniform first-attachment
-or equilibrium speedup. An exact reciprocal representation is designed but
-not yet implemented.
+or equilibrium speedup. The [exact reciprocal representation](docs/reciprocal-contact-proposal-design.md)
+is now implemented and validated for frozen spherical proposals. Its completed
+matched control reaches native registry in four reciprocal and three legacy
+runs, with additional registry excursions but no exclusion-contact loss or
+neighbor exchange. It adds no contact fits. Independent competitor integration now extends to R12,
+but the outer-shell estimates are dominated by a few poses and coverage
+remains unresolved.
 The [independent basin normalizer](docs/basin-normalizers.md) integrates the
 same physical density using positive Poisson importance weights and an
 exhaustive contact-region partition. It provides a separate check on trapped

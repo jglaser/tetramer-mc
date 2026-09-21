@@ -231,6 +231,10 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         epsilon,
         &shape_sha,
     )?;
+    ensure!(
+        !original.has_reciprocal_components(),
+        "Reciprocal charts are not supported by the Gaussian-rescaling normalizer"
+    );
     let mut parameters = original.component_parameters();
     for p in &mut parameters {
         for row in &mut p.covariance {

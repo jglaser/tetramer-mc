@@ -1,4 +1,4 @@
-//! Frozen Gaussian relative-pose proposals with an explicit periodic null move.
+//! Frozen relative-pose mixtures, optionally with exact reciprocal branches.
 //!
 //! The chosen other-particle anchor is retained as an auxiliary label. Learned
 //! displacements outside its unique lab-frame image cube are null proposals;
@@ -49,6 +49,25 @@ struct RawModel {
     weights: Option<Vec<f64>>,
     shape_sha256: String,
     coordinate_convention: String,
+}
+
+/// An outer envelope keeps reciprocal models unreadable by legacy Gaussian
+/// parsers, instead of letting an ignored optional field silently change G.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawReciprocalModel {
+    schema: String,
+    base_model: RawModel,
+    reciprocal_components: Vec<bool>,
+}
+
+/// One normalized branch of the learned relative-pose density. Component
+/// indices always address the stored base Gaussians, including inverted branches.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct RelativePoseBranch {
+    pub component_index: usize,
+    pub inverted: bool,
+    pub weight: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -249,12 +268,16 @@ pub struct ProposalOutcome {
     pub new_log_density: Option<f64>,
     pub log_reverse_forward: Option<f64>,
     pub component_index: Option<usize>,
+    /// Present only for a learned draw from a model with active reciprocity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component_inverted: Option<bool>,
 }
 
 /// Immutable normalized Gaussian mixture plus periodic uniform/null extension.
 #[derive(Clone, Debug)]
 pub struct FrozenRelativePoseProposal {
     components: Vec<Gaussian>,
+    reciprocal_components: Vec<bool>,
     angular_length: f64,
     log_coordinate_scale: f64,
     box_lengths: Vec3,
@@ -329,6 +352,7 @@ impl FrozenRelativePoseProposal {
             });
         }
         Ok(Self {
+            reciprocal_components: vec![false; components.len()],
             components,
             angular_length,
             log_coordinate_scale: 3. * angular_length.ln(),
@@ -358,6 +382,8 @@ impl FrozenRelativePoseProposal {
         )
     }
 
+    /// Stored BASE Gaussian parameters and weights, not the virtual reciprocal
+    /// branches. Exporters must reject active reciprocity or preserve its envelope.
     pub fn component_parameters(&self) -> Vec<GaussianComponentParameters> {
         self.components
             .iter()
@@ -382,6 +408,7 @@ impl FrozenRelativePoseProposal {
         &self,
         parameters: Vec<GaussianComponentParameters>,
     ) -> Result<Self> {
+        self.require_base_only("Parameter replacement")?;
         ensure!(
             !self.periodic,
             "Parameter replacement currently requires an open proposal"
@@ -413,8 +440,51 @@ impl FrozenRelativePoseProposal {
         uniform_weight: f64,
         expected_shape_sha256: &str,
     ) -> Result<Self> {
-        let raw: RawModel =
-            serde_json::from_str(text).context("Read frozen Gaussian pose model")?;
+        Self::from_json_str_impl(
+            text,
+            box_lengths,
+            uniform_weight,
+            expected_shape_sha256,
+            true,
+        )
+    }
+
+    fn from_json_str_impl(
+        text: &str,
+        box_lengths: Vec3,
+        uniform_weight: f64,
+        expected_shape_sha256: &str,
+        periodic: bool,
+    ) -> Result<Self> {
+        let value: serde_json::Value =
+            serde_json::from_str(text).context("Read frozen relative-pose model")?;
+        let is_envelope = |v: &serde_json::Value| {
+            v.get("base_model").is_some()
+                || v.get("reciprocal_components").is_some()
+                || v.get("schema").and_then(|s| s.as_str()) == Some("reciprocal-pose-mixture-v1")
+        };
+        let (raw, reciprocal_components): (RawModel, Option<Vec<bool>>) = if is_envelope(&value) {
+            ensure!(
+                !periodic,
+                "Reciprocal pose envelopes require an open proposal"
+            );
+            ensure!(
+                !value.get("base_model").is_some_and(is_envelope),
+                "Nested reciprocal pose envelopes are unsupported"
+            );
+            let envelope: RawReciprocalModel =
+                serde_json::from_str(text).context("Read reciprocal pose envelope")?;
+            ensure!(
+                envelope.schema == "reciprocal-pose-mixture-v1",
+                "Unsupported reciprocal pose schema"
+            );
+            (envelope.base_model, Some(envelope.reciprocal_components))
+        } else {
+            (
+                serde_json::from_str(text).context("Read frozen Gaussian pose model")?,
+                None,
+            )
+        };
         ensure!(
             raw.coordinate_convention == "anchor-body-relative",
             "Model coordinate_convention must be anchor-body-relative"
@@ -443,6 +513,11 @@ impl FrozenRelativePoseProposal {
         ensure!(
             count > 0 && raw.means.len() == count,
             "One mean is required per nonempty component"
+        );
+        let reciprocal_components = reciprocal_components.unwrap_or_else(|| vec![false; count]);
+        ensure!(
+            reciprocal_components.len() == count,
+            "One reciprocal flag is required per base component"
         );
         if let Some(dfs) = &raw.dfs {
             ensure!(
@@ -478,6 +553,13 @@ impl FrozenRelativePoseProposal {
         for w in &mut weights {
             *w /= weight_sum;
         }
+        ensure!(
+            weights
+                .iter()
+                .zip(&reciprocal_components)
+                .all(|(w, flag)| !flag || w / 2. > 0.),
+            "Unrepresentable reciprocal branch weight"
+        );
         let mut components = Vec::with_capacity(count);
         for (i, ((anchor, mean), covariance)) in raw
             .anchors
@@ -509,6 +591,7 @@ impl FrozenRelativePoseProposal {
         }
         Ok(Self {
             components,
+            reciprocal_components,
             angular_length: raw.angular_length,
             log_coordinate_scale: 3.0 * raw.angular_length.ln(),
             box_lengths,
@@ -521,7 +604,7 @@ impl FrozenRelativePoseProposal {
                 (-uniform_weight).ln_1p()
             },
             shape_sha256: raw.shape_sha256,
-            periodic: true,
+            periodic,
         })
     }
 
@@ -533,14 +616,13 @@ impl FrozenRelativePoseProposal {
         uniform_weight: f64,
         expected_shape_sha256: &str,
     ) -> Result<Self> {
-        let mut result = Self::from_json_str(
+        Self::from_json_str_impl(
             text,
             uniform_cube_lengths,
             uniform_weight,
             expected_shape_sha256,
-        )?;
-        result.periodic = false;
-        Ok(result)
+            false,
+        )
     }
 
     pub fn is_periodic(&self) -> bool {
@@ -552,6 +634,7 @@ impl FrozenRelativePoseProposal {
 
     /// A fresh immutable mixture, shifting each mean by its original Cholesky L times offset.
     pub fn with_whitened_mean_offsets(&self, offsets: &[[f64; 6]]) -> Result<Self> {
+        self.require_base_only("Whitened mean offsets")?;
         ensure!(
             offsets.len() == self.components.len(),
             "One mean offset required per component"
@@ -575,7 +658,8 @@ impl FrozenRelativePoseProposal {
         Ok(result)
     }
 
-    /// Standardized component residual; pi-chart seams and numerical overflow return None.
+    /// Standardized BASE Gaussian residual; this does not apply reciprocal parity.
+    /// Pi-chart seams and numerical overflow return None.
     pub fn component_residual(
         &self,
         relative_t: Vec3,
@@ -604,9 +688,51 @@ impl FrozenRelativePoseProposal {
     pub fn component_count(&self) -> usize {
         self.components.len()
     }
-    /// Fixed dictionary probabilities for auxiliary component-label births.
+    /// Stored BASE Gaussian probabilities. Use virtual_branches for reciprocal labels.
     pub fn component_weights(&self) -> Vec<f64> {
         self.components.iter().map(|c| c.weight).collect()
+    }
+
+    pub fn has_reciprocal_components(&self) -> bool {
+        self.reciprocal_components.iter().any(|flag| *flag)
+    }
+
+    pub fn reciprocal_components(&self) -> Vec<bool> {
+        self.reciprocal_components.clone()
+    }
+
+    /// Branch order is base component order, false then true for a split component.
+    pub fn virtual_branches(&self) -> Vec<RelativePoseBranch> {
+        let mut branches = Vec::with_capacity(self.components.len() * 2);
+        for (component_index, component) in self.components.iter().enumerate() {
+            let split = self.reciprocal_components[component_index];
+            let weight = if split {
+                component.weight / 2.
+            } else {
+                component.weight
+            };
+            branches.push(RelativePoseBranch {
+                component_index,
+                inverted: false,
+                weight,
+            });
+            if split {
+                branches.push(RelativePoseBranch {
+                    component_index,
+                    inverted: true,
+                    weight,
+                });
+            }
+        }
+        branches
+    }
+
+    fn require_base_only(&self, operation: &str) -> Result<()> {
+        ensure!(
+            !self.has_reciprocal_components(),
+            "{operation} does not support active reciprocal components"
+        );
+        Ok(())
     }
 
     /// Append one normalized Gaussian chart at every current memory pose.
@@ -622,6 +748,7 @@ impl FrozenRelativePoseProposal {
         translation_std: f64,
         small_angle_std_degrees: f64,
     ) -> Result<Self> {
+        self.require_base_only("Contact-memory components")?;
         ensure!(
             !poses.is_empty(),
             "Contact-memory dictionary cannot be empty"
@@ -671,6 +798,7 @@ impl FrozenRelativePoseProposal {
                 weight: memory_weight,
                 log_weight: memory_weight.ln(),
             });
+            result.reciprocal_components.push(false);
         }
         Ok(result)
     }
@@ -680,6 +808,7 @@ impl FrozenRelativePoseProposal {
     /// An empty subset uses the same defensive uniform cube; the full subset is
     /// returned unchanged so control runs retain bitwise identical proposal draws.
     pub fn weighted_subset(&self, labels: &[usize]) -> Result<Self> {
+        self.require_base_only("Weighted atlas subsets")?;
         ensure!(
             !self.periodic,
             "Weighted atlas masks require an open proposal"
@@ -707,12 +836,14 @@ impl FrozenRelativePoseProposal {
                 c
             })
             .collect();
+        result.reciprocal_components = vec![false; result.components.len()];
         Ok(result)
     }
 
     /// Ordered active components with replacement, each with weight 1/K.
     /// Duplicate labels are distinct auxiliary slots; never sort or merge them.
     pub fn selected_components(&self, labels: &[usize]) -> Result<Self> {
+        self.require_base_only("Selected atlas components")?;
         ensure!(
             !labels.is_empty() && labels.iter().all(|&i| i < self.components.len()),
             "Invalid active component labels"
@@ -728,6 +859,7 @@ impl FrozenRelativePoseProposal {
                 component
             })
             .collect();
+        result.reciprocal_components = vec![false; result.components.len()];
         Ok(result)
     }
     pub fn shape_sha256(&self) -> &str {
@@ -741,26 +873,55 @@ impl FrozenRelativePoseProposal {
     }
 
     fn relative_log_density_unchecked(&self, position: Vec3, orientation: Mat3) -> f64 {
+        let inverse = self.has_reciprocal_components().then(|| {
+            let r = transpose(orientation);
+            (matvec(r, position).map(|x| -x), r)
+        });
         let mut total = f64::NEG_INFINITY;
-        for component in &self.components {
-            let Some(c) = cayley_inverse(matmul(orientation, transpose(component.anchor_rotation)))
-            else {
-                continue;
+        for (index, component) in self.components.iter().enumerate() {
+            let split = self.reciprocal_components[index];
+            let log_weight = if split {
+                component.log_weight - 2_f64.ln()
+            } else {
+                component.log_weight
             };
-            let latent: Vec6 = std::array::from_fn(|i| {
-                if i < 3 {
-                    position[i] - component.anchor_position[i]
-                } else {
-                    self.angular_length * c[i - 3]
-                }
-            });
-            let gaussian = component.log_density(latent);
             total = log_add(
                 total,
-                component.log_weight + gaussian + self.log_coordinate_scale - log_haar_jacobian(c),
+                self.component_log_density(component, position, orientation, log_weight),
             );
+            if split {
+                // Inversion preserves d^3t dHaar(R); no extra Jacobian or
+                // Gaussian approximation to its nonlinear translation is used.
+                let (inverse_t, inverse_r) = inverse.expect("reciprocal component has inverse");
+                total = log_add(
+                    total,
+                    self.component_log_density(component, inverse_t, inverse_r, log_weight),
+                );
+            }
         }
         total
+    }
+
+    fn component_log_density(
+        &self,
+        component: &Gaussian,
+        position: Vec3,
+        orientation: Mat3,
+        log_weight: f64,
+    ) -> f64 {
+        let Some(c) = cayley_inverse(matmul(orientation, transpose(component.anchor_rotation)))
+        else {
+            return f64::NEG_INFINITY;
+        };
+        let latent: Vec6 = std::array::from_fn(|i| {
+            if i < 3 {
+                position[i] - component.anchor_position[i]
+            } else {
+                self.angular_length * c[i - 3]
+            }
+        });
+        let gaussian = component.log_density(latent);
+        log_weight + gaussian + self.log_coordinate_scale - log_haar_jacobian(c)
     }
 
     /// Learned G alone in anchor-body relative coordinates, before the box null.
@@ -838,6 +999,7 @@ impl FrozenRelativePoseProposal {
             new_log_density: None,
             log_reverse_forward: None,
             component_index: None,
+            component_inverted: None,
         };
         let candidate = match branch {
             ProposalBranch::Uniform => {
@@ -871,16 +1033,28 @@ impl FrozenRelativePoseProposal {
                     }
                 }
                 outcome.component_index = Some(index);
+                // Preserve the exact legacy random stream when no component
+                // is reciprocal; only a selected split component needs a coin.
+                let inverted = self.reciprocal_components[index] && rng.random::<bool>();
+                if self.has_reciprocal_components() {
+                    outcome.component_inverted = Some(inverted);
+                }
                 let component = &self.components[index];
                 let Some(latent) = component.draw(rng) else {
                     outcome.null_reason = Some("learned_numerical_null".into());
                     return Ok(outcome);
                 };
-                let relative_t = std::array::from_fn(|i| component.anchor_position[i] + latent[i]);
+                let mut relative_t =
+                    std::array::from_fn(|i| component.anchor_position[i] + latent[i]);
                 let c = std::array::from_fn(|i| latent[i + 3] / self.angular_length);
                 if !finite3(relative_t) || !finite3(c) {
                     outcome.null_reason = Some("learned_numerical_null".into());
                     return Ok(outcome);
+                }
+                let mut relative_r = matmul(cayley(c), component.anchor_rotation);
+                if inverted {
+                    relative_r = transpose(relative_r);
+                    relative_t = matvec(relative_r, relative_t).map(|x| -x);
                 }
                 let anchor_rotation = rotation(anchor.orientation);
                 let displacement = matvec(anchor_rotation, relative_t);
@@ -894,7 +1068,6 @@ impl FrozenRelativePoseProposal {
                     outcome.null_reason = Some("learned_outside_unique_image_cube".into());
                     return Ok(outcome);
                 }
-                let relative_r = matmul(cayley(c), component.anchor_rotation);
                 let orientation = quaternion(matmul(anchor_rotation, relative_r));
                 let raw_position = std::array::from_fn(|i| anchor.position[i] + displacement[i]);
                 if !finite3(raw_position) {

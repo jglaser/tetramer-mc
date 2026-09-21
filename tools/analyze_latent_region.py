@@ -9,8 +9,10 @@ import math
 import json
 from pathlib import Path
 import numpy as np
+from scipy.linalg import solve_triangular
+from scipy.spatial.transform import Rotation
 from scipy.special import logsumexp
-from prepare_smc_normalizer_atlas import Density,relative_poses,read,write,sha
+from prepare_smc_normalizer_atlas import Density,arrays,relative_poses,read,write,sha
 from analyze_basin_normalizers import moments,paired_noise
 from analyze_native_region_reference import native_q
 
@@ -50,11 +52,158 @@ def validate_manifest_q_window(population_manifest,region,window):
         assert type(population_manifest.get(field,True)) is bool
 
 
+IMPORTANCE_SCHEMA='importance-latent-region-normalizer-v1'
+GUIDE_FILE='importance-guide.json'
+DENSITY_MEASURE='Lebesgue measure in the original six-dimensional whitened region chart'
+
+
+def latent_shell_contains(radius,region):
+    """The target shell is open at a positive inner radius; the ball includes 0."""
+    inner=region.get('minimum_mahalanobis_radius',0.)
+    return (math.isfinite(radius) and (radius>inner if inner else radius>=0.)
+        and radius<=region['mahalanobis_radius'])
+
+
+class LatentImportanceGuide:
+    """Independent full proposal density in the original whitened d^6u measure.
+
+    Gaussian components are never truncated or renormalized on the target shell.
+    The only shell indicator multiplies the defensive uniform contribution.
+    """
+    def __init__(self,guide,region_sha256):
+        assert set(guide)=={'schema','region_sha256','defensive_uniform_shell_probability','gaussian_components'}
+        assert guide['schema']=='defensive-latent-shell-guide-v1'
+        assert guide['region_sha256']==region_sha256, 'Guide targets another frozen region'
+        assert isinstance(region_sha256,str) and len(region_sha256)==64 and all(c in '0123456789abcdefABCDEF' for c in region_sha256)
+        self.alpha=guide['defensive_uniform_shell_probability']
+        assert type(self.alpha) in (float,int) and math.isfinite(self.alpha) and 0<self.alpha<=1
+        components=guide['gaussian_components']
+        assert isinstance(components,list) and (components or self.alpha==1.)
+        self.count=len(components)
+        weights=[];means=[];lowers=[];normalizers=[]
+        for component in components:
+            assert set(component)=={'weight','mean','covariance'}
+            weight=component['weight']
+            assert type(weight) in (int,float) and math.isfinite(weight) and weight>0
+            assert isinstance(component['mean'],list) and all(type(x) in (int,float) for x in component['mean'])
+            assert isinstance(component['covariance'],list) and all(isinstance(row,list) and all(type(x) in (int,float) for x in row) for row in component['covariance'])
+            mean=np.asarray(component['mean'],dtype=float)
+            covariance=np.asarray(component['covariance'],dtype=float)
+            assert mean.shape==(6,) and covariance.shape==(6,6)
+            assert np.isfinite(mean).all() and np.isfinite(covariance).all()
+            assert np.all(np.abs(covariance-covariance.T)<=1e-12*(1+np.maximum(np.abs(covariance),np.abs(covariance.T))))
+            lower=np.linalg.cholesky(.5*(covariance+covariance.T))
+            normalizer=-3*np.log(2*np.pi)-np.log(np.diag(lower)).sum()
+            assert np.isfinite(lower).all() and math.isfinite(normalizer)
+            weights.append(weight);means.append(mean);lowers.append(lower);normalizers.append(normalizer)
+        total=sum(weights)
+        assert not weights or (math.isfinite(total) and total>0)
+        self.weights=np.asarray(weights)/total if weights else np.empty(0)
+        assert np.isfinite(self.weights).all() and np.all(self.weights>0)
+        self.means,self.lowers,self.normalizers=means,lowers,normalizers
+
+    def log_density(self,latents,shell_valid,log_volume):
+        latents=np.asarray(latents,dtype=float);shell_valid=np.asarray(shell_valid,dtype=bool)
+        assert latents.ndim==2 and latents.shape[1]==6 and shell_valid.shape==(len(latents),)
+        assert np.isfinite(latents).all() and math.isfinite(log_volume)
+        total=np.where(shell_valid,math.log(self.alpha)-log_volume,-np.inf)
+        if self.alpha<1.:
+            gaussian=[]
+            for weight,mean,lower,normalizer in zip(self.weights,self.means,self.lowers,self.normalizers):
+                residual=solve_triangular(lower,(latents-mean).T,lower=True).T
+                gaussian.append(math.log(weight)+normalizer-.5*np.einsum('ij,ij->i',residual,residual))
+            total=np.logaddexp(total,math.log1p(-self.alpha)+logsumexp(gaussian,axis=0))
+        return total
+
+
+def importance_guide_binding(root,manifest,region):
+    digest=manifest['archive_sha256'].get(GUIDE_FILE)
+    if digest is None:
+        assert 'importance_guide_sha256' not in manifest, 'Unarchived importance guide'
+        assert manifest.get('schema')!='importance-latent-region-campaign-v1', 'Importance campaign has no archived guide'
+        return None,None
+    assert manifest['schema']=='importance-latent-region-campaign-v1', 'Guide requires an explicit importance campaign'
+    assert manifest['importance_guide_sha256']==digest
+    path=root/'provenance'/GUIDE_FILE
+    assert sha(path)==digest
+    return LatentImportanceGuide(read(path),manifest['region_sha256']),digest
+
+
+def validate_population_guide(directory,population_manifest,guide,digest):
+    importance=population_manifest['schema']==IMPORTANCE_SCHEMA
+    assert importance==(guide is not None), 'Campaign and population sampling laws differ'
+    if not importance:
+        assert 'importance_guide_sha256' not in population_manifest
+        return False
+    assert sha(directory/'provenance'/GUIDE_FILE)==population_manifest['importance_guide_sha256']==digest
+    assert population_manifest['importance_uniform_probability']==guide.alpha
+    assert type(population_manifest['importance_component_count']) is int and population_manifest['importance_component_count']==guide.count
+    assert population_manifest['proposal_density_measure']==DENSITY_MEASURE
+    return True
+
+
+def audit_importance_rows(rows,region,guide,chart):
+    """Reconstruct every actual latent point, shell flag, Jacobian and full q."""
+    assert len(chart.weights)==1 and not chart.inverted.any(), 'Region chart must be a single unwrapped Gaussian'
+    for row in rows:
+        assert all(type(row[key]) is bool for key in ('shell_valid','capture_valid','hard_valid','region_valid'))
+        assert abs(np.linalg.norm(row['pose']['orientation'])-1.)<1e-8
+    poses=relative_poses([row['pose'] for row in rows],region['fixed_neighbor'])
+    translation,_,rotation=arrays(poses)
+    anchor=chart.anchors[0]
+    quaternion=Rotation.from_matrix(rotation@np.asarray(anchor['rotation']).T).as_quat()
+    assert np.all(quaternion[:,3]!=0.), 'A chart inverse failure is an error, not a rejected draw'
+    cayley=quaternion[:,:3]/quaternion[:,3,None]
+    coordinates=np.column_stack((translation-anchor['position'],chart.ell*cayley))
+    reconstructed=solve_triangular(chart.lower[0],(coordinates-chart.mean[0]).T,lower=True).T
+    latent=np.asarray([row['latent'] for row in rows],dtype=float)
+    assert latent.shape==(len(rows),6) and np.isfinite(latent).all() and np.isfinite(reconstructed).all()
+    latent_error=float(np.max(np.abs(latent-reconstructed)))
+    assert latent_error<2e-8, 'Saved latent vector does not reconstruct the saved physical pose'
+    radii=np.linalg.norm(latent,axis=1)
+    # Radius is logged by the draw, independently of the chart backmap. Allow
+    # roundoff between Euclidean norm implementations, never a target-size cap.
+    for row,radius,actual in zip(rows,radii,reconstructed):
+        assert math.isfinite(row['latent_radius']) and abs(row['latent_radius']-radius)<2e-8
+        backmapped=np.asarray(row['backmapped_latent'])
+        assert backmapped.shape==(6,) and np.max(np.abs(backmapped-actual))<2e-8
+        assert abs(row['backmapped_radius']-np.linalg.norm(actual))<2e-8
+    shell=np.asarray([latent_shell_contains(row['latent_radius'],region) for row in rows])
+    assert all(type(row['shell_valid']) is bool and row['shell_valid']==inside for row,inside in zip(rows,shell)), 'Wrong saved shell indicator'
+    independent_logj=chart.logdet[0]-3*np.log(chart.ell)-2*np.log(np.pi)-2*np.log1p(np.einsum('ij,ij->i',cayley,cayley))
+    jacobian_error=float(np.max(np.abs(independent_logj-[row['log_physical_jacobian'] for row in rows])))
+    assert math.isfinite(jacobian_error) and jacobian_error<2e-8
+    expected=guide.log_density(latent,shell,shell_log_volume(region))
+    recorded=np.asarray([row['log_proposal_density'] for row in rows],dtype=float)
+    errors=np.abs(expected-recorded)
+    assert np.isfinite(recorded).all() and np.isfinite(errors).all() and np.max(errors)<2e-8, 'Full defensive mixture density differs'
+    counts={'uniform-shell':0,'gaussian':0};component_counts=[0]*guide.count
+    for row,inside in zip(rows,shell):
+        branch,index=row['proposal_branch'],row['proposal_component']
+        assert branch in counts
+        counts[branch]+=1
+        if branch=='uniform-shell':
+            assert index is None and inside, 'A uniform-shell draw lies outside its support'
+        else:
+            assert guide.alpha<1. and type(index) is int and 0<=index<guide.count, 'Invalid Gaussian branch label'
+            component_counts[index]+=1
+        if not inside:
+            assert row['log_importance_weight'] is None and row['log_hard_weight'] is None and not row['clouds'], 'Out-of-shell draw was conditioned away or assigned nonzero weight'
+    return dict(draws=len(rows),shell_rejected=int((~shell).sum()),branch_counts=counts,
+        gaussian_component_counts=component_counts,maximum_log_proposal_density_error=float(np.max(errors)),
+        maximum_latent_vector_reconstruction_error=latent_error,maximum_log_jacobian_error=jacobian_error,
+        scope='Every unconditional draw is retained. Branch labels are checked against the frozen law and support; random numbers are not regenerated. Full q includes all untruncated Gaussians, regardless of the selected branch.')
+
+
 def analyze(root):
     manifest=read(root/"manifest.json");region=read(root/"provenance/region.json")
     for name,digest in manifest['archive_sha256'].items():
         assert sha(root/'provenance'/name)==digest, f'Changed archived input: {name}'
     assert sha(root/'provenance/region.json')==manifest['region_sha256']
+    guide,guide_sha256=importance_guide_binding(root,manifest,region)
+    importance_audits=[]
+    if guide is not None:
+        assert len(manifest['jobs'])==len({j['seed'] for j in manifest['jobs']})>0, 'Independent importance populations require distinct seeds'
     all_logs=[];all_hard=[];all_pairs=[];populations=[];cpu=0.;backmap=0.;density_error=0.;audited_poses=0
     chart=Density(region["gaussian_chart"])
     log_volume=shell_log_volume(region)
@@ -83,7 +232,8 @@ def analyze(root):
         for name,field in [('input-config.json','config_sha256'),('region.json','region_sha256'),
                            ('shape.json','shape_sha256'),('source-bundle.json','source_bundle_sha256')]:
             assert sha(directory/'provenance'/name)==summary['manifest'][field]
-        extended=summary['manifest']['schema']=='uniform-latent-region-normalizer-v2'
+        importance=validate_population_guide(directory,summary['manifest'],guide,guide_sha256)
+        extended=summary['manifest']['schema']=='uniform-latent-region-normalizer-v2' or importance
         if not window['lower_inclusive'] or not window['upper_inclusive']:
             assert extended, 'Open q boundaries require the extended manifest'
         sample_hash=sha(directory/'samples.jsonl')
@@ -98,10 +248,15 @@ def analyze(root):
         with (directory/'samples.jsonl').open() as sample_file:
             rows=[json.loads(line) for line in sample_file]
         assert len(rows)==job["samples"] and [r["draw"] for r in rows]==list(range(job["samples"]))
+        if importance:
+            proposal_audit=audit_importance_rows(rows,region,guide,chart)
+            assert summary['shell_rejected']==proposal_audit['shell_rejected']
+            importance_audits.append(proposal_audit)
         logs=[];hard_logs=[];pairs=[]
         for r in rows:
-            valid=r["hard_valid"] and r["region_valid"]
-            assert inner*(1-1e-12)<=r["latent_radius"]<=region["mahalanobis_radius"]*(1+1e-12)
+            valid=r["hard_valid"] and r["region_valid"] and (not importance or r['shell_valid'])
+            if not importance:
+                assert inner*(1-1e-12)<=r["latent_radius"]<=region["mahalanobis_radius"]*(1+1e-12)
             assert r['region_valid']==original_q_contains(r['q'],window)
             if extended:
                 assert abs(native_q(region['physical_metric'],r['pose'])-r['q'])<2e-8
@@ -109,8 +264,10 @@ def analyze(root):
             if valid:
                 assert r['capture_valid'] and original_q_contains(r['q'],window)
                 assert len(r["clouds"])==2
-                p=[log_volume+r["log_physical_jacobian"]+c["log_weight"] for c in r["clouds"]]
-                assert abs(r['log_hard_weight']-log_volume-r['log_physical_jacobian'])<1e-10
+                geometric_weight=(r['log_physical_jacobian']-r['log_proposal_density'] if importance
+                    else log_volume+r['log_physical_jacobian'])
+                p=[geometric_weight+c["log_weight"] for c in r["clouds"]]
+                assert abs(r['log_hard_weight']-geometric_weight)<1e-10
                 for cloud in r['clouds']:
                     expected=summary['manifest']['activity']*cloud['lower_volume']+cloud['overlap_points']*math.log1p(summary['manifest']['activity']/summary['manifest']['lambda'])
                     assert abs(cloud['log_weight']-expected)<1e-10
@@ -118,13 +275,24 @@ def analyze(root):
                 logs.append(r["log_importance_weight"]);hard_logs.append(r["log_hard_weight"]);pairs.append(p)
             else:
                 assert r["log_importance_weight"] is None and not r["clouds"]
+                if importance:assert r['log_hard_weight'] is None
                 logs.append(-np.inf);hard_logs.append(-np.inf);pairs.append([-np.inf,-np.inf])
         estimate=moments(logs)
         recorded=summary["estimates"]["region"]["logQ"]
         assert recorded is None if estimate["logQ"] is None else abs(estimate["logQ"]-recorded)<1e-10
-        populations.append(dict(id=job["id"],seed=job["seed"],estimate=estimate,hard_region=moments(hard_logs),samples_sha256=sample_hash))
+        population=dict(id=job["id"],seed=job["seed"],estimate=estimate,hard_region=moments(hard_logs),samples_sha256=sample_hash)
+        if importance:
+            hard_estimate=population['hard_region']['logQ']
+            recorded_hard=summary['estimates']['hard_region']['logQ']
+            assert recorded_hard is None if hard_estimate is None else abs(hard_estimate-recorded_hard)<1e-10
+            population['importance_sampling_audit']=proposal_audit
+        populations.append(population)
         all_logs.extend(logs);all_hard.extend(hard_logs);all_pairs.extend(pairs);cpu+=summary["sampler_cpu_seconds"]
         backmap=max(backmap,summary["maximum_backmap_error"])
+        if importance:
+            audited_poses+=len(rows)
+            density_error=max(density_error,proposal_audit['maximum_log_jacobian_error'])
+            continue
         selected=rows if extended else [rows[i] for i in np.linspace(0,len(rows)-1,32,dtype=int)]
         audited_poses+=len(selected)
         poses=relative_poses([r["pose"] for r in selected],region["fixed_neighbor"])
@@ -151,13 +319,24 @@ def analyze(root):
         scope="ONLY the predeclared fixed ellipsoid or shell physical mass, not a global normalizer; no conditioning away invalid zeros")
     if any(field in region for field in ('minimum_original_q_inclusive','maximum_original_q_inclusive')):
         result['original_q_window']=dict(window,maximum=region.get('maximum_original_q'))
+    if guide is not None:
+        result['importance_sampling']=dict(guide_sha256=guide_sha256,
+            uniform_shell_probability=guide.alpha,gaussian_component_count=guide.count,
+            draws=len(all_logs),shell_rejected=sum(p['shell_rejected'] for p in importance_audits),
+            branch_counts={key:sum(p['branch_counts'][key] for p in importance_audits) for key in ('uniform-shell','gaussian')},
+            maximum_log_proposal_density_error=max(p['maximum_log_proposal_density_error'] for p in importance_audits),
+            maximum_latent_vector_reconstruction_error=max(p['maximum_latent_vector_reconstruction_error'] for p in importance_audits),
+            density_measure=DENSITY_MEASURE,
+            scope='Fixed frozen proposal: q=alpha*1_shell/V+(1-alpha)*untruncated Gaussian mixture. Physical weights use J/q and all outside-shell, hard-invalid or q-invalid draws remain zeros in the original attempted denominator. Independence from guide-construction data is a campaign requirement. No bound on mass outside the target shell.')
     out=root/"assessment";out.mkdir(exist_ok=True)
     write(out/"analysis.json",result)
     observed=(f"log Q = {estimate['logQ']:.6f}, ESS {estimate['ess']:.1f}, "
         f"largest contribution {estimate['max_fraction']:.2%}, observed relative SE {estimate['relative_se']:.2%}."
         if estimate["logQ"] is not None else "no nonzero observations: unresolved regional mass, not a physical zero or upper bound.")
+    sampling=('defensive-mixture six-dimensional draws (including outside-shell zeros)' if guide is not None
+        else 'uniform six-dimensional ball/shell draws')
     report=(f"# Direct integration of the frozen region\n\n"
-        f"{len(all_logs):,} unconditional uniform six-dimensional ball/shell draws; {observed}\n\n"
+        f"{len(all_logs):,} unconditional {sampling}; {observed}\n\n"
         f"Only the predeclared ellipsoid is integrated. This is not a global normalizer. "
         f"The region hash is `{manifest['region_sha256']}`. Invalid draws remain zeros.\n\n"
         f"Independent population log Q values: "+", ".join("unresolved" if p['estimate']['logQ'] is None else f"{p['estimate']['logQ']:.6f}" for p in populations)+".\n\n"

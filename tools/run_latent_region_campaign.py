@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run independent uniform-latent-ball/shell integrals of one immutable region."""
+"""Run independent fixed-region integrals, optionally using a frozen latent guide."""
 from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,6 +24,8 @@ def main():
     parser.add_argument("--config",type=Path,default=ROOT/"runs/basin-normalizer-importance-guided-16384-l64/provenance/config.json")
     parser.add_argument("--region",type=Path,default=ROOT/"runs/smc-normalizer-deep-far/site0/fixed-discovered-region.json")
     parser.add_argument("--binary",type=Path,default=ROOT/"target/release/latent-region-normalizer")
+    parser.add_argument("--importance-guide",type=Path,
+        help="Frozen normalized latent proposal; preserves the fixed region and retains outside draws as zeros")
     parser.add_argument("--samples",type=int,default=16384)
     parser.add_argument("--replicates",type=int,default=4)
     parser.add_argument("--workers",type=int,default=4)
@@ -45,6 +47,8 @@ def main():
              "analyze_basin_normalizers.py":Path(__file__).with_name("analyze_basin_normalizers.py"),
              "analyze_native_region_reference.py":Path(__file__).with_name("analyze_native_region_reference.py"),
              "analyze_latent_region_shells.py":Path(__file__).with_name("analyze_latent_region_shells.py")}
+    if args.importance_guide is not None:
+        sources["importance-guide.json"]=args.importance_guide
     for name,path in sources.items():
         shutil.copy2(path,archive/name)
     config=json.loads(args.config.read_text())
@@ -63,11 +67,17 @@ def main():
         archive_sha256={p.name:sha(p) for p in archive.iterdir()},
         source_inputs={name:str(path.resolve()) for name,path in sources.items()},
         scope="REGION ONLY. Uniform six-dimensional latent ball/shell integration of one frozen region with all prescribed physical neighbors. Independent fixed-N zeros retained; no model fitting or global mass inference.")
+    if args.importance_guide is not None:
+        manifest.update(schema="importance-latent-region-campaign-v1",
+            importance_guide_sha256=sha(archive/"importance-guide.json"),
+            scope="REGION ONLY. Frozen defensive latent importance proposal on the same physical region; full J/q weighting with all prescribed neighbors. Outside-shell and invalid draws remain zeros. No fitting during sampling or global mass inference.")
     write(out/"manifest.json",manifest)
     def execute(job):
         args_command=[str(archive/"latent-region-normalizer"),"--config",str(archive/"config.json"),
             "--region",str(archive/"region.json"),"--out",job["directory"],"--samples",str(job["samples"]),
             "--seed",str(job["seed"]),"--lambda-ratio",str(args.lambda_ratio),"--cloud-replicates",str(args.cloud_replicates)]
+        if args.importance_guide is not None:
+            args_command.extend(["--importance-guide",str(archive/"importance-guide.json")])
         with (out/f"{job['id']}.log").open("w") as f:
             result=subprocess.run(args_command,stdout=f,stderr=subprocess.STDOUT)
         status=dict(id=job["id"],returncode=result.returncode,completed_unix=time.time())

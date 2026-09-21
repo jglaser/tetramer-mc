@@ -112,6 +112,9 @@ def validate_campaign_jobs(manifest, status):
     elif schema == 'mobile-competing-atlas-benchmark-v1':
         assert manifest['atlas_variant'] in ('legacy', 'augmented')
         expected = {('competing', mode, replicate) for mode in ('c0', 'c09') for replicate in (0, 1)}
+    elif schema == 'mobile-reciprocal-atlas-benchmark-v1':
+        assert manifest['atlas_variant'] in ('legacy', 'reciprocal')
+        expected = {('competing', mode, replicate) for mode in ('c0', 'c09') for replicate in (0, 1)}
     else:
         raise AssertionError('Unrecognized mobile campaign schema')
     jobs = manifest['jobs']
@@ -256,6 +259,8 @@ def audit_densities(model, records, cfg, audit):
         return dict(global_density_records=0, full_mixture_checks=0, posterior_checks=0,
                     posterior_uniform_checks=0, map_checks=0)
     density = Density(model)
+    assert np.array_equal(density.base_indices, audit.base_indices)
+    assert np.array_equal(density.inverted, audit.inverted)
     old_g, _, old_logs = density.evaluate([r['old_relative'] for r in records])
     new_g, _, new_logs = density.evaluate([r['new_relative'] for r in records])
     log_weights = np.log(density.weights)
@@ -270,6 +275,7 @@ def audit_densities(model, records, cfg, audit):
                 continue
             posterior.append(k)
             a, b = info['trace']['source'], info['trace']['target']
+            audit.check_branch_metadata(info, a, b)
             audit.close('full_old_gaussian', old_g[k], info['full_old_gaussian_log_density'])
             audit.close('full_new_gaussian', new_g[k], info['full_new_gaussian_log_density'])
             audit.close('source_posterior', old_logs[k, a]-old_g[k], info['source_log_probability'])
@@ -282,6 +288,11 @@ def audit_densities(model, records, cfg, audit):
         else:
             assert record['kernel'] == 'full-mixture-capture'
             captures += 1
+            if density.inverted.any() and info.get('branch') == 'learned':
+                base, inverted = info.get('component_index'), info.get('component_inverted')
+                assert type(base) is int and type(inverted) is bool, 'Missing reciprocal capture branch metadata'
+                matches = np.flatnonzero((density.base_indices == base) & (density.inverted == inverted))
+                assert len(matches) == 1, 'Invalid reciprocal capture base/branch combination'
             lengths = cfg['uniform_proposal_cube_lengths']
             before = full_capture_log_density(old_g[k], record['old'], lengths, cfg['learned_uniform_weight'])
             after = full_capture_log_density(new_g[k], record['new'], lengths, cfg['learned_uniform_weight'])

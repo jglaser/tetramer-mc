@@ -33,6 +33,7 @@ struct Fixture {
     config: Value,
     tree: SphereTree,
     model: FrozenRelativePoseProposal,
+    reciprocal_flags: Vec<bool>,
 }
 impl Fixture {
     fn new(label: &str) -> Result<Self> {
@@ -87,7 +88,23 @@ impl Fixture {
             config,
             tree,
             model,
+            reciprocal_flags: vec![false; 2],
         })
+    }
+    fn enable_reciprocal(&mut self, flags: Vec<bool>) -> Result<()> {
+        let base: Value = serde_json::from_slice(&fs::read(self.root.join("model.json"))?)?;
+        assert_eq!(flags.len(), base["weights"].as_array().unwrap().len());
+        let wrapped = json!({"schema":"reciprocal-pose-mixture-v1", "base_model":base,
+            "reciprocal_components":flags});
+        fs::write(self.root.join("model.json"), wrapped.to_string())?;
+        self.model = FrozenRelativePoseProposal::from_json_str_open(
+            &wrapped.to_string(),
+            [2. * (WALL + CORE); 3],
+            0.2,
+            &hash_file(&self.root.join("shape.json"))?,
+        )?;
+        self.reciprocal_flags = flags;
+        Ok(())
     }
     fn save_config(&self) -> Result<()> {
         fs::write(self.root.join("config.json"), self.config.to_string())?;
@@ -158,11 +175,48 @@ fn assert_pose_near(actual: Pose, expected: Pose) {
     );
 }
 
-fn involution(
-    model: &FrozenRelativePoseProposal,
-    correlation: f64,
-) -> Result<FixedBasinInvolution> {
-    let weights = model.component_weights();
+// Independent test construction of virtual labels, rather than calling the
+// production DockingProposal wrapper or trusting its virtual-branch table.
+fn branches(fixture: &Fixture) -> Vec<(usize, bool, f64)> {
+    fixture
+        .model
+        .component_weights()
+        .into_iter()
+        .zip(&fixture.reciprocal_flags)
+        .enumerate()
+        .flat_map(|(base, (weight, reciprocal))| {
+            if *reciprocal {
+                vec![(base, false, weight / 2.), (base, true, weight / 2.)]
+            } else {
+                vec![(base, false, weight)]
+            }
+        })
+        .collect()
+}
+
+fn reciprocal_pose(value: Pose) -> Pose {
+    // Matrix inversion is intentionally separate from invert_relative_pose,
+    // used by the production proposal implementation.
+    let inverse_rotation = transpose(rotation(value.orientation));
+    Pose {
+        position: scale(matvec(inverse_rotation, value.position), -1.),
+        orientation: quaternion(inverse_rotation),
+    }
+}
+
+fn involution(fixture: &Fixture, correlation: f64) -> Result<FixedBasinInvolution> {
+    let model = &fixture.model;
+    let virtual_branches = branches(fixture);
+    let weights: Vec<_> = virtual_branches.iter().map(|b| b.2).collect();
+    let base = model.component_parameters();
+    let parameters = virtual_branches
+        .iter()
+        .map(|&(index, _, weight)| {
+            let mut parameter = base[index].clone();
+            parameter.weight = weight;
+            parameter
+        })
+        .collect();
     let pairs = (0..weights.len())
         .flat_map(|a| {
             let weights = &weights;
@@ -173,19 +227,62 @@ fn involution(
             })
         })
         .collect();
-    FixedBasinInvolution::new(
-        model.component_parameters(),
-        model.angular_length(),
-        correlation,
-        pairs,
-    )
+    FixedBasinInvolution::new(parameters, model.angular_length(), correlation, pairs)
 }
 
 fn replay(fixture: &Fixture, folder: &str, correlation: f64) -> Result<()> {
     let rows = fixture.moves(folder)?;
     assert_eq!(rows.len(), 3 * SWEEPS as usize);
     let mut poses: Vec<Pose> = serde_json::from_value(fixture.config["initial_poses"].clone())?;
-    let map = involution(&fixture.model, correlation)?;
+    let map = involution(fixture, correlation)?;
+    let virtual_branches = branches(fixture);
+    let reported_branches = fixture.model.virtual_branches();
+    assert_eq!(reported_branches.len(), virtual_branches.len());
+    for (actual, &(index, inverted, weight)) in reported_branches.iter().zip(&virtual_branches) {
+        assert_eq!(actual.component_index, index);
+        assert_eq!(actual.inverted, inverted);
+        assert_eq!(actual.weight, weight);
+    }
+    let base_components = fixture
+        .model
+        .component_parameters()
+        .into_iter()
+        .map(|mut parameter| {
+            parameter.weight = 1.;
+            FrozenRelativePoseProposal::from_components_open(
+                vec![parameter],
+                fixture.model.angular_length(),
+                fixture.model.box_lengths(),
+                fixture.model.uniform_weight(),
+                fixture.model.shape_sha256(),
+                fixture.model.shape_sha256(),
+            )
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let component_density = |label: usize, value: Pose| -> Result<f64> {
+        let (base, inverted, _) = virtual_branches[label];
+        let value = if inverted {
+            reciprocal_pose(value)
+        } else {
+            value
+        };
+        base_components[base].relative_log_density(value.position, rotation(value.orientation))
+    };
+    let full_density = |value: Pose| -> Result<f64> {
+        let logs = virtual_branches
+            .iter()
+            .enumerate()
+            .map(|(label, &(_, _, weight))| Ok(weight.ln() + component_density(label, value)?))
+            .collect::<Result<Vec<f64>>>()?;
+        let maximum = logs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        Ok(maximum
+            + logs
+                .iter()
+                .map(|value| (value - maximum).exp())
+                .sum::<f64>()
+                .ln())
+    };
+    let has_reciprocal = fixture.reciprocal_flags.iter().any(|&flag| flag);
     let mut posterior_attempts = [0_u64; 3];
     let mut posterior_accepted = [0_u64; 3];
     let mut anchor_pairs = [[0_u64; 3]; 3];
@@ -194,6 +291,9 @@ fn replay(fixture: &Fixture, folder: &str, correlation: f64) -> Result<()> {
     let mut posterior_uniforms = 0;
     let mut shielding_witnesses = 0;
     let mut largest_correction = 0_f64;
+    let mut inverse_sources = 0;
+    let mut inverse_targets = 0;
+    let mut inverse_captures = 0;
     for (index, sweep_rows) in rows.chunks_exact(3).enumerate() {
         let sweep = index as u64 + 1;
         let mut order = [0_usize, 1, 2];
@@ -253,21 +353,99 @@ fn replay(fixture: &Fixture, folder: &str, correlation: f64) -> Result<()> {
                 let anchor = poses[anchor.unwrap()];
                 let old_relative = relative(old, anchor);
                 let new_relative = relative(new, anchor);
-                let expected = fixture.model.relative_log_density(
-                    old_relative.position,
-                    rotation(old_relative.orientation),
-                )? - fixture.model.relative_log_density(
-                    new_relative.position,
-                    rotation(new_relative.orientation),
-                )?;
+                let old_g = full_density(old_relative)?;
+                let new_g = full_density(new_relative)?;
+                let expected = old_g - new_g;
                 assert!((correction - expected).abs() < 2e-9);
                 largest_correction = largest_correction.max(correction.abs());
                 let trace: BasinTrace = serde_json::from_value(info["trace"].clone())?;
                 let inverse: BasinTrace =
                     serde_json::from_value(info["step"]["inverse_trace"].clone())?;
-                let forward = map.apply(old_relative, &trace)?;
-                assert_pose_near(forward.pose, new_relative);
-                assert_pose_near(map.apply(new_relative, &inverse)?.pose, old_relative);
+                let (source_base, source_inverse, source_weight) = virtual_branches[trace.source];
+                let (target_base, target_inverse, target_weight) = virtual_branches[trace.target];
+                assert_eq!(inverse.source, trace.target);
+                assert_eq!(inverse.target, trace.source);
+                if has_reciprocal {
+                    assert_eq!(info["source_component_index"], source_base);
+                    assert_eq!(info["target_component_index"], target_base);
+                    assert_eq!(info["source_inverted"], source_inverse);
+                    assert_eq!(info["target_inverted"], target_inverse);
+                    inverse_sources += usize::from(source_inverse);
+                    inverse_targets += usize::from(target_inverse);
+                } else {
+                    for key in [
+                        "source_component_index",
+                        "target_component_index",
+                        "source_inverted",
+                        "target_inverted",
+                    ] {
+                        assert!(info.get(key).is_none(), "legacy serialization gained {key}");
+                    }
+                }
+                let input = if source_inverse {
+                    reciprocal_pose(old_relative)
+                } else {
+                    old_relative
+                };
+                let forward = map.apply(input, &trace)?;
+                let output = if target_inverse {
+                    reciprocal_pose(forward.pose)
+                } else {
+                    forward.pose
+                };
+                assert_pose_near(output, new_relative);
+                let reverse_input = if target_inverse {
+                    reciprocal_pose(new_relative)
+                } else {
+                    new_relative
+                };
+                let back = map.apply(reverse_input, &inverse)?;
+                let reverse_output = if source_inverse {
+                    reciprocal_pose(back.pose)
+                } else {
+                    back.pose
+                };
+                assert_pose_near(reverse_output, old_relative);
+                for (key, expected) in [
+                    ("log_extended_jacobian", forward.log_extended_jacobian),
+                    ("log_auxiliary_ratio", forward.log_auxiliary_ratio),
+                    ("log_correction", forward.log_correction),
+                ] {
+                    assert!((info["step"][key].as_f64().unwrap() - expected).abs() < 2e-9);
+                }
+                for (key, expected) in [
+                    ("source_latent", forward.source_latent),
+                    ("target_latent", forward.target_latent),
+                ] {
+                    let actual: [f64; 6] = serde_json::from_value(info["step"][key].clone())?;
+                    assert!(
+                        actual
+                            .iter()
+                            .zip(expected)
+                            .all(|(a, b)| (a - b).abs() < 2e-9)
+                    );
+                }
+                let source_log = component_density(trace.source, old_relative)?;
+                let target_log = component_density(trace.target, new_relative)?;
+                let source_probability = source_weight.ln() + source_log - old_g;
+                let reverse_probability = target_weight.ln() + target_log - new_g;
+                let label_correction = reverse_probability + source_weight.ln()
+                    - source_probability
+                    - target_weight.ln();
+                for (key, expected) in [
+                    ("selected_source_log_density", source_log),
+                    ("selected_target_log_density", target_log),
+                    ("full_old_gaussian_log_density", old_g),
+                    ("full_new_gaussian_log_density", new_g),
+                    ("source_log_probability", source_probability),
+                    ("inverse_source_log_probability", reverse_probability),
+                    ("label_log_reverse_forward", label_correction),
+                ] {
+                    assert!(
+                        (info[key].as_f64().unwrap() - expected).abs() < 2e-9,
+                        "{key}"
+                    );
+                }
                 assert!(
                     (info["expanded_log_reverse_forward"].as_f64().unwrap() - correction).abs()
                         < 2e-9
@@ -281,6 +459,15 @@ fn replay(fixture: &Fixture, folder: &str, correlation: f64) -> Result<()> {
                 let expected = fixture.model.log_density(&old, &anchor)?
                     - fixture.model.log_density(&new, &anchor)?;
                 assert!((correction - expected).abs() < 2e-9);
+                if has_reciprocal && info["branch"] == "learned" {
+                    let base = info["component_index"].as_u64().unwrap() as usize;
+                    let inverse = info["component_inverted"].as_bool().unwrap();
+                    assert!(base < fixture.reciprocal_flags.len());
+                    assert!(!inverse || fixture.reciprocal_flags[base]);
+                    inverse_captures += usize::from(inverse);
+                } else {
+                    assert!(info.get("component_inverted").is_none());
+                }
             } else {
                 assert_eq!(correction, 0.);
             }
@@ -385,6 +572,12 @@ fn replay(fixture: &Fixture, folder: &str, correlation: f64) -> Result<()> {
     assert!((0..3).all(|i| (0..3).all(|j| i == j || anchor_pairs[i][j] > 0)));
     assert!(captures > 20 && posterior_gaussians > 20 && posterior_uniforms > 10);
     assert!(largest_correction > 0.1);
+    if has_reciprocal {
+        assert!(inverse_sources > 0 && inverse_targets > 0 && inverse_captures > 0);
+        eprintln!(
+            "Reciprocal c={correlation}: inverted source/target/capture counts {inverse_sources}/{inverse_targets}/{inverse_captures}"
+        );
+    }
     assert!(
         shielding_witnesses > 0,
         "fixture must distinguish full spectator shielding from anchor-only depletion"
@@ -455,5 +648,54 @@ fn zero_posterior_probability_preserves_existing_physical_draws() -> Result<()> 
         row["proposal"].as_object_mut().unwrap().remove("kernel");
     }
     assert_eq!(absent_moves, zero_moves);
+    Ok(())
+}
+
+#[test]
+fn mixed_reciprocal_assembly_replays_virtual_traces_and_resumes_exactly() -> Result<()> {
+    let mut fixture = Fixture::new("reciprocal-replay")?;
+    fixture.enable_reciprocal(vec![true, false])?;
+    assert!(fixture.model.has_reciprocal_components());
+    for (label, correlation) in [("reciprocal-c0", 0.), ("reciprocal-c09", 0.9)] {
+        fixture.config["frozen_posterior"] = json!({"probability":0.5,"correlation":correlation});
+        fixture.save_config()?;
+        let summary = fixture.run(label, SWEEPS, None)?;
+        assert_eq!(summary["all_bodies_mobile"], true);
+        assert_eq!(
+            summary["counts"]["selected_body_updates_by_body"],
+            json!(vec![SWEEPS; 3])
+        );
+        replay(&fixture, label, correlation)?;
+        let partial = format!("{label}-part");
+        let resumed = format!("{label}-resumed");
+        fixture.run(&partial, 17, None)?;
+        fixture.run(&resumed, SWEEPS, Some(&partial))?;
+        assert_eq!(
+            fixture.read(label, "checkpoint.json")?,
+            fixture.read(&resumed, "checkpoint.json")?
+        );
+        assert_eq!(
+            &fixture.moves(label)?[17 * 3..],
+            fixture.moves(&resumed)?.as_slice()
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn active_reciprocal_model_rejects_adaptive_atlas_before_sampling() -> Result<()> {
+    let mut fixture = Fixture::new("reciprocal-adaptive-guard")?;
+    fixture.enable_reciprocal(vec![true, false])?;
+    fixture.config["atlas_transport"] = json!({"mean_gain":0.,"covariance_gain":0.,"weight_gain":0.,
+        "mean_noise":0.,"covariance_noise":0.,"weight_noise":0.,"initialization":"reference"});
+    fixture.save_config()?;
+    let error = fixture.run("forbidden", 1, None).unwrap_err();
+    assert!(
+        error.to_string().contains(
+            "Reciprocal contact proposals currently require immutable capture/posterior charts"
+        ),
+        "{error:#}"
+    );
+    assert!(!fixture.root.join("forbidden/moves.jsonl").exists());
     Ok(())
 }

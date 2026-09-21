@@ -107,11 +107,21 @@ first-attachment advantage. One augmented run detaches from its initial
 neighbor, attaches to the other and eventually regains the initial contact;
 other native-edge changes retain exclusion contact. This identifies an
 accessible route, not stationary efficiency or whole-basin equilibrium.
-Independent finite-region integration on the exact observed scaffold favors
-the specified native R4 region over competitor R5 by 16.51 kBT; the outer
-competitor shell supplies 75% of the latter's weight, and coverage outside
-R5 remains unresolved. An [exact reciprocal proposal representation](reciprocal-contact-proposal-design.md)
-is designed but not implemented.
+Independent finite-region integration on the exact observed scaffold now
+extends through competitor R12. Its measured native-R4/competitor-R12 log
+ratio is 15.33, but the two new outer shells have ESS only 6.69 and 3.01;
+their high concentration and all coverage outside R12 remain unresolved.
+The [outer-shell diagnostic](mobile-outer-importance-design.md) motivates a
+frozen defensive importance guide with exact weighting and independent
+fresh samples on these same regions. An [exact reciprocal proposal representation](reciprocal-contact-proposal-design.md)
+is implemented and reference-tested. Its eight-run control reaches native
+registry in all four reciprocal and three of four legacy preparations, with
+two body-0 registry excursions but no exclusion-contact loss or neighbor
+exchange. A return to an unregistered pair lies at geometric chart radius
+18.84, outside the present R12 integration; its other neighbor is mobile.
+Thus both domain coverage and stationary exchange remain unresolved. Both
+atlases remain native-informed; neither target weights nor new contact fits
+are supplied by symmetrizing the proposal.
 
 ## Earlier evidence and the coverage problems it revealed
 

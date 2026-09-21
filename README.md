@@ -113,6 +113,14 @@ A [three-neighborhood reference](docs/shoulder-guide-peak-references.md)
 also measures the guided maxima with exact overlap exclusions. Its finite
 union agrees with the guided estimates at about 3% observed reference
 uncertainty; a substantial outside contribution still needs a fresh control.
+A [calibrated contact atlas](docs/shoulder-contact-atlas.md) now measures the
+whole shoulder with both narrow and broad fitted components. The controls
+agree at about 2% observed error; the broad proposal improves importance-weight
+ESS per sampling CPU by 10.8× over the previous mixture. Its independent
+finite-mask checks and remaining prefix sensitivity are reported separately.
+A [complete native-cover pilot](docs/native-tail-complete-cover.md) reaches
+the old-chart tail directly, but its weight remains concentrated in rare
+poses and needs a larger independent reference.
 The [fixed-allocation MIS control](docs/deterministic-mixture-mis.md) combines
 fresh guide and geometric draws with one full proposal denominator. It retains
 the component estimates and uses stratified uncertainty and paired comparisons;

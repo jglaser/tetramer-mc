@@ -17,8 +17,8 @@ The four unchanged windows partition all captured poses:
 
 | Region | Original q | Current log Q estimates | Remaining qualification |
 | --- | --- | --- | --- |
-| Native | 0≤q≤1 | 35.77224, 35.83594 | Native outer-chart tail remains incompletely referenced. |
-| Shoulder | 1<q<2 | 25.00691, 25.23622 | Three inner neighborhoods calibrated; 26–30% of historical guided inner weight lies outside their union. |
+| Native | 0≤q≤1 | 35.77224, 35.83594 | Complete geometric tail pilot reaches old r>12, but one pose carries 70% of its tail estimate. |
+| Shoulder | 1<q<2 | 25.07718, 25.07058 | Fresh calibrated atlas gives about 2% observed error; narrow prefix sensitivity remains. |
 | Intermediate | 2≤q<5 | 16.69976, 16.77534 | Larger frozen-model repeats agree; positive remainder is less precise. |
 | Far | 5≤q<37 | 17.68457, 17.67871 | Repeat rises from pilot; matching totals hide differing regional contributions. |
 
@@ -29,29 +29,33 @@ density. Two proposal estimates of one region are controls; they are not
 added. Disjoint physical regions can be added in linear weight, never by
 averaging their log weights.
 
-The initial ledger is
-`runs/ab-region-weight-status-pilot-20260921`. The separately retained repeat
-ledger is `runs/ab-region-weight-status-repeat-20260921`. With the pilot far estimates,
-all 16 choices of one proposal control per region give
+The current ledger is
+`runs/ab-region-weight-status-calibrated-shoulder-20260921`. It replaces only
+the full-shoulder controls in the previous repeat ledger, after verifying
+the same physical configuration, shape, original windows and full sample
+counts. The independent native-tail pilot is a separate diagnostic, not an
+additional native contribution. All 16 choices of one proposal control per
+region give
 
 \[
 \log\widehat Q_{\rm native}
 -\log(\widehat Q_{\rm shoulder}+\widehat Q_{\rm intermediate}
-      +\widehat Q_{\rm far})=10.535\text{–}10.828.
+      +\widehat Q_{\rm far})=10.694\text{–}10.765.
 \]
 
 This is the numerical spread of ratios of existing point estimates,
 **not a confidence interval**. The corresponding observed other/native
-weight ratios are 1.98×10⁻⁵ to 2.66×10⁻⁵. The unresolved shoulder and native
+weight ratios are 2.11×10⁻⁵ to 2.27×10⁻⁵. The unresolved shoulder and native
 tails remain qualifications on this comparison. These numbers do not yet
 establish a converged global occupancy.
 
-Replacing only the far estimates by their larger-repeat results leaves
-the displayed ratio range unchanged at this precision, because the
-shoulder dominates the observed competing weight. This insensitivity is
-not a convergence test for either region. The larger far repeat specifically
-shows why small observed errors or matching whole-region totals can miss
-regional concentration.
+The separately preserved pilot and repeat ledgers gave the earlier envelope
+10.535–10.828. Replacing only their far estimates by the larger far repeat
+did not change that envelope at the displayed precision, because the
+shoulder dominates observed competing weight. The new shoulder controls
+narrow its numerical spread. Neither insensitivity to a small region nor
+agreement of two proposal totals is a convergence test; regional concentration
+and width/prefix controls remain necessary.
 
 The free-energy difference is per mobile tetramer conditioned on this
 specific fixed neighborhood. Both the tetramer's internal native geometry
@@ -77,7 +81,7 @@ kernel, not a bound on physical time or on an arbitrary unequilibrated
 starting pose.
 
 If the current weight ratios survive the remaining checks, even perfect
-entry from O could yield only about one native exit per 38,000–50,000
+entry from O could yield only about one native exit per 44,000–47,000
 attempted kernel applications under that equilibrium conditional average.
 Thus equal forward and reverse transition probabilities would be the wrong
 test of correct sampling. The equilibrium *fluxes* must agree. A useful
@@ -98,9 +102,9 @@ this event without discarding the rest of the shoulder.
 That [local calibration is now complete](inner-shoulder-local-reference.md):
 the direct reference assigned about 60 times the fresh weight to the
 radius-0.25 neighborhood. Independent uniform proposals reproduce the
-small-ball result. Most guided inner-shoulder weight remains outside
-radius 0.5, so no new full-shoulder estimate has been substituted in this
-ledger.
+small-ball result. Most historical guided inner-shoulder weight lies outside
+that single radius-0.5 ball, so the local result was never substituted for
+a whole-shoulder estimate.
 
 The [three-neighborhood control](shoulder-guide-peak-references.md) now
 adds independent references at both guided maxima. Its priority-disjoint
@@ -109,16 +113,34 @@ agreeing in scale with both guided estimates of that same union. Historical
 guided data place 26–30% of inner-shoulder weight outside all three balls;
 their outside estimates are log Q=23.33294 and 23.79311, with 8.58% and
 22.97% row errors. The fresh finite-union means and historical remainder
-are kept separate. A new complete-support shoulder measurement remains
-necessary; the whole-window values in the ledger are unchanged.
+remain separate.
+
+The [complete shoulder atlas](shoulder-contact-atlas.md) supplies the new
+whole-window entries above. It fits one Gaussian to each independently
+sampled radius-.5 neighborhood, retains the legacy mixture and complete
+geometric support, and evaluates all branches in the importance denominator.
+The width arms agree on the full shoulder, finite union, and directly sampled
+complement. The complement still supplies 25–27% of inner weight, with
+7.45% and 4.80% row errors. The broad arm's observed importance-weight ESS
+per sampling CPU is 10.8 times the earlier mixture guide; learning/calibration
+cost is excluded, and the full hybrid allocation also changed (model
+probability 0.75 to 0.99), so this is a comparison of whole proposal designs.
+The narrow arm's early-to-final prefix change remains
+3.15 estimated correlated difference errors. This is substantial integration
+progress, without a claim of full convergence or trajectory mixing.
 
 The [native uniform references](native-ab-uniform-tail-reference.md)
 reproduce the wider guide in the 8–12 shell. Their 5–8 confirmation agrees
 in scale but still has appreciable Poisson noise and weight concentration.
-No independent reference yet controls the old-chart region beyond 12.
-The full native target is compact; a complete geometric cover with that
-reporting mask is a possible check. Neither small observed tail fractions
-nor finite geometric support bound its physical statistical weight.
+The new [complete native-cover pilot](native-tail-complete-cover.md) directly
+measures the region beyond 12: log Q=25.47842 with 71.5% row error, 379
+positive poses but only 1.95 importance-weight ESS. It establishes usable
+geometric coverage, not controlled tail weight. Its observed tail/full ratios
+are about 3.2–3.4×10⁻⁵; neither those point estimates nor finite support bound
+the physical tail. The pilot also fails to recover the targeted 8–12
+reference (80.3% low, with only 11 positive rows and ESS 2.25) and undersamples
+the native core. It cannot replace the previous full-native or finite-shell estimates. A larger
+independent complete-cover repeat is the next inexpensive reference check.
 
 The [complete-far atlas](far-contact-atlas.md) and
 [intermediate repeat](contact-atlas-repeat.md) address other disjoint

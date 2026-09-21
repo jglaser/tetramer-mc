@@ -7,10 +7,11 @@ use crate::{
     overlap_weight::{self, OverlapEnvelope},
     proposal::FrozenRelativePoseProposal,
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
+    spherical::Container,
 };
 use anyhow::{Context, Result, ensure};
 use rand::{SeedableRng, rngs::StdRng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -36,6 +37,13 @@ pub struct NormalizerOptions {
     pub proposal_anchor_index: Option<usize>,
     pub cloud_replicates: usize,
     pub activity: Option<f64>,
+}
+
+/// A protein-only wall. Ideal depletants continue to permeate the wall.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct NormalizerWall {
+    pub center: Vec3,
+    pub radius: f64,
 }
 
 #[derive(Clone, Deserialize)]
@@ -164,6 +172,16 @@ fn stream(seed: u64, draw: u64, cloud: usize, name: &str) -> StdRng {
 }
 
 pub fn run(options: NormalizerOptions) -> Result<Value> {
+    run_impl(options, None)
+}
+
+/// Integrate the full atomic-wall domain, with capture used only as a
+/// conservative proposal/support enclosure. A truncated enclosure is refused.
+pub fn run_with_wall(options: NormalizerOptions, wall: NormalizerWall) -> Result<Value> {
+    run_impl(options, Some(wall))
+}
+
+fn run_impl(options: NormalizerOptions, wall_spec: Option<NormalizerWall>) -> Result<Value> {
     ensure!(
         options.samples > 0 && options.cloud_replicates > 0,
         "Positive sample and cloud counts required"
@@ -205,6 +223,35 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
     let shape_raw = fs::read(&cfg.shape)?;
     let shape_sha = hash_bytes(&shape_raw);
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
+    let wall = if let Some(spec) = wall_spec {
+        ensure!(
+            spec.center.iter().all(|x| x.is_finite()),
+            "Invalid wall center"
+        );
+        let container = Container::new(spec.radius, &tree)?;
+        // For any atom, |body center - wall center| <= wall radius +
+        // |atom body-frame center|. The shape bound therefore encloses ALL
+        // feasible centers, even for offset or highly concave sphere unions.
+        let required = norm(sub(spec.center, cfg.capture_center)) + spec.radius + tree.bound;
+        let guard = 256. * f64::EPSILON * (1. + required);
+        ensure!(
+            required.is_finite() && cfg.capture_radius >= required + guard,
+            "Capture must enclose the full atomic-wall domain: radius >= {}",
+            required + guard
+        );
+        for (i, pose) in cfg.fixed_poses.iter().enumerate() {
+            ensure!(
+                container.contains(Pose {
+                    position: sub(pose.position, spec.center),
+                    ..*pose
+                }),
+                "Fixed neighbor {i} is outside atomic wall"
+            );
+        }
+        Some(container)
+    } else {
+        None
+    };
     let mut contact_shape = tree.shape.clone();
     for a in &mut contact_shape.atoms {
         a.radius += cfg.depletant_radius;
@@ -304,6 +351,19 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         manifest["virtual_component_count"] = json!(model.virtual_branches().len());
         manifest["reciprocal_components"] = json!(model.reciprocal_components());
     }
+    if let Some(spec) = wall_spec {
+        manifest["pose_proposal_schema"] = manifest["schema"].clone();
+        manifest["schema"] = json!(4);
+        manifest["atomic_wall"] = json!(spec);
+        manifest["bath_wall_permeable"] = json!(true);
+        manifest["shape_bound"] = json!(tree.bound);
+        manifest["target"] = json!(
+            "hard(x,S) atomic_wall(x) exp[z |E(x) intersect union E(S)|] with Lebesgue and normalized Haar measure; capture encloses all feasible centers"
+        );
+        manifest["partition"] = json!(
+            "q<=.8; .8<q<=1; 1<q<2; 2<=q<5; q>=5, each split by exclusion contact; exhaustive within the full atomic-wall domain"
+        );
+    }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
     let cpu_start = cpu_seconds();
@@ -333,6 +393,7 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
     let mut valid = 0u64;
     let mut capture_rejected = 0u64;
     let mut hard_rejected = 0u64;
+    let mut wall_rejected = 0u64;
     let mut numerical_nulls = 0u64;
     let mut raw_points = 0u64;
     let mut proposal_cpu = 0.;
@@ -343,7 +404,8 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         let before = cpu_seconds();
         let outcome = model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
         ensure!(
-            (!reciprocal && options.proposal_anchor_index.is_none()) || outcome.candidate.is_some(),
+            (!reciprocal && wall.is_none() && options.proposal_anchor_index.is_none())
+                || outcome.candidate.is_some(),
             "{} importance draw produced a numerical null: {:?}; stop instead of censoring",
             if reciprocal {
                 "Reciprocal"
@@ -370,6 +432,7 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         proposal_cpu += cpu_seconds() - before;
         let mut capture_valid = false;
         let mut hard_valid = false;
+        let mut wall_valid = false;
         let mut q = None;
         let mut contact = None;
         let mut region = None;
@@ -379,11 +442,19 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         if let Some(p) = candidate {
             let before = cpu_seconds();
             capture_valid = cfg.contains(p);
-            if capture_valid {
+            wall_valid = wall.as_ref().is_none_or(|container| {
+                container.contains(Pose {
+                    position: sub(p.position, wall_spec.unwrap().center),
+                    ..p
+                })
+            });
+            if capture_valid && wall_valid {
                 hard_valid = env.hard_valid(p);
             }
             if !capture_valid {
                 capture_rejected += 1;
+            } else if !wall_valid {
+                wall_rejected += 1;
             } else if !hard_valid {
                 hard_rejected += 1;
             }
@@ -436,12 +507,13 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         } else {
             numerical_nulls += 1;
         }
-        serde_json::to_writer(
-            &mut writer,
-            &json!({"draw":draw,"pose":candidate,"proposal":outcome,
+        let mut row = json!({"draw":draw,"pose":candidate,"proposal":outcome,
             "capture_valid":capture_valid,"hard_valid":hard_valid,"q":q,"depletion_contact":contact,"region":region,
-            "log_proposal_density":log_proposal,"log_importance_weight":log_weight,"log_hard_weight":log_hard,"clouds":clouds}),
-        )?;
+            "log_proposal_density":log_proposal,"log_importance_weight":log_weight,"log_hard_weight":log_hard,"clouds":clouds});
+        if wall.is_some() {
+            row["wall_valid"] = json!(wall_valid);
+        }
+        serde_json::to_writer(&mut writer, &row)?;
         writer.write_all(b"\n")?;
         if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
             writer.flush()?;
@@ -457,11 +529,14 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
         .into_iter()
         .map(|(k, m)| (k, m.value(options.samples)))
         .collect();
-    let summary = json!({"complete":true,"samples":options.samples,"hard_valid":valid,"capture_rejected":capture_rejected,
+    let mut summary = json!({"complete":true,"samples":options.samples,"hard_valid":valid,"capture_rejected":capture_rejected,
         "hard_rejected":hard_rejected,"numerical_nulls":numerical_nulls,"raw_points":raw_points,"estimates":estimates,
         "sampler_cpu_seconds":cpu_seconds()-cpu_start,"wall_seconds":start.elapsed().as_secs_f64(),
         "cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"envelope_cpu_seconds":envelope_cpu,"cloud_cpu_seconds":cloud_cpu},
         "manifest":manifest});
+    if wall.is_some() {
+        summary["wall_rejected"] = json!(wall_rejected);
+    }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
 }

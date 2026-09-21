@@ -109,7 +109,50 @@ rows are reconstructed, including 162 invalid zeros and 17 inverse-branch
 proposals; the maximum full-density difference is 3.56e-15. This validates
 the integration/auditor interface, not whole-domain protein coverage.
 
+Highly elongated proposal Gaussians also require auditing the **effective
+factor used to draw them**. In the full D170 control, covariance condition
+numbers near 10⁹ produced about 10⁻⁷ differences in log proposal density
+between scalar Cholesky and NumPy/LAPACK. Both factors were backward-stable,
+but represented slightly different floating-point Gaussian laws. The original
+audit stopped at its unchanged 2×10⁻⁸ tolerance; saved physical weights must
+not be replaced by weights from the other law.
+
+`normalizer_proposal_density.py` reconstructs the source-bound scalar factor
+used for both draws and densities, checks its covariance residual with exact
+rational arithmetic against bounds derived from the individual floating-point
+operations, and retains independent SciPy pose geometry and density evaluation.
+This correction applies to active reciprocal normalizer models, whose factors
+are retained directly. Legacy covariance-replacement paths are separate.
+The [saved-row diagnosis](../runs/mobile-full-capture-density-math-20260921/analysis.json)
+quantifies the difference between the two factors. It changes the observer,
+not the proposal, target, samples, weights or acceptance rule.
+
 ## Running
+
+For the full spherical vessel, `--wall-radius R --wall-center x y z`
+enables the same atomic protein-wall predicate used by assembly. Every atom
+sphere must fit; a conservative body bound is only an early acceptance test.
+The ideal bath remains unbounded and permeates the protein wall. Thus there
+is no extra solvent-wall overlap or clipped-cloud term in the estimator.
+
+In this mode, the config's capture ball must enclose **all** feasible body
+centers. The implementation requires its radius to be at least
+`distance(capture_center, wall_center) + wall_radius + shape_bound`, with a
+floating-point guard. This sufficient enclosure also works for offset and
+concave sphere unions. A smaller capture, or a fixed neighbor outside the
+atomic wall, fails before output is created. The physical indicator is the
+full atomic wall; the enlarged capture is a proposal support enclosure.
+Changing the capture without specifying the wall would define a different
+target and is not an equivalent calculation.
+
+Wall populations use schema 4 and retain the underlying proposal schema.
+Every draw records `wall_valid`; rejected poses contribute zeros to the
+same unconditional denominator. The independent Python auditor reconstructs
+transformed atom spheres and verifies the enclosure, fixed scaffold and
+unchanged permeable bath. No-wall runs retain their earlier schemas and
+sampling laws. Sphere tests compare zero and positive activity integrals
+with independent radial quadrature and normalized Haar rotations; a dumbbell
+test checks wall-valid orientations beyond the conservative inner ball.
 
 ```bash
 cargo build --locked --release --bin basin-normalizer

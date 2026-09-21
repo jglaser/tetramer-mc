@@ -64,13 +64,16 @@ excursions, but it has not produced a neighbor exchange. Portable
 model with local moves, GCA and center shifts. Both pass short execution and
 trajectory-readback checks; their long-run assembly outcome is for measurement.
 
-The remaining thermodynamic scope is concrete: the
-[domain coverage review](mobile-domain-coverage.md) finds no whole-domain
-normalizer on the exact observed scaffold. Even the current 170 Å capture
-ball omits demonstrated wall-valid native placements. Also, the old q>1 label
-includes native sites absent from its original reference list. Existing finite
-region estimates must retain their definitions; a full assembly verdict needs
-explicit remainder coverage and a separate all-site registry classification.
+The [full D170 integration](mobile-full-capture-results.md) now finds a second
+cooperative native pocket on the exact observed scaffold. Its dominant saved
+poses register with both neighbors; they belonged to the old q>1 remainder
+because that score described only the original native site. However, total
+importance ESS is only 1.2–2.7, and both global proposal arms completely miss
+the independently measured original native R4. These are useful discoveries,
+not converged equilibrium occupancies. An independent regional reference for
+the new pocket is the next test. The [domain coverage review](mobile-domain-coverage.md)
+also identifies wall-valid native sites outside D170; full-vessel weights
+remain unresolved.
 
 The [regional weight ledger](ab-regional-weight-status.md) now combines
 independent native, shoulder, intermediate and far controls for the original

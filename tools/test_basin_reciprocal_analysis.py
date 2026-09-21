@@ -74,8 +74,8 @@ class ReciprocalBasinAudit(unittest.TestCase):
             covariances=[(lower@lower.T).tolist(), (np.diag([1.5, .7, 1.1, .6, .9, .8])**2).tolist()])
         model = dict(schema='reciprocal-pose-mixture-v1', base_model=base, reciprocal_components=[True, False])
         save(root/'provenance/model.json', model)
-        source = 'synthetic reviewed source\n'
-        save(root/'provenance/source-bundle.json', dict(files={'src/example.rs':dict(text=source, sha256=hashlib.sha256(source.encode()).hexdigest())}))
+        source = (Path(__file__).resolve().parents[1]/'src/proposal.rs').read_text()
+        save(root/'provenance/source-bundle.json', dict(files={'src/proposal.rs':dict(text=source, sha256=hashlib.sha256(source.encode()).hexdigest())}))
         manifest = dict(schema=3, proposal_anchor_index=selected, physical_fixed_neighbor_count=2,
             proposal_model_kind='reciprocal-pose-mixture-v1', base_component_count=2, virtual_component_count=3,
             reciprocal_components=[True, False], covariance_scale=1., uniform_probability=.2, activity=.4,
@@ -175,7 +175,7 @@ class ReciprocalBasinAudit(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);m,rows,job=self.fixture(root)
             source=root/'provenance/source-bundle.json';old=source.read_text();bad=json.loads(old)
-            bad['files']['src/example.rs']['text']+='changed';save(source,bad)
+            bad['files']['src/proposal.rs']['text']+='changed';save(source,bad)
             altered=dict(m,source_bundle_sha256=sha(source))
             with self.assertRaises(AssertionError):audit_pose_proposal(root,job,altered,rows)
             source.write_text(old)

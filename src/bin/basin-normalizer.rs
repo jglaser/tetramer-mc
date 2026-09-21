@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tetramer_mc::normalizer::{self, NormalizerOptions};
+use tetramer_mc::normalizer::{self, NormalizerOptions, NormalizerWall};
 
 #[derive(Parser)]
 #[command(
@@ -29,10 +29,22 @@ struct Cli {
     cloud_replicates: usize,
     #[arg(long)]
     activity: Option<f64>,
+    /// Integrate an atomic protein wall; the ideal bath permeates it. Capture
+    /// must enclose every feasible center (radius >= R_wall + shape bound).
+    #[arg(long)]
+    wall_radius: Option<f64>,
+    /// Wall center in laboratory coordinates (default: origin).
+    #[arg(
+        long,
+        num_args = 3,
+        allow_hyphen_values = true,
+        requires = "wall_radius"
+    )]
+    wall_center: Option<Vec<f64>>,
 }
 fn main() -> Result<()> {
     let c = Cli::parse();
-    let summary = normalizer::run(NormalizerOptions {
+    let options = NormalizerOptions {
         config: c.config,
         model: c.model,
         out: c.out,
@@ -43,7 +55,13 @@ fn main() -> Result<()> {
         proposal_anchor_index: c.proposal_anchor_index,
         cloud_replicates: c.cloud_replicates,
         activity: c.activity,
-    })?;
+    };
+    let summary = if let Some(radius) = c.wall_radius {
+        let center = c.wall_center.map_or([0.; 3], |v| [v[0], v[1], v[2]]);
+        normalizer::run_with_wall(options, NormalizerWall { center, radius })?
+    } else {
+        normalizer::run(options)?
+    };
     println!("{}", serde_json::to_string_pretty(&summary)?);
     Ok(())
 }

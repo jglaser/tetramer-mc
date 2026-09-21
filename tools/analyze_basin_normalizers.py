@@ -91,8 +91,10 @@ def audit_pose_proposal(root, job, manifest, rows):
     """
     from prepare_smc_normalizer_atlas import Density, relative_poses, unwrap_proposal_model
     from prepare_deep_far_normalizer_atlas import registration
-    schema = manifest['schema']
-    assert schema in (2, 3)
+    assert manifest['schema'] in (2, 3, 4)
+    schema = manifest.get('pose_proposal_schema', manifest['schema'])
+    assert schema in (1, 2, 3)
+    assert schema != 1 or manifest['schema'] == 4
     config=read(root/'config.json')
     raw_config=root/'provenance/input-config.json'
     model_path=root/'provenance/model.json'
@@ -107,7 +109,7 @@ def audit_pose_proposal(root, job, manifest, rows):
     index=manifest['proposal_anchor_index']
     assert index==job.get('proposal_anchor_index')
     assert index is None or type(index) is int
-    assert index is not None or schema == 3
+    assert index is not None or schema in (1, 3)
     assert index is None or 0<=index<len(config['fixed_poses'])
     assert manifest['physical_fixed_neighbor_count']==len(config['fixed_poses'])
     raw_model=read(model_path)
@@ -137,7 +139,11 @@ def audit_pose_proposal(root, job, manifest, rows):
     assert len(actual)==len(rows), 'Open selected-anchor proposal has no intentional null: numerical failures require diagnosis'
     assert actual, 'Positive fixed sample budget is required'
     poses=[r['pose'] for r in actual]
-    density = Density(model)
+    if schema == 3:
+        from normalizer_proposal_density import NormalizerProposalDensity
+        density = NormalizerProposalDensity(model, source_bundle=root/'provenance/source-bundle.json')
+    else:
+        density = Density(model)
     indices = [index] if index is not None else list(range(len(config['fixed_poses'])))
     assert indices
     log_gaussians = np.asarray([density.evaluate(relative_poses(poses,config['fixed_poses'][i]))[0]
@@ -216,7 +222,53 @@ def audit_pose_proposal(root, job, manifest, rows):
             virtual_component_count=len(flags)+sum(flags),reciprocal_components=flags,
             proposal_anchor_indices=indices,checked_proposal_labels=len(actual),proposal_label_counts=dict(label_counts),
             oracle='Independent exact reciprocal physical Gaussian sum, composed with each physical anchor, plus half-open lab cube/Haar; all selected anchors marginalized; no retry or valid-only normalization')
+        result['factor_audit']=dict(algorithm=density.algorithm_metadata,components=density.factor_diagnostics)
     return result
+
+
+def audit_wall_domain(root, manifest, rows, summary):
+    """Independent transformed-atom wall check; never clip the ideal bath."""
+    from scipy.spatial.transform import Rotation
+    assert manifest['schema'] == 4 and manifest['pose_proposal_schema'] in (1, 2, 3)
+    assert manifest['bath_wall_permeable'] is True
+    source = root/'provenance/source-bundle.json'
+    assert sha(source) == manifest['source_bundle_sha256']
+    for entry in read(source)['files'].values():
+        assert hashlib.sha256(entry['text'].encode()).hexdigest() == entry['sha256']
+    config = read(root/'config.json')
+    atoms = read(root/'provenance/shape.json')['atoms']
+    centers = np.asarray([a['center'] for a in atoms], float)
+    radii = np.asarray([a['radius'] for a in atoms], float)
+    bound = np.max(np.linalg.norm(centers, axis=1)+radii)
+    assert abs(manifest['shape_bound']-bound) < 2e-10
+    wall = manifest['atomic_wall'];center = np.asarray(wall['center'],float);radius = wall['radius']
+    assert center.shape == (3,) and np.isfinite(center).all()
+    assert math.isfinite(radius) and radius > 0 and np.all(radii <= radius)
+    required = np.linalg.norm(center-config['capture_center'])+radius+bound
+    assert config['capture_radius'] >= required+256*np.finfo(float).eps*(1+required)
+    def contains(pose):
+        q = np.asarray(pose['orientation'])
+        rotation = Rotation.from_quat(q[[1,2,3,0]]).as_matrix()
+        positions = centers@rotation.T+np.asarray(pose['position'])-center
+        return bool(np.all(np.sum(positions**2,axis=1) <= (radius-radii)**2))
+    for pose in config['fixed_poses']:
+        assert contains(pose), 'Fixed scaffold leaves the atomic wall'
+    wall_rejected=0
+    for row in rows:
+        assert row['pose'] is not None, 'Full-wall proposals must not censor numerical nulls'
+        valid=contains(row['pose'])
+        assert type(row['wall_valid']) is bool and row['wall_valid']==valid
+        if valid:
+            assert row['capture_valid'], 'Capture truncates a wall-valid pose'
+        else:
+            assert not row['hard_valid'] and row['log_importance_weight'] is None
+            assert row['log_hard_weight'] is None and row['q'] is None
+            assert row['region'] is None and row['depletion_contact'] is None and not row['clouds']
+            wall_rejected += int(row['capture_valid'])
+    assert summary['wall_rejected']==wall_rejected
+    return dict(checked_poses=len(rows),wall_rejected_inside_capture=wall_rejected,
+                atomic_wall=wall,bath_wall_permeable=True,
+                oracle='Direct transformed atomic sphere squared distances; complete capture enclosure checked independently; no bath-wall clipping')
 
 
 def audit_selected_anchor(root, job, manifest, rows):
@@ -229,8 +281,10 @@ def population(job):
     from prepare_smc_normalizer_atlas import unwrap_proposal_model
     root = Path(job['directory'])
     summary, manifest = read(root/'summary.json'), read(root/'manifest.json')
+    assert ('atomic_wall' in manifest) == (manifest['schema'] == 4), 'Atomic wall requires its explicit domain schema'
     _, flags = unwrap_proposal_model(read(root/'provenance/model.json'))
-    assert any(flags) == (manifest['schema'] == 3), 'Active reciprocal model and population schema disagree'
+    proposal_schema=manifest.get('pose_proposal_schema', manifest['schema'])
+    assert any(flags) == (proposal_schema == 3), 'Active reciprocal model and population schema disagree'
     assert summary['complete'] and manifest['seed'] == job['seed']
     assert summary['manifest']==manifest
     assert manifest['covariance_scale'] == job['covariance_std_scale']
@@ -238,9 +292,11 @@ def population(job):
     assert [r['draw'] for r in rows] == list(range(job['samples']))
     assert manifest['samples'] == len(rows) and manifest['cloud_replicates'] == 2
     proposal_audit=None
-    if manifest['schema'] in (2, 3):
+    if manifest['schema'] in (2, 3, 4):
         assert summary['numerical_nulls']==0 and all(r.get('pose') is not None for r in rows)
         proposal_audit=audit_pose_proposal(root,job,manifest,rows)
+        if manifest['schema'] == 4:
+            proposal_audit['wall_domain']=audit_wall_domain(root,manifest,rows,summary)
     else:
         assert manifest['schema']==1
         assert manifest.get('proposal_anchor_index') is None and job.get('proposal_anchor_index') is None
@@ -287,12 +343,23 @@ def population(job):
                 rows=rows)
 
 
-def analyze(root):
+def audit_campaign_domain(physical, population_manifest):
+    """An omitted wall CLI flag must not silently change the campaign target."""
+    has_wall = 'atomic_wall' in physical
+    assert (population_manifest['schema'] == 4) == has_wall, 'Campaign and population wall domains differ'
+    assert ('atomic_wall' in population_manifest) == has_wall
+    if has_wall:
+        assert physical['atomic_wall'] == population_manifest['atomic_wall']
+        assert physical['bath_wall_permeable'] is True
+        assert population_manifest['bath_wall_permeable'] is True
+
+
+def analyze(root, out=None):
     from prepare_smc_normalizer_atlas import unwrap_proposal_model
     manifest = read(root/'manifest.json')
     _, reciprocal_flags = unwrap_proposal_model(read(root/'provenance/model.json'))
     reciprocal = any(reciprocal_flags)
-    if manifest.get('proposal_anchor_index') is not None or reciprocal:
+    if manifest.get('proposal_anchor_index') is not None or reciprocal or manifest['physical'].get('atomic_wall'):
         for name,digest in manifest['archive_sha256'].items():
             assert sha(root/'provenance'/name)==digest, f'Frozen campaign input changed: {name}'
     complete, pending = [], []
@@ -302,19 +369,20 @@ def analyze(root):
     populations = [population(j) for j in complete]
     for p in populations:
         m = p['summary']['manifest']
+        audit_campaign_domain(manifest['physical'], m)
         assert m['model_sha256'] == manifest['archive_sha256']['model.json']
         assert m['config_sha256'] == manifest['archive_sha256']['config.json']
         assert m['shape_sha256'] == manifest['archive_sha256']['shape.json']
         assert m['executable_sha256'] == manifest['archive_sha256']['basin-normalizer']
         assert m['activity'] == manifest['physical']['activity']
         assert m.get('proposal_anchor_index')==manifest.get('proposal_anchor_index')
-        if m['schema'] in (2, 3):
+        if m['schema'] in (2, 3, 4):
             cfg=read(Path(p['job']['directory'])/'config.json')
             assert cfg['fixed_poses']==manifest['physical']['fixed_poses']
             assert cfg['capture_center']==manifest['physical']['capture_center']
             assert cfg['capture_radius']==manifest['physical']['capture_radius']
             assert cfg['depletant_radius']==manifest['physical']['depletant_radius']
-        if m['schema'] == 3:
+        if m['schema'] in (3, 4):
             assert m['uniform_probability'] == manifest['physical']['uniform_probability']
             assert m['physical_fixed_neighbor_count'] == len(manifest['physical']['fixed_poses'])
             if 'source-bundle.json' in manifest['archive_sha256']:
@@ -356,7 +424,12 @@ def analyze(root):
             sampler_cpu_seconds=sum(p['summary']['sampler_cpu_seconds'] for p in pops))
     for p in populations:
         p.pop('rows')
-    out = root/'assessment';out.mkdir(exist_ok=True)
+    if out is None:
+        out = root/'assessment';out.mkdir(exist_ok=True)
+    else:
+        out = Path(out).resolve()
+        assert not out.exists(), 'Use a fresh separate assessment output'
+        out.mkdir(parents=True)
     provenance = {str(Path(j['directory'])/name):sha(Path(j['directory'])/name) for j in complete for name in ['summary.json','samples.jsonl','manifest.json']}
     provenance[str(Path(__file__).resolve())]=sha(__file__)
     provenance[str(root/'manifest.json')]=sha(root/'manifest.json')
@@ -419,4 +492,6 @@ def plot(result, out):
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,required=True)
-    analyze(parser.parse_args().root.resolve())
+    parser.add_argument('--out', type=Path, help='Fresh separate assessment directory; leaves the original campaign untouched')
+    args=parser.parse_args()
+    analyze(args.root.resolve(), args.out)

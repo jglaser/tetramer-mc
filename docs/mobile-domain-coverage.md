@@ -1,9 +1,11 @@
 # Fixed-scaffold domain coverage
 
-The current finite-region weights leave the rest of the captured pose space
-unmeasured. A full-support importance campaign can partition that remainder
-without extending an indefinite sequence of shells. It would still integrate
-an **inner capture domain**, not the entire physical spherical vessel.
+The finite-region weights motivated a full-support importance campaign over
+the remaining captured pose space. That [campaign is now complete](mobile-full-capture-results.md):
+it discovers a consequential alternative native pocket, but its estimates
+remain dominated by a few rows. It integrates an **inner capture domain**,
+not the entire physical spherical vessel. The original coverage review and
+frozen design below explain its scope.
 
 ## Frozen target and existing evidence
 
@@ -72,10 +74,10 @@ Exact inputs for that check:
 
 ## An exhaustive partition within the unchanged capture
 
-A concrete next pilot would use four fresh populations of 8,192 unconditional
+The subsequently executed pilot uses four fresh populations of 8,192 unconditional
 draws, two independent Poisson clouds per valid pose, and λ/z=64. Freeze the
 existing exact reciprocal 150-component proposal at covariance scale one,
-with a positive uniform cube/Haar fraction, for example 0.1, and marginalize
+with uniform cube/Haar fractions 0.1 and 0.5 in separate arms, and marginalizes
 over both fixed proposal anchors. The [normalizer estimator](basin-normalizers.md)
 then uses the full physical pose density, not the sampled component or anchor
 density. No Jacobian is added again to that physical-density denominator.
@@ -120,8 +122,16 @@ indicator and a proposal support covering every feasible body center, while
 retaining the same fixed scaffold and bath. A conservative cube with half-side
 `wall_radius + shape_bound` suffices for support; merely enlarging capture
 without the atomic-wall indicator changes the target. Keep inside-D170 and
-outside-D170 contributions separate. Neither that larger experiment nor the
-proposed whole-D170 pilot was executed for this coverage review.
+outside-D170 contributions separate. The full-vessel protein experiment
+remains unperformed. The whole-D170 pilot was executed after this initial
+review; its [results and limits](mobile-full-capture-results.md) are separate.
 
 The completed schema3 Python audit controls are recorded in
 [validation.json](../runs/basin-reciprocal-python-audit-validation-20260921/validation.json).
+
+The [stateless native-entry classifier](native-contact-regions.md) is now
+implemented and its criteria and inputs are frozen. The full atomic-wall
+extension of [the normalizer](basin-normalizers.md) also passes independent
+sphere and dumbbell controls, including actual Rust/Python serialization and
+unchanged no-wall output. These establish available tools; full-vessel protein
+statistical weights still require a separately declared campaign.

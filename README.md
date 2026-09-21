@@ -118,9 +118,19 @@ whole shoulder with both narrow and broad fitted components. The controls
 agree at about 2% observed error; the broad proposal improves importance-weight
 ESS per sampling CPU by 10.8× over the previous mixture. Its independent
 finite-mask checks and remaining prefix sensitivity are reported separately.
-A [complete native-cover pilot](docs/native-tail-complete-cover.md) reaches
-the old-chart tail directly, but its weight remains concentrated in rare
-poses and needs a larger independent reference.
+A [complete native-cover repeat](docs/native-tail-complete-cover.md) uses
+4.2 million independent draws. It recovers the targeted 8–12 shell and reduces
+the remote tail's observed error to 25%, but its largest contribution still
+supplies 21% of that tail. Core under-sampling and prefix sensitivity remain.
+A [conditional shoulder benchmark](docs/shoulder-docking-benchmark.md) compares
+matched local, Gaussian redraw and reversible transport kernels against
+independently measured contact-region probabilities. Its explicit support
+restriction isolates competing-contact mixing from rare full-target native
+escape. The first pilot completes 0, 23 and 66 direct–geometry contact
+roundtrips respectively; transport yields 2.1× more roundtrips per sampling
+CPU than redraw. Initialization and trajectory-half differences remain,
+so this is demonstrated contact exchange rather than a converged global
+mixing rate, assembly result or physical kinetic measurement.
 The [fixed-allocation MIS control](docs/deterministic-mixture-mis.md) combines
 fresh guide and geometric draws with one full proposal denominator. It retains
 the component estimates and uses stratified uncertainty and paired comparisons;

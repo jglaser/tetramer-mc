@@ -194,3 +194,62 @@ The physical campaign is
 `runs/native-tail-reference-4x32768-l64-20260921`; its analysis is
 `runs/native-tail-reference-audit-20260921/analysis.json`.
 These calculations do not establish native assembly or global convergence.
+
+## Independent 32-fold repeat
+
+The unchanged geometric law was repeated with **16 independent populations
+of 262,144 draws**, for N=4,194,304. Seeds were fixed at
+`114501010 + 1009*i`. The first 4, 8 and 16 whole populations were declared
+as nested prefixes before sampling. No shape, chart, mask, cloud intensity,
+executable or source-audit definition changed. Preparation and comparison
+plans are in `runs/native-tail-repeat-preparation-20260921` and
+`runs/native-tail-repeat-comparison-plan-20260921`.
+
+All original draws passed the frozen all-row audit. Sampling required
+**729.77 CPU seconds** and produced 12,063 hard-valid native contributions.
+The repeat results are:
+
+| Original-chart mask | Positive rows | log Q | Row / population RSE | Weight ESS | Largest contribution |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| r≤4 | 6 | 32.72376 | 54.59% / 73.39% | 3.36 | 42.87% |
+| 4<r≤5 | 6 | 33.48945 | 63.95% / 67.69% | 2.45 | 50.12% |
+| 5<r≤8 | 102 | 32.55471 | 32.23% / 39.74% | 9.63 | 18.91% |
+| 8<r≤12 | 648 | 30.40058 | 38.33% / 34.19% | 6.81 | 32.99% |
+| r>12 | 11,301 | 26.10900 | 24.64% / 26.90% | 16.48 | 21.37% |
+
+The 8–12 shell now agrees with the independent targeted reference: its
+ratio is 1.126, a difference of 0.26 combined observed row SE. The 5–8
+repeat is still only 0.525 of its targeted reference, with a difference
+of −2.04 observed row SE (−1.61 population SE). These highly concentrated
+weights do not support Gaussian significance claims. Agreement in one
+shell does not establish global convergence.
+
+The remote-tail estimate is 1.879 times the pilot estimate, despite the
+smaller relative error. Its first 4, 8 and 16 population estimates were
+log Q=25.68635, 25.63644 and 26.10900. Thus doubling the final prefix did
+not simply narrow its error: it found new weight and increased row RSE
+from 22.75% to 24.64%. Paired-cloud noise supplies only **8.34%** of the
+final observed tail variance. Further reduction of Poisson noise alone
+would leave most of this variance intact.
+
+The tail point estimate is approximately **6×10⁻⁵** of the earlier fitted
+full-native estimates. This is not an upper bound and is not added to an
+estimate that already covers the tail. The repeat full-native estimate
+has log Q=34.13335, 36.76% row RSE and weight ESS 7.40; its six core hits
+remain insufficient to replace the fitted-guide estimates near 35.8.
+
+The comparison reconstructs the original sufficient moments from the
+audited equal-size population summaries, including off-mask zeros, paired
+noise and maximum contributions. It checks all final moments against the
+all-row audit and uses shared-draw covariance for prefix differences.
+Previously completed shell audits are verified by archived hashes and
+target identity, rather than replayed. No estimates are pooled across
+different proposal laws or historical populations.
+
+Artifacts:
+
+- `runs/native-tail-repeat-audit-20260921/analysis.json`: all-row audit.
+- `runs/native-tail-repeat-comparison-20260921/analysis.json`: independent
+  pilot, finite-shell and fixed-prefix comparisons.
+- `runs/native-tail-repeat-figure-v2-20260921/native-tail-repeat.png`: shell
+  controls and nested remote-tail estimates.

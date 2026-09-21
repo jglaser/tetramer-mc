@@ -175,6 +175,10 @@ pub fn run(options: NormalizerOptions) -> Result<Value> {
     let raw = fs::read(&options.config)?;
     let mut cfg: DockingConfig = serde_json::from_slice(&raw)?;
     cfg.validate()?;
+    ensure!(
+        cfg.target_region.is_none(),
+        "basin-normalizer does not implement DockingConfig.target_region; use a configuration without that docking-only constraint and an explicitly supported integration region"
+    );
     if let Some(index) = options.proposal_anchor_index {
         ensure!(
             index < cfg.fixed_poses.len(),

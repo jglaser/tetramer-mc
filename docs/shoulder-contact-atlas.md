@@ -213,3 +213,68 @@ Implementation: [fitter](../tools/fit_shoulder_local_guides.py),
 [preparation](../tools/prepare_shoulder_contact_atlas.py),
 [analysis](../tools/analyze_shoulder_contact_atlas.py), and
 [mask/covariance accumulator](../tools/shoulder_atlas_moments.py).
+
+## Independent repeat with twice the draw count
+
+The repeat retains **1,048,576 unconditional draws per arm**: 16 populations
+of 65,536. Configuration and five-component model files are byte-identical
+to the original run, including the full `.99/.05` hybrid law, both physical
+neighbors, strict `1 < q < 2` target and all 23 analysis masks. Seeds were
+frozen before sampling as `114101010 + 1009*i` for narrow and
+`114201010 + 1009*i` for broad, with `i=0,...,15`; they are disjoint from
+original and calibration streams. The repeat budget was selected after the
+original results. Original and repeat estimates remain separate.
+
+Parentheses in the normalizer rows below give observed row RSE.
+
+| Repeat diagnostic | Narrow | Broad |
+|---|---|---|
+| Full shoulder log normalizer | 25.094457 (1.67%) | 25.123489 (1.57%) |
+| Full shoulder population RSE | 1.39% | 1.34% |
+| Strict-inner log normalizer | 24.725690 (1.41%) | 24.756958 (2.07%) |
+| Inner finite-union log normalizer | 24.419675 (1.03%) | 24.459799 (2.55%) |
+| Inner outside-union log normalizer | 23.392461 (4.50%) | 23.398567 (3.25%) |
+| Outer-shoulder log normalizer | 23.918143 (4.40%) | 23.942141 (2.10%) |
+| Full importance-weight ESS | 3,574.5 | 4,032.7 |
+| Sampling CPU seconds | 11,079.1 | 6,160.2 |
+| Importance-weight ESS / sampling CPU second | 0.3226 | 0.6546 |
+
+Relative to its original estimate, narrow increases **1.74%**, or 0.67
+combined observed row standard errors. Broad increases **5.43%**, or 2.13
+row SE and 2.50 population SE. Broad's change is concentrated in the inner
+region (+7.79%, 2.29 row SE); its outer estimate changes only +0.48%
+(0.14 row SE). Within the repeat, narrow/broad full weight is 0.97139,
+a −1.27 row-SE difference. The corresponding finite-union, outside-union
+and outer differences are −1.44, −0.11 and −0.50 row SE. These are
+observed-variance diagnostics, not Gaussian significance claims.
+
+The broad priority-assigned mixture-contact region remains a discrepancy:
+it is **28.38% above** the original broad estimate (2.14 row SE) and
+**26.28% above** its finite reference (2.38 row SE). Its own row RSE is
+7.52% and weight ESS is 176.9. Narrow's assigned direct-contact estimate
+remains 9.05% below its reference (1.65 row SE). The complete finite-union
+reference contrasts are smaller: −0.16 row SE for narrow and +0.91 for
+broad. No reference mean replaces any repeat contribution.
+
+At the frozen 16,384 → 32,768 → 65,536 draws-per-population prefixes,
+full log Q is **25.10558 → 25.09496 → 25.09446** for narrow and
+**25.12966 → 25.13647 → 25.12349** for broad. Their earliest-versus-final
+differences are 0.39 and 0.23 same-stream SE, using the final row variance
+and prefix covariance. Narrow's earliest inner outside-union estimate is
+still 15.86% above its final value, a 2.03
+same-stream SE contrast. Nested prefixes and contrasts sharing the original
+estimate are correlated; they are not additional independent runs.
+
+The observed full N-times-variance-of-the-mean
+increases by factors 1.51 and 1.46 relative to the respective original
+campaigns, and observed ESS per CPU second decreases in both arms. These
+changes and the component discrepancy remain qualifications even though
+the repeat's full-prefix diagnostics are quieter. Neither the original
+nor repeat is pooled, declared globally converged, or interpreted as an
+MCMC speedup.
+
+The [repeat assessment](../runs/ab-shoulder-contact-atlas-repeat-assessment-20260921/analysis.json)
+preserves all full-N denominators, same-row partitions and within-run
+prefix covariance. Its unchanged base analyzer validates all **2,097,152**
+new rows and checks the eight largest contributions per arm against both
+neighbors at atomic resolution.

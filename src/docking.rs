@@ -1,11 +1,13 @@
 //! One moving rigid body in a fixed neighborhood and a fixed center-capture ball.
 //! This conditional docking experiment uses the full immutable learned atlas.
-//! Registry labels never enter proposal construction or physical acceptance.
+//! An optional explicit original-q window restricts the physical target for
+//! conditional contact diagnostics; it never changes the proposal charts.
 use crate::{
     basin_involution::{BasinPair, BasinTrace, FixedBasinInvolution},
     depletion::{self, GateOptions},
     geometry::{Environment, Placed, Shape, SphereTree},
     math::*,
+    native_region::{NativeMetric, QWindow},
     proposal::FrozenRelativePoseProposal,
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
 };
@@ -43,7 +45,51 @@ pub struct DockingConfig {
     pub endpoint_gate: GateOptions,
     #[serde(default)]
     pub metadata: Value,
+    /// Fixed spectator index used only to define proposal coordinates. Every
+    /// fixed pose remains present in the physical hard/depletion environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal_anchor_index: Option<usize>,
+    /// An explicit conditional target, never a change to proposal chart widths.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_region: Option<DockingRegion>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DockingRegion {
+    pub metric: NativeMetric,
+    pub window: QWindow,
+}
+impl DockingRegion {
+    pub fn validate(&self) -> Result<()> {
+        self.window.validate()?;
+        ensure!(
+            !self.metric.native_poses.is_empty() && !self.metric.rigid_members.is_empty(),
+            "Conditional region needs native reference poses and rigid members"
+        );
+        ensure!(
+            self.metric.member_error_scale.is_finite()
+                && self.metric.member_error_scale > 0.
+                && self.metric.angle_error_scale_deg.is_finite()
+                && self.metric.angle_error_scale_deg > 0.
+                && self.metric.angle_error_scale_deg <= 180.,
+            "Invalid original registration metric"
+        );
+        for pose in self
+            .metric
+            .native_poses
+            .iter()
+            .chain(&self.metric.rigid_members)
+        {
+            pose.validate()?;
+        }
+        Ok(())
+    }
+    pub fn contains(&self, pose: Pose) -> bool {
+        self.window.contains(self.metric.q(pose))
+    }
+}
+
 impl DockingConfig {
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -53,6 +99,15 @@ impl DockingConfig {
         self.initial_pose.validate()?;
         for p in &self.fixed_poses {
             p.validate()?;
+        }
+        if let Some(index) = self.proposal_anchor_index {
+            ensure!(
+                index < self.fixed_poses.len(),
+                "Proposal anchor index out of range"
+            );
+        }
+        if let Some(region) = &self.target_region {
+            region.validate()?;
         }
         ensure!(
             self.capture_center.iter().all(|x| x.is_finite())
@@ -92,6 +147,11 @@ impl DockingConfig {
     pub fn contains(&self, pose: Pose) -> bool {
         norm(sub(pose.position, self.capture_center)) <= self.capture_radius
     }
+    pub fn region_contains(&self, pose: Pose) -> bool {
+        self.target_region
+            .as_ref()
+            .is_none_or(|region| region.contains(pose))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum)]
@@ -102,6 +162,9 @@ pub enum DockingMethod {
     /// Posterior source chart, independent weight-distributed destination.
     /// At correlation zero this is the branch-separated independent redraw.
     PosteriorInvolution,
+    /// Keep the common local slots and replace the final global slot by one
+    /// additional local attempt with exactly the same translation/rotation law.
+    Local,
 }
 
 #[derive(Clone, Debug)]
@@ -121,11 +184,17 @@ pub struct DockingCounts {
     pub attempted: u64,
     pub numerical_nulls: u64,
     pub capture_rejected: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub region_rejected: u64,
     pub hard_rejected: u64,
     pub hard_valid: u64,
     pub accepted: u64,
     pub accepted_pose_changes: u64,
     pub gate_raw_points: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -151,6 +220,7 @@ pub struct DockingProposal {
     correlation: f64,
     center: Vec3,
     cube: Vec3,
+    proposal_anchor_index: Option<usize>,
 }
 impl DockingProposal {
     pub fn new(
@@ -204,7 +274,12 @@ impl DockingProposal {
             method,
             correlation,
             center: capture_center,
+            proposal_anchor_index: None,
         })
+    }
+    pub fn with_anchor_index(mut self, index: Option<usize>) -> Self {
+        self.proposal_anchor_index = index;
+        self
     }
     pub fn propose(
         &self,
@@ -213,13 +288,24 @@ impl DockingProposal {
         fixed: &[Pose],
     ) -> Result<(Option<Pose>, Value)> {
         ensure!(!fixed.is_empty(), "No proposal anchor");
+        ensure!(
+            self.method != DockingMethod::Local,
+            "Local control has no atlas proposal"
+        );
+        if let Some(index) = self.proposal_anchor_index {
+            ensure!(index < fixed.len(), "Proposal anchor index out of range");
+        }
         if self.method == DockingMethod::Mixture {
             let centered = |p: Pose| Pose {
                 position: sub(p.position, self.center),
                 orientation: p.orientation,
             };
             let mut poses = vec![centered(old)];
-            poses.extend(fixed.iter().copied().map(centered));
+            if let Some(index) = self.proposal_anchor_index {
+                poses.push(centered(fixed[index]));
+            } else {
+                poses.extend(fixed.iter().copied().map(centered));
+            }
             let result = self.model.propose(rng, &poses, 0)?;
             let candidate = result.candidate.map(|p| Pose {
                 position: add(p.position, self.center),
@@ -227,10 +313,16 @@ impl DockingProposal {
             });
             let mut log = serde_json::to_value(result)?;
             // Anchor indices in this module index fixed_poses directly.
-            log["anchor_index"] = json!(log["anchor_index"].as_u64().unwrap() - 1);
+            log["anchor_index"] = json!(
+                self.proposal_anchor_index
+                    .map(|index| index as u64)
+                    .unwrap_or(log["anchor_index"].as_u64().unwrap() - 1)
+            );
             return Ok((candidate, log));
         }
-        let j = rng.random_range(0..fixed.len());
+        let j = self
+            .proposal_anchor_index
+            .unwrap_or_else(|| rng.random_range(0..fixed.len()));
         if rng.random::<f64>() < self.model.uniform_weight() {
             let mut p = uniform_pose(rng, self.cube);
             p.position = add(sub(p.position, scale(self.cube, 0.5)), self.center);
@@ -463,7 +555,8 @@ pub fn run(options: DockingOptions) -> Result<Value> {
         options.method,
         options.correlation,
         cfg.capture_center,
-    )?;
+    )?
+    .with_anchor_index(cfg.proposal_anchor_index);
     let mut pose = cfg.initial_pose;
     let mut completed = 0;
     let mut counts: [DockingCounts; 2] = Default::default();
@@ -491,6 +584,10 @@ pub fn run(options: DockingOptions) -> Result<Value> {
         cfg.contains(pose) && env.hard_valid(pose),
         "Initial/checkpoint pose violates target support"
     );
+    ensure!(
+        cfg.region_contains(pose),
+        "Initial/checkpoint pose violates conditional target region"
+    );
     if options.out.exists() {
         ensure!(
             fs::read_dir(&options.out)?.next().is_none(),
@@ -504,15 +601,33 @@ pub fn run(options: DockingOptions) -> Result<Value> {
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
-    save(
-        &options.out.join("manifest.json"),
-        &json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,
+    let mut manifest = json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,
         "model_sha256":model_sha,"source_bundle_sha256":hash_bytes(source.as_bytes()),"executable_sha256":hash_file(&std::env::current_exe()?)?,
         "method":options.method,"correlation":options.correlation,"cycles":options.cycles,"sample_every":options.sample_every,
         "rng_protocol":"tetramer-docking-rng-v1","physical_target":"hard(x,S) indicator[|x-center|<=R] exp[z |E(x) intersect union E(S)|]",
         "pair_law":"static directed w_a*w_b including self; unordered offdiagonal 2*w_a*w_b followed by fair direction",
-        "scope":"One moving rigid body, fixed neighbors and capture ball; immutable full atlas; native labels used only by external diagnostics"}),
-    )?;
+        "scope":if cfg.target_region.is_some() {
+            "One moving rigid body conditional on the explicit original-q window, all fixed neighbors and capture; not full-target native escape or assembly"
+        } else {"One moving rigid body, fixed neighbors and capture ball; immutable full atlas; native labels used only by external diagnostics"}});
+    if let Some(region) = &cfg.target_region {
+        manifest["target_region"] = json!(region);
+        manifest["physical_target"] = json!(
+            "hard(x,S) indicator[|x-center|<=R] indicator[original q in configured window] exp[z |E(x) intersect union E(S)|]"
+        );
+    }
+    if let Some(index) = cfg.proposal_anchor_index {
+        manifest["proposal_anchor_index"] = json!(index);
+    }
+    if options.method == DockingMethod::Local {
+        manifest["pair_law"] = json!(
+            "No chart pairs: all local_attempts_per_cycle+1 slots use the unchanged local proposal law"
+        );
+    } else if cfg.target_region.is_some() && options.method == DockingMethod::PosteriorInvolution {
+        manifest["pair_law"] = json!(
+            "Posterior source w_a*q_a(x)/G(x), independent destination w_b, including self; separate fixed-probability uniform branch"
+        );
+    }
+    save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
     let cpu_start = cpu_seconds();
     let initial_cycle = completed;
@@ -534,7 +649,8 @@ pub fn run(options: DockingOptions) -> Result<Value> {
     )?;
     for cycle in completed + 1..=options.cycles {
         for attempt in 0..=cfg.local_attempts_per_cycle {
-            let is_global = attempt == cfg.local_attempts_per_cycle;
+            let is_global =
+                attempt == cfg.local_attempts_per_cycle && options.method != DockingMethod::Local;
             let kind = if is_global { "global" } else { "local" };
             let index = usize::from(is_global);
             counts[index].attempted += 1;
@@ -552,6 +668,7 @@ pub fn run(options: DockingOptions) -> Result<Value> {
             };
             proposal_cpu += cpu_seconds() - before;
             let mut capture_valid = false;
+            let mut region_valid = false;
             let mut hard_valid = false;
             let mut accepted = false;
             let mut gate = None;
@@ -560,12 +677,15 @@ pub fn run(options: DockingOptions) -> Result<Value> {
                 new.validate()?;
                 let before = cpu_seconds();
                 capture_valid = cfg.contains(new);
-                if capture_valid {
+                region_valid = cfg.region_contains(new);
+                if capture_valid && region_valid {
                     hard_valid = env.hard_valid(new);
                 }
                 geometry_cpu += cpu_seconds() - before;
                 if !capture_valid {
                     counts[index].capture_rejected += 1;
+                } else if !region_valid {
+                    counts[index].region_rejected += 1;
                 } else if !hard_valid {
                     counts[index].hard_rejected += 1;
                 } else {
@@ -620,14 +740,18 @@ pub fn run(options: DockingOptions) -> Result<Value> {
             } else {
                 counts[index].numerical_nulls += 1;
             }
-            jsonline(
-                &mut moves,
-                &json!({"cycle":cycle,"attempt":attempt,"kind":kind,"branch":info["branch"],
+            let mut record = json!({"cycle":cycle,"attempt":attempt,"kind":kind,"branch":info["branch"],
                 "old_pose":old,"proposed_pose":candidate,"retained_pose":pose,"proposal":info,"accepted":accepted,
                 "capture_valid":capture_valid,"hard_valid":hard_valid,"gate":gate,"log_acceptance":log_acceptance,
                 "depletion_contact_before":contact_before,"depletion_contact":depletion_contact,
-                "sampler_cpu_seconds":cpu_seconds()-cpu_start}),
-            )?;
+                "sampler_cpu_seconds":cpu_seconds()-cpu_start});
+            if let Some(region) = &cfg.target_region {
+                record["region_valid"] = json!(region_valid);
+                record["old_q"] = json!(region.metric.q(old));
+                record["proposed_q"] = json!(candidate.map(|p| region.metric.q(p)));
+                record["retained_q"] = json!(region.metric.q(pose));
+            }
+            jsonline(&mut moves, &record)?;
         }
         completed = cycle;
         if cycle % options.sample_every == 0 || cycle == options.cycles {

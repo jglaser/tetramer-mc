@@ -269,6 +269,10 @@ pub fn run(options: LatentRegionOptions) -> Result<Value> {
     let config_raw = fs::read(&options.config)?;
     let mut cfg: DockingConfig = serde_json::from_slice(&config_raw)?;
     cfg.validate()?;
+    ensure!(
+        cfg.target_region.is_none(),
+        "latent-region-normalizer does not implement DockingConfig.target_region; use a configuration without that docking-only constraint and the explicit frozen region definition"
+    );
     if cfg.shape.is_relative() {
         cfg.shape = options
             .config

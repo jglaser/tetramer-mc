@@ -24,23 +24,26 @@ cargo test --locked --release
 
 target/release/tetramer-mc run \
   --config examples/spherical-reciprocal-free.json \
-  --model examples/frozen-reciprocal-mixture.json \
-  --out runs/reciprocal-free-10000 --sweeps 10000 --sample-every 10
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --out runs/coverage-free-10000 --sweeps 10000 --sample-every 10
 
 target/release/tetramer-mc run \
   --config examples/spherical-reciprocal-seeded.json \
-  --model examples/frozen-reciprocal-mixture.json \
-  --out runs/reciprocal-seeded-10000 --sweeps 10000 --sample-every 10
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --out runs/coverage-seeded-10000 --sweeps 10000 --sample-every 10
 ```
 
-These portable examples bundle the latest validated reciprocal model: 150 base
-Gaussians with 300 ordinary/inverse branches, frozen posterior transport at
+These commands select the latest validated coverage model: 178 base
+Gaussians with 328 ordinary/inverse branches, frozen posterior transport at
 correlation 0.9, local moves, spherical GCA and sphere-center shifts. The atlas
 is **native-informed**, and all twelve bodies remain mobile in either start.
-Both examples passed eight-sweep smoke tests with JSON and GSD readback; those
-checks establish runnable inputs, not assembly or equilibration. See
+Both examples passed two-sweep execution checks with this atlas, including
+checkpoint and final atomic geometry checks. The original 150-component atlas
+also passed eight-sweep checks with JSON and GSD readback. These checks establish
+runnable inputs; assembly and equilibration require measurement. See
 [the example guide](examples/README.md) for offline commands, a matched
-independent-redraw control, independent seeds, and checkpoint continuation.
+independent-redraw control, a geometry-only atlas, independent seeds, and
+checkpoint continuation.
 All runtime assets use relative paths within `examples/`.
 
 Add `--offline` to Cargo commands when dependencies are already cached. Configure
@@ -267,9 +270,9 @@ Resume into a **new empty directory**, using the same original config/model:
 ```bash
 target/release/tetramer-mc run \
   --config examples/spherical-reciprocal-free.json \
-  --model examples/frozen-reciprocal-mixture.json \
-  --resume runs/reciprocal-free-10000/checkpoint.json \
-  --out runs/reciprocal-free-20000 --sweeps 20000 --sample-every 10
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --resume runs/coverage-free-10000/checkpoint.json \
+  --out runs/coverage-free-20000 --sweeps 20000 --sample-every 10
 ```
 
 `--sweeps` is the absolute final sweep. Named RNG streams are derived from the
@@ -280,8 +283,8 @@ and checkpoint for exact continuation. Changed models/configs are rejected.
 ## Browser viewer
 
 ```bash
-python3 tools/export_viewer.py --run runs/reciprocal-free-10000 \
-  --out runs/reciprocal-free-10000/viewer.html --native-bonds off
+python3 tools/export_viewer.py --run runs/coverage-free-10000 \
+  --out runs/coverage-free-10000/viewer.html --native-bonds off
 ```
 
 Open the resulting standalone HTML locally. It contains actual atom-sphere

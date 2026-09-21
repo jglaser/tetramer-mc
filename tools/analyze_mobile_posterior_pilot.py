@@ -32,11 +32,12 @@ RECOVERY_MARKER = 'reference-recovery.json'
 RECOVERY_SCHEMA = 'mobile-posterior-reference-recovery-v1'
 RECOVERY_COORDINATES = 'results/native-geometry-repair/rebuilt-hydrogens/heavy-coordinates.json'
 FOUR_BODY_SCHEMA = 'mobile-four-body-growth-campaign-v1'
+GEOMETRY_FOUR_BODY_SCHEMA = 'mobile-geometry-four-body-growth-campaign-v1'
 
 
 def campaign_body_count(manifest):
     """An explicit new experiment contract, never an inferred relaxation of N=3."""
-    if manifest['schema'] == FOUR_BODY_SCHEMA:
+    if manifest['schema'] in (FOUR_BODY_SCHEMA, GEOMETRY_FOUR_BODY_SCHEMA):
         assert manifest['body_count'] == 4 and type(manifest['body_count']) is int
         assert manifest['tracked_body_index'] == 3 and type(manifest['tracked_body_index']) is int
         assert manifest['scaffold_body_indices'] == [0, 1, 2]
@@ -132,6 +133,12 @@ def validate_campaign_jobs(manifest, status):
         expected = {('competing', mode, replicate) for mode in ('c0', 'c09') for replicate in (0, 1)}
     elif schema == FOUR_BODY_SCHEMA:
         assert manifest['atlas_variant'] in ('original', 'coverage')
+        campaign_body_count(manifest)
+        expected = {(start, 'c09', replicate) for start in ('triangle_free', 'retained_motif8') for replicate in (0, 1)}
+    elif schema == GEOMETRY_FOUR_BODY_SCHEMA:
+        assert manifest['atlas_variant'] == 'geometry'
+        assert manifest['native_informed_proposal'] is False
+        assert manifest['native_initial_scaffold'] is True
         campaign_body_count(manifest)
         expected = {(start, 'c09', replicate) for start in ('triangle_free', 'retained_motif8') for replicate in (0, 1)}
     else:
@@ -499,6 +506,10 @@ def one(task):
         assert cfg['global_probability'] == .5 and cfg['learned_uniform_weight'] == .1
         assert cfg['frozen_posterior'] == dict(probability=.5, correlation=.9)
         assert job['mode'] == 'c09' and job['start'] in ('triangle_free', 'retained_motif8')
+    if manifest['schema'] == GEOMETRY_FOUR_BODY_SCHEMA:
+        assert cfg['metadata']['native_informed_proposal'] is False
+        assert cfg['metadata']['native_initial_scaffold'] is True
+        assert cfg['metadata']['atlas_variant'] == 'geometry'
     model, shape = read(directory/'provenance/frozen-relative-model.json'), read(directory/'provenance/shape.json')
     audit = ChartAudit(model)
     atoms = np.asarray([a['center'] for a in shape['atoms']])
@@ -724,6 +735,10 @@ def one(task):
     if n == 4:
         result.update(body_count=4,atlas_variant=manifest['atlas_variant'],
             four_body_growth=summarize_four_body_growth(graph_history,rows,graph_metrics,burn,summary['sampler_cpu_seconds'],cpu))
+    if manifest['schema'] == GEOMETRY_FOUR_BODY_SCHEMA:
+        result.update(native_informed_proposal=False,native_initial_scaffold=True)
+        result['scope'] = ('Geometry-only proposal; supplied native scaffold and retained-start registry remain initial-condition information. '
+                           + result['scope'])
     target = output/'runs'/job['id']
     target.mkdir(parents=True)
     write(target/'analysis.json', result)

@@ -1,134 +1,141 @@
 # Supplied physical inputs
 
-## Latest frozen reciprocal assembly examples
+## Offline assembly quick start
 
-`spherical-reciprocal-free.json` and `spherical-reciprocal-seeded.json` use
-`frozen-reciprocal-mixture.json`, the exact validated reciprocal envelope of
-the current 150-component atlas. Each base component has two reciprocal
-branches, giving 300 virtual branches without fitting another Gaussian.
-The model SHA256 is
-`dc9218c9706e1691af9336ef1c0e87a75a86994933dfd41cc6e1d1cd3dc52aa3`.
-All runtime inputs are included here with relative paths; no campaign data
-or original protein-nucleation directory is needed to run these examples.
-
-Both configurations preserve the corresponding existing spherical example's
-12 initial tetramer poses, hard shape, and 354.50820786337056 Å sphere. Every
-tetramer is mobile, including those labelled as the initial seed. They use
-depletant radius 1.5 Å and activity 0.035 Å⁻³, local steps of 0.2 Å and
-1 degree, global-move probability 0.5, frozen-posterior probability 0.5
-within the global branch with correlation 0.9, and a 10% uniform proposal
-floor. The auxiliary Poisson intensity ratio is 64. GCA and sphere-center
-shift attempts run after each ordinary sweep. Each example has its own RNG
-seed; change `seed` to obtain an independent replicate.
-
-For the matched independent-redraw control, set only
-`frozen_posterior.correlation` to `0.0`. Keep its probability, the global and
-local proposals, GCA, and center shifts unchanged. The supplied latest
-configuration uses `0.9`.
-
-This atlas remains **native-informed**. Reciprocal inversion exchanges the
-roles of the two proper relative poses; it does not invert a protein's
-chirality. The example is a frozen reversible sampling control, not a claim
-of template-free discovery or a guarantee that a crystal will assemble.
-There is no adaptive training, auxiliary mixture learning, or reversible-jump
-update in these two configurations. The separate importance sampler for
-fixed contact-region integrals is not an assembly move and is not enabled
-here.
-
-Both configurations passed eight-sweep execution checks, including reciprocal
-branch attempts and JSON/GSD trajectory readback. Their input hashes were
-rechecked against those completed tests on 2026-09-21. The
-[current evidence summary](../docs/contact-evidence-roadmap.md) distinguishes
-native accessibility from sustained assembly and equilibrium contact weights.
-The broader coverage atlas below is optional; these configurations retain
-the 150-component atlas as their documented default.
-
-From the repository root, with Rust and the locked dependencies available
-locally:
+Use the broader **native-informed coverage atlas** with either supplied
+12-tetramer start. From the repository root, with Rust and the locked registry
+dependencies already cached:
 
 ```bash
-cargo run --offline --locked --release --bin tetramer-mc -- run \
-  --config examples/spherical-reciprocal-free.json \
-  --model examples/frozen-reciprocal-mixture.json \
-  --out runs/reciprocal-free-10000 --sweeps 10000 --sample-every 10
+cargo build --offline --locked --release --bin tetramer-mc
 
-cargo run --offline --locked --release --bin tetramer-mc -- run \
-  --config examples/spherical-reciprocal-seeded.json \
-  --model examples/frozen-reciprocal-mixture.json \
-  --out runs/reciprocal-seeded-10000 --sweeps 10000 --sample-every 10
-```
-
-### Optional broader coverage atlas
-
-`frozen-coverage-reciprocal-mixture.json` is an unchanged portable copy of the
-frozen coverage atlas, with SHA256
-`feb4011c622c3104bbe909a29685bd7f077e28f0c847f630c69d8fa87939c20e`.
-Its original 150 Gaussian components retain both reciprocal branches; 28
-additional ordinary charts give 178 base components and 328 virtual branches.
-The additional charts cover known native and competing contact geometries,
-using existing covariances without a new fit. Their mixture weights specify
-the proposal, not equilibrium contact probabilities. The separate 10%
-uniform proposal floor remains unchanged.
-
-This atlas is **native-informed**, including its original components and
-explicit native-site coverage. In the short four-body attachment control,
-the broader atlas reached native-connected attachment in 2/2 free-start runs,
-versus 1/2 with the original atlas. This is evidence of accessibility, not an
-established speedup, equilibrium preference, or template-free assembly. The
-twelve-body examples below are different initial conditions from that control.
-
-Select it with `--model` in either existing configuration:
-
-```bash
-cargo run --offline --locked --release --bin tetramer-mc -- run \
+target/release/tetramer-mc run \
   --config examples/spherical-reciprocal-free.json \
   --model examples/frozen-coverage-reciprocal-mixture.json \
   --out runs/coverage-free-10000 --sweeps 10000 --sample-every 10
 
-cargo run --offline --locked --release --bin tetramer-mc -- run \
+target/release/tetramer-mc run \
   --config examples/spherical-reciprocal-seeded.json \
   --model examples/frozen-coverage-reciprocal-mixture.json \
   --out runs/coverage-seeded-10000 --sweeps 10000 --sample-every 10
 ```
 
-`--model` determines the loaded proposal. The configuration's descriptive
-metadata still names the default atlas; the output manifest records the
-actual model hash. Keep that same model when resuming a run.
-Both configurations passed two-sweep checks with this atlas: model hashes,
-checkpoint/final-frame agreement, and final atomic overlap and wall checks.
-These checks used JSON trajectories with `--no-gsd`.
+Every invocation needs a fresh output directory. All runtime assets are
+included in `examples/`; no campaign files or original protein-nucleation
+checkout are needed. These commands write JSON/GSD trajectories, move records,
+checkpoints, and input/source provenance. Add `--no-gsd` for JSON output only.
 
-The commands retain `trajectory.gsd`, `trajectory.jsonl`, `moves.jsonl`,
-checkpoints, and input/source provenance. Use a fresh output directory for
-each invocation. To extend the free run to a **total** of 20,000 sweeps:
+Both starts use the same 354.50820786337056 Å sphere, depletant radius 1.5 Å,
+activity 0.035 Å⁻³, and auxiliary Poisson intensity ratio 64. Every tetramer
+moves, including the initial seed. Local steps are 0.2 Å and 1 degree. Half
+of ordinary attempts select a global move; half of those select frozen
+posterior transport with correlation 0.9. The mixture has a 10% uniform floor.
+Spherical GCA and sphere-center shifts run after each ordinary sweep.
+There is no online fitting, contact-memory update, or reversible-jump update
+in these two configurations.
+
+The newer entry-shell importance guide measures a fixed contact-region
+integral. It is a separate analysis sampler and is **not an assembly move**
+enabled by these commands.
+
+### Choose the proposal model
+
+The same two configuration files support all three frozen models via `--model`:
+
+| Model file | Base Gaussians / virtual branches | Role |
+|---|---:|---|
+| `frozen-coverage-reciprocal-mixture.json` | 178 / 328 | Broader native-informed coverage; quick start above |
+| `frozen-reciprocal-mixture.json` | 150 / 300 | Original native-informed reference |
+| `frozen-geometry-reciprocal-mixture.json` | 96 / 192 | Geometry-only inter-tetramer proposal control |
+
+The coverage atlas preserves both reciprocal branches of the original 150
+components and adds 28 ordinary charts for known native and competing contact
+geometries. It reuses existing covariances without a new fit. Its weights
+specify the proposal, not equilibrium contact probabilities. In the short
+four-body control, coverage reached native-connected attachment in 2/2
+free-start runs, versus 1/2 for the original atlas. This establishes
+accessibility, not an established speedup, equilibrium preference, or
+template-free assembly. The twelve-body examples are different initial
+conditions from that control.
+
+The geometry-only model is an exact copy of the validated 96-component
+reciprocal control. Its centers come from shape-only contact rays and its
+covariances from contact-pivot geometry; no supplied inter-tetramer registry
+was used. The protein shape still contains a native tetramer, and the seeded
+configuration supplies a native initial scaffold. In the four-body control,
+neither of its two free-start runs reached native attachment within 2,000
+sweeps; the two initially attached runs retained their native contacts. These
+finite runs do not establish a thermodynamic obstruction. See the
+[geometry-only control](../docs/geometry-only-growth-control.md) and
+[current evidence summary](../docs/contact-evidence-roadmap.md).
+
+For a free-start geometry-only proposal control:
 
 ```bash
-cargo run --offline --locked --release --bin tetramer-mc -- run \
+target/release/tetramer-mc run \
   --config examples/spherical-reciprocal-free.json \
-  --model examples/frozen-reciprocal-mixture.json \
-  --resume runs/reciprocal-free-10000/checkpoint.json \
-  --out runs/reciprocal-free-20000 --sweeps 20000 --sample-every 10
+  --model examples/frozen-geometry-reciprocal-mixture.json \
+  --out runs/geometry-free-10000 --sweeps 10000 --sample-every 10
 ```
 
-Resume keeps the original stream and physical configuration; a larger
-`--sweeps` value is the new cumulative endpoint, not an additional count.
+Use `spherical-reciprocal-seeded.json` and a fresh output path for its seeded
+counterpart. To reproduce the original reference, select
+`examples/frozen-reciprocal-mixture.json` instead. Reciprocal inversion swaps
+which proper relative pose describes a contact; it does not invert protein
+chirality.
 
-Export a self-contained offline browser viewer with Python's standard
-library:
+`--model` selects the actual proposal. The shared configurations' descriptive
+metadata still describes the original 150-component atlas, including its
+native-informed label. When overriding the model, use the output manifest's
+`model_sha256` to identify the proposal; the descriptive input metadata is not
+rewritten. The geometry model's historical `construction.shape_path` is also
+provenance only; runtime shape loading uses the configuration's relative path.
+
+Exact model SHA256 values:
+
+- Coverage: `feb4011c622c3104bbe909a29685bd7f077e28f0c847f630c69d8fa87939c20e`.
+- Original: `dc9218c9706e1691af9336ef1c0e87a75a86994933dfd41cc6e1d1cd3dc52aa3`.
+- Geometry-only: `e90a7c85c5bdb2a587071949f0ae6527dba080594229434080d0761e4125983b`.
+
+Both configurations passed eight-sweep checks with the original atlas,
+including JSON/GSD readback, and two-sweep checks with coverage, including
+model binding, checkpoint/final-frame agreement, and atomic overlap/wall
+checks. The geometry-only model passed its separate four-body campaign;
+these twelve-body configurations have not been smoke-tested with that model.
+No completed test establishes crystal assembly or equilibration.
+
+### Continue, compare, and view
+
+To continue the coverage free run to a **total** of 20,000 sweeps, retain its
+configuration and model and write to a fresh directory:
 
 ```bash
-python3 tools/export_viewer.py --run runs/reciprocal-free-10000 \
-  --out runs/reciprocal-free-10000/viewer.html --native-bonds off
+target/release/tetramer-mc run \
+  --config examples/spherical-reciprocal-free.json \
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --resume runs/coverage-free-10000/checkpoint.json \
+  --out runs/coverage-free-20000 --sweeps 20000 --sample-every 10
 ```
 
-Open the resulting `viewer.html` in a browser. The default is the
-**sphere-centered frame**. The coordinate-origin selector shows accumulated
-center shifts when their saved history is available. This portable command
-disables the optional native-bond classifier, whose research reference
-inputs are separate from the bundled assembly inputs.
+The sweep count is the cumulative endpoint, not an additional count. For an
+independent replicate, make a configuration copy with a fresh `seed` and start
+a fresh run. For the matched independent-redraw control, change only
+`frozen_posterior.correlation` to `0.0`, preserving its probability and every
+other move setting. Changing radius or activity defines a different physical
+run; efficiency of an existing atlas at those conditions is not established.
 
-The earlier `frozen-relative-mixture.json` and earlier example configurations
-are retained for reproducing their historical controls.
+Export a self-contained offline viewer with Python's standard library:
+
+```bash
+python3 tools/export_viewer.py --run runs/coverage-free-10000 \
+  --out runs/coverage-free-10000/viewer.html --native-bonds off
+```
+
+Open `viewer.html` in a browser. The default frame is sphere-centered; the
+coordinate-origin selector displays accumulated sphere-center shifts.
+This portable command disables the optional native-bond classifier, whose
+research reference data are separate. The earlier `frozen-relative-mixture.json`
+and earlier configurations remain available for historical controls.
 
 ## Earlier pilot inputs
 

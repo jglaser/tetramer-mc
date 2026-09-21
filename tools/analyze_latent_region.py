@@ -15,6 +15,7 @@ from scipy.special import logsumexp
 from prepare_smc_normalizer_atlas import Density,arrays,relative_poses,read,write,sha
 from analyze_basin_normalizers import moments,paired_noise
 from analyze_native_region_reference import native_q
+from entry_shell_proposal import EntryShellGuide
 
 
 def shell_log_volume(region):
@@ -53,6 +54,7 @@ def validate_manifest_q_window(population_manifest,region,window):
 
 
 IMPORTANCE_SCHEMA='importance-latent-region-normalizer-v1'
+ENTRY_IMPORTANCE_SCHEMA='importance-latent-region-normalizer-v2'
 GUIDE_FILE='importance-guide.json'
 DENSITY_MEASURE='Lebesgue measure in the original six-dimensional whitened region chart'
 
@@ -120,17 +122,20 @@ def importance_guide_binding(root,manifest,region):
     digest=manifest['archive_sha256'].get(GUIDE_FILE)
     if digest is None:
         assert 'importance_guide_sha256' not in manifest, 'Unarchived importance guide'
-        assert manifest.get('schema')!='importance-latent-region-campaign-v1', 'Importance campaign has no archived guide'
+        assert manifest.get('schema')not in ('importance-latent-region-campaign-v1','importance-latent-region-campaign-v2'), 'Importance campaign has no archived guide'
         return None,None
-    assert manifest['schema']=='importance-latent-region-campaign-v1', 'Guide requires an explicit importance campaign'
     assert manifest['importance_guide_sha256']==digest
     path=root/'provenance'/GUIDE_FILE
     assert sha(path)==digest
+    if read(path).get('schema')=='defensive-entry-shell-guide-v1':
+        assert manifest['schema']=='importance-latent-region-campaign-v2', 'Entry shell requires an explicit v2 campaign'
+        return EntryShellGuide(read(path),region,manifest['region_sha256']),digest
+    assert manifest['schema']=='importance-latent-region-campaign-v1', 'Gaussian guide requires its explicit importance campaign'
     return LatentImportanceGuide(read(path),manifest['region_sha256']),digest
 
 
 def validate_population_guide(directory,population_manifest,guide,digest):
-    importance=population_manifest['schema']==IMPORTANCE_SCHEMA
+    importance=population_manifest['schema'] in (IMPORTANCE_SCHEMA,ENTRY_IMPORTANCE_SCHEMA)
     assert importance==(guide is not None), 'Campaign and population sampling laws differ'
     if not importance:
         assert 'importance_guide_sha256' not in population_manifest
@@ -139,6 +144,11 @@ def validate_population_guide(directory,population_manifest,guide,digest):
     assert population_manifest['importance_uniform_probability']==guide.alpha
     assert type(population_manifest['importance_component_count']) is int and population_manifest['importance_component_count']==guide.count
     assert population_manifest['proposal_density_measure']==DENSITY_MEASURE
+    if isinstance(guide,EntryShellGuide):
+        assert population_manifest['schema']==ENTRY_IMPORTANCE_SCHEMA
+        assert population_manifest['guide_schema']==guide.schema and population_manifest['proposal_kind']==guide.proposal_kind
+    else:
+        assert population_manifest['schema']==IMPORTANCE_SCHEMA
     return True
 
 
@@ -177,22 +187,30 @@ def audit_importance_rows(rows,region,guide,chart):
     recorded=np.asarray([row['log_proposal_density'] for row in rows],dtype=float)
     errors=np.abs(expected-recorded)
     assert np.isfinite(recorded).all() and np.isfinite(errors).all() and np.max(errors)<2e-8, 'Full defensive mixture density differs'
-    counts={'uniform-shell':0,'gaussian':0};component_counts=[0]*guide.count
-    for row,inside in zip(rows,shell):
+    guided_branch='entry-shell' if isinstance(guide,EntryShellGuide) else 'gaussian'
+    counts={'uniform-shell':0,guided_branch:0};component_counts=[0]*guide.count
+    entry_support=guide.entry_support(latent) if isinstance(guide,EntryShellGuide) else None
+    for row_number,(row,inside) in enumerate(zip(rows,shell)):
         branch,index=row['proposal_branch'],row['proposal_component']
         assert branch in counts
         counts[branch]+=1
         if branch=='uniform-shell':
             assert index is None and inside, 'A uniform-shell draw lies outside its support'
         else:
-            assert guide.alpha<1. and type(index) is int and 0<=index<guide.count, 'Invalid Gaussian branch label'
+            assert guide.alpha<1. and type(index) is int and 0<=index<guide.count, 'Invalid guided branch label'
             component_counts[index]+=1
+            if entry_support is not None:
+                assert entry_support[row_number,index], 'Selected entry shell does not contain proposed pose'
         if not inside:
             assert row['log_importance_weight'] is None and row['log_hard_weight'] is None and not row['clouds'], 'Out-of-shell draw was conditioned away or assigned nonzero weight'
-    return dict(draws=len(rows),shell_rejected=int((~shell).sum()),branch_counts=counts,
-        gaussian_component_counts=component_counts,maximum_log_proposal_density_error=float(np.max(errors)),
+    result=dict(draws=len(rows),shell_rejected=int((~shell).sum()),branch_counts=counts,
+        maximum_log_proposal_density_error=float(np.max(errors)),
         maximum_latent_vector_reconstruction_error=latent_error,maximum_log_jacobian_error=jacobian_error,
         scope='Every unconditional draw is retained. Branch labels are checked against the frozen law and support; random numbers are not regenerated. Full q includes all untruncated Gaussians, regardless of the selected branch.')
+    result['entry_shell_component_counts' if entry_support is not None else 'gaussian_component_counts']=component_counts
+    if entry_support is not None:
+        result['scope']='Every unconditional draw retained. Exact angular marginal times all overlapping world-space member-shell densities, plus full-ball uniform support; no conditioning on the physical target or hard validity. Saved source-branch membership checked independently.'
+    return result
 
 
 def analyze(root):
@@ -320,14 +338,19 @@ def analyze(root):
     if any(field in region for field in ('minimum_original_q_inclusive','maximum_original_q_inclusive')):
         result['original_q_window']=dict(window,maximum=region.get('maximum_original_q'))
     if guide is not None:
+        guided_branch='entry-shell'if isinstance(guide,EntryShellGuide)else 'gaussian'
         result['importance_sampling']=dict(guide_sha256=guide_sha256,
-            uniform_shell_probability=guide.alpha,gaussian_component_count=guide.count,
+            uniform_shell_probability=guide.alpha,
             draws=len(all_logs),shell_rejected=sum(p['shell_rejected'] for p in importance_audits),
-            branch_counts={key:sum(p['branch_counts'][key] for p in importance_audits) for key in ('uniform-shell','gaussian')},
+            branch_counts={key:sum(p['branch_counts'][key] for p in importance_audits) for key in ('uniform-shell',guided_branch)},
             maximum_log_proposal_density_error=max(p['maximum_log_proposal_density_error'] for p in importance_audits),
             maximum_latent_vector_reconstruction_error=max(p['maximum_latent_vector_reconstruction_error'] for p in importance_audits),
             density_measure=DENSITY_MEASURE,
             scope='Fixed frozen proposal: q=alpha*1_shell/V+(1-alpha)*untruncated Gaussian mixture. Physical weights use J/q and all outside-shell, hard-invalid or q-invalid draws remain zeros in the original attempted denominator. Independence from guide-construction data is a campaign requirement. No bound on mass outside the target shell.')
+        result['importance_sampling']['entry_shell_component_count'if isinstance(guide,EntryShellGuide)else'gaussian_component_count']=guide.count
+        if isinstance(guide,EntryShellGuide):
+            result['importance_sampling'].update(guide_schema=guide.schema,proposal_kind=guide.proposal_kind,
+                scope='Frozen mixture of full latent-ball uniform support and exact angular-marginal/member-shell draws. Full density sums every overlapping shell. Physical weights use J/q; all out-of-ball, hard-invalid and q-invalid draws remain unconditional zeros. No change to physical region, native criterion or bath; no bound on unmeasured regions.')
     out=root/"assessment";out.mkdir(exist_ok=True)
     write(out/"analysis.json",result)
     observed=(f"log Q = {estimate['logQ']:.6f}, ESS {estimate['ess']:.1f}, "

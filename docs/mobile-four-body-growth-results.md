@@ -83,8 +83,9 @@ demonstrate reversible-kernel access to distinct registered interfaces, but
 these short, unequilibrated trajectories do not measure their equilibrium
 weights or independent-contact sampling efficiency.
 
-The next comparison should keep the native-informed control while testing
-geometry-only discovery. Independent integration must also resolve the
+The subsequent [geometry-only control](geometry-only-growth-control.md) keeps
+these native-informed results as its positive controls. Independent integration
+must also resolve the
 contact region just outside the native-entry threshold and the remaining
 full-vessel weight. Neither a fourth-body attachment nor a conditional
 one-body integral includes the thermodynamic cost of forming ABC.

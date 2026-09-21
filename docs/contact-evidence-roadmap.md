@@ -56,6 +56,14 @@ theorem alone does not verify floating-point geometry or executable code.
 
 ## Latest controlled results — 2026-09-21
 
+| Goal milestone | Present evidence | Remaining requirement |
+|---|---|---|
+| Correct reversible moves | Checked balance theorem, complete proposal corrections, reference limits and trajectory audits | These do not by themselves establish mixing |
+| Access native growth | A free fourth tetramer registers in 3/4 native-informed runs; all four preattached controls remain connected | Sustained growth and independent returns |
+| Remove inter-tetramer templates | Matched geometry-only controls and a portable shape-derived atlas | No new native attachment in its 2 free-start runs |
+| Compare physical contact weights | Independently confirmed cooperative native pockets and an explicit remainder decomposition | Competing-contact weights and global tails remain poorly resolved |
+| Decide the model question | Positive controlled accessibility at the selected bath | Converged thermodynamic evidence and larger assembly controls |
+
 The present milestone is **native accessibility with a validated,
 native-informed proposal**, not equilibrium assembly. The exact reciprocal
 control reaches registry in four of four small mobile runs and allows registry
@@ -102,13 +110,16 @@ both of its free-start attachments, versus one of two with the original atlas;
 two seeds cannot establish a speedup. The preattached fourth bodies change
 from six-bond motif 8 to two-bond motif 7, demonstrating access to other native
 interfaces without proving an equilibrium preference. There are no complete
-attachment–detachment round trips. The next assembly comparison should retain
-this native-informed positive control and test geometry-only discovery, while
-the independent contact-weight work resolves the remaining global uncertainty.
-The [geometry-only control design](geometry-only-growth-control.md) identifies
-an existing 96-chart shape-derived atlas, with verified native-blind centers
-and covariances, for an exact reciprocal control. That campaign is not yet
-implemented or launched.
+attachment–detachment round trips. The native-informed runs remain the positive
+control for geometry-only discovery, while independent contact-weight work
+resolves the remaining global uncertainty.
+The [geometry-only control](geometry-only-growth-control.md) is now complete.
+Its 96 unchanged shape-derived charts use the same reciprocal construction and
+physical move schedule. Both free starts form transient exclusion contacts but
+neither reaches native registry in 2,000 sweeps; both preattached starts retain
+their initial six-bond interface. All four retain ABC. The native-informed
+control accesses interfaces this geometry atlas has not reached, so its failure
+to grow cannot establish a thermodynamic absence of native assembly.
 
 The [fresh threshold-shoulder reference](mobile-threshold-reference-results.md)
 shows that the largest no-entry contacts are near the existing native-entry
@@ -119,6 +130,21 @@ the identical R4. Native entry dominates the observed weight, yet these
 disagreements and unresolved tails still prevent a converged global
 free-energy claim. Pose coverage, rather than Poisson noise alone, is the
 main observed limitation.
+
+An [exact orientation-marginal/member-shell proposal](entry-shell-reference.md) targets
+that threshold neighborhood while preserving the full R4 integration domain.
+It sums all overlapping proposal shells and keeps a 20% uniform branch;
+every out-of-domain or hard-invalid draw remains a zero. Independent Python
+density reconstruction agrees with 32,768 Rust sphere draws within 7.2e-15
+in log density, and both analytic hard-sphere/depletion integral controls pass
+their predeclared statistical checks. The protein reference has also completed:
+all 65,536 unconditional draws pass the density audit, but total depletion
+weight still has ESS 2.6 and 92% between-population relative error. It does not
+resolve convergence. Only 831 of 52,320 guided draws enter R4; the uniform branch
+supplies 99.72% of observed no-entry weight. The completed comparison therefore
+does not demonstrate a sampling gain from these shells. This is regional
+integration, separate from the assembly
+moves supplied in the examples.
 
 The [regional weight ledger](ab-regional-weight-status.md) now combines
 independent native, shoulder, intermediate and far controls for the original

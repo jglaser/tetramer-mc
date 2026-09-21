@@ -25,6 +25,8 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+mod entry_shell;
+use entry_shell::EntryShellGuide;
 
 /// A frozen guide changes only the latent proposal, never the physical region.
 #[derive(Deserialize)]
@@ -191,6 +193,65 @@ impl ImportanceGuide {
             "Nonfinite Gaussian draw; never silently redraw"
         );
         Ok((u, radius, Some(index)))
+    }
+}
+
+/// Dispatch only after the physical chart is known. The historical Gaussian
+/// guide keeps its parser, arithmetic, draw order and output schema.
+enum FrozenGuide {
+    Gaussian(ImportanceGuide),
+    EntryShell(EntryShellGuide),
+}
+impl FrozenGuide {
+    fn from_bytes(raw: &[u8], region_hash: &str, chart: &Chart, inner: f64) -> Result<Self> {
+        let value: Value = serde_json::from_slice(raw)?;
+        match value["schema"].as_str() {
+            Some("defensive-latent-shell-guide-v1") => Ok(Self::Gaussian(
+                ImportanceGuide::from_bytes(raw, region_hash)?,
+            )),
+            Some("defensive-entry-shell-guide-v1") => Ok(Self::EntryShell(
+                EntryShellGuide::from_bytes(raw, region_hash, chart, inner)?,
+            )),
+            _ => anyhow::bail!("Unknown latent guide schema"),
+        }
+    }
+    fn alpha(&self) -> f64 {
+        match self {
+            Self::Gaussian(g) => g.alpha,
+            Self::EntryShell(g) => g.alpha,
+        }
+    }
+    fn len(&self) -> usize {
+        match self {
+            Self::Gaussian(g) => g.components.len(),
+            Self::EntryShell(g) => g.len(),
+        }
+    }
+    fn draw(
+        &self,
+        rng: &mut StdRng,
+        chart: &Chart,
+        outer: f64,
+        inner: f64,
+        fraction: f64,
+    ) -> Result<([f64; 6], f64, Option<usize>)> {
+        match self {
+            Self::Gaussian(g) => g.draw(rng, outer, inner, fraction),
+            Self::EntryShell(g) => g.draw(rng, chart, outer),
+        }
+    }
+    fn log_density(
+        &self,
+        u: [f64; 6],
+        inside: bool,
+        volume: f64,
+        chart: &Chart,
+        radius: f64,
+    ) -> f64 {
+        match self {
+            Self::Gaussian(g) => g.log_density(u, inside, volume),
+            Self::EntryShell(g) => g.log_density(u, inside, volume, chart, radius),
+        }
     }
 }
 
@@ -405,10 +466,13 @@ impl Chart {
             log_det,
         })
     }
-    fn decode(&self, u: [f64; 6]) -> (Pose, f64) {
-        let x: [f64; 6] = std::array::from_fn(|i| {
+    fn coordinates(&self, u: [f64; 6]) -> [f64; 6] {
+        std::array::from_fn(|i| {
             self.mean[i] + (0..=i).map(|j| self.lower[i][j] * u[j]).sum::<f64>()
-        });
+        })
+    }
+    fn decode(&self, u: [f64; 6]) -> (Pose, f64) {
+        let x = self.coordinates(u);
         let c = [x[3] / self.ell, x[4] / self.ell, x[5] / self.ell];
         let relative_t = add(self.anchor_position, [x[0], x[1], x[2]]);
         let relative_r = matmul(cayley(c), self.anchor_rotation);
@@ -485,10 +549,6 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     let region_raw = fs::read(&options.region)?;
     let region: Value = serde_json::from_slice(&region_raw)?;
     let guide_raw = guide_path.map(fs::read).transpose()?;
-    let guide = guide_raw
-        .as_ref()
-        .map(|raw| ImportanceGuide::from_bytes(raw, &hash_bytes(&region_raw)))
-        .transpose()?;
     let fixed: Pose = serde_json::from_value(region["fixed_neighbor"].clone())?;
     let physical_fixed: Vec<Pose> = if let Some(value) = region.get("physical_fixed_neighbors") {
         serde_json::from_value(value.clone())?
@@ -582,6 +642,10 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
         "Frozen region shape mismatch"
     );
     let chart = Chart::new(&region, &shape_hash, cfg.capture_radius, fixed)?;
+    let guide = guide_raw
+        .as_ref()
+        .map(|raw| FrozenGuide::from_bytes(raw, &hash_bytes(&region_raw), &chart, inner_radius))
+        .transpose()?;
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
     let env = Environment {
         tree: &tree,
@@ -662,8 +726,13 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     if let Some(g) = &guide {
         manifest["schema"] = json!("importance-latent-region-normalizer-v1");
         manifest["importance_guide_sha256"] = json!(hash_bytes(guide_raw.as_ref().unwrap()));
-        manifest["importance_uniform_probability"] = json!(g.alpha);
-        manifest["importance_component_count"] = json!(g.components.len());
+        manifest["importance_uniform_probability"] = json!(g.alpha());
+        manifest["importance_component_count"] = json!(g.len());
+        if matches!(g, FrozenGuide::EntryShell(_)) {
+            manifest["schema"] = json!("importance-latent-region-normalizer-v2");
+            manifest["guide_schema"] = json!("defensive-entry-shell-guide-v1");
+            manifest["proposal_kind"] = json!("orientation-marginal-member-shell-mixture");
+        }
         manifest["proposal_density_measure"] =
             json!("Lebesgue measure in the original six-dimensional whitened region chart");
         manifest["estimator"] = json!(
@@ -685,7 +754,7 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     for draw in 0..options.samples {
         let mut rng = stream(options.seed, draw, 0, "latent");
         let (latent, radial, selected_component) = if let Some(g) = &guide {
-            g.draw(&mut rng, radius, inner_radius, shell_fraction)?
+            g.draw(&mut rng, &chart, radius, inner_radius, shell_fraction)?
         } else {
             let (u, radial) = draw_uniform(&mut rng, radius, inner_radius, shell_fraction)?;
             (u, radial, None)
@@ -695,7 +764,7 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
         let shell_valid =
             guide.is_none() || ((inner_radius == 0. || radial > inner_radius) && radial <= radius);
         let log_proposal_density = guide.as_ref().map_or(-log_volume, |g| {
-            g.log_density(latent, shell_valid, log_volume)
+            g.log_density(latent, shell_valid, log_volume, &chart, radius)
         });
         ensure!(
             log_proposal_density.is_finite(),
@@ -777,7 +846,11 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             row["shell_valid"] = json!(shell_valid);
             row["log_proposal_density"] = json!(log_proposal_density);
             row["proposal_branch"] = json!(if selected_component.is_some() {
-                "gaussian"
+                if matches!(guide, Some(FrozenGuide::EntryShell(_))) {
+                    "entry-shell"
+                } else {
+                    "gaussian"
+                }
             } else {
                 "uniform-shell"
             });

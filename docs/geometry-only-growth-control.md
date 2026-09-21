@@ -1,11 +1,52 @@
 # Geometry-only proposal control for four-body growth
 
-This is a design for a future control, not an implemented or launched campaign.
-The existing 96-chart geometry-only atlas is the cleanest starting point. Its
-centers and covariances contain no supplied inter-tetramer docking geometry.
-The native rigid tetramer shape and native labels used only for reporting remain
-allowed. Retaining the prepared native ABC triangle makes the proposed experiment
-**seeded growth without native proposal charts**, not de novo assembly.
+The matched four-body control is complete. Both free starts make transient
+exclusion contacts but neither reaches native registry in 2,000 sweeps. Both
+preattached starts retain their initial interface. The original ABC triangle
+retains registry throughout all four runs. The native-informed positive controls
+reach native attachment in three of four free starts under the same physical
+conditions. This demonstrates a limitation of the tested geometry proposal;
+it does not establish that the physical model prevents growth.
+
+The 96-chart geometry-only atlas has no supplied inter-tetramer docking geometry
+in its centers or covariances. Native intratetramer structure remains supplied,
+as does the initial ABC triangle. This is **seeded growth without native proposal
+charts**, not de novo assembly.
+
+## Completed result
+
+| Initial D | Repeat | First exclusion contact | First native entry | Final D native monomer bonds | CPU s |
+|---|---:|---:|---:|---:|---:|
+| Free | 0 | Sweep 94 | Not observed | 0 | 109.94 |
+| Free | 1 | Sweep 378 | Not observed | 0 | 110.49 |
+| Preattached motif 8 | 0 | Initial | Initial | 6 | 146.09 |
+| Preattached motif 8 | 1 | Initial | Initial | 6 | 140.48 |
+
+The preattached controls retain motif 8, whereas all four native-informed
+preattached controls move to motif 7. Neither retention nor the number of
+monomer contacts establishes an equilibrium preference. Both initially free
+geometry runs detach repeatedly from nonspecific contacts; there are no native
+attachment events from which to infer native return rates.
+
+The [twelve-run comparison](../runs/mobile-geometry-four-body-growth-comparison-20260921/report.md)
+retains every run, proposal arm, start and accepted/rejected update. Its analysis
+SHA256 is `d14d279e06b739448d320b82ef6cfd1251b510da319225f82c94e252a7ac2920`.
+All 48,000 new move records passed the observer audit. All observed native
+graphs admit consistent ideal catalogue transforms around their cycles; this
+does not certify a complete crystal or equilibrium sampling.
+
+![Matched geometry and native-informed controls](../runs/mobile-geometry-four-body-growth-comparison-20260921/geometry-growth.png)
+
+The prepared reciprocal model SHA256 is
+`e90a7c85c5bdb2a587071949f0ae6527dba080594229434080d0761e4125983b`.
+The [preparation](../tools/prepare_geometry_reciprocal_proposal.py) verifies
+shape-only generation and unchanged full covariances, and the
+[controller](../tools/run_geometry_four_body_growth.py) binds the reviewed
+assembly executable, input closures and independent seeds before launch.
+Four preparation tests and seven controller tests passed, together with ten
+four-body and twelve preceding three-body observer regressions. No assembly
+kernel change was needed. The following sections retain the construction and
+predeclared comparison specifications.
 
 ## Existing atlas and provenance
 
@@ -80,9 +121,10 @@ The completed positive-control
 SHA `1a07fce8ac75e787f8ba778db5584968fe6bf912b72b34b0c9de2294db4f8d75`.
 Retain its original and coverage results as separately identified positive
 controls; a new geometry arm must not be relabelled as either old model.
-The current four-body observer explicitly accepts only `original` and
-`coverage` variants, so a prospective schema/provenance extension and focused
-validation are required before freezing this arm. No kernel change is proposed.
+The four-body observer now explicitly supports the geometry campaign schema
+while retaining its original/coverage contracts. Its schema and provenance
+extension was tested before this arm was frozen. The assembly kernels are
+unchanged.
 
 Report strict entry versus retained registry, actual exclusion detachment and
 return, attachment kernel, ABC survival, competing contacts, and source/parity
@@ -92,7 +134,7 @@ establish equilibrium, independent-contact efficiency, or a thermodynamic
 absence of native assembly. The outermost-contact atlas also need not represent
 deep interlocking pockets. Earlier geometry-only failures in
 [rj-assembly.md](rj-assembly.md) used different auxiliary proposals and are not a
-result for this prospective reciprocal N4 control.
+result for this reciprocal N4 control.
 
 The current coverage atlas does not qualify: it retains native-derived charts,
 adds prescribed catalogue sites, and selects some centers using the no-native-

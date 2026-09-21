@@ -1,0 +1,267 @@
+{
+  "shape": "tetramer-shape.json",
+  "monomer_shape": "monomer-shape.json",
+  "initial_poses": [
+    {
+      "position": [
+        96.48171174200539,
+        59.980322906867514,
+        -100.14962593858924
+      ],
+      "orientation": [
+        -0.43306095439529374,
+        0.2931861341954453,
+        -0.5545611421927096,
+        0.6472727709889277
+      ]
+    },
+    {
+      "position": [
+        -25.448001303256525,
+        -164.09499134692047,
+        33.25492019428505
+      ],
+      "orientation": [
+        -0.7625731767317779,
+        -0.6150934070706958,
+        -0.17959631896146475,
+        0.08881110810512274
+      ]
+    },
+    {
+      "position": [
+        145.89655218827528,
+        -22.85869478536731,
+        259.799598134504
+      ],
+      "orientation": [
+        0.6264076774336442,
+        -0.5177048767386672,
+        0.4587475104294868,
+        0.35936861845177437
+      ]
+    },
+    {
+      "position": [
+        77.42597147030231,
+        -204.1570465144205,
+        21.877085655428672
+      ],
+      "orientation": [
+        0.6744841394676476,
+        0.6382023278230775,
+        -0.3074271622356753,
+        -0.20798431259956032
+      ]
+    },
+    {
+      "position": [
+        25.262380236861524,
+        -153.68055483582197,
+        -59.24618194974484
+      ],
+      "orientation": [
+        0.41647575471283355,
+        -0.11431286100289147,
+        -0.5530514827021128,
+        -0.7124707524008997
+      ]
+    },
+    {
+      "position": [
+        -53.57196681032984,
+        36.59309720153412,
+        -114.93228285738839
+      ],
+      "orientation": [
+        0.6500698478962353,
+        0.5686819821214055,
+        0.50134436037407,
+        0.05161228911557425
+      ]
+    },
+    {
+      "position": [
+        181.84064168474464,
+        -66.92764907249796,
+        -55.12021286853475
+      ],
+      "orientation": [
+        -0.6586151390981704,
+        0.5426175052398611,
+        -0.48723951033059837,
+        0.1854454128059403
+      ]
+    },
+    {
+      "position": [
+        -6.000158467892455,
+        181.04574634106243,
+        20.634024500595096
+      ],
+      "orientation": [
+        -0.7041282612238122,
+        -0.3501875462088573,
+        -0.24098484860779823,
+        -0.568769177230647
+      ]
+    },
+    {
+      "position": [
+        221.5569056962213,
+        70.30010995713279,
+        -91.16036319472582
+      ],
+      "orientation": [
+        -0.8288851262035897,
+        -0.043131505545336526,
+        0.4779668740195724,
+        -0.2874661512731718
+      ]
+    },
+    {
+      "position": [
+        -108.11001820259439,
+        -49.13334968588964,
+        -193.37144852570867
+      ],
+      "orientation": [
+        -0.10733435916027563,
+        -0.3146027627631536,
+        0.9045485714365724,
+        -0.26701370548625375
+      ]
+    },
+    {
+      "position": [
+        30.69070002495653,
+        -168.00930601446987,
+        236.27725318745183
+      ],
+      "orientation": [
+        0.5171967784610088,
+        -0.6189973370928555,
+        0.12373733498597284,
+        -0.5779609510616415
+      ]
+    },
+    {
+      "position": [
+        -60.859829385625524,
+        -53.26754520238243,
+        174.97878889790226
+      ],
+      "orientation": [
+        -0.5118273512862286,
+        -0.4015713786662166,
+        -0.7361716239223992,
+        0.1866133179676504
+      ]
+    }
+  ],
+  "box_lengths": [
+    709.0164157267411,
+    709.0164157267411,
+    709.0164157267411
+  ],
+  "boundary": {
+    "kind": "spherical",
+    "radius": 354.50820786337056
+  },
+  "depletant_radius": 1.5,
+  "reservoir_density": 0.035,
+  "poisson_lambda_ratio": 64.0,
+  "endpoint_gate": {
+    "max_cells": 2047,
+    "max_depth": 14,
+    "min_width": 0.5
+  },
+  "global_probability": 0.5,
+  "learned_uniform_weight": 0.1,
+  "local_translation_std_A": 0.2,
+  "local_small_angle_std_degrees": 1.0,
+  "gca_probability": 1.0,
+  "center_shift_probability": 1.0,
+  "fixed_body_indices": [],
+  "seed_labels": [],
+  "seed": 121601010,
+  "sweeps": 10000,
+  "sample_every": 10,
+  "metadata": {
+    "arm": "dispersed-free",
+    "replicate": 0,
+    "proposal_mode": "frozen-posterior-c09",
+    "model_label": "native-informed-frozen-exact-reciprocal-atlas",
+    "model_sha256": "dc9218c9706e1691af9336ef1c0e87a75a86994933dfd41cc6e1d1cd3dc52aa3",
+    "native_pair_motifs": "native-pair-motifs.json",
+    "initial_fragments": [
+      [
+        0
+      ],
+      [
+        1
+      ],
+      [
+        2
+      ],
+      [
+        3
+      ],
+      [
+        4
+      ],
+      [
+        5
+      ],
+      [
+        6
+      ],
+      [
+        7
+      ],
+      [
+        8
+      ],
+      [
+        9
+      ],
+      [
+        10
+      ],
+      [
+        11
+      ]
+    ],
+    "initial_free_tetramers": 12,
+    "preparation_seed": 6818658415860514766,
+    "initial_poses_sha256": "854c48e160b5e4dc508a4650c872e3be592c30b84aef97bb4013dc8446502278",
+    "preparation_equilibrated": false,
+    "training_feedback": false,
+    "initialization": "Independent dispersed positions and Haar orientations; all exclusion bounds separated",
+    "preparation_certificate": {
+      "body_bound_A": 49.48702190349181,
+      "exclusion_bound_A": 50.98702190349181,
+      "minimum_center_distance_A": 106.00215649527276,
+      "required_separation_A": 101.97404380698362,
+      "minimum_body_bound_wall_clearance_A": 6.183177904399827,
+      "exact_no_interbody_exclusion_overlap_by_bound": true,
+      "proposals": 14,
+      "initial_registered_bonds": 0,
+      "initial_nonspecific_exclusion_contacts": 0,
+      "orientation_law": "Independent normalized four-dimensional Gaussian: Haar SO(3)",
+      "preparation_law": "Sequential uniform inner-ball placement conditioned on separation; not an equilibrium sample"
+    },
+    "native_informed_proposal": true,
+    "exact_reciprocal_proposal": true,
+    "reciprocal_base_components": 150,
+    "reciprocal_virtual_components": 300,
+    "portable_initial_config": "spherical-free.json",
+    "portable_initial_config_sha256": "b8e27a8c08edbb9d658d3e37fce92585d8ab2d91eb11385eacfc92a52d38721b",
+    "scope": "Portable twelve-body all-mobile assembly example using the validated native-informed reciprocal proposal. Initial geometry is supplied; a short smoke test does not establish assembly, equilibrium, or sampling speedup."
+  },
+  "method": "learned",
+  "frozen_posterior": {
+    "probability": 0.5,
+    "correlation": 0.9
+  }
+}

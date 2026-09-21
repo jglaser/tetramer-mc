@@ -6,7 +6,7 @@ and orientations; a complete Hastings factor and a conditional Poisson gate
 preserve the hard-particle, many-body depletion target. Crystal information is
 allowed in training examples but never substitutes for physical acceptance.
 
-The supplied example is twelve repaired-1LYZ tetramers at depletant radius
+The latest supplied examples use twelve repaired-1LYZ tetramers at depletant radius
 1.5 Å and reservoir activity 0.035 Å⁻³. The seeded preparation has eight native
 tetramers and four dispersed tetramers; the fluid preparation has twelve
 dispersed tetramers. Every body moves. This is a sampler, not a physical dynamics
@@ -23,21 +23,32 @@ cargo build --locked --release --bins
 cargo test --locked --release
 
 target/release/tetramer-mc run \
-  --config examples/seeded.json \
-  --model examples/frozen-relative-mixture.json \
-  --out runs/seeded --sweeps 400 --sample-every 10
+  --config examples/spherical-reciprocal-free.json \
+  --model examples/frozen-reciprocal-mixture.json \
+  --out runs/reciprocal-free-10000 --sweeps 10000 --sample-every 10
 
 target/release/tetramer-mc run \
-  --config examples/seed-free.json --method local-uniform \
-  --out runs/fluid-control --sweeps 400 --sample-every 10
+  --config examples/spherical-reciprocal-seeded.json \
+  --model examples/frozen-reciprocal-mixture.json \
+  --out runs/reciprocal-seeded-10000 --sweeps 10000 --sample-every 10
 ```
+
+These portable examples bundle the latest validated reciprocal model: 150 base
+Gaussians with 300 ordinary/inverse branches, frozen posterior transport at
+correlation 0.9, local moves, spherical GCA and sphere-center shifts. The atlas
+is **native-informed**, and all twelve bodies remain mobile in either start.
+Both examples passed eight-sweep smoke tests with JSON and GSD readback; those
+checks establish runnable inputs, not assembly or equilibration. See
+[the example guide](examples/README.md) for offline commands, a matched
+independent-redraw control, independent seeds, and checkpoint continuation.
+All runtime assets use relative paths within `examples/`.
 
 Add `--offline` to Cargo commands when dependencies are already cached. Configure
 radius, activity, local steps, mixture floor, and Poisson planning budget in the
 input JSON. Changing those inputs defines a new run; the example mixture may
 be inefficient at other physical conditions, but its correction remains valid.
 
-A matched campaign can run in the background:
+The earlier periodic frozen-model campaign can run in the background:
 
 ```bash
 mkdir -p runs
@@ -104,8 +115,10 @@ or equilibrium speedup. The [exact reciprocal representation](docs/reciprocal-co
 is now implemented and validated for frozen spherical proposals. Its completed
 matched control reaches native registry in four reciprocal and three legacy
 runs, with additional registry excursions but no exclusion-contact loss or
-neighbor exchange. It adds no contact fits. Independent competitor integration now extends to R12,
-but the outer-shell estimates are dominated by a few poses and coverage
+neighbor exchange. It adds no contact fits. Independent competitor integration now extends to R12.
+A [fresh frozen-guide control](docs/mobile-outer-importance-design.md) reduces
+observed outer-shell errors to about 20%, but effective sample sizes remain
+23–28 and [full physical-domain coverage](docs/mobile-domain-coverage.md)
 remains unresolved.
 The [independent basin normalizer](docs/basin-normalizers.md) integrates the
 same physical density using positive Poisson importance weights and an
@@ -253,9 +266,10 @@ Resume into a **new empty directory**, using the same original config/model:
 
 ```bash
 target/release/tetramer-mc run \
-  --config examples/seeded.json --model examples/frozen-relative-mixture.json \
-  --resume runs/seeded/checkpoint.json --out runs/seeded-next \
-  --sweeps 4000 --sample-every 10
+  --config examples/spherical-reciprocal-free.json \
+  --model examples/frozen-reciprocal-mixture.json \
+  --resume runs/reciprocal-free-10000/checkpoint.json \
+  --out runs/reciprocal-free-20000 --sweeps 20000 --sample-every 10
 ```
 
 `--sweeps` is the absolute final sweep. Named RNG streams are derived from the
@@ -266,7 +280,8 @@ and checkpoint for exact continuation. Changed models/configs are rejected.
 ## Browser viewer
 
 ```bash
-python3 tools/export_viewer.py --run runs/seeded --out runs/seeded/viewer.html
+python3 tools/export_viewer.py --run runs/reciprocal-free-10000 \
+  --out runs/reciprocal-free-10000/viewer.html --native-bonds off
 ```
 
 Open the resulting standalone HTML locally. It contains actual atom-sphere

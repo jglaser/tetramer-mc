@@ -63,6 +63,12 @@ specific fixed neighborhood. Both the tetramer's internal native geometry
 and the AB scaffold are supplied. It is not a fluid chemical potential,
 the cost of forming AB, or evidence of template-free assembly.
 
+The [mobile competing contact](mobile-competing-contact.md) illustrates this
+domain limitation explicitly: its center is 96.17 Å from the old capture
+center after aligning the observed scaffold to AB. It was outside this
+18 Å calculation. The strong preference within this table therefore cannot
+be used as a native-versus-that-contact free-energy difference.
+
 ## What this implies for a mixing benchmark
 
 For the exact stationary distribution on this fixed captured system, let

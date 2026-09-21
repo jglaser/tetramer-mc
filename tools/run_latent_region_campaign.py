@@ -41,6 +41,7 @@ def main():
              "latent-region-normalizer":args.binary,"launcher.py":Path(__file__),
              "analyze_latent_region.py":Path(__file__).with_name("analyze_latent_region.py"),
              "prepare_smc_normalizer_atlas.py":Path(__file__).with_name("prepare_smc_normalizer_atlas.py"),
+             "prepare_deep_far_normalizer_atlas.py":Path(__file__).with_name("prepare_deep_far_normalizer_atlas.py"),
              "analyze_basin_normalizers.py":Path(__file__).with_name("analyze_basin_normalizers.py"),
              "analyze_native_region_reference.py":Path(__file__).with_name("analyze_native_region_reference.py"),
              "analyze_latent_region_shells.py":Path(__file__).with_name("analyze_latent_region_shells.py")}

@@ -94,6 +94,25 @@ not merely its separately allocated native block. Current successful access
 uses supplied inter-tetramer registry; it is not completion of the discovery
 or equilibrium objectives.
 
+The [persistent mobile contact](mobile-competing-contact.md) is now located
+explicitly: it lies outside the original 18 Å capture ball, at 96.17 Å in the
+aligned AB frame. The observed scaffold has a small deformation, retained
+exactly in the new finite-region references. The atlas has concentrated
+support for this contact in one anchor ordering and only broad defensive
+support in the other. This supplies a concrete coverage hypothesis for the
+matched proposal control, independently of the earlier conditional shoulder
+speedup. That eight-run control is now complete: all four augmented runs and
+three of four legacy runs reach native connectivity, without a uniform
+first-attachment advantage. One augmented run detaches from its initial
+neighbor, attaches to the other and eventually regains the initial contact;
+other native-edge changes retain exclusion contact. This identifies an
+accessible route, not stationary efficiency or whole-basin equilibrium.
+Independent finite-region integration on the exact observed scaffold favors
+the specified native R4 region over competitor R5 by 16.51 kBT; the outer
+competitor shell supplies 75% of the latter's weight, and coverage outside
+R5 remains unresolved. An [exact reciprocal proposal representation](reciprocal-contact-proposal-design.md)
+is designed but not implemented.
+
 ## Earlier evidence and the coverage problems it revealed
 
 The independent normalization work has exposed a substantial coverage

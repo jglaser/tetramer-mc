@@ -103,6 +103,26 @@ def validate_reference(campaign, manifest, reference):
         scope='Separate observer recovery: every original reference script/data file is unchanged; only the missing hash-bound coordinate records are added. Original campaign, automatic observer failure and physical trajectories are preserved.')
 
 
+def validate_campaign_jobs(manifest, status):
+    """Require the declared experiment grid before reusing the physical audit."""
+    schema = manifest['schema']
+    if schema == 'mobile-frozen-posterior-pilot-campaign-v1':
+        expected = {(start, mode, replicate) for start in ('dispersed', 'preassociated')
+                    for mode in ('capture_only', 'c0', 'c09') for replicate in (0, 1)}
+    elif schema == 'mobile-competing-atlas-benchmark-v1':
+        assert manifest['atlas_variant'] in ('legacy', 'augmented')
+        expected = {('competing', mode, replicate) for mode in ('c0', 'c09') for replicate in (0, 1)}
+    else:
+        raise AssertionError('Unrecognized mobile campaign schema')
+    jobs = manifest['jobs']
+    assert len(jobs) == len(status['jobs']) == len(expected) == len({j['id'] for j in jobs})
+    assert {(j['start'], j['mode'], j['replicate']) for j in jobs} == expected
+    assert {j['id'] for j in jobs} == {j['id'] for j in status['jobs']}
+    assert status['complete'] and not status['running']
+    assert all(j['status'] == 'complete' and j['exit_code'] == 0 for j in status['jobs'])
+    return jobs
+
+
 def update_registry(active, entry, stay, affected):
     affected = set(affected)
     return {key for key in active if key[:2] not in affected or key in stay} | entry
@@ -532,11 +552,7 @@ def main():
     manifest, status = read(campaign/'manifest.json'), read(campaign/'status.json')
     reference = (args.reference or Path(manifest['reference'])).resolve()
     reference_validation = validate_reference(campaign, manifest, reference)
-    assert status['complete'] and not status['running']
-    jobs = manifest['jobs']
-    assert len(jobs) == len(status['jobs']) == len({j['id'] for j in jobs}) == 12
-    assert {j['id'] for j in jobs} == {j['id'] for j in status['jobs']}
-    assert all(j['status'] == 'complete' and j['exit_code'] == 0 for j in status['jobs'])
+    jobs = validate_campaign_jobs(manifest, status)
     for name, digest in manifest['input_sha256'].items():
         assert sha(campaign/'provenance'/name) == digest, name
     output.mkdir(parents=True)
@@ -546,7 +562,7 @@ def main():
         terminal_status_sha256=sha(campaign/'status.json'), analyzer_sha256=sha(__file__),
         observer_reference=reference_validation, original_frozen_observer_sha256=manifest['observer_sha256'],
         observer_execution='separate-recovery-assessment' if reference_validation['mode'] == 'separate-reference-data-recovery' else 'frozen-reference-assessment',
-        scope='Native-informed three-mobile-tetramer preparation/association pilot. All twelve runs are retained separately.'))
+        scope=manifest['scope']))
 
 
 if __name__ == '__main__':

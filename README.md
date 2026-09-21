@@ -92,6 +92,16 @@ starts reached a native-connected three-body group, but no exclusion contacts
 detached and no partner exchanges occurred. Native-informed access is therefore
 established for these small groups; equilibrium assembly and a mobile-system
 transport speedup remain unresolved.
+The [persistent competing attachment](docs/mobile-competing-contact.md) lies
+outside the earlier capture domain and exposes strongly uneven proposal
+coverage between the two anchor orderings of the same contact. Direct finite
+region integrals and a frozen contact-chart control separate that sampling
+defect from the physical weight of the attachment.
+The matched eight-run control reaches native connectivity in four augmented
+and three legacy runs, with one actual partner exchange in an augmented run.
+It changes accessible routes without establishing a uniform first-attachment
+or equilibrium speedup. An exact reciprocal representation is designed but
+not yet implemented.
 The [independent basin normalizer](docs/basin-normalizers.md) integrates the
 same physical density using positive Poisson importance weights and an
 exhaustive contact-region partition. It provides a separate check on trapped

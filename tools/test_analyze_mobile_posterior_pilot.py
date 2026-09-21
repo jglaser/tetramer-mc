@@ -15,6 +15,7 @@ from analyze_mobile_posterior_pilot import (
     environment_episodes, full_capture_log_density, pair_changes,
     proposal_kernel, update_nonspecific_graph, update_registry,
     RECOVERY_COORDINATES, RECOVERY_MARKER, RECOVERY_SCHEMA, validate_reference,
+    validate_campaign_jobs,
 )
 
 
@@ -300,6 +301,36 @@ class MobileAuditTests(unittest.TestCase):
         state[1] = pose(.8)
         with self.assertRaises(AssertionError):
             update_nonspecific_graph(state, [(0, 1)], set(), Sphere(), .5)
+
+
+class CampaignAllocationTests(unittest.TestCase):
+    def fixture(self, variant='legacy'):
+        jobs = [dict(id=f'{mode}-{r}', start='competing', mode=mode, replicate=r)
+                for mode in ('c0', 'c09') for r in (0, 1)]
+        manifest = dict(schema='mobile-competing-atlas-benchmark-v1', atlas_variant=variant, jobs=jobs)
+        status = dict(complete=True, running=False,
+                      jobs=[dict(id=j['id'], status='complete', exit_code=0) for j in jobs])
+        return manifest, status
+
+    def test_strict_four_run_atlas_grid(self):
+        for variant in ('legacy', 'augmented'):
+            m, s = self.fixture(variant)
+            self.assertEqual(validate_campaign_jobs(m, s), m['jobs'])
+        for field, value in (('start', 'dispersed'), ('mode', 'capture_only'), ('replicate', 2)):
+            m, s = self.fixture()
+            m['jobs'][0][field] = value
+            with self.assertRaises(AssertionError):
+                validate_campaign_jobs(m, s)
+
+    def test_incomplete_and_unknown_campaigns_rejected(self):
+        for mutation in ('failed', 'missing', 'schema', 'variant'):
+            m, s = self.fixture()
+            if mutation == 'failed': s['jobs'][0]['exit_code'] = 1
+            elif mutation == 'missing': s['jobs'].pop()
+            elif mutation == 'schema': m['schema'] = 'unknown'
+            else: m['atlas_variant'] = 'unplanned'
+            with self.assertRaises(AssertionError):
+                validate_campaign_jobs(m, s)
 
 
 if __name__ == '__main__':

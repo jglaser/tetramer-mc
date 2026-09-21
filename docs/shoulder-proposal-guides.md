@@ -319,3 +319,12 @@ demonstrated middle-band limitation of the weighted-only guide, these
 new extremes do not establish an additional guide-coverage failure. They
 do not establish native assembly or justify selecting a new model from
 the same extremes.
+
+The subsequent [independent local calibration](inner-shoulder-local-reference.md)
+now measures the small geometric neighborhood containing the three dominant
+direct-reference points. The original direct estimate assigned about 60
+times the fresh weight to that same neighborhood. Independent uniform
+proposals reproduce the small-region result, while most guided weight
+lies outside the larger checked ball. This resolves a specific noisy
+reference event; the full shoulder and its remaining neighborhoods still
+require controls.

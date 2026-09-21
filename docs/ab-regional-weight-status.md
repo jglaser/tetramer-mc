@@ -18,7 +18,7 @@ The four unchanged windows partition all captured poses:
 | Region | Original q | Current log Q estimates | Remaining qualification |
 | --- | --- | --- | --- |
 | Native | 0≤q≤1 | 35.77224, 35.83594 | Native outer-chart tail remains incompletely referenced. |
-| Shoulder | 1<q<2 | 25.00691, 25.23622 | Inner-band reference and guided estimates have rare large weights. |
+| Shoulder | 1<q<2 | 25.00691, 25.23622 | Direct-reference extreme is locally calibrated; most guided weight lies outside that checked region. |
 | Intermediate | 2≤q<5 | 16.69976, 16.77534 | Larger frozen-model repeats agree; positive remainder is less precise. |
 | Far | 5≤q<37 | 17.68457, 17.67871 | Repeat rises from pilot; matching totals hide differing regional contributions. |
 
@@ -94,6 +94,13 @@ density under the frozen guides. It does not by itself establish a new
 missing mode. An independently sampled finite geometric neighborhood,
 compared with exactly the same mask on the historical rows, can calibrate
 this event without discarding the rest of the shoulder.
+
+That [local calibration is now complete](inner-shoulder-local-reference.md):
+the direct reference assigned about 60 times the fresh weight to the
+radius-0.25 neighborhood. Independent uniform proposals reproduce the
+small-ball result. Most guided inner-shoulder weight remains outside
+radius 0.5, so no new full-shoulder estimate has been substituted in this
+ledger.
 
 The [native uniform references](native-ab-uniform-tail-reference.md)
 reproduce the wider guide in the 8–12 shell. Their 5–8 confirmation agrees

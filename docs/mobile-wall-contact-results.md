@@ -40,6 +40,14 @@ the R5 discrepancy is a reason to retain proposal and sample-size sensitivity.
 The original arm's R32 estimate is 2.8410 log units above its independent
 reference and is almost entirely one weighted observation.
 
+The [saved-outlier inspection](../runs/mobile-wall-contact-outliers-20260921/report.md)
+places that row, original/r02/draw6611, at radius 5.4475 in the alternative
+chart: it belongs to the already measured 5–8 shell. All eight largest rows
+inspected across the two arms match the same motif7/4 triangle. The original
+outlier's unusually small proposal density amplifies its importance weight;
+it is not a newly discovered native site. Its brighter Poisson cloud also
+contributes 94.9% of the two-cloud mean. No rows are removed or reweighted.
+
 The observed native/contact-without-entry log ratios are 24.38 and 20.77
 for the original and coverage arms. Those are conditional point estimates,
 not converged free-energy differences or bounds on unseen competitors.
@@ -62,6 +70,14 @@ sampling problem.
 The next mobile test should measure growth beyond the known three-tetramer
 triangle and retain a preassembled control. A converged conditional native
 pocket does not include the free-energy cost of forming its scaffold.
+The [four-body geometric design](../runs/mobile-four-body-design-20260921/recommendation.md)
+finds hard-valid motif3 and motif8 interfaces on the exposed third tetramer,
+each with six supported native monomer contacts. The recommended matched
+starts are the same triangle plus a free fourth tetramer or one attached at
+motif8, with all four bodies mobile. These are geometric witnesses and a
+native-informed positive-control design, not a measured association free
+energy or a completed growth simulation. The physical kernels already
+support four bodies; the current three-body observer needs generalization.
 
 The physical wall has radius 223.32617672378387 Å, centered at the origin.
 Every atomic sphere of the mobile tetramer must fit inside it. The ideal

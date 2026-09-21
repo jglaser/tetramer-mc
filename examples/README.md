@@ -35,6 +35,14 @@ update in these two configurations. The separate importance sampler for
 fixed contact-region integrals is not an assembly move and is not enabled
 here.
 
+Both configurations passed eight-sweep execution checks, including reciprocal
+branch attempts and JSON/GSD trajectory readback. Their input hashes were
+rechecked against those completed tests on 2026-09-21. The
+[current evidence summary](../docs/contact-evidence-roadmap.md) distinguishes
+native accessibility from sustained assembly and equilibrium contact weights.
+The newer full-vessel coverage guide is a separate importance-integration
+control; these examples retain the latest validated assembly model above.
+
 From the repository root, with Rust and the locked dependencies available
 locally:
 

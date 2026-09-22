@@ -1,7 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
-use tetramer_mc::normalizer::{self, NormalizerOptions, NormalizerWall};
+use tetramer_mc::normalizer::{
+    self, NormalizerLatentGuideFiles, NormalizerOptions, NormalizerWall,
+};
 
 #[derive(Parser)]
 #[command(
@@ -33,6 +35,12 @@ struct Cli {
     /// must enclose every feasible center (radius >= R_wall + shape bound).
     #[arg(long)]
     wall_radius: Option<f64>,
+    /// Complete radius-4 source chart for an untruncated physical-pose guide.
+    #[arg(long, requires_all = ["latent_guide", "wall_radius"])]
+    latent_region: Option<PathBuf>,
+    /// Frozen normalized Gaussian guide; forms an outer 50/50 vessel mixture.
+    #[arg(long, requires_all = ["latent_region", "wall_radius"])]
+    latent_guide: Option<PathBuf>,
     /// Wall center in laboratory coordinates (default: origin).
     #[arg(
         long,
@@ -58,7 +66,16 @@ fn main() -> Result<()> {
     };
     let summary = if let Some(radius) = c.wall_radius {
         let center = c.wall_center.map_or([0.; 3], |v| [v[0], v[1], v[2]]);
-        normalizer::run_with_wall(options, NormalizerWall { center, radius })?
+        let wall = NormalizerWall { center, radius };
+        if let (Some(region), Some(guide)) = (c.latent_region, c.latent_guide) {
+            normalizer::run_with_wall_and_latent_guide(
+                options,
+                wall,
+                NormalizerLatentGuideFiles { region, guide },
+            )?
+        } else {
+            normalizer::run_with_wall(options, wall)?
+        }
     } else {
         normalizer::run(options)?
     };

@@ -3,6 +3,7 @@
 use crate::{
     docking::DockingConfig,
     geometry::{Environment, Placed, Shape, SphereTree},
+    latent_region::physical_guide::{PhysicalLatentGuide, half_mixture_log_density},
     math::*,
     overlap_weight::{self, OverlapEnvelope},
     proposal::FrozenRelativePoseProposal,
@@ -10,7 +11,7 @@ use crate::{
     spherical::Container,
 };
 use anyhow::{Context, Result, ensure};
-use rand::{SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -37,6 +38,14 @@ pub struct NormalizerOptions {
     pub proposal_anchor_index: Option<usize>,
     pub cloud_replicates: usize,
     pub activity: Option<f64>,
+}
+
+/// Frozen source chart and normalized Gaussian guide. Neither source R4 nor
+/// source capture restricts the full-vessel physical integration domain.
+#[derive(Clone, Debug)]
+pub struct NormalizerLatentGuideFiles {
+    pub region: PathBuf,
+    pub guide: PathBuf,
 }
 
 /// A protein-only wall. Ideal depletants continue to permeate the wall.
@@ -172,16 +181,31 @@ fn stream(seed: u64, draw: u64, cloud: usize, name: &str) -> StdRng {
 }
 
 pub fn run(options: NormalizerOptions) -> Result<Value> {
-    run_impl(options, None)
+    run_impl(options, None, None)
 }
 
 /// Integrate the full atomic-wall domain, with capture used only as a
 /// conservative proposal/support enclosure. A truncated enclosure is refused.
 pub fn run_with_wall(options: NormalizerOptions, wall: NormalizerWall) -> Result<Value> {
-    run_impl(options, Some(wall))
+    run_impl(options, Some(wall), None)
 }
 
-fn run_impl(options: NormalizerOptions, wall_spec: Option<NormalizerWall>) -> Result<Value> {
+/// Integrate the same atomic-wall target using the exact 50/50 mixture of the
+/// complete existing vessel proposal and q_D(u(x))/J_D(u(x)). Every draw is
+/// retained; Gaussian tails outside the reference R4 region are not truncated.
+pub fn run_with_wall_and_latent_guide(
+    options: NormalizerOptions,
+    wall: NormalizerWall,
+    guide_files: NormalizerLatentGuideFiles,
+) -> Result<Value> {
+    run_impl(options, Some(wall), Some(guide_files))
+}
+
+fn run_impl(
+    options: NormalizerOptions,
+    wall_spec: Option<NormalizerWall>,
+    guide_files: Option<NormalizerLatentGuideFiles>,
+) -> Result<Value> {
     ensure!(
         options.samples > 0 && options.cloud_replicates > 0,
         "Positive sample and cloud counts required"
@@ -223,6 +247,22 @@ fn run_impl(options: NormalizerOptions, wall_spec: Option<NormalizerWall>) -> Re
     let shape_raw = fs::read(&cfg.shape)?;
     let shape_sha = hash_bytes(&shape_raw);
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
+    let guide_source = guide_files
+        .as_ref()
+        .map(|files| -> Result<_> { Ok((fs::read(&files.region)?, fs::read(&files.guide)?)) })
+        .transpose()?;
+    let latent_guide = guide_source
+        .as_ref()
+        .map(|(region, guide)| -> Result<_> {
+            ensure!(
+                wall_spec.is_some(),
+                "Latent vessel guide requires an atomic wall"
+            );
+            let value = PhysicalLatentGuide::from_bytes(region, guide, &shape_sha)?;
+            value.validate_physical_context(&shape_sha, &cfg.fixed_poses)?;
+            Ok(value)
+        })
+        .transpose()?;
     let wall = if let Some(spec) = wall_spec {
         ensure!(
             spec.center.iter().all(|x| x.is_finite()),
@@ -329,6 +369,10 @@ fn run_impl(options: NormalizerOptions, wall_spec: Option<NormalizerWall>) -> Re
     fs::write(options.out.join("provenance/input-config.json"), &raw)?;
     fs::write(options.out.join("provenance/model.json"), &model_raw)?;
     fs::write(options.out.join("provenance/shape.json"), &shape_raw)?;
+    if let Some((region, guide)) = &guide_source {
+        fs::write(options.out.join("provenance/latent-region.json"), region)?;
+        fs::write(options.out.join("provenance/latent-guide.json"), guide)?;
+    }
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
@@ -363,6 +407,28 @@ fn run_impl(options: NormalizerOptions, wall_spec: Option<NormalizerWall>) -> Re
         manifest["partition"] = json!(
             "q<=.8; .8<q<=1; 1<q<2; 2<=q<5; q>=5, each split by exclusion contact; exhaustive within the full atomic-wall domain"
         );
+    }
+    if let Some(guide) = &latent_guide {
+        manifest["schema"] = json!(5);
+        manifest["outer_mixture_schema"] = json!("full-vessel-latent-half-mixture-v1");
+        manifest["outer_vessel_probability"] = json!(0.5);
+        manifest["vessel_proposal"] = manifest["proposal"].clone();
+        manifest["proposal"] = json!(
+            "0.5 full vessel density + 0.5 q_D(u(world_pose))/J_D(u(world_pose)); both component laws evaluated on every unconditional draw; no R4 truncation"
+        );
+        manifest["latent_region_sha256"] = json!(guide.region_sha256());
+        manifest["latent_guide_sha256"] = json!(guide.guide_sha256());
+        manifest["latent_defensive_uniform_probability"] = json!(guide.uniform_probability());
+        manifest["latent_gaussian_component_count"] = json!(guide.gaussian_component_count());
+        let (center, radius) = guide.reference_capture();
+        manifest["latent_source_capture"] =
+            json!({"center":center,"radius":radius,"restricts_target":false});
+        manifest["density_measure"] = json!(PhysicalLatentGuide::DENSITY_MEASURE);
+        manifest["component_zero_density_encoding"] = json!(
+            "JSON null denotes negative infinity (zero density) only in component log-density fields; full generated-row mixture log density is finite"
+        );
+        manifest["pose_streams"] = json!({"outer_branch":"outer-mixture", "vessel":"pose", "latent":"latent-pose", "generator":"tetramer-normalizer-independent-v1"});
+        manifest["latent_reference_ball_is_target_restriction"] = json!(false);
     }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
@@ -402,32 +468,78 @@ fn run_impl(options: NormalizerOptions, wall_spec: Option<NormalizerWall>) -> Re
     let mut cloud_cpu = 0.;
     for draw in 0..options.samples {
         let before = cpu_seconds();
-        let outcome = model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
-        ensure!(
-            (!reciprocal && wall.is_none() && options.proposal_anchor_index.is_none())
-                || outcome.candidate.is_some(),
-            "{} importance draw produced a numerical null: {:?}; stop instead of censoring",
-            if reciprocal {
-                "Reciprocal"
+        // The old no-guide path consumes exactly its original streams. The
+        // outer branch and latent branch have separately named streams, so
+        // neither shifts vessel draws nor either independent cloud stream.
+        let use_latent = latent_guide.is_some()
+            && stream(options.seed, draw, 0, "outer-mixture").random::<f64>() < 0.5;
+        let (candidate, outcome, latent_proposal) = if use_latent {
+            let draw = latent_guide.as_ref().unwrap().draw(&mut stream(
+                options.seed,
+                draw,
+                0,
+                "latent-pose",
+            ))?;
+            let metadata = json!({"latent":draw.latent,"latent_radius":draw.latent_radius,
+                "gaussian_component":draw.gaussian_component});
+            (Some(draw.pose), None, Some(metadata))
+        } else {
+            let outcome = model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
+            ensure!(
+                (!reciprocal && wall.is_none() && options.proposal_anchor_index.is_none())
+                    || outcome.candidate.is_some(),
+                "{} importance draw produced a numerical null: {:?}; stop instead of censoring",
+                if reciprocal {
+                    "Reciprocal"
+                } else {
+                    "Selected-anchor"
+                },
+                outcome.null_reason
+            );
+            let candidate = outcome.candidate.map(|p| Pose {
+                position: add(p.position, cfg.capture_center),
+                orientation: p.orientation,
+            });
+            (candidate, Some(outcome), None)
+        };
+        let log_vessel_proposal = if let Some(p_world) = candidate {
+            // Preserve the historical exact coordinates on the no-guide path.
+            // On mixed draws both component densities use the WORLD pose.
+            let p = if latent_guide.is_some() {
+                centered(p_world)
             } else {
-                "Selected-anchor"
-            },
-            outcome.null_reason
-        );
-        let candidate = outcome.candidate.map(|p| Pose {
-            position: add(p.position, cfg.capture_center),
-            orientation: p.orientation,
-        });
-        let log_proposal = if let Some(p) = outcome.candidate {
+                outcome.as_ref().unwrap().candidate.unwrap()
+            };
             let mut total = f64::NEG_INFINITY;
             for anchor in &poses[1..] {
                 total = log_add(total, model.log_density(&p, anchor)?);
             }
             let density = total - ((poses.len() - 1) as f64).ln();
-            ensure!(density.is_finite(), "Nonfinite proposal density");
+            ensure!(
+                density.is_finite() || (latent_guide.is_some() && density == f64::NEG_INFINITY),
+                "Nonfinite vessel proposal density"
+            );
             Some(density)
         } else {
             None
+        };
+        let latent_density = if let Some(guide) = &latent_guide {
+            Some(guide.evaluate(candidate.context("Mixed draw has no pose")?)?)
+        } else {
+            None
+        };
+        let log_proposal = if let Some(density) = &latent_density {
+            let mixed = half_mixture_log_density(
+                log_vessel_proposal.unwrap(),
+                density.log_physical_density,
+            )?;
+            ensure!(
+                mixed.is_finite(),
+                "Generated mixture draw has zero or nonfinite density"
+            );
+            Some(mixed)
+        } else {
+            log_vessel_proposal
         };
         proposal_cpu += cpu_seconds() - before;
         let mut capture_valid = false;
@@ -510,6 +622,17 @@ fn run_impl(options: NormalizerOptions, wall_spec: Option<NormalizerWall>) -> Re
         let mut row = json!({"draw":draw,"pose":candidate,"proposal":outcome,
             "capture_valid":capture_valid,"hard_valid":hard_valid,"q":q,"depletion_contact":contact,"region":region,
             "log_proposal_density":log_proposal,"log_importance_weight":log_weight,"log_hard_weight":log_hard,"clouds":clouds});
+        if let Some(density) = &latent_density {
+            row["outer_branch"] = json!(if use_latent { "latent" } else { "vessel" });
+            row["log_vessel_proposal_density"] = json!(log_vessel_proposal);
+            row["log_latent_physical_density"] = json!(density.log_physical_density);
+            row["latent_density"] = json!({"latent":density.latent,
+                "in_reference_ball":density.in_reference_ball,
+                "log_latent_density":density.log_latent_density,
+                "log_physical_jacobian":density.log_physical_jacobian,
+                "coordinate_chart_seam":density.latent.is_none()});
+            row["latent_proposal"] = json!(latent_proposal);
+        }
         if wall.is_some() {
             row["wall_valid"] = json!(wall_valid);
         }

@@ -2,8 +2,10 @@
 
 `tools/analyze_r4_smc_control.py` audits one completed, immutable control at a
 time. It never starts the SMC executable. Both September 22 control protocols
-remain inert: `runs/smc-r4-density-bridge-control-20260922/protocol.json` and
+were frozen inert (their immutable preparation records remain unchanged): `runs/smc-r4-density-bridge-control-20260922/protocol.json` and
 `runs/smc-r4-density-bridge-narrow-control-20260922/protocol.json`.
+
+They are now queued through the separately frozen [dependent workflow](r4-independent-method-comparison.md). Its status file is authoritative for live execution; the preparation-time `frozen_unlaunched` fields are historical.
 
 Each fixes four independent populations, N=2048 particles, M=262144
 unconditional initialization attempts, 128 beta stages, four local proposals per

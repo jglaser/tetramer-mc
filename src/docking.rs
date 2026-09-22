@@ -527,7 +527,7 @@ fn jsonline(writer: &mut impl Write, value: &Value) -> Result<()> {
     writer.write_all(b"\n")?;
     Ok(())
 }
-fn local(rng: &mut StdRng, old: Pose, cfg: &DockingConfig) -> Pose {
+pub(crate) fn local(rng: &mut StdRng, old: Pose, cfg: &DockingConfig) -> Pose {
     if rng.random::<f64>() < cfg.rotation_probability {
         let step = cfg.rotation_steps_deg[rng.random_range(0..cfg.rotation_steps_deg.len())]
             .to_radians()

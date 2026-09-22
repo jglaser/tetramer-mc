@@ -26,6 +26,8 @@ use std::{
     time::Instant,
 };
 mod conditional_ray;
+pub mod physical_guide;
+pub mod smc;
 mod entry_shell;
 use conditional_ray::ConditionalRayGuide;
 use entry_shell::EntryShellGuide;

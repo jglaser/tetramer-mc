@@ -1,0 +1,49 @@
+{
+  "schema": "contact-refinement-confirmation-validation-v1",
+  "recorded": 1790092257.5872443,
+  "source_sha256": {
+    "tools/score_contact_refinements.py": "bd22295a0b243840b28ff431a8fa763f4cf90350c8843f9f344ad033230eaff0",
+    "tools/test_score_contact_refinements.py": "e583f49547e1b854ec612d784f1acad61230d722078abd9c6ce91c93e28aa8ac",
+    "tools/analyze_contact_complement_geometry.py": "bd8ceeb19be832847e68bf36ed909bf907e9c67db66b5dfd1aae8b45bc361419",
+    "tools/prepare_refined_contact_bank.py": "607aef52797f042e4016c05adbadd09cda80fb483c95faf9e7211e784a56b88d",
+    "tools/run_contact_confirmation.py": "77102163f1df5431cc998bb678d47d01d66fe06b5f65471c763ad862e4ee932a",
+    "tools/test_contact_confirmation.py": "f763cc43f1431a1f5601b25a2028df616d89224ce81f3d5da2d0844d9258784b",
+    "tools/analyze_contact_confirmation.py": "54f61fcda2e4d8f44364adb0151c0e53be182fd9fd4f1f07c2ceccfed10481ee",
+    "tools/test_analyze_contact_confirmation.py": "488fd3bb888eb84648b89fbd0c7256990c89344704e384101c269795fe3d317b"
+  },
+  "tests": {
+    "saved_data_refinement": 9,
+    "confirmation_controller": 7,
+    "confirmation_analysis": 12
+  },
+  "test_logs": [
+    "runs/contact-refinement-score-20260922/tests.txt",
+    "runs/contact-confirmation-implementation-validation-20260922/test_contact_confirmation.py.txt",
+    "runs/contact-confirmation-implementation-validation-20260922/test_analyze_contact_confirmation.py.txt"
+  ],
+  "scoring": "runs/contact-refinement-score-20260922",
+  "scoring_freeze_sha256": "921ffce0deb9dfe0431bb46a9bc84aa8e02317d12ea232ed3016cccc63fcf0a4",
+  "preparation": "runs/refined-contact-bank-preparation-20260922",
+  "preparation_freeze_sha256": "acfc7baee29a9520a7b0c07b185d31721f15bce01f7c279a9e95db0af8ccded5",
+  "campaign": "runs/contact-confirmation-campaign-20260922",
+  "campaign_protocol_sha256": "410f12940f3b98dd16b728d3875bc29bdc886edd052bfc7d91e503e02aa33bdb",
+  "campaign_freeze_sha256": "4e9aef86bbc3098e8b6666648d9e80b6236c18010d957b4df3ee1683e7ae9826",
+  "declared_draws": 2228224,
+  "physical_populations": 20,
+  "maximum_simultaneous_physical_jobs": 8,
+  "poisson_clouds_per_valid_pose": 2,
+  "physical_binary_sha256": "b0e051638276de13336090c21b4f2c8def693d5b6037eac1e2591dba29225094",
+  "physical_target_unchanged": true,
+  "previous_physical_draws_repeated": 0,
+  "old_audits_replayed": 0,
+  "independent_review": "No unresolved density, denominator or geometry findings. Main q_new >= 0.5 q_old; alpha02 >= 0.4 q_old. Paired-cloud training moments omit conditional Poisson noise.",
+  "current_stage": "Fresh confirmation running; no result yet",
+  "finite_system_assembly_verdict": "unresolved",
+  "old_user_example_sha256": "e21dc9ba81b61a32acb739eaff55a238d86b983ce71909b2ca63f266530c986b",
+  "limitations": [
+    "Old R4 convergence gate failed; new frozen confirmation is pending.",
+    "Shared retained geometry can still miss unobserved regions.",
+    "Conditional R4 weights do not measure scaffold formation or full-vessel/finite-system stability.",
+    "No new physical MCMC contact-ESS or assembly speedup has been measured."
+  ]
+}

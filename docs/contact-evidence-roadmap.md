@@ -118,6 +118,36 @@ by 0.284 kBT. More decisively, the separately declared known-pocket split gives
 Compensating regional errors therefore prevent declaring the total converged.
 No dependent full-vessel or assembly production was launched.
 
+## Fresh contact-weight confirmation — 2026-09-22
+
+The saved-pose [continuation diagnostic](../runs/contact-complement-geometry-20260922/report.md)
+locates the unresolved weight in recurring, tightly touching A7/B4 arrangements
+outside the old R5 ellipsoid. It does not prove these contact regions are
+connected. The [new guide and fixed confirmation](contact-refinement-confirmation.md)
+retain the old 56 components and add 24 components, one for each of eight
+training populations in each of three named regions. The declared held-out
+selection favors weighted neighborhood means with 128 neighbors; its physical
+second-moment estimates remain uncertain and omit new Poisson-cloud noise.
+
+A **separate 2,228,224-attempt confirmation is now running**, with five arms and
+four fresh populations per arm. The main allocation is 131,072 attempts per
+population; a 32,768-attempt control tests population size. Other controls vary
+all covariances by four, the uniform defensive fraction from 0.5 to 0.2, and the
+auxiliary intensity ratio from 128 to 256. Old calculations are not extended
+or pooled into these estimates. Full-native R5 intersection and native complement
+are now separate decision quantities, alongside complete native and no-entry
+weights and the original spatial/angular strata. The frozen workflow runs
+independent density reconstruction and full classification after the physical
+jobs finish. No result from this campaign is yet claimed.
+
+The independent [R4 SMC control](smc-r4-control.md) provides a different estimator
+and mutation mechanism. A geometric proposal-density bridge is needed because
+resampling directly into the hard-fluid measure would almost always discard
+old-pocket ancestors at the planned population size. Its physical endpoint
+remains unchanged. Analytic toy tests validate this implementation; protein
+SMC and full-vessel calculations remain separately controlled work. None of
+these preparations changes the unresolved finite-system assembly verdict.
+
 ## Latest controlled results — 2026-09-21
 
 The [conditional-ray comparison](conditional-ray-reference-results.md) has now

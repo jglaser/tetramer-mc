@@ -1,0 +1,60 @@
+{
+  "schema": "conditional-ray-completed-stage-validation-v1",
+  "complete": true,
+  "conclusion": "unresolved finite-region sampling",
+  "finite_system_native_stability_established": false,
+  "finite_system_native_instability_established": false,
+  "template_free_sampling_success_established": false,
+  "physical_populations": 24,
+  "independent_seeds": 24,
+  "attempted_draws": 786432,
+  "raw_audits": 6,
+  "sampler_cpu_seconds": 5820.519025923999,
+  "observed_peak_simultaneous_physical_jobs": 8,
+  "analysis_workers": 4,
+  "retries": 0,
+  "additional_draws_after_gate": 0,
+  "convergence": {
+    "large_population_quality": false,
+    "specified_mass_comparisons": false,
+    "significant_strata_agreement": false,
+    "paired_free_energy_precision": false,
+    "classifier_contact_consistency": true
+  },
+  "unbound_finite_region_bound": {
+    "log_Qz_upper": -9.807904164238384,
+    "log_Q0_upper": -9.807904164238384,
+    "log_latent_volume": 9.96019635503949,
+    "log_maximum_physical_J": -19.768100519277873,
+    "derivation": "Q_unbound = integral H_unbound J dxi <= V6(R) det(L)/(pi^2 ell^3), because no exclusion contact gives C=0 and (1+|Cayley|^2)^-2<=1.",
+    "scope": "Deterministic upper bound inside this finite R4 only; unrelated to whether unbound poses happened to be observed."
+  },
+  "gated_work_not_launched": [
+    "full-vessel 50/50 regional mixture comparison",
+    "matched local/redraw/transport contact-mixing benchmark",
+    "compressed-versus-uncompressed held-out production evaluation",
+    "N12/N24 assembly preparations and proposal controls",
+    "equal-volume boundary production comparison",
+    "biased protein assembly free-energy production"
+  ],
+  "reused_existing_evidence": [
+    "previous uniform R4 comparison by hashes only",
+    "same-target SMC reconciliation and prior audits",
+    "historical native-blind bank: all64 slots",
+    "original19 checked Lean results"
+  ],
+  "record_sha256": {
+    "runs/mobile-conditional-ray-campaign-20260921/protocol.json": "69c15c1c501b12c825495e5267cc81684ddabbe825d1cc951289acaef179c891",
+    "runs/mobile-conditional-ray-campaign-20260921/status.json": "4a56e27e40234d29cf3c344a4619fd98e5eadbad5f5a57148cbf29ba3e7374d6",
+    "runs/mobile-conditional-ray-campaign-20260921/freeze.json": "a20e2cac291a2a6c2c47e3feb95f00d36b22dcc5463cf9591788133337588db7",
+    "runs/mobile-conditional-ray-comparison-20260921/analysis.json": "f2cebea9ba45fabe9683c531130d0ab5a678a233d635524415b176421d295b1e",
+    "runs/mobile-conditional-ray-comparison-20260921/freeze.json": "b4147e9d089c631be1481fea648d7484bcf229e660fb71777edc0a53e95f1f36",
+    "runs/conditional-ray-implementation-validation-20260921/validation.json": "611597ebe65e94833f71e1bdeaf3edc9e0e0b2d8ac538515e8d11162d496bc0b",
+    "runs/frozen-assembly-bias-validation-20260921/validation.json": "274fceb83338024accea33004a34dbd9f04a66179531f772cab2151328cf2cfc",
+    "formal/validation.json": "7cc5145e7c51984c0a405d027b95ecb64c3d8f47acdf208440f722cc085aa538",
+    "runs/native-blind-memory-proposal-preparation-20260921/model.json": "b6d06b0a076d7f3cd4f591d116a77799b2dc4caa3ea6c21081ad5da8a45b3e9b",
+    "runs/native-blind-memory-proposal-preparation-20260921/freeze.json": "2ea917e076ba0a397ea9a8eb91fa284e1557adb1ab8cb244ed2510a83efd9db2"
+  },
+  "protected_user_example_sha256": "e21dc9ba81b61a32acb739eaff55a238d86b983ce71909b2ca63f266530c986b",
+  "scope": "Completed the fixed regional campaign and independent infrastructure/proof implementation. The failed gate stops dependent physical production under the approved plan. This is not completion of the broader assembly objective."
+}

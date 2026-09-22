@@ -2,6 +2,9 @@
 //! named RNG streams derived from (master seed, absolute sweep, stream label),
 //! allowing exact checkpoint continuation without serializing opaque RNG state.
 use crate::{
+    assembly_bias::{
+        self, AssemblyBias, AssemblyBiasConfig, AssemblyBiasCounts, AssemblyBiasState,
+    },
     atlas_mask::{AtlasMaskConfig, AtlasMaskEngine, AtlasMaskState},
     atlas_transport::{
         AtlasTransportConfig, AtlasTransportEngine, AtlasTransportFit, AtlasTransportState,
@@ -134,6 +137,8 @@ pub struct Config {
     pub atlas_mask: Option<AtlasMaskConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub frozen_posterior: Option<FrozenPosteriorConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assembly_bias: Option<AssemblyBiasConfig>,
     #[serde(default)]
     pub seed_labels: Vec<usize>,
     #[serde(default)]
@@ -273,6 +278,18 @@ impl Config {
                 "frozen posterior transport requires immutable charts; disable auxiliary, RJ, contact-memory, conditional and atlas adaptations"
             );
         }
+        if let Some(bias) = &self.assembly_bias {
+            bias.validate(self.initial_poses.len())?;
+            ensure!(
+                self.auxiliary_transport.is_none()
+                    && self.reversible_jump.is_none()
+                    && self.contact_memory.is_none()
+                    && self.conditional_closure.is_none()
+                    && self.atlas_transport.is_none()
+                    && self.atlas_mask.is_none(),
+                "assembly bias currently requires frozen proposals; disable all auxiliary/adaptive model modes"
+            );
+        }
         self.endpoint_gate.validate()
     }
 }
@@ -313,6 +330,8 @@ pub struct RunCounts {
     pub atlas_refreshes: u64,
     #[serde(default)]
     pub atlas_mask_refreshes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assembly_bias: Option<AssemblyBiasCounts>,
     pub selected_body_updates: u64,
     pub selected_body_updates_by_body: Vec<u64>,
 }
@@ -363,6 +382,10 @@ pub struct Checkpoint {
     pub coordinate_wall_center: Vec3,
     #[serde(default)]
     pub coordinate_origin_sweep: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assembly_bias: Option<AssemblyBiasConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assembly_bias_state: Option<AssemblyBiasState>,
 }
 
 impl Counts {
@@ -391,6 +414,13 @@ impl RunCounts {
                 - old.conditional_shift_rejected,
             atlas_refreshes: self.atlas_refreshes - old.atlas_refreshes,
             atlas_mask_refreshes: self.atlas_mask_refreshes - old.atlas_mask_refreshes,
+            assembly_bias: self.assembly_bias.as_ref().map(|c| {
+                c.since(
+                    old.assembly_bias
+                        .as_ref()
+                        .expect("bias counter mode changed"),
+                )
+            }),
             selected_body_updates: self.selected_body_updates - old.selected_body_updates,
             selected_body_updates_by_body: self
                 .selected_body_updates_by_body
@@ -618,6 +648,19 @@ pub fn run(options: RunOptions) -> Result<Value> {
         fs::read(&shape_path).with_context(|| format!("shape {}", shape_path.display()))?;
     let shape_sha = hash_bytes(&shape_raw);
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
+    let assembly_bias = config
+        .assembly_bias
+        .as_ref()
+        .map(|settings| {
+            AssemblyBias::new(
+                settings.clone(),
+                &tree.shape,
+                config.depletant_radius,
+                config.initial_poses.len(),
+                (config.boundary == Boundary::Periodic).then_some(config.box_lengths),
+            )
+        })
+        .transpose()?;
     let wall = config
         .boundary
         .radius()
@@ -838,11 +881,19 @@ pub fn run(options: RunOptions) -> Result<Value> {
         .transpose()?;
     let mut counts = RunCounts {
         selected_body_updates_by_body: vec![0; poses.len()],
+        assembly_bias: config
+            .assembly_bias
+            .as_ref()
+            .map(|_| AssemblyBiasCounts::default()),
         ..Default::default()
     };
     let mut completed = 0;
     let mut coordinate_wall_center = [0.; 3];
     let mut coordinate_origin_sweep = 0;
+    let mut bias_state = assembly_bias
+        .as_ref()
+        .map(|b| b.score(&poses))
+        .transpose()?;
     if let Some(path) = &options.resume {
         let checkpoint_json: Value = serde_json::from_slice(&fs::read(path)?)?;
         let mut checkpoint: Checkpoint = serde_json::from_value(checkpoint_json.clone())?;
@@ -916,6 +967,20 @@ pub fn run(options: RunOptions) -> Result<Value> {
         }
         contact_memory_state = checkpoint.contact_memory_state;
         dictionary = memory_dictionary(&proposal, &contact_memory_state, &resolved_contact_memory)?;
+        ensure!(
+            checkpoint.assembly_bias == config.assembly_bias
+                && checkpoint.counts.assembly_bias.is_some() == config.assembly_bias.is_some(),
+            "checkpoint assembly bias mode/table mismatch"
+        );
+        let restored_bias = assembly_bias
+            .as_ref()
+            .map(|b| b.score(&checkpoint.poses))
+            .transpose()?;
+        ensure!(
+            checkpoint.assembly_bias_state == restored_bias,
+            "checkpoint assembly bias score mismatch"
+        );
+        bias_state = restored_bias;
         poses = checkpoint.poses;
         if let Some(state) = &checkpoint.conditional_state {
             state.validate(config.conditional_closure.as_ref().unwrap())?;
@@ -1008,6 +1073,17 @@ pub fn run(options: RunOptions) -> Result<Value> {
     if let Some(settings) = config.frozen_posterior {
         manifest["frozen_posterior"] = json!(settings);
     }
+    if let Some(settings) = &config.assembly_bias {
+        manifest["assembly_bias"] = json!(settings);
+        manifest["physical_target"] = json!(
+            "hard(X) wall(X) exp[-z * exclusion_union_volume(X) - B(largest_exclusion_contact_component(X))]"
+        );
+        manifest["assembly_bias_protocol"] =
+            json!("elementary-reversible-kernel-factorized-bias-v1");
+        manifest["assembly_bias_reweighting"] = json!(
+            "Normalized physical expectations use exp(log_reweight), where log_reweight = B; every saved frame including rejected updates is retained."
+        );
+    }
     save(&options.out.join("manifest.json"), &manifest)?;
     let mut trajectory = BufWriter::new(File::create(options.out.join("trajectory.jsonl"))?);
     let mut moves = if options.record_moves {
@@ -1050,20 +1126,22 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     atlas_fit: &Option<AtlasTransportFit>,
                     atlas_mask_state: &Option<AtlasMaskState>,
                     coordinate_wall_center: Vec3,
+                    bias_state: Option<AssemblyBiasState>,
                     trajectory: &mut BufWriter<File>,
                     gsd: &mut Option<Trajectory>|
      -> Result<()> {
-        jsonline(
-            trajectory,
-            &json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"coordinate_wall_center":coordinate_wall_center,"coordinate_origin_sweep":coordinate_origin_sweep,"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta,"rj_state":rj_state,"contact_memory_state":contact_memory_state,"conditional_state":conditional_state,"conditional_fit":conditional_fit.as_ref().map(conditional_diagnostic),"atlas_state":atlas_state,"atlas_fit":atlas_fit.as_ref().map(atlas_diagnostic),"atlas_mask_state":atlas_mask_state}),
-        )?;
+        let mut frame = json!({"sweep":sweep,"poses":poses,"seed_labels":config.seed_labels,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"coordinate_wall_center":coordinate_wall_center,"coordinate_origin_sweep":coordinate_origin_sweep,"sampler_cpu_seconds":cpu_seconds()-start_cpu,"counts":counts,"auxiliary_eta":auxiliary_eta,"rj_state":rj_state,"contact_memory_state":contact_memory_state,"conditional_state":conditional_state,"conditional_fit":conditional_fit.as_ref().map(conditional_diagnostic),"atlas_state":atlas_state,"atlas_fit":atlas_fit.as_ref().map(atlas_diagnostic),"atlas_mask_state":atlas_mask_state});
+        if let Some(state) = bias_state {
+            frame["assembly_bias"] = json!(state);
+        }
+        jsonline(trajectory, &frame)?;
         trajectory.flush()?;
         if let Some(writer) = gsd {
             let display_lengths = config
                 .boundary
                 .radius()
                 .map_or(config.box_lengths, |r| [2. * r; 3]);
-            writer.append_with_coordinate_frame(
+            writer.append_with_coordinate_frame_and_bias(
                 sweep,
                 poses,
                 display_lengths,
@@ -1071,6 +1149,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 config.boundary.radius(),
                 coordinate_wall_center,
                 coordinate_origin_sweep,
+                bias_state,
             )?;
             writer.sync()?;
         }
@@ -1089,6 +1168,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
         &atlas_fit,
         &atlas_mask_state,
         coordinate_wall_center,
+        bias_state,
         &mut trajectory,
         &mut gsd,
     )?;
@@ -1158,6 +1238,10 @@ pub fn run(options: RunOptions) -> Result<Value> {
             .map(|_| stream(config.seed, sweep, "posterior-proposal"));
         let mut gate_rng = stream(config.seed, sweep, "gate");
         let mut accept = stream(config.seed, sweep, "accept");
+        let mut bias_rng = config
+            .assembly_bias
+            .as_ref()
+            .map(|_| stream(config.seed, sweep, "assembly-bias-single-body"));
         let mut order: Vec<_> = (0..poses.len()).collect();
         order.shuffle(&mut schedule);
         for (update, &i) in order.iter().enumerate() {
@@ -1319,6 +1403,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
             proposal_cpu += cpu_seconds() - before;
             let mut valid = false;
             let mut accepted = false;
+            let mut physical_accepted = false;
+            let mut bias_decision = None;
             let mut sampled = None;
             let mut log_alpha = None;
             if let Some(new) = candidate {
@@ -1409,6 +1495,30 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     gate_points += result.raw_points;
                     let alpha = (correction + result.log_weight).min(0.);
                     accepted = accept.random::<f64>().max(f64::MIN_POSITIVE).ln() < alpha;
+                    physical_accepted = accepted;
+                    if accepted {
+                        if let Some(engine) = &assembly_bias {
+                            poses[i] = new;
+                            let proposed = engine.score(&poses)?;
+                            poses[i] = old;
+                            let decision = assembly_bias::decide(
+                                bias_rng.as_mut().unwrap(),
+                                bias_state.unwrap(),
+                                proposed,
+                            );
+                            let counters = counts.assembly_bias.as_mut().unwrap();
+                            if is_global {
+                                counters.global.record(decision);
+                            } else {
+                                counters.local.record(decision);
+                            }
+                            accepted = decision.accepted;
+                            if accepted {
+                                bias_state = Some(proposed);
+                            }
+                            bias_decision = Some(decision);
+                        }
+                    }
                     if accepted {
                         poses[i] = new;
                         if let Some(fit) = next_conditional_fit {
@@ -1430,10 +1540,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
             counts.selected_body_updates += 1;
             counts.selected_body_updates_by_body[i] += 1;
             if let Some(writer) = &mut moves {
-                jsonline(
-                    writer,
-                    &json!({"sweep":sweep,"update_in_sweep":update,"moving_index":i,"kind":if is_global{"global"}else{"local"},"old_pose":old,"proposed_pose":candidate,"retained_pose":poses[i],"proposal":proposal_info,"hard_valid":valid,"accepted":accepted,"gate":sampled,"log_acceptance":log_alpha,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
-                )?;
+                let mut row = json!({"sweep":sweep,"update_in_sweep":update,"moving_index":i,"kind":if is_global{"global"}else{"local"},"old_pose":old,"proposed_pose":candidate,"retained_pose":poses[i],"proposal":proposal_info,"hard_valid":valid,"accepted":accepted,"gate":sampled,"log_acceptance":log_alpha,"sampler_cpu_seconds":cpu_seconds()-start_cpu});
+                if assembly_bias.is_some() {
+                    row["physical_accepted"] = json!(physical_accepted);
+                    row["assembly_bias_decision"] = json!(bias_decision);
+                }
+                jsonline(writer, &row)?;
             }
         }
         if let Some(wall) = &wall {
@@ -1442,7 +1554,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
             if config.gca_probability > 0. && gca_rng.random::<f64>() < config.gca_probability {
                 counts.gca.attempted += 1;
                 let before = cpu_seconds();
-                let previous = conditional_engine.as_ref().map(|_| poses.clone());
+                let previous = (conditional_engine.is_some() || assembly_bias.is_some())
+                    .then(|| poses.clone());
                 let axis = uniform_direction(&mut gca_rng);
                 let result = spherical::update(
                     &tree,
@@ -1469,10 +1582,30 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     if accepted {
                         conditional_fit = Some(fit);
                     } else {
-                        poses = previous.unwrap();
+                        poses = previous.as_ref().unwrap().clone();
                         counts.conditional_gca_rejected += 1;
                     }
                     conditional_fit_cpu += cpu_seconds() - before;
+                }
+                let physical_accepted = accepted;
+                let mut bias_decision = None;
+                if accepted {
+                    if let Some(engine) = &assembly_bias {
+                        let proposed = engine.score(&poses)?;
+                        let decision = assembly_bias::decide(
+                            &mut stream(config.seed, sweep, "assembly-bias-gca"),
+                            bias_state.unwrap(),
+                            proposed,
+                        );
+                        counts.assembly_bias.as_mut().unwrap().gca.record(decision);
+                        accepted = decision.accepted;
+                        if accepted {
+                            bias_state = Some(proposed);
+                        } else {
+                            poses = previous.as_ref().unwrap().clone();
+                        }
+                        bias_decision = Some(decision);
+                    }
                 }
                 counts.gca.completed += 1;
                 if let Some(engine) = &atlas_engine {
@@ -1485,10 +1618,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     counts.gca.transformed_bodies += result.flipped_indices.len() as u64;
                 }
                 if let Some(writer) = &mut moves {
-                    jsonline(
-                        writer,
-                        &json!({"sweep":sweep,"kind":"gca","axis":axis,"result":result,"accepted":accepted,"conditional_count_log_ratio":count_ratio,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
-                    )?;
+                    let mut row = json!({"sweep":sweep,"kind":"gca","axis":axis,"result":result,"accepted":accepted,"conditional_count_log_ratio":count_ratio,"sampler_cpu_seconds":cpu_seconds()-start_cpu});
+                    if assembly_bias.is_some() {
+                        row["physical_accepted"] = json!(physical_accepted);
+                        row["assembly_bias_decision"] = json!(bias_decision);
+                    }
+                    jsonline(writer, &row)?;
                 }
             }
             let mut shift_rng = stream(config.seed, sweep, "spherical-center-shift");
@@ -1497,7 +1632,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
             {
                 counts.center_shift.attempted += 1;
                 let before = cpu_seconds();
-                let previous = conditional_engine.as_ref().map(|_| poses.clone());
+                let previous = (conditional_engine.is_some() || assembly_bias.is_some())
+                    .then(|| poses.clone());
                 let direction = uniform_direction(&mut shift_rng);
                 // Strictly interior 52-bit midpoint, representable even at the
                 // upper endpoint (53-bit midpoint addition could round to one).
@@ -1519,10 +1655,38 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     if accepted {
                         conditional_fit = Some(fit);
                     } else {
-                        poses = previous.unwrap();
+                        poses = previous.as_ref().unwrap().clone();
                         counts.conditional_shift_rejected += 1;
                     }
                     conditional_fit_cpu += cpu_seconds() - before;
+                }
+                let physical_accepted = accepted;
+                let mut bias_decision = None;
+                if accepted {
+                    if let Some(engine) = &assembly_bias {
+                        // In exact arithmetic the common shift leaves this score
+                        // unchanged. Re-evaluate the stored FP64 configuration so
+                        // the observable never depends on trajectory history.
+                        let proposed = engine.score(&poses)?;
+                        let decision = assembly_bias::decide(
+                            &mut stream(config.seed, sweep, "assembly-bias-center-shift"),
+                            bias_state.unwrap(),
+                            proposed,
+                        );
+                        counts
+                            .assembly_bias
+                            .as_mut()
+                            .unwrap()
+                            .center_shift
+                            .record(decision);
+                        accepted = decision.accepted;
+                        if accepted {
+                            bias_state = Some(proposed);
+                        } else {
+                            poses = previous.as_ref().unwrap().clone();
+                        }
+                        bias_decision = Some(decision);
+                    }
                 }
                 if accepted {
                     coordinate_wall_center = sub(coordinate_wall_center, result.displacement);
@@ -1542,10 +1706,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     counts.center_shift.transformed_bodies += poses.len() as u64;
                 }
                 if let Some(writer) = &mut moves {
-                    jsonline(
-                        writer,
-                        &json!({"sweep":sweep,"kind":"center_shift","direction":direction,"result":result,"accepted":accepted,"conditional_count_log_ratio":count_ratio,"sampler_cpu_seconds":cpu_seconds()-start_cpu}),
-                    )?;
+                    let mut row = json!({"sweep":sweep,"kind":"center_shift","direction":direction,"result":result,"accepted":accepted,"conditional_count_log_ratio":count_ratio,"sampler_cpu_seconds":cpu_seconds()-start_cpu});
+                    if assembly_bias.is_some() {
+                        row["physical_accepted"] = json!(physical_accepted);
+                        row["assembly_bias_decision"] = json!(bias_decision);
+                    }
+                    jsonline(writer, &row)?;
                 }
             }
         }
@@ -1620,6 +1786,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 &atlas_fit,
                 &atlas_mask_state,
                 coordinate_wall_center,
+                bias_state,
                 &mut trajectory,
                 &mut gsd,
             )?;
@@ -1645,6 +1812,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 atlas_mask_state: atlas_mask_state.clone(),
                 coordinate_wall_center,
                 coordinate_origin_sweep,
+                assembly_bias: config.assembly_bias.clone(),
+                assembly_bias_state: bias_state,
             };
             save(&options.out.join("checkpoint.json"), &checkpoint)?;
             save(
@@ -1656,6 +1825,10 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let mut summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu,"contact_memory_cpu_seconds":memory_cpu,"contact_memory_gate_raw_points":memory_gate_points,"contact_memory_initialization_cpu_seconds":memory_initialization_cpu,"conditional_fit_cpu_seconds":conditional_fit_cpu,"conditional_fit_calls":conditional_fit_calls,"conditional_initialization_cpu_seconds":conditional_initialization_cpu,"atlas_fit_cpu_seconds":atlas_fit_cpu,"atlas_fit_calls":atlas_fit_calls,"atlas_initialization_cpu_seconds":atlas_initialization_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask});
     if let Some(settings) = config.frozen_posterior {
         summary["frozen_posterior"] = json!(settings);
+    }
+    if let Some(settings) = &config.assembly_bias {
+        summary["assembly_bias"] = json!(settings);
+        summary["assembly_bias_state"] = json!(bias_state);
     }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)

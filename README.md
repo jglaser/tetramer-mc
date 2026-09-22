@@ -84,6 +84,15 @@ see [the mask law and balance argument](docs/atlas-mask-balance.md) and the
 active proposal, not stored parameters, and do not discover new basins.
 The [contact-evidence roadmap](docs/contact-evidence-roadmap.md) separates
 proposal coverage from physical contact free energies and registry constraints.
+The [conditional-ray reference](docs/conditional-ray-reference.md) implements the
+fixed 786,432-draw regional comparison before further full-vessel or finite-system
+assembly production. The [completed campaign](docs/conditional-ray-reference-results.md)
+fails its convergence gate, so those dependent production runs remain deferred;
+the physical assembly question is unresolved. The [frozen cluster-size bias](docs/frozen-assembly-bias.md)
+adds an optional correction to each elementary reversible kernel and records
+physical reweighting factors. The [Lean project](formal/README.md) now checks
+38 theorems, including the Poisson depletion estimator and conditional count gate;
+geometry, floating-point execution and convergence remain separate obligations.
 An independently validated [involutive Gaussian-chart map](docs/involutive-basin-transport.md)
 constructs its return transformation from the same operation, including the
 Gaussian auxiliary and translation/Haar Jacobian factors. The

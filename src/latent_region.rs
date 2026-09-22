@@ -25,7 +25,9 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+mod conditional_ray;
 mod entry_shell;
+use conditional_ray::ConditionalRayGuide;
 use entry_shell::EntryShellGuide;
 
 /// A frozen guide changes only the latent proposal, never the physical region.
@@ -201,6 +203,7 @@ impl ImportanceGuide {
 enum FrozenGuide {
     Gaussian(ImportanceGuide),
     EntryShell(EntryShellGuide),
+    ConditionalRay(ConditionalRayGuide),
 }
 impl FrozenGuide {
     fn from_bytes(raw: &[u8], region_hash: &str, chart: &Chart, inner: f64) -> Result<Self> {
@@ -212,6 +215,9 @@ impl FrozenGuide {
             Some("defensive-entry-shell-guide-v1") => Ok(Self::EntryShell(
                 EntryShellGuide::from_bytes(raw, region_hash, chart, inner)?,
             )),
+            Some("defensive-conditional-ray-guide-v1") => Ok(Self::ConditionalRay(
+                ConditionalRayGuide::from_bytes(raw, region_hash, chart, inner)?,
+            )),
             _ => anyhow::bail!("Unknown latent guide schema"),
         }
     }
@@ -219,12 +225,14 @@ impl FrozenGuide {
         match self {
             Self::Gaussian(g) => g.alpha,
             Self::EntryShell(g) => g.alpha,
+            Self::ConditionalRay(g) => g.alpha,
         }
     }
     fn len(&self) -> usize {
         match self {
             Self::Gaussian(g) => g.components.len(),
             Self::EntryShell(g) => g.len(),
+            Self::ConditionalRay(g) => g.len(),
         }
     }
     fn draw(
@@ -234,10 +242,13 @@ impl FrozenGuide {
         outer: f64,
         inner: f64,
         fraction: f64,
-    ) -> Result<([f64; 6], f64, Option<usize>)> {
+    ) -> Result<([f64; 6], f64, Option<usize>, Option<bool>)> {
         match self {
-            Self::Gaussian(g) => g.draw(rng, outer, inner, fraction),
-            Self::EntryShell(g) => g.draw(rng, chart, outer),
+            Self::Gaussian(g) => g
+                .draw(rng, outer, inner, fraction)
+                .map(|(u, r, c)| (u, r, c, None)),
+            Self::EntryShell(g) => g.draw(rng, chart, outer).map(|(u, r, c)| (u, r, c, None)),
+            Self::ConditionalRay(g) => g.draw(rng, chart, outer),
         }
     }
     fn log_density(
@@ -247,10 +258,11 @@ impl FrozenGuide {
         volume: f64,
         chart: &Chart,
         radius: f64,
-    ) -> f64 {
+    ) -> Result<f64> {
         match self {
-            Self::Gaussian(g) => g.log_density(u, inside, volume),
-            Self::EntryShell(g) => g.log_density(u, inside, volume, chart, radius),
+            Self::Gaussian(g) => Ok(g.log_density(u, inside, volume)),
+            Self::EntryShell(g) => Ok(g.log_density(u, inside, volume, chart, radius)),
+            Self::ConditionalRay(g) => g.log_density(u, inside, volume, chart, radius),
         }
     }
 }
@@ -733,6 +745,11 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             manifest["guide_schema"] = json!("defensive-entry-shell-guide-v1");
             manifest["proposal_kind"] = json!("orientation-marginal-member-shell-mixture");
         }
+        if matches!(g, FrozenGuide::ConditionalRay(_)) {
+            manifest["schema"] = json!("importance-latent-region-normalizer-v3");
+            manifest["guide_schema"] = json!("defensive-conditional-ray-guide-v1");
+            manifest["proposal_kind"] = json!("conditional-ray-interval-mixture");
+        }
         manifest["proposal_density_measure"] =
             json!("Lebesgue measure in the original six-dimensional whitened region chart");
         manifest["estimator"] = json!(
@@ -753,19 +770,21 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     let mut raw_points = 0_u64;
     for draw in 0..options.samples {
         let mut rng = stream(options.seed, draw, 0, "latent");
-        let (latent, radial, selected_component) = if let Some(g) = &guide {
+        let (latent, radial, selected_component, selected_ray_fallback) = if let Some(g) = &guide {
             g.draw(&mut rng, &chart, radius, inner_radius, shell_fraction)?
         } else {
             let (u, radial) = draw_uniform(&mut rng, radius, inner_radius, shell_fraction)?;
-            (u, radial, None)
+            (u, radial, None, None)
         };
         // Preserve legacy uniform boundary arithmetic. The guide branch has an
         // explicit target-shell indicator and never retries an exterior draw.
         let shell_valid =
             guide.is_none() || ((inner_radius == 0. || radial > inner_radius) && radial <= radius);
-        let log_proposal_density = guide.as_ref().map_or(-log_volume, |g| {
-            g.log_density(latent, shell_valid, log_volume, &chart, radius)
-        });
+        let log_proposal_density = if let Some(g) = &guide {
+            g.log_density(latent, shell_valid, log_volume, &chart, radius)?
+        } else {
+            -log_volume
+        };
         ensure!(
             log_proposal_density.is_finite(),
             "Unrepresentable latent proposal density"
@@ -846,7 +865,9 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             row["shell_valid"] = json!(shell_valid);
             row["log_proposal_density"] = json!(log_proposal_density);
             row["proposal_branch"] = json!(if selected_component.is_some() {
-                if matches!(guide, Some(FrozenGuide::EntryShell(_))) {
+                if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
+                    "conditional-ray"
+                } else if matches!(guide, Some(FrozenGuide::EntryShell(_))) {
                     "entry-shell"
                 } else {
                     "gaussian"
@@ -855,6 +876,9 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                 "uniform-shell"
             });
             row["proposal_component"] = json!(selected_component);
+            if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
+                row["selected_ray_fallback"] = json!(selected_ray_fallback);
+            }
         }
         serde_json::to_writer(&mut writer, &row)?;
         writer.write_all(b"\n")?;

@@ -484,6 +484,7 @@ def one(task):
         assert Path(sys.modules[name].__file__).resolve() == (reference/'scripts'/f'{name}.py').resolve()
     directory = Path(job['directory'])
     cfg, summary, provenance = [read(directory/name) for name in ('config.json', 'summary.json', 'manifest.json')]
+    assert cfg.get('assembly_bias') is None, 'Physical-only observer does not audit assembly-biased trajectories'
     assert summary['complete'] and summary['completed_sweeps'] == manifest['sweeps']
     assert provenance['executable_sha256'] == manifest['binary_sha256']
     assert provenance['config_sha256'] == job['config_sha256'] == sha(job['config'])

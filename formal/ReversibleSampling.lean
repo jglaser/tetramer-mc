@@ -2,3 +2,6 @@ import ReversibleSampling.Balance
 import ReversibleSampling.MetropolisHastings
 import ReversibleSampling.Involution
 import ReversibleSampling.ImportanceSampling
+import ReversibleSampling.Poisson
+import ReversibleSampling.CountGate
+import ReversibleSampling.ConditionalPoisson

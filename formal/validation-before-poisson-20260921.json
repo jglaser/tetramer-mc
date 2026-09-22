@@ -1,0 +1,42 @@
+{
+  "checked_at_utc": "2026-09-20T17:51:58.156809+00:00",
+  "lean": "4.24.0",
+  "lean_commit": "797c613eb9b6d4ec95db23e3e00af9ac6657f24b",
+  "mathlib_commit": "f897ebcf72cd16f89ab4577d0c826cd14afaafc7",
+  "checks": [
+    {
+      "command": [
+        "/home/xvg/tetramer-mc/formal/.elan/bin/lake",
+        "build"
+      ],
+      "exit_code": 0,
+      "stdout": "\u2714 [2444/2446] Built ReversibleSampling.ImportanceSampling (3.1s)\n\u2714 [2445/2446] Built ReversibleSampling (2.5s)\nBuild completed successfully (2446 jobs).\n",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "/home/xvg/tetramer-mc/formal/.elan/bin/lake",
+        "env",
+        "lean",
+        "Audit.lean"
+      ],
+      "exit_code": 0,
+      "stdout": "'ReversibleSampling.complete_markov' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.complete_reversible' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.complete_invariant' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.accept_reject_correct' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.mass_mul_mh' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.mh_accepted_flow_symmetric' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.metropolis_hastings_correct' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.deterministic_accepted_flow_density' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.involution_accepted_flow_symmetric' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.involution_metropolis_correct' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.invariant_preserves_physical_marginal' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.product_auxiliary_marginal' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.conditional_auxiliary_marginal' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.conditional_auxiliary_update_preserves_marginal' depends on axioms: [propext,\n Classical.choice,\n Quot.sound]\n'ReversibleSampling.invariant_hybrid' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.importance_sampling_lintegral' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.normalized_importance_sampling' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.unbiased_auxiliary_weight_marginal' depends on axioms: [propext, Classical.choice, Quot.sound]\n'ReversibleSampling.randomized_importance_sampling' depends on axioms: [propext, Classical.choice, Quot.sound]\n",
+      "stderr": ""
+    }
+  ],
+  "theorems_axiom_audited": 19,
+  "source_sha256": {
+    "lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434",
+    "lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "ReversibleSampling.lean": "fe04b9b90dd8ae2f53aa1e51b7039b1cd50e171f8a4749342937449a8fd8953d",
+    "ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "ReversibleSampling/Involution.lean": "273743e9925a32ffc0dd3ebb612900c5c43c6c5d8048e9e6685cb163c628b7cb",
+    "ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "Audit.lean": "db9966eeef91a0933753cb4f892ff304b8f27f893b1e75ccee85253b1f182639",
+    "check.py": "1602b8f7b8d30c5fbf48885b9fb4111426cfa0d7240710d2dd605bc19743fb72"
+  },
+  "scope": "General measurable-state accept/reject balance; finite-density MH and measure-preserving deterministic-involution specializations; conditional auxiliary marginal and hybrid invariance; nonnegative importance-weight expectation, unbiased auxiliary-weight marginal, and randomized importance expectation identities. Not a proof of concrete geometric proposal densities, Rust code, numerical arithmetic, ergodicity, or mixing."
+}

@@ -40,6 +40,8 @@ files = ["lean-toolchain", "lakefile.toml", "lake-manifest.json",
          "ReversibleSampling.lean", "ReversibleSampling/Balance.lean",
          "ReversibleSampling/MetropolisHastings.lean", "ReversibleSampling/Involution.lean",
          "ReversibleSampling/ImportanceSampling.lean",
+         "ReversibleSampling/Poisson.lean", "ReversibleSampling/CountGate.lean",
+         "ReversibleSampling/ConditionalPoisson.lean",
          "Audit.lean", "check.py"]
 record = {
     "checked_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -53,7 +55,10 @@ record = {
              "measure-preserving deterministic-involution specializations; conditional "
              "auxiliary marginal and hybrid invariance; nonnegative importance-weight "
              "expectation, unbiased auxiliary-weight marginal, and randomized importance "
-             "expectation identities. Not a proof "
+             "expectation identities; Poisson generating function, depletion mean/second "
+             "moment/relative variance and concrete importance/marginal corollaries; "
+             "normalized auxiliary-count MH and the simplified gained/lost Poisson gate, "
+             "including zero-activity and zero-volume limits. Not a proof "
              "of concrete geometric proposal densities, Rust code, "
              "numerical arithmetic, ergodicity, or mixing.",
 }

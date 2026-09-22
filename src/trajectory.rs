@@ -1,7 +1,7 @@
 //! Native Rust GSD output plus lossless body-pose JSONL records.
 //! Standard GSD particles are atom spheres for external visualization. Exact
 //! FP64 rigid-body poses are also stored in custom log chunks for analysis.
-use crate::{geometry::SphereTree, math::*};
+use crate::{assembly_bias::AssemblyBiasState, geometry::SphereTree, math::*};
 use anyhow::Result;
 use hoomd_gsd::file_layer::GsdFile;
 use std::path::Path;
@@ -49,6 +49,31 @@ impl Trajectory {
         spherical_radius: Option<f64>,
         coordinate_wall_center: Vec3,
         coordinate_origin_sweep: u64,
+    ) -> Result<()> {
+        self.append_with_coordinate_frame_and_bias(
+            step,
+            poses,
+            lengths,
+            tree,
+            spherical_radius,
+            coordinate_wall_center,
+            coordinate_origin_sweep,
+            None,
+        )
+    }
+
+    /// Optional frozen assembly bias; old callers write identical chunks.
+    #[allow(clippy::too_many_arguments)]
+    pub fn append_with_coordinate_frame_and_bias(
+        &mut self,
+        step: u64,
+        poses: &[Pose],
+        lengths: Vec3,
+        tree: &SphereTree,
+        spherical_radius: Option<f64>,
+        coordinate_wall_center: Vec3,
+        coordinate_origin_sweep: u64,
+        bias: Option<AssemblyBiasState>,
     ) -> Result<()> {
         let n = poses.len() * tree.shape.atoms.len();
         let center = if spherical_radius.is_some() {
@@ -130,6 +155,18 @@ impl Trajectory {
                 .write_scalars("log/tetramer_mc/spherical_wall_radius", [radius])?;
             self.gsd
                 .write_scalars("log/tetramer_mc/bath_wall_permeable", [1_u8])?;
+        }
+        if let Some(state) = bias {
+            self.gsd.write_scalars(
+                "log/tetramer_mc/assembly_largest_component",
+                [state.largest_component_size as u64],
+            )?;
+            self.gsd
+                .write_scalars("log/tetramer_mc/assembly_bias", [state.bias])?;
+            self.gsd.write_scalars(
+                "log/tetramer_mc/assembly_log_reweight",
+                [state.log_reweight],
+            )?;
         }
         self.gsd.end_frame()?;
         Ok(())

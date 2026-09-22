@@ -10,7 +10,7 @@ arrangements without native docking information. Native intratetramer geometry
 is already supplied by the body shape. This experiment cannot establish
 template-free crystallization from flexible monomers.
 
-## Current objective — revised 2026-09-20
+## Current objective — revised 2026-09-21
 
 Determine whether the specified hard protein-shape plus ideal-depletant model
 supports native inter-tetramer assembly, using validated reversible sampling
@@ -54,7 +54,52 @@ and recovery of the physical marginal. Keep the theorem's mathematical
 assumptions explicit and connect them to the implemented moves; the general
 theorem alone does not verify floating-point geometry or executable code.
 
+## Approved finite-system endpoint and execution order
+
+The first decisive endpoint is equilibrium native assembly in a finite system
+at approximately **106.8 μM tetramers**, with N=12/N=24 and equal-volume boundary
+checks. A bulk crystal-stability conclusion is separate. Keep the repaired shape,
+1.5 Å depletants, activity 0.035 Å⁻³ and physical measure unchanged.
+
+The [conditional-ray campaign](conditional-ray-reference.md) implements the
+predeclared 786,432-draw, six-arm regional comparison, with two independent
+Poisson clouds per valid pose. Its frozen R4 is a fixed conditional subset.
+Every proposal and invalid zero retains the unconditional denominator; the
+complete native classifier remains independent of proposal construction.
+Full-vessel importance comparisons and subsequent production assembly runs are
+gated on regional convergence. A failed fixed campaign leaves the thermodynamic
+question unresolved and identifies unstable strata rather than changing the
+region or enlarging the allocation after seeing results.
+
+Once that gate passes, compare matched local, redraw and transport kernels by
+contact-fingerprint ESS per CPU, initial-condition agreement and completed
+environment exchanges. Freeze the native-blind memory-derived model before
+held-out coverage/compression evaluation. Then compare all-mobile dispersed,
+competing-aggregate and native-seeded starts at N=12/N=24, four streams per
+preparation and proposal arm. Retain native-informed controls and compare
+spherical versus periodic boundaries with the common valid move set.
+
+The optional [frozen cluster-size bias](frozen-assembly-bias.md) is implemented
+and reference-tested for later reversible assembly free energies. It corrects
+each elementary kernel and stores exp(B) physical reweighting factors; no
+protein biased-production result is implied. The [Lean project](../formal/README.md)
+now has 38 checked theorem audits, preserving the original 19 and adding the
+Poisson estimator and count-gate bridges. None of these correctness results
+establishes equilibrium sampling by itself.
+
 ## Latest controlled results — 2026-09-21
+
+The [conditional-ray comparison](conditional-ray-reference-results.md) has now
+completed all 786,432 draws, 24 populations, six independent audits and the
+unchanged native classification. It fixes out-of-region proposal waste but
+fails the predeclared weight-convergence gate. Larger guided native/no-entry
+ESS is 1.1/2.7; their largest draws supply 95.0%/60.4% of estimated mass.
+The larger guided/uniform free-energy contrasts differ by 5.38 kBT, and
+radial/angular contributions remain unstable. The full-vessel comparison,
+physical mixing benchmark and N=12/N=24 production therefore remain gated.
+This is an explicit unresolved sampling limitation, not finite-system
+instability. The optional bias and 38-theorem Lean bridge are implemented
+and validated independently of that unresolved physical result.
 
 | Goal milestone | Present evidence | Remaining requirement |
 |---|---|---|

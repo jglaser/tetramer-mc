@@ -141,7 +141,35 @@ adds prescribed catalogue sites, and selects some centers using the no-native-
 entry label. Removing explicit labels after fitting, or extracting new centers
 from the current native-informed trajectories, does not remove that provenance.
 
-## Later branch: freeze physically discovered pair-memory poses
+## Frozen native-blind pair-memory proposal
+
+The all-slot baseline is now prepared as a separate, inert proposal asset in
+[runs/native-blind-memory-proposal-preparation-20260921](../runs/native-blind-memory-proposal-preparation-20260921/manifest.json).
+The self-contained `model.json` has SHA
+`b6d06b0a076d7f3cd4f591d116a77799b2dc4caa3ea6c21081ad5da8a45b3e9b`.
+It retains all 64 terminal slots in replicate/slot order, including duplicates
+and any unbound poses, with equal weights and exact reciprocal symmetrization
+(128 virtual branches). No native label, fitted covariance, likelihood,
+production pose or source weight selected or altered any slot.
+
+The prescribed ordinary Gaussian widths are 1 Å translation and 3° small-angle
+rotation, with no cross terms. Their full-rank covariance uses the atom-derived
+angular coordinate scale 55.02283113084892 Å. These widths are a baseline, not a
+fit or demonstrated coverage optimum. Retain the 10% uniform proposal component
+when evaluating it with the existing assembly runner.
+
+The [exporter](../tools/prepare_native_blind_memory_proposal.py) archives complete
+historical checkpoints, input configurations, source bundle, executable,
+geometry model and its own Python dependency closure. All 64 centers passed an
+independent atomic hard-overlap check. Four tests check every slot, ordering,
+equal weights, independence from production poses, retention of duplicates,
+failures instead of filtering, and the exact reciprocal law. The reciprocal
+density identity and symmetry errors were below 8e-14; all 128 chart round trips
+were below 5e-14. No new physical sampling or depletant clouds were generated,
+and no assembly production run uses this asset yet. Contact-weight convergence
+remains the gate for the planned controlled assembly comparison.
+
+### Historical source and fixed selection rule
 
 A separate later proposal can use all 64 terminal poses from the four historical
 `runs/contact-memory-free-1000/runs/free-r0{0,1,2,3}-rj-memory-on/checkpoint.json`
@@ -181,5 +209,5 @@ borrow native covariance. Freeze those ordinary charts before applying exact
 reciprocal symmetrization. Treat training cost and historical nonequilibrium
 bank coverage separately, as described in
 [contact-memory-pilot.md](contact-memory-pilot.md) and
-[contact-memory-balance.md](contact-memory-balance.md). No export, fit, new
-sampling or launch of either proposed control has been performed for this note.
+[contact-memory-balance.md](contact-memory-balance.md). The export described above uses this complete source. It performs no fit or
+new sampling, and has not launched a production assembly comparison.

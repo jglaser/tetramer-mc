@@ -1,0 +1,108 @@
+{
+  "schema": "contact-bank-completed-stage-validation-v1",
+  "complete": true,
+  "conclusion": "unresolved finite-region sampling",
+  "finite_system_native_stability_established": false,
+  "finite_system_native_instability_established": false,
+  "template_free_sampling_success_established": false,
+  "fresh_attempted_draws": 131072,
+  "physical_populations": 8,
+  "independent_population_seeds": [
+    132101010,
+    132102019,
+    132103028,
+    132104037,
+    132105046,
+    132106055,
+    132107064,
+    132108073
+  ],
+  "raw_audits": 2,
+  "sampler_cpu_seconds": 1807.001640019,
+  "controller_wall_seconds": 309.8030183315277,
+  "maximum_simultaneous_physical_jobs": 8,
+  "analysis_workers": 4,
+  "old_physical_campaigns_restarted": 0,
+  "old_raw_audits_replayed": 0,
+  "first_48_component_preparation_physical_draws": 0,
+  "primary_v1_checks": {
+    "observed_regional_quality": false,
+    "width_agreement": true,
+    "paired_free_energy_precision": false,
+    "significant_strata_agreement": false,
+    "classifier_contact_consistency": true
+  },
+  "supplemental_strict_width_free_energy_check": {
+    "observed": true,
+    "beta_deltaF_left_minus_right": -0.28390581785068036,
+    "combined_population_SE": 0.37892391978483103,
+    "absolute_passed": false,
+    "SE_passed": true,
+    "passed": false,
+    "absolute_limit": 0.2,
+    "SE_multiplier": 3.0
+  },
+  "known_pocket_width_log_difference": 0.7602519792820814,
+  "known_pocket_width_combined_population_SE": 0.18908835511046707,
+  "known_pocket_width_observed_standard_errors": 4.020617656956905,
+  "covariance_version_note": "Completed primary comparison and archived analyzer are immutable v1. Working v2 adds a strict contrast agreement gate. Original overall failure is unchanged.",
+  "novel_focused_tests": [
+    {
+      "path": "tools/test_contact_bank_guides.py",
+      "count": 13,
+      "returncode": 0,
+      "source_sha256": "a00eb8038f266708d8428929ee620e30fbaee396ba00633ff1a46970814eb723"
+    },
+    {
+      "path": "tools/test_reference_contact_bank.py",
+      "count": 8,
+      "returncode": 0,
+      "source_sha256": "1a3377b090d95081d20e44cb58cc58db903c065548b479739684af150b0a4419"
+    },
+    {
+      "path": "tools/test_contact_bank_pilot.py",
+      "count": 13,
+      "returncode": 0,
+      "source_sha256": "9f7c533f648ea1a364feb6ba5ae5796ea0e5e9dc54ccc3e6fb7478c4e022ddc5"
+    },
+    {
+      "path": "tools/test_contact_bank_analysis.py",
+      "count": 8,
+      "returncode": 0,
+      "source_sha256": "7cc0f21a16aad9f093803ab0a38269a3a35b398600a154d06fd33ebf9d299fd4"
+    },
+    {
+      "path": "tools/test_analyze_contact_bank_reference_partition.py",
+      "count": 9,
+      "returncode": 0,
+      "source_sha256": "2f7d5d8c0beb77fcf0dbd7033bc7aaf98997c130fb925b7ee4cb57511ef88204"
+    }
+  ],
+  "total_novel_focused_tests": 51,
+  "frozen_physical_analyzer_sha256": "0a75382766e1eef536ff818b85e6f4587a4c55d716deb84a34b2b0d2c4e6d87b",
+  "working_analyzer_v2_sha256": "7a9ceb72bdb2b7e396662a5349e0262b431e53c1ec452198f70e6c2497beb76e",
+  "record_sha256": {
+    "runs/contact-bank-pilot-20260922/protocol.json": "98ca05e13dc211542204a072d4e07c89b18bb9709baee52688588eff74896a8d",
+    "runs/contact-bank-pilot-20260922/status.json": "7dae25f92ecbfa42047f499a78992ce298ffb95e82c6c3cb7065915785393cec",
+    "runs/contact-bank-pilot-20260922/freeze.json": "b753f540211e8ae4be9c9a244272e785870d24b061791b03ae71ed760c47a6d0",
+    "runs/contact-bank-pilot-comparison-20260922/analysis.json": "088df0e27256410688f1773077dc3ad27ad6f154563c9bc19ff3ab12e6c445f8",
+    "runs/contact-bank-reference-partition-20260922/analysis.json": "4602f6255473a2957412e9a4bc79209f435692d6806727e40124d8d65b62bb4f",
+    "runs/contact-bank-reference-partition-plan-20260922/protocol.json": "497fa30e7389c8baf3c458060397f13a31f0227e1241f7dd38a9fff761010e50",
+    "runs/contact-bank-guide-preparation-20260922/freeze.json": "33365ccf697dce596efe1b35486fc01bcd3176f01eb2ed01f299db2c509a9798",
+    "runs/reference-contact-bank-preparation-20260922/freeze.json": "bfabb8ed202f2d2bca13bbe48daccc0a0156b7433d2758b8e92027328a909077",
+    "runs/mobile-conditional-ray-extremes-20260922/analysis.json": "ec4e6b76fa2c27079f7357116157f7df393f0af1eefb4a411ce48ca9e6004f31",
+    "runs/mobile-conditional-ray-extremes-review-20260922/analysis.json": "e27f61b227c6933ba98a5f8166750335f464f8634257c8f97722e4f749fa7656",
+    "runs/contact-bank-implementation-validation-20260922/validation.json": "9745e2cc1bb75c5b20c6646d9bada1f8e496623ae8d69b2ce55b5277a379a0b1",
+    "formal/validation.json": "7cc5145e7c51984c0a405d027b95ecb64c3d8f47acdf208440f722cc085aa538"
+  },
+  "protected_user_example_sha256": "e21dc9ba81b61a32acb739eaff55a238d86b983ce71909b2ca63f266530c986b",
+  "completed_work": "Separate training diagnostics, two frozen inert guide preparations, fresh reference-augmented pilot, independent audits, full unchanged classification, pocket/complement partition, future stricter contrast gate.",
+  "unresolved_work": [
+    "native and complementary R4 mass precision",
+    "remaining full-vessel contribution",
+    "proposal/population-size/intensity validation",
+    "stationary physical contact mixing",
+    "geometry-only finite-system assembly and boundary/size controls"
+  ],
+  "scope": "Stage completion is not the broader goal. Original786432draw campaign and all existing correctness/proof evidence are reused, never pooled as fresh validation. No dependent full-vessel or assembly production launched."
+}

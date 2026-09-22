@@ -87,6 +87,37 @@ now has 38 checked theorem audits, preserving the original 19 and adding the
 Poisson estimator and count-gate bridges. None of these correctness results
 establishes equilibrium sampling by itself.
 
+## Saved-data coverage diagnosis — 2026-09-22
+
+A [matching-target review](../runs/mobile-conditional-ray-extremes-review-20260922/report.md)
+shows that all 5,064 contributing poses in the independent R5 native-pocket
+reference also satisfy current R4. The original 131,072-attempt subset estimate
+is log Qz=60.6821, with observed population RSE 7.97% and ESS 169.8. It exceeds
+the large-uniform estimate for the entire current native region by 4.815 log
+units. The shape, scaffold, measure, full native observer and original
+normalizers agree. This is evidence of missed native weight, not a new full-R4
+estimate or a rigorous lower bound.
+
+A [separate six-dimensional guide](contact-bank-reference.md) uses the completed
+campaign only for proposal training. Its first frozen 48-component version
+improved held-out scores on those campaign data but still missed the measured
+native pocket, so no physical pilot was launched from it. A separately prepared
+56-component version adds observed pocket anchors before fresh validation.
+Both versions retain 50% uniform R4 coverage and full untruncated mixture
+corrections. Positive training scores do not pass the physical convergence gate;
+full-vessel and assembly production remain gated.
+
+The [fresh 56-component pilot](contact-bank-reference-results.md) has now completed
+131,072 new attempts, eight populations and two audits. The tighter guide gives
+native/no-entry ESS 88.7/323.2, a substantial improvement, but fails native
+precision and dominant-contribution criteria. The individual total-region log
+weights differ by about 0.14 between widths; their free-energy contrasts differ
+by 0.284 kBT. More decisively, the separately declared known-pocket split gives
+59.7% versus 32.2% of native weight inside R5, with a 0.760-log-unit discrepancy
+(4.02 combined observed population SE). Native-complement ESS is only 17.6/20.5.
+Compensating regional errors therefore prevent declaring the total converged.
+No dependent full-vessel or assembly production was launched.
+
 ## Latest controlled results — 2026-09-21
 
 The [conditional-ray comparison](conditional-ray-reference-results.md) has now

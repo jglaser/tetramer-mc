@@ -103,3 +103,8 @@ reported moment ratios by less than 4.73×10⁻¹¹. Independent reconstruction
 reproduced the unnormalized held-out ratios within 2.1×10⁻¹⁴ and checked the
 objective derivatives. This is numerical verification of the diagnostic, not
 validation of an operational proposal or a bound on physical unseen mass.
+
+A subsequent [tail and protected-subdivision allocation diagnostic](contact-tail-allocation.md)
+shows that existing components cover the observed troublesome rows and tests
+a training-only objective protecting important orthants as well as aggregates.
+It remains an offline design experiment, with no change to physical gates.

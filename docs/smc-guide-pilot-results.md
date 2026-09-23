@@ -135,6 +135,11 @@ existing Gaussian components using saved samples, retaining the defensive
 component and exact density. Any such fitted candidate needs a separately
 frozen fresh evaluation; retrospective optimization cannot repair this result.
 
+The subsequent [fixed-component reweighting diagnostic](contact-guide-reweighting-diagnostic.md)
+improves the three aggregate moment estimates on populations held out from
+fitting, but worsens several unstable competing-contact strata. No operational
+proposal or new physical campaign was promoted from that diagnostic.
+
 ## Reproducibility
 
 - [Frozen pilot protocol](../runs/smc-geometry-guide-pilot-20260923/protocol.json):

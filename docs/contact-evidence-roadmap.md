@@ -129,26 +129,34 @@ training populations in each of three named regions. The declared held-out
 selection favors weighted neighborhood means with 128 neighbors; its physical
 second-moment estimates remain uncertain and omit new Poisson-cloud noise.
 
-A **separate 2,228,224-attempt confirmation is now running**, with five arms and
+The **separate 2,228,224-attempt confirmation has completed**, with five arms and
 four fresh populations per arm. The main allocation is 131,072 attempts per
 population; a 32,768-attempt control tests population size. Other controls vary
 all covariances by four, the uniform defensive fraction from 0.5 to 0.2, and the
 auxiliary intensity ratio from 128 to 256. Old calculations are not extended
 or pooled into these estimates. Full-native R5 intersection and native complement
 are now separate decision quantities, alongside complete native and no-entry
-weights and the original spatial/angular strata. The frozen workflow runs
-independent density reconstruction and full classification after the physical
-jobs finish. No result from this campaign is yet claimed.
+weights and the original spatial/angular strata. The frozen workflow completed independent density reconstruction and full
+classification. The [results](contact-confirmation-results.md) pass all aggregate
+region/control comparisons and paired free-energy precision, but fail regional
+concentration and 30 of133 significant subdivision comparisons (29 orthants,
+one angular; all radial comparisons pass). The native complement of oldR5
+remains particularly concentrated. The declared regional gate is unsatisfied.
 
 The independent [R4 SMC control](smc-r4-control.md) provides a different estimator
 and mutation mechanism. A geometric proposal-density bridge is needed because
 resampling directly into the hard-fluid measure would almost always discard
 old-pocket ancestors at the planned population size. Its physical endpoint
 remains unchanged. Analytic toy tests validate this implementation; protein
-SMC and full-vessel calculations remain separately controlled work. None of
-these preparations changes the unresolved finite-system assembly verdict.
+SMC controls are running under their existing frozen allocation and will be
+compared on matching linear masses. The [full-vessel allocation](full-vessel-comparison-preparation.md)
+is now frozen but inert, with the same complete classifier in both arms and
+explicit pocket-complement accounting. The [passive efficiency observer](contact-efficiency-observer.md)
+prepares retained-state contact ESS/CPU and completed-exchange diagnostics for
+later mobile benchmarks. These implementations do not change the unresolved
+finite-system assembly verdict.
 
-## Latest controlled results — 2026-09-21
+## Earlier conditional-ray results — 2026-09-21
 
 The [conditional-ray comparison](conditional-ray-reference-results.md) has now
 completed all 786,432 draws, 24 populations, six independent audits and the

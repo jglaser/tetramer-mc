@@ -1,6 +1,6 @@
 # Full-vessel latent proposal mixture
 
-`basin-normalizer` can integrate the unchanged atomic protein-wall target with a normalized 50/50 mixture of the complete existing vessel proposal and a frozen latent guide. This is a proposal change, not a restriction to a contact pocket. Protein execution remains gated by the regional convergence and independent coverage checks.
+`basin-normalizer` can integrate the unchanged atomic protein-wall target with a normalized 50/50 mixture of the complete existing vessel proposal and a frozen latent guide. This is a proposal change, not a restriction to a contact pocket. Protein execution remains gated by regional convergence and matching independent-method checks. The full-vessel remainder is the next measurement, not a prerequisite that can already be assumed.
 
 The library entry point is:
 

@@ -129,3 +129,8 @@ authentication paths and a fresh output directory. It launches no physical work.
 A subsequent [bounded proposal-design diagnostic](smc-terminal-geometry-guides.md)
 reuses terminal geometry to improve native-region proposal coverage. It preserves
 this failed physical convergence result and launches no new simulations.
+
+The [fresh frozen-guide pilot](smc-guide-pilot-results.md) subsequently measured
+the candidate with independent importance populations. Its native complement
+is closer to narrow SMC, while competing-contact tails and hard-only population
+agreement remain unresolved. The historical comparisons above are unchanged.

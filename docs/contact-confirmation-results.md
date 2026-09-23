@@ -99,3 +99,7 @@ Physical contact-mixing and N=12/N=24 assembly conclusions still require their
 own mobile-system evidence. Aggregate agreement here is progress toward those
 measurements; concentration and subdivision failures leave the model question
 open.
+
+A subsequent [fresh guide pilot](smc-guide-pilot-results.md) completed 524,288
+independent attempts. It improves native-complement proposal coverage but still
+fails the fixed regional diagnostics. It does not supersede this confirmation.

@@ -108,8 +108,11 @@ The already-launched serialized command is:
 This command is recorded for reproduction, not for relaunching an active or
 completed campaign. [Workflow status](../runs/smc-geometry-guide-pilot-20260923/workflow-status.json)
 and [physical/audit status](../runs/smc-geometry-guide-pilot-20260923/status.json)
-record the actual stage and process birth identities. The automatic analysis
-will write `comparison/analysis.json` and `comparison/report.md`.
+record the actual stage and process birth identities. The workflow completed
+and wrote `comparison/analysis.json` and `comparison/report.md`.
+The [completed pilot results](smc-guide-pilot-results.md) retain its failed
+convergence checks and distinguish native proposal gains from competing-contact
+tail uncertainty.
 
 This allocation tests candidate utility. Previous noisy-moment diagnostics
 suggest its no-entry ESS may remain below the fixed precision requirement.

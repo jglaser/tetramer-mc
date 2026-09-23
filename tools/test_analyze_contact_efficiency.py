@@ -195,6 +195,15 @@ class ContactEfficiencyTests(unittest.TestCase):
         c = fixture()[0]; obs = ContactObserver(shape, ['surface'], c)
         with self.assertRaisesRegex(ValueError, 'atomic wall'): obs.classify([pose(20.), pose(0), pose(10)])
 
+    def test_nonbinary_tangency_matches_strict_inflated_sphere_predicate(self):
+        c = fixture()[0]; c['depletant_radius'] = .1
+        observer = ContactObserver(dict(atoms=[dict(center=[0., 0., 0.], radius=.6)]), ['surface'], c)
+        self.assertEqual(observer.classify([pose(0.), pose(1.4), pose(10.)])['tokens'], [])
+        inner = float(np.nextafter(1.4, 0.))
+        self.assertEqual(observer.classify([pose(0.), pose(inner), pose(10.)])['tokens'], [TOKEN_A])
+        outer = float(np.nextafter(1.4, np.inf))
+        self.assertEqual(observer.classify([pose(0.), pose(outer), pose(10.)])['tokens'], [])
+
     def test_patch_ids_track_surface_change_at_fixed_partner(self):
         c = fixture()[0]
         shape = dict(atoms=[dict(center=[-.3, 0, 0], radius=.1), dict(center=[.3, 0, 0], radius=.1)])

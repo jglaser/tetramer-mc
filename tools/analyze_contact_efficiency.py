@@ -19,7 +19,6 @@ import time
 
 import numpy as np
 from scipy.spatial import cKDTree
-from scipy.spatial.transform import Rotation
 
 from mobile_posterior_metrics import apparent_effective_count
 
@@ -87,7 +86,14 @@ def pose_arrays(poses):
     require(p.shape == (len(poses), 3) and q.shape == (len(poses), 4)
             and np.isfinite(p).all() and np.isfinite(q).all(), 'Invalid retained pose')
     require(np.max(abs(np.linalg.norm(q, axis=1)-1)) <= 1e-8, 'Unnormalized quaternion')
-    return p, Rotation.from_quat(q[:, [1, 2, 3, 0]]).as_matrix()
+    # Match Rust's normalized quaternion polynomial and summation order.
+    # This is a numerical cross-check, not a bitwise cross-platform guarantee.
+    norm = np.sqrt(((q[:, 0]**2+q[:, 1]**2)+q[:, 2]**2)+q[:, 3]**2)
+    w, x, y, z = (q/norm[:, None]).T
+    matrix = np.stack((1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w),
+                       2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w),
+                       2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)), axis=1)
+    return p, matrix.reshape((-1, 3, 3))
 
 
 def validate_effective_config(config, declared, manifest, summary, shape):
@@ -186,12 +192,21 @@ def numeric_leaves(value, prefix=()):
     return {prefix: value} if type(value) is int else {}
 
 
-def validate_frames(frames, config, summary, manifest, checkpoint, burn_sweep, end_sweep):
-    """Audit the entire saved axis, then select an explicitly declared regular window."""
+def validate_frames(frames, config, summary, manifest, checkpoint, burn_sweep, end_sweep, *, allow_frozen_assembly_bias=False):
+    """Audit retained cadence; the explicit bias path requires a separate weight audit.
+
+    The ordinary analyzer never enables this option. It permits only the stored
+    frozen bias table and records, not adaptation or uncorrected physical ESS.
+    """
     require(summary['complete'] is True and summary['all_bodies_mobile'] is True, 'Completed all-mobile run required')
     require(not config.get('fixed_body_indices'), 'Fixed bodies are outside this analyzer')
-    require(all(config.get(key) is None and manifest.get(key) is None for key in FROZEN_MODES),
+    require(type(allow_frozen_assembly_bias) is bool, 'Explicit Boolean bias observer mode required')
+    forbidden = tuple(k for k in FROZEN_MODES if not (allow_frozen_assembly_bias and k == 'assembly_bias'))
+    require(all(config.get(key) is None and manifest.get(key) is None for key in forbidden),
             'Ordinary physical ESS requires a frozen, unbiased proposal; adaptive/bias modes unsupported here')
+    if allow_frozen_assembly_bias:
+        require(config.get('assembly_bias') is not None and config['assembly_bias'] == manifest.get('assembly_bias'),
+                'Bias observer requires an identical frozen config/manifest table')
     n = len(config['initial_poses']); integer(n, 'body count', 2)
     require(summary['bodies'] == n, 'Summary body count differs')
     start, total = summary['initial_sweep'], summary['completed_sweeps']
@@ -211,7 +226,10 @@ def validate_frames(frames, config, summary, manifest, checkpoint, burn_sweep, e
     for frame in frames:
         require(len(frame['poses']) == n and frame['boundary'] == config['boundary']['kind'], 'Frame identity differs')
         pose_arrays(frame['poses'])
-        require(frame.get('assembly_bias') is None, 'Biased frame lacks supported physical ESS correction')
+        if allow_frozen_assembly_bias:
+            require(isinstance(frame.get('assembly_bias'), dict), 'Missing frozen bias state on retained frame')
+        else:
+            require(frame.get('assembly_bias') is None, 'Biased frame lacks supported physical ESS correction')
         cpu = frame['sampler_cpu_seconds']
         require(math.isfinite(cpu) and cpu >= 0 and cpu > prior_cpu, 'Missing or nonmonotone sampler CPU')
         prior_cpu = cpu
@@ -267,26 +285,39 @@ class ContactObserver:
 
     def classify(self, poses):
         p, rotation = pose_arrays(poses)
-        rotated = np.einsum('bij,aj->bai', rotation, self.atoms)
+        rotated = ((rotation[:, None, :, 0]*self.atoms[None, :, 0, None]
+                    + rotation[:, None, :, 1]*self.atoms[None, :, 1, None])
+                    + rotation[:, None, :, 2]*self.atoms[None, :, 2, None])
         tokens, native_keys = set(), []
         if self.boundary['kind'] == 'spherical':
             clearance = self.boundary['radius']-np.linalg.norm(rotated+p[:, None, :], axis=2)-self.radii
             require(np.min(clearance) >= -2e-8, 'Retained pose violates atomic wall')
         for i, j in itertools.combinations(range(len(poses)), 2):
-            delta = p[j]-p[i]
+            neighbor_position = p[j].copy()
             if self.boundary['kind'] == 'periodic':
-                delta -= self.lengths*np.floor(delta/self.lengths+.5)
-            if np.linalg.norm(delta) <= 2*(self.bound+self.rd):
-                near = cKDTree(rotated[i]).sparse_distance_matrix(cKDTree(rotated[j]+delta),
-                    2*(float(self.radii.max())+self.rd), output_type='ndarray')
+                neighbor_position -= self.lengths*np.floor((p[j]-p[i])/self.lengths+.5)
+            delta = neighbor_position-p[i]
+            guard = 512*np.finfo(float).eps*(1+np.linalg.norm(p[i])
+                + np.linalg.norm(neighbor_position)+self.bound+self.rd)
+            if np.linalg.norm(delta) <= 2*(self.bound+self.rd)+guard:
+                left, right = p[i]+rotated[i], neighbor_position+rotated[j]
+                near = cKDTree(left).sparse_distance_matrix(cKDTree(right),
+                    2*(float(self.radii.max())+self.rd)+guard, output_type='ndarray')
                 if len(near):
-                    gap = near['v']-self.radii[near['i']]-self.radii[near['j']]
+                    a, b = near['i'], near['j']
+                    d = left[a]-right[b]
+                    squared = (d[:, 0]*d[:, 0]+d[:, 1]*d[:, 1])+d[:, 2]*d[:, 2]
+                    gap = np.sqrt(squared)-self.radii[a]-self.radii[b]
                     require(float(gap.min()) >= -1e-8, 'Retained inter-body hard overlap')
-                    for a, b in zip(near['i'][gap < 2*self.rd], near['j'][gap < 2*self.rd]):
-                        tokens.add((i, j, self.patches[a], self.patches[b]))
+                    # Inflate each radius before summing, as AssemblyBias does.
+                    # Gap subtraction can turn a representable tangency into contact.
+                    radius_sum = (self.radii[a]+self.rd)+(self.radii[b]+self.rd)
+                    contact = squared < radius_sum*radius_sum
+                    for aa, bb in zip(a[contact], b[contact]):
+                        tokens.add((i, j, self.patches[aa], self.patches[bb]))
             if self.native is not None:
                 # Reimage only the pair. Open-space classifier performs its own exact predicates.
-                partner = dict(poses[j], position=(p[i]+delta).tolist())
+                partner = dict(poses[j], position=neighbor_position.tolist())
                 native_keys.extend((i, j, m['motif_id']) for m in self.native.classify_pair(poses[i], partner))
         cycle = self.checker.check(native_keys) if self.checker else None
         if cycle is not None and self.boundary['kind'] == 'periodic':
@@ -494,7 +525,7 @@ def analyze(run, plan_path, out):
     patch_path = load_bound_file(plan['patch_map'], plan_path.parent); patch = read(patch_path)
     require(patch['schema'] == 'body-frame-atom-patch-map-v1' and patch['shape_sha256'] == manifest['shape_sha256'], 'Patch/shape identity differs')
     implementation = {name: sha(Path(__file__).with_name(name))
-                      for name in ('analyze_contact_efficiency.py', 'mobile_posterior_metrics.py')}
+                      for name in ('analyze_contact_efficiency.py', 'mobile_posterior_metrics.py', 'contact_benchmark_contract.py')}
     native = None; dependencies = {str(plan_path): sha(plan_path), str(patch_path): sha(patch_path)}
     dependencies.update({str(Path(__file__).with_name(name).resolve()): value for name, value in implementation.items()})
     if plan.get('native_definition') is not None:
@@ -545,6 +576,15 @@ def analyze(run, plan_path, out):
                   source_sha256=bindings, dependency_sha256=dependencies, implementation_sha256=implementation,
                   observer_cpu_seconds=time.process_time()-started,
                   equilibrium_reference_scope='Reference coverage/independence are explicit evidence attestations; this observer verifies bindings, not the external free-energy derivation.')
+    result['window_attempts'] = {kind: frames[window['indices'][-1]]['counts'][kind]['attempted']
+        - frames[window['indices'][0]]['counts'][kind]['attempted'] for kind in ('local', 'global')}
+    result['benchmark_contract'] = None
+    if plan.get('benchmark_contract') is not None:
+        from contact_benchmark_contract import validate_report
+        path = load_bound_file(plan['benchmark_contract'], plan_path.parent); contract = read(path)
+        dependencies[str(path)] = sha(path)
+        result['benchmark_contract'] = dict(path=str(path), sha256=sha(path), content=contract, content_sha256=digest(contract))
+        validate_report(result, contract)
     recheck_bindings({str(run/name): expected for name, expected in bindings.items()}, 'Input changed during observation')
     recheck_bindings(dependencies, 'Observer dependency changed during observation')
     out.mkdir(parents=True)
@@ -570,11 +610,15 @@ def compare_reports(reports):
     """Independent stream means, never concatenated-chain or accepted-event ESS."""
     require(len(reports) >= 2, 'At least two report populations are required')
     first = reports[0]
+    from contact_benchmark_contract import validate_comparison
+    contract = validate_comparison(reports)
     for r in reports:
         require(r['schema'] == SCHEMA and r['complete'] is True, 'Incomplete contact report')
         for key in ('physical_identity', 'region_definition_sha256', 'observer_definition_sha256',
-                    'measurement_identity', 'schedule', 'implementation_sha256'):
+                    'measurement_identity', 'implementation_sha256'):
             require(r[key] == first[key], 'Comparison must match '+key)
+        if contract is None:
+            require(r['schedule'] == first['schedule'], 'Comparison must match schedule')
         require((r['window']['burn_sweep'], r['window']['end_sweep']) ==
                 (first['window']['burn_sweep'], first['window']['end_sweep']), 'Matched observation windows required')
     identities = [r['initialization']['master_seed'] for r in reports]
@@ -611,7 +655,7 @@ def compare_reports(reports):
                 diagnostic_agreement_within_three_observed_se=None if se is None else abs(difference) <= 3*se,
                 zero_observed_variance=se == 0,
                 scope='Observed population means only; zero variance, common trapping or unseen modes can invalidate a convergence interpretation.'))
-    return dict(schema='contact-efficiency-independent-stream-comparison-v1', groups=output, contrasts=contrasts,
+    return dict(schema='contact-efficiency-independent-stream-comparison-v1', groups=output, contrasts=contrasts, benchmark_contract=contract,
                 scope=SCOPE+' Independent stream means supply between-run uncertainty. Null ESS values remain null; no pooling chains or artificial iid ESS.')
 
 

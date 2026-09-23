@@ -35,6 +35,12 @@ created by repeating a sparse frame for hypothetical intermediate sweeps.
 The contact fingerprint is the vector of indicators
 `(body_i, body_j, patch_i, patch_j)`, with `i < j`. A token is present if any pair
 of its atom spheres has surface gap strictly less than twice the depletant radius.
+The numerical contact test compares squared distances to the sum of individually
+inflated atom radii squared, matching the Rust bias predicate. Subtracting radii
+from a distance instead can misclassify floating-point tangencies. Guarded tree
+queries only prune candidates; they never expand the strict contact set.
+Quaternion normalization and coordinate arithmetic follow the Rust polynomial.
+This remains a numerical cross-check, not a cross-platform floating-point proof.
 Hard-overlap checks and spherical per-atom wall checks accompany classification.
 Every atom has a frozen body-frame patch ID. A residue/member partition is useful
 for proteins; atom IDs also work but describe finer and noisier surface motion.
@@ -207,12 +213,42 @@ than four streams per group are flagged as incomplete relative to the assembly
 plan. Agreement within three observed standard errors does not establish
 coverage; a zero observed variance explicitly remains a warning sign.
 
-The strict comparator also requires equal `global_probability`. Its current
-baseline is **local+uniform-global**, compared with redraw/transport arms using
-the same global slot probability. A pure-local arm (`global_probability: 0`)
-cannot be compared with a positive-global-probability arm through this interface.
-Such a comparison needs a separately predeclared arm probability contract; the
-current implementation does not infer or relax one after seeing results.
+Without an explicit contract, the strict comparator still requires equal
+`global_probability`. A local+uniform-global control can use that interface.
+For the intended **pure-local / independent-redraw / correlated-transport**
+comparison, bind a frozen contract in every observer plan:
+
+```json
+"benchmark_contract": {"path": "benchmark-contract.json", "sha256": "SHA256"}
+```
+
+`tools/contact_benchmark_contract.py` validates schema
+`matched-contact-kernel-benchmark-v1`. The contract contains the physical,
+observer and region identity hashes; `common_schedule` with the two local widths,
+GCA and center-shift probabilities, cloud intensity and full endpoint tree budget;
+`window` with burn/end/cadence; all preparation labels; exactly four independent
+streams per preparation and arm; and exactly three named `arms`. Each arm declares
+`role`, `global_probability`, `method`, `model_sha256`, `frozen_posterior`, and
+`learned_uniform_weight`. Its `single_body_attempt_budget` is exactly
+`one single-body update per mobile body per sweep`.
+
+The `local` role requires global probability zero, method `local-uniform`, and no
+model or posterior. Its retained counters must contain zero global attempts.
+The two learned roles share a frozen model, defensive floor and positive global
+probability, retaining local opportunities. `independent-redraw` has no posterior;
+it uses the capture-mixture draw. A posterior update at correlation zero is not
+this control: its component selection still depends on the old pose.
+`correlated-transport` declares a nonzero correlation and a posterior branch
+probability strictly between zero and one, retaining independent capture moves.
+Correlations +1 and -1 are allowed for validated deterministic involutions.
+
+The comparator checks the complete arm/preparation matrix, disjoint seeds,
+non-resumed production windows, identical common settings and observed total
+single-body attempts. The global branch can differ only as declared. Every
+contract and implementation dependency is hash-bound and rechecked. The contract
+certifies these design checks, not when it was declared, equilibrium, or speedup.
+It does not launch a benchmark. A synthetic complete example and failure cases
+are in `tools/test_contact_benchmark_contract.py`.
 
 ## Remaining obligations
 
@@ -225,9 +261,11 @@ campaign responsibilities.
 
 This initial analyzer fails closed for biased or configuration-dependent
 auxiliary/adaptive proposal modes. Frozen correlated transport is supported.
-Physical occupancies under a frozen assembly bias require self-normalized
-reweighting and a correlated weighted-observable variance estimator; an ordinary
-unweighted-chain ESS is inappropriate. This observer does not replace the
+Physical occupancies under a frozen assembly bias are handled by the separate
+[biased occupancy observer](biased-contact-occupancy.md), using self-normalized
+`exp(+B)` reweighting. It distinguishes weight concentration, serial-correlation
+diagnostics and independent-stream uncertainty. Ordinary unweighted-chain ESS
+cannot certify reweighted physical occupancies. Neither observer replaces the
 separate reversible kernel/bias implementation audits.
 
 Focused validation command:

@@ -83,11 +83,15 @@ nothing about the full-vessel unbound contribution.
 
 ## Consequence for the next calculation
 
-The independent broad/narrow R4 SMC controls continue under their already
-frozen allocation. Their matching physical masses must use normalizer times
-terminal indicator, not endpoint fractions or unmatched capture domains.
-Their independent comparison remains useful even though the importance gate
-failed. No thresholds, regions or allocations are relaxed retrospectively.
+The independent broad/narrow R4 SMC controls have now completed under their
+frozen allocation; all eight populations and both matching-target comparisons
+were authenticated. The [completed SMC reconciliation](smc-contact-reconciliation.md)
+corroborates the historical R5 intersection and observed hard-only volumes, but
+leaves native weight outside R5 dependent on mutation scale. Neither SMC arm has
+terminal no-entry observations, so it cannot independently estimate that contrast.
+All region masses use normalizer times terminal indicator, not endpoint fractions
+or unmatched capture domains. The regional gate remains failed. No thresholds,
+regions or allocations are relaxed retrospectively.
 
 The [full-vessel comparison is prepared](full-vessel-comparison-preparation.md)
 but unlaunched. It explicitly measures the complement of all named pockets.

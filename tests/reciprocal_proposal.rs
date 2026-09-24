@@ -399,7 +399,7 @@ fn allfalse_open_envelope_preserves_legacy_density_draws_rng_and_serialization()
 }
 
 #[test]
-fn reciprocal_envelope_fails_closed_and_rejects_periodic_or_malformed_models() {
+fn reciprocal_envelope_fails_closed_for_malformed_models_in_either_boundary() {
     let model = envelope(base_model(), &[true, false]);
     #[derive(Deserialize)]
     struct LegacyRequired {
@@ -412,7 +412,11 @@ fn reciprocal_envelope_fails_closed_and_rejects_periodic_or_malformed_models() {
     let bad = |v: Value| {
         assert!(
             FrozenRelativePoseProposal::from_json_str_open(&v.to_string(), CUBE, 0.2, SHA).is_err(),
-            "Accepted {v}"
+            "Accepted open {v}"
+        );
+        assert!(
+            FrozenRelativePoseProposal::from_json_str(&v.to_string(), CUBE, 0.2, SHA).is_err(),
+            "Accepted periodic {v}"
         )
     };
     for flags in [&[true, false][..], &[false, false][..]] {
@@ -423,7 +427,7 @@ fn reciprocal_envelope_fails_closed_and_rejects_periodic_or_malformed_models() {
                 0.2,
                 SHA
             )
-            .is_err()
+            .is_ok()
         );
     }
     bad(envelope(model.clone(), &[true, false]));

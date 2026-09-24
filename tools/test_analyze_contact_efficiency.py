@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from analyze_contact_efficiency import (ContactObserver, PLAN_SCHEMA, SCHEMA, CONFIG_DEFAULTS,
-    FRAME_CONVENTION, GATE_DEFAULTS, analyze, compare_report_files, compare_reports, digest,
+    FRAME_CONVENTION, PERIODIC_FRAME_CONVENTION, GATE_DEFAULTS, analyze, compare_report_files, compare_reports, digest,
     environment_label, native_input_bindings, physical_identity, reference_assessment,
     sampled_exchanges, save, sha, summarize_observations, validate_effective_config,
     validate_frames, validate_probability_bounds)
@@ -312,6 +312,81 @@ class ContactEfficiencyTests(unittest.TestCase):
         c['initial_poses'] = copy.deepcopy(declared['initial_poses']); c['initial_poses'][0] = pose(39.5)
         c['uniform_proposal_cube_lengths'] = c['box_lengths']
         validate_effective_config(c, declared, manifest, summary, shape)
+
+    def test_periodic_effective_metadata_accepts_only_legacy_and_canonical_conventions(self):
+        c, _, summary, manifest, _ = fixture()
+        c['boundary'] = manifest['boundary'] = dict(kind='periodic')
+        c['uniform_proposal_cube_lengths'] = c['box_lengths']
+        declared = copy.deepcopy(c)
+        shape = dict(atoms=[dict(center=[0., 0., 0.], radius=.2)])
+        for convention in (FRAME_CONVENTION, PERIODIC_FRAME_CONVENTION):
+            with self.subTest(convention=convention):
+                c['coordinate_frame_convention'] = convention
+                validate_effective_config(c, declared, manifest, summary, shape)
+        for convention in (None, '', 'canonical periodic centers', PERIODIC_FRAME_CONVENTION+' altered'):
+            with self.subTest(convention=convention):
+                c['coordinate_frame_convention'] = convention
+                with self.assertRaisesRegex(ValueError, 'Unknown effective coordinate frame'):
+                    validate_effective_config(c, declared, manifest, summary, shape)
+
+    def test_spherical_effective_metadata_rejects_periodic_convention(self):
+        c, _, summary, manifest, _ = fixture()
+        declared = copy.deepcopy(c)
+        shape = dict(atoms=[dict(center=[0., 0., 0.], radius=.2)])
+        for convention in (PERIODIC_FRAME_CONVENTION, 'sphere-centered', None):
+            c['coordinate_frame_convention'] = convention
+            with self.assertRaisesRegex(ValueError, 'Unknown effective coordinate frame'):
+                validate_effective_config(c, declared, manifest, summary, shape)
+        c['coordinate_frame_convention'] = FRAME_CONVENTION
+        validate_effective_config(c, declared, manifest, summary, shape)
+
+    def test_new_periodic_metadata_does_not_relax_geometry_or_input_reconciliation(self):
+        c, _, summary, manifest, _ = fixture()
+        c['boundary'] = manifest['boundary'] = dict(kind='periodic')
+        c['uniform_proposal_cube_lengths'] = c['box_lengths']
+        c['coordinate_frame_convention'] = PERIODIC_FRAME_CONVENTION
+        declared = copy.deepcopy(c)
+        shape = dict(atoms=[dict(center=[0., 0., 0.], radius=.2)])
+        for key, value, error in (
+                ('initial_poses', [pose(39.9), pose(.7), pose(10)], 'Initial poses differ'),
+                ('uniform_proposal_cube_lengths', [40.4]*3, 'proposal cell differs'),
+                ('boundary', dict(kind='spherical', radius=20.), 'Effective config differs')):
+            changed = copy.deepcopy(c); changed[key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, error):
+                validate_effective_config(changed, declared, manifest, summary, shape)
+
+    def test_periodic_metadata_versions_survive_full_file_analysis_and_comparison(self):
+        # All rewritten files live in independent synthetic temporary runs; no
+        # archived production provenance or frozen observer asset is changed.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); reports = []
+            for index, convention in enumerate((FRAME_CONVENTION, PERIODIC_FRAME_CONVENTION)):
+                child = root/str(index); run, plan_path = file_fixture(child, seed=811+index)
+                config = json.loads((run/'config.json').read_text())
+                declared = json.loads((run/'provenance/input-config.json').read_text())
+                config['boundary'] = declared['boundary'] = dict(kind='periodic')
+                config['uniform_proposal_cube_lengths'] = config['box_lengths']
+                config['coordinate_frame_convention'] = convention
+                save(run/'config.json', config)
+                save(run/'provenance/input-config.json', declared)
+                for name in ('manifest.json', 'summary.json', 'checkpoint.json'):
+                    content = json.loads((run/name).read_text())
+                    content['config_sha256'] = sha(run/'provenance/input-config.json')
+                    if name == 'manifest.json': content['boundary'] = config['boundary']
+                    save(run/name, content)
+                frames = [json.loads(line) for line in (run/'trajectory.jsonl').read_text().splitlines()]
+                for frame in frames:
+                    frame['boundary'] = 'periodic'
+                    frame.pop('spherical_wall_radius', None)
+                (run/'trajectory.jsonl').write_text(''.join(json.dumps(f)+'\n' for f in frames))
+                plan = json.loads(plan_path.read_text())
+                plan['physical_identity_sha256'] = digest(physical_identity(config, sha(run/'provenance/shape.json')))
+                save(plan_path, plan)
+                report = analyze(run, plan_path, child/'out')
+                self.assertEqual(report['fingerprint']['samples'], 8)
+                self.assertEqual(report['window']['cpu_seconds'], 4.)
+                reports.append(child/'out/analysis.json')
+            self.assertEqual(compare_report_files(reports)['groups'][0]['populations'], 2)
 
     def test_reference_intervals_must_cover_unit_total_probability(self):
         validate_probability_bounds({'A': [.2, .6], 'B': [.1, .4], 'remaining': [0., .7]}, ['A', 'B'])

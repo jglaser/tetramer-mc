@@ -52,6 +52,12 @@ EFFECTIVE_OVERRIDES = ('method', 'sweeps', 'sample_every', 'initial_poses', 'sha
 FRAME_CONVENTION = ('Stored poses use sphere-centered coordinates; coordinate positions = stored positions + '
     'coordinate_wall_center; center shifts subtract their common displacement from the wall center. '
     'Origin established at coordinate_origin_sweep.')
+# Older periodic runs emitted the spherical text above despite canonical periodic
+# coordinates. Accept precisely that archived legacy string and the corrected
+# periodic string; this metadata compatibility does not relax any geometry,
+# boundary, source-hash, initial-pose or retained-state checks.
+PERIODIC_FRAME_CONVENTION = ('Stored poses use canonical periodic centers in [0,L); relative proposal translations '
+    "use the anchor's world-frame minimum image before conversion to the anchor body frame.")
 
 
 def require(ok, message):
@@ -150,7 +156,9 @@ def validate_effective_config(config, declared, manifest, summary, shape):
     require(origin <= manifest['initial_sweep'] and (manifest.get('resume') is not None or origin == 0),
             'Invalid effective coordinate origin')
     require(config['resolved_contact_memory'] == manifest.get('contact_memory'), 'Resolved contact memory differs')
-    require(config['coordinate_frame_convention'] == FRAME_CONVENTION, 'Unknown effective coordinate frame')
+    conventions = ((FRAME_CONVENTION, PERIODIC_FRAME_CONVENTION)
+                   if expected['boundary']['kind'] == 'periodic' else (FRAME_CONVENTION,))
+    require(config['coordinate_frame_convention'] in conventions, 'Unknown effective coordinate frame')
 
 
 def physical_identity(config, shape_sha):

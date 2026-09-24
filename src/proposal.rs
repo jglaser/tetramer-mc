@@ -465,10 +465,6 @@ impl FrozenRelativePoseProposal {
         };
         let (raw, reciprocal_components): (RawModel, Option<Vec<bool>>) = if is_envelope(&value) {
             ensure!(
-                !periodic,
-                "Reciprocal pose envelopes require an open proposal"
-            );
-            ensure!(
                 !value.get("base_model").is_some_and(is_envelope),
                 "Nested reciprocal pose envelopes are unsupported"
             );
@@ -936,6 +932,9 @@ impl FrozenRelativePoseProposal {
     }
 
     /// Continuous off-diagonal subdensity eta/V+(1-eta)G at the unique image.
+    /// Reciprocal branches are evaluated in unwrapped relative-pose space first.
+    /// Only the final lab-frame displacement is restricted to the image cube;
+    /// exterior probability stays a null atom, without conditioning or image sums.
     pub fn log_density(&self, pose: &Pose, anchor: &Pose) -> Result<f64> {
         validate_pose(pose)?;
         validate_pose(anchor)?;

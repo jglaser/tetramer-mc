@@ -265,10 +265,6 @@ impl Config {
         if let Some(options) = self.frozen_posterior {
             options.validate()?;
             ensure!(
-                self.boundary.radius().is_some(),
-                "frozen posterior transport requires a spherical boundary"
-            );
-            ensure!(
                 self.auxiliary_transport.is_none()
                     && self.reversible_jump.is_none()
                     && self.contact_memory.is_none()
@@ -744,10 +740,6 @@ pub fn run(options: RunOptions) -> Result<Value> {
         .is_some_and(|model| model.has_reciprocal_components())
     {
         ensure!(
-            wall.is_some(),
-            "Reciprocal contact proposals require spherical boundaries"
-        );
-        ensure!(
             config.auxiliary_transport.is_none()
                 && config.reversible_jump.is_none()
                 && config.contact_memory.is_none()
@@ -1064,9 +1056,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
     effective["uniform_proposal_cube_lengths"] = json!(uniform_lengths);
     effective["coordinate_origin_sweep"] = json!(coordinate_origin_sweep);
     effective["resolved_contact_memory"] = json!(resolved_contact_memory);
-    effective["coordinate_frame_convention"] = json!(
-        "Stored poses use sphere-centered coordinates; coordinate positions = stored positions + coordinate_wall_center; center shifts subtract their common displacement from the wall center. Origin established at coordinate_origin_sweep."
-    );
+    effective["coordinate_frame_convention"] = json!(match config.boundary {
+        Boundary::Periodic =>
+            "Stored poses use canonical periodic centers in [0,L); relative proposal translations use the anchor's world-frame minimum image before conversion to the anchor body frame.",
+        Boundary::Spherical { .. } =>
+            "Stored poses use sphere-centered coordinates; coordinate positions = stored positions + coordinate_wall_center; center shifts subtract their common displacement from the wall center. Origin established at coordinate_origin_sweep.",
+    });
     save(&options.out.join("config.json"), &effective)?;
     let executable_sha = hash_file(&std::env::current_exe()?)?;
     let mut manifest = json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask,"scope":"Frozen atlas/contact-memory modes or normalized current-geometry conditional full-GMM closure; explicit auxiliary state and corrections; no unrecorded training history; algorithmic MC time, not physical kinetics"});
@@ -1851,7 +1846,7 @@ mod frozen_posterior_tests {
     }
 
     #[test]
-    fn frozen_posterior_config_requires_a_capture_branch_and_immutable_open_charts() -> Result<()> {
+    fn frozen_posterior_config_requires_a_capture_branch_and_immutable_charts() -> Result<()> {
         for probability in [-0.1, 1., 1.1, f64::INFINITY, f64::NAN] {
             assert!(
                 FrozenPosteriorConfig {
@@ -1893,11 +1888,16 @@ mod frozen_posterior_tests {
         serde_json::from_value::<Config>(enabled.clone())?.validate()?;
         let mut periodic = enabled.clone();
         periodic["boundary"] = json!({"kind":"periodic"});
-        assert!(
-            serde_json::from_value::<Config>(periodic)?
-                .validate()
-                .is_err()
-        );
+        serde_json::from_value::<Config>(periodic.clone())?.validate()?;
+        for mode in ["gca_probability", "center_shift_probability"] {
+            let mut changed = periodic.clone();
+            changed[mode] = json!(0.1);
+            assert!(
+                serde_json::from_value::<Config>(changed)?
+                    .validate()
+                    .is_err()
+            );
+        }
         for mode in [
             "auxiliary_transport",
             "reversible_jump",

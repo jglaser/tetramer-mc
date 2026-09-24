@@ -230,10 +230,7 @@ impl DockingProposal {
         correlation: f64,
         capture_center: Vec3,
     ) -> Result<Self> {
-        ensure!(
-            !model.is_periodic() && model.component_count() > 0,
-            "Need a full open-space atlas"
-        );
+        ensure!(model.component_count() > 0, "Need a nonempty frozen atlas");
         // The stored atlas contains each base Gaussian once. The numerical map
         // has one chart per virtual branch; its reciprocal wrappers preserve
         // translation volume times rotational Haar measure exactly.
@@ -355,7 +352,11 @@ impl DockingProposal {
             }
             let result = self.model.propose(rng, &poses, 0)?;
             let candidate = result.candidate.map(|p| Pose {
-                position: add(p.position, self.center),
+                position: if self.model.is_periodic() {
+                    wrap(add(p.position, self.center), self.cube)
+                } else {
+                    add(p.position, self.center)
+                },
                 orientation: p.orientation,
             });
             let mut log = serde_json::to_value(result)?;
@@ -372,7 +373,11 @@ impl DockingProposal {
             .unwrap_or_else(|| rng.random_range(0..fixed.len()));
         if rng.random::<f64>() < self.model.uniform_weight() {
             let mut p = uniform_pose(rng, self.cube);
-            p.position = add(sub(p.position, scale(self.cube, 0.5)), self.center);
+            p.position = if self.model.is_periodic() {
+                wrap(add(p.position, self.center), self.cube)
+            } else {
+                add(sub(p.position, scale(self.cube, 0.5)), self.center)
+            };
             return Ok((
                 Some(p),
                 json!({"branch":"uniform","anchor_index":j,"log_reverse_forward":0.}),
@@ -380,8 +385,17 @@ impl DockingProposal {
         }
         let anchor = fixed[j];
         let ar = rotation(anchor.orientation);
+        // A periodic chart uses exactly one world-frame relative image. It is
+        // selected before rotation into the anchor body frame; an anisotropic
+        // world box must not be imposed in that rotating frame.
+        let displacement = sub(old.position, anchor.position);
+        let displacement = if self.model.is_periodic() {
+            minimum_image(displacement, self.cube)
+        } else {
+            displacement
+        };
         let relative = Pose {
-            position: matvec(transpose(ar), sub(old.position, anchor.position)),
+            position: matvec(transpose(ar), displacement),
             orientation: quaternion(matmul(transpose(ar), rotation(old.orientation))),
         };
         let posterior = self.method == DockingMethod::PosteriorInvolution;
@@ -428,11 +442,42 @@ impl DockingProposal {
         // These are virtual indices: the same base Gaussian with opposite
         // inversion labels is a nonidentity reciprocal move, including c=1.
         let identity = self.correlation == 1. && trace.source == trace.target;
+        let proposed_displacement = matvec(ar, step.pose.position);
+        // Restrict both ends of the invertible open-chart map to the same
+        // canonical image domain. Exterior destinations are self-loops, never
+        // redrawn or wrapped into a different relative image. Thus no truncated
+        // Gaussian normalization or image sum enters the density correction.
+        // An exact identity retains the existing point, including at a face.
+        if self.model.is_periodic()
+            && !identity
+            && !(0..3).all(|k| {
+                proposed_displacement[k] >= -0.5 * self.cube[k]
+                    && proposed_displacement[k] < 0.5 * self.cube[k]
+            })
+        {
+            return Ok((
+                None,
+                json!({"branch":"involution","anchor_index":j,"trace":trace,
+                    "step":step,"source_law":if posterior {"posterior"} else {"static_pair"},
+                    "null_reason":"outside_unique_image_cube"}),
+            ));
+        }
         let proposed = if identity {
-            old
+            if self.model.is_periodic() {
+                Pose {
+                    position: wrap(old.position, self.cube),
+                    ..old
+                }
+            } else {
+                old
+            }
         } else {
             Pose {
-                position: add(anchor.position, matvec(ar, step.pose.position)),
+                position: if self.model.is_periodic() {
+                    wrap(add(anchor.position, proposed_displacement), self.cube)
+                } else {
+                    add(anchor.position, proposed_displacement)
+                },
                 orientation: quaternion(matmul(ar, rotation(step.pose.orientation))),
             }
         };

@@ -6,6 +6,12 @@ window. The [review receipt](../runs/finite-assembly-runtime-review-20260924/rec
 binds the specific inputs, extracted timing records, current source snippets and
 their full-file hashes. Historical trajectories and proposal models are unchanged.
 
+**Subsequent implementation:** the capability gap recorded below has now been
+addressed by the [periodic reciprocal capture and transport extension](periodic-reciprocal-transport.md).
+Its independent reference and actual-runner tests pass. This document and its
+archived receipt retain the original preimplementation review; the historical
+timings, proposed production allocation and physical convergence gates are unchanged.
+
 ## Relevant runtime evidence
 
 | Existing calculation | Runs and sweeps per run | Sampler CPU seconds per sweep | Differences from the new finite-system design |

@@ -94,6 +94,9 @@ comparisons without launching a campaign; unfilled preparations remain incomplet
 The [matched starting geometries](docs/finite-assembly-starts.md) supply 48 validated
 boundary-specific state assets at 106.8 μM, covering both sizes, three preparations
 and four streams. These initial conditions do not establish equilibrium assembly.
+The [finite-assembly observer](docs/finite-assembly-observer.md) measures native
+components surrounded by free tetramers, retains unresolved registry, and reports
+contact fingerprints separately from instantaneous component-size occupancies.
 The [frozen cluster-size bias](docs/frozen-assembly-bias.md)
 adds an optional correction to each elementary reversible kernel and records
 physical reweighting factors. The [Lean project](formal/README.md) now checks

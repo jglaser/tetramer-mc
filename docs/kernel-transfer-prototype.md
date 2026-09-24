@@ -130,8 +130,12 @@ need not be attainable by one global weight vector, and gives no bound on unseen
 physical mass. Thus the evidence points to component allocation as an immediate
 issue; it does not yet demonstrate that a nonlinear warp is required.
 
-A useful subsequent test would freeze a geometry-trained warp and compare it
-with the affine map at matched budgets, retaining all rejected states and the
-full physical correction. Held-out density coverage, failed contact subdivisions,
-and effective contact samples per CPU remain the criteria. The schematic and
-unit tests alone establish neither protein efficiency nor finite-system assembly.
+The subsequent [frozen conditional fit](kernel-shear-fitting.md) and
+[independent-population evaluation](kernel-shear-results.md#independent-population-evaluation)
+found lower observed contact-weight second moments, at about 2.63 times the
+density-scoring cost. The [analytic Gaussian moment control](kernel-shear-results.md#analytic-gaussian-moment-control)
+attributes much of that improvement to changed means and covariances, with a
+smaller additional benefit from nonlinear shape. These native-informed,
+retrospective diagnostics establish no physical sampling speedup. A matched
+physical comparison still needs the full reversible pose correction, retained
+rejections, contact samples per total CPU, and unresolved-region coverage checks.

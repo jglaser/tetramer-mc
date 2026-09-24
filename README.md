@@ -91,6 +91,9 @@ fails its convergence gate, so those dependent production runs remain deferred;
 the physical assembly question is unresolved. The [finite-system design validator](docs/finite-assembly-contract.md)
 checks the separate N=12/N=24, initialization, model and equal-volume boundary
 comparisons without launching a campaign; unfilled preparations remain incomplete.
+The [matched starting geometries](docs/finite-assembly-starts.md) supply 48 validated
+boundary-specific state assets at 106.8 μM, covering both sizes, three preparations
+and four streams. These initial conditions do not establish equilibrium assembly.
 The [frozen cluster-size bias](docs/frozen-assembly-bias.md)
 adds an optional correction to each elementary reversible kernel and records
 physical reweighting factors. The [Lean project](formal/README.md) now checks

@@ -8,6 +8,7 @@ pub mod docking;
 pub mod geometry;
 pub mod latent_region;
 pub mod math;
+pub mod native_entry;
 pub mod native_region;
 pub mod normalizer;
 pub mod overlap_weight;

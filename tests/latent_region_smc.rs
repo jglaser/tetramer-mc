@@ -68,6 +68,7 @@ fn options(root: &Path, out: &str, seed: u64) -> SmcOptions {
     SmcOptions {
         config: root.join("config.json"),
         region: root.join("region.json"),
+        exclude_native_entry: None,
         initial_reference_region: None,
         initial_current_probability: 1.,
         out: root.join(out),
@@ -622,6 +623,262 @@ fn zero_activity_two_chart_density_bridge_keeps_density_corrections() -> Result<
     assert!(correction_seen);
     check_populations(&total, reference(0., CAPTURE));
     check_populations(&subset, reference(0., 1.4));
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+fn native_excluded_sphere_fixture(root: &Path, activity: f64) -> Result<()> {
+    fixture(root, activity, 0.3)?;
+    let mut region = read(root.join("region.json"))?;
+    for i in 3..6 {
+        region["gaussian_chart"]["covariances"][0][i][i] = json!(0.03_f64.powi(2));
+    }
+    fs::write(root.join("region.json"), region.to_string())?;
+    let identity = json!([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]);
+    let config = read(root.join("config.json"))?;
+    let compiled = json!({"schema":"native-entry-compiled-v1","source_definition_sha256":"a".repeat(64),
+        "source_input_sha256":{"tetramer-shape.json":hash_file(&root.join("shape.json"))?},
+        "criteria":{"body_member_position_entry_A":2.,"body_orientation_entry_deg":15.,
+            "monomer_position_entry_A":3.,"monomer_orientation_entry_deg":20.,"contact_entry_A":2.,
+            "native_reference_patch_gap_A":1.,"minimum_shared_native_residue_pairs":1,
+            "hard_overlap_tolerance_A":1e-8,"catalogue_cycle_position_tolerance_A":1e-6,
+            "catalogue_cycle_angle_tolerance_deg":1e-6},
+        "fixed_poses":config["fixed_poses"],"members":[{"position":[0.,0.,0.],"rotation":identity}],
+        "monomer_atoms":[{"center":[0.,0.,0.],"radius":0.3,"residue":0}],"residue_count":1,
+        "references":[{"label":"A","family":"A","position":[1.5,0.,0.],"rotation":identity,"native_residue_pairs":[0]}],
+        "motifs":[{"id":0,"position":[1.5,0.,0.],"rotation":identity,
+            "member_contacts":[{"member_i":0,"member_j":0,"directed_class":"A"}]}]});
+    fs::write(root.join("native-compiled.json"), compiled.to_string())?;
+    Ok(())
+}
+
+fn native_excluded_sphere_reference(activity: f64, upper: f64) -> f64 {
+    // All chart rotations lie below 15 degrees: the real complete predicate
+    // reduces here to |t-1.5 e_x| <= 2. Hard/capture validity gives .6<=r<=2.2;
+    // monomer position/orientation and residue-contact criteria then hold.
+    let f = |r: f64| {
+        let cayley = 0.03 / ELL * (R * R - (r / ST).powi(2)).max(0.).sqrt();
+        let angular_fraction =
+            ((1. + (r * r + 1.5_f64.powi(2) - 4.) / (3. * r)) / 2.).clamp(0., 1.);
+        8. * r
+            * r
+            * (cayley.atan() - cayley / (1. + cayley * cayley))
+            * (activity * lens(r)).exp()
+            * angular_fraction
+    };
+    let n = 32768;
+    let hi = upper.min(CAPTURE);
+    let h = (hi - 0.6) / n as f64;
+    (f(0.6)
+        + f(hi)
+        + (1..n)
+            .map(|i| f(0.6 + h * i as f64) * if i % 2 == 0 { 2. } else { 4. })
+            .sum::<f64>())
+        * h
+        / 3.
+}
+
+#[test]
+fn complete_native_exclusion_matches_nontrivial_sphere_depletion_integrals() -> Result<()> {
+    let root = root("compiled-native-exclusion")?;
+    for activity in [0., 4.] {
+        native_excluded_sphere_fixture(&root, activity)?;
+        let exact_total = native_excluded_sphere_reference(activity, CAPTURE);
+        let exact_contact = native_excluded_sphere_reference(activity, 1.4);
+        // Independently supplied SciPy physical radial/Haar integrals also
+        // cross-check the reference formula (not used to generate samples).
+        let known = if activity == 0. {
+            (0.004462706426614964, 0.001569924700053489)
+        } else {
+            (0.005747109017931148, 0.002854327291369672)
+        };
+        near(exact_total, known.0);
+        near(exact_contact, known.1);
+        for bridge in [SmcBridge::PhysicalActivity, SmcBridge::ProposalDensity] {
+            let mut totals = Vec::new();
+            let mut contacts = Vec::new();
+            let mut unbound = Vec::new();
+            let mut total_native_rejections = 0;
+            for replicate in 0..8 {
+                let tag = format!("native-excluded-{activity}-{bridge:?}-{replicate}");
+                let mut opts = options(
+                    &root,
+                    &tag,
+                    152101010
+                        + 1009 * replicate
+                        + if activity == 0. { 0 } else { 100000 }
+                        + if bridge == SmcBridge::PhysicalActivity {
+                            0
+                        } else {
+                            10000
+                        },
+                );
+                opts.exclude_native_entry = Some(root.join("native-compiled.json"));
+                opts.bridge = bridge;
+                opts.population = 128;
+                opts.sweeps_per_stage = 2;
+                let result = smc::run(opts.clone())?;
+                assert_eq!(
+                    result["schema"],
+                    "latent-region-smc-native-excluded-summary-v1"
+                );
+                let manifest = read(opts.out.join("manifest.json"))?;
+                assert_eq!(manifest["schema"], "latent-region-smc-native-excluded-v1");
+                assert_eq!(manifest["final_target_unchanged"], false);
+                assert_eq!(
+                    manifest["native_exclusion"]["compiled_sha256"],
+                    hash_file(&root.join("native-compiled.json"))?
+                );
+                assert_eq!(
+                    hash_file(&opts.out.join("provenance/native-entry-compiled.json"))?,
+                    hash_file(&root.join("native-compiled.json"))?
+                );
+                let initial = lines(opts.out.join("initialization.jsonl"))?;
+                assert_eq!(initial.len(), opts.initial_draws);
+                let mut operative_sum = 0.;
+                let mut hard = 0;
+                let mut native_rejected = 0;
+                for row in &initial {
+                    let pose = &row["pose"];
+                    let radius = norm(&pose["position"]);
+                    let hard_valid = radius >= 0.6 && radius <= CAPTURE;
+                    assert_eq!(row["hard_valid"], hard_valid);
+                    let distance_squared = (pose["position"][0].as_f64().unwrap() - 1.5).powi(2)
+                        + pose["position"][1].as_f64().unwrap().powi(2)
+                        + pose["position"][2].as_f64().unwrap().powi(2);
+                    let native = distance_squared <= 4.;
+                    let allowed = hard_valid && !native;
+                    assert_eq!(row["target_valid"], allowed);
+                    if hard_valid {
+                        hard += 1;
+                        assert_eq!(row["native_membership"]["native_any"], native);
+                        assert_eq!(row["native_membership"]["pose"], row["pose"]);
+                        if native {
+                            native_rejected += 1;
+                            assert!(row["log_initial_weight"].is_null());
+                        }
+                    } else {
+                        assert_eq!(row["native_evaluated"], false);
+                    }
+                    if allowed {
+                        near(
+                            row["log_target_hard_weight"].as_f64().unwrap(),
+                            -row["log_physical_proposal_density"].as_f64().unwrap(),
+                        );
+                        operative_sum += row["log_initial_weight"].as_f64().unwrap().exp();
+                    } else {
+                        assert!(row["log_target_hard_weight"].is_null());
+                    }
+                }
+                assert_eq!(result["initial_geometric_hits"], hard);
+                assert_eq!(result["initial_native_rejected"], native_rejected);
+                assert!(native_rejected > 0);
+                total_native_rejections += native_rejected;
+                let stages = lines(opts.out.join("stages.jsonl"))?;
+                near(
+                    stages[0]["log_Z"].as_f64().unwrap(),
+                    (operative_sum / opts.initial_draws as f64).ln(),
+                );
+                let particles = result["terminal_particles"].as_array().unwrap();
+                let contact_count = particles
+                    .iter()
+                    .filter(|p| norm(&p["pose"]["position"]) < 1.4)
+                    .count();
+                for particle in particles {
+                    assert_eq!(particle["native_membership"]["native_any"], false);
+                }
+                let q = result["log_Z"].as_f64().unwrap().exp();
+                totals.push(q);
+                contacts.push(q * contact_count as f64 / particles.len() as f64);
+                unbound.push(q * (particles.len() - contact_count) as f64 / particles.len() as f64);
+            }
+            assert!(total_native_rejections > 0);
+            check_populations(&totals, exact_total);
+            check_populations(&contacts, exact_contact);
+            check_populations(&unbound, exact_total - exact_contact);
+        }
+    }
+    fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn native_exclusion_cli_is_deterministic_and_rejects_mismatched_bindings() -> Result<()> {
+    let root = root("native-excluded-cli")?;
+    native_excluded_sphere_fixture(&root, 0.)?;
+    let mut opts = options(&root, "api", 152991010);
+    opts.exclude_native_entry = Some(root.join("native-compiled.json"));
+    opts.initial_draws = 256;
+    opts.population = 32;
+    opts.schedule = vec![0., 0.5, 1.];
+    opts.sweeps_per_stage = 2;
+    let result = smc::run(opts.clone())?;
+    assert_eq!(result["complete"], true);
+    let cli = Command::new(env!("CARGO_BIN_EXE_latent-region-smc"))
+        .args([
+            "--config",
+            root.join("config.json").to_str().unwrap(),
+            "--region",
+            root.join("region.json").to_str().unwrap(),
+            "--exclude-native-entry",
+            root.join("native-compiled.json").to_str().unwrap(),
+            "--out",
+            root.join("cli").to_str().unwrap(),
+            "--seed",
+            "152991010",
+            "--initial-draws",
+            "256",
+            "--population",
+            "32",
+            "--stages",
+            "2",
+            "--sweeps-per-stage",
+            "2",
+            "--cloud-replicates",
+            "2",
+            "--lambda-ratio",
+            "8",
+        ])
+        .output()?;
+    assert!(
+        cli.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cli.stderr)
+    );
+    for name in ["initialization.jsonl", "stages.jsonl"] {
+        assert_eq!(
+            fs::read(root.join("api").join(name))?,
+            fs::read(root.join("cli").join(name))?
+        );
+    }
+    let manifest = read(root.join("api/manifest.json"))?;
+    assert!(
+        manifest["bridge_density"]
+            .as_str()
+            .unwrap()
+            .contains("H_minus")
+    );
+    assert!(
+        manifest["mutation"]
+            .as_str()
+            .unwrap()
+            .contains("before the bath gate")
+    );
+    let original = read(root.join("native-compiled.json"))?;
+    let mut bad_shape = original.clone();
+    bad_shape["source_input_sha256"]["tetramer-shape.json"] = json!("0".repeat(64));
+    fs::write(root.join("wrong-shape.json"), bad_shape.to_string())?;
+    opts.exclude_native_entry = Some(root.join("wrong-shape.json"));
+    opts.out = root.join("wrong-shape-out");
+    assert!(smc::run(opts.clone()).is_err());
+    assert!(!opts.out.exists());
+    let mut bad_scaffold = original;
+    bad_scaffold["fixed_poses"][0]["position"][0] = json!(0.1);
+    fs::write(root.join("wrong-scaffold.json"), bad_scaffold.to_string())?;
+    opts.exclude_native_entry = Some(root.join("wrong-scaffold.json"));
+    opts.out = root.join("wrong-scaffold-out");
+    assert!(smc::run(opts.clone()).is_err());
+    assert!(!opts.out.exists());
     fs::remove_dir_all(root)?;
     Ok(())
 }

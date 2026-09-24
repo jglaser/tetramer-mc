@@ -12,6 +12,9 @@ struct Cli {
     config: PathBuf,
     #[arg(long)]
     region: PathBuf,
+    /// Frozen compiled complete-native definition for a distinct native-excluded target.
+    #[arg(long)]
+    exclude_native_entry: Option<PathBuf>,
     #[arg(long)]
     initial_reference_region: Option<PathBuf>,
     #[arg(long)]
@@ -51,6 +54,7 @@ fn main() -> Result<()> {
     let result = smc::run(SmcOptions {
         config: cli.config,
         region: cli.region,
+        exclude_native_entry: cli.exclude_native_entry,
         initial_reference_region: cli.initial_reference_region,
         initial_current_probability,
         out: cli.out,

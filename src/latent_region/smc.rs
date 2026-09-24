@@ -1,4 +1,5 @@
-//! Fixed-schedule random-potential SMC on the unchanged full R4 domain.
+//! Fixed-schedule random-potential SMC on the original R4 domain.
+//! Optional exact native exclusion is an explicitly distinct restricted target.
 //!
 //! This is a separate estimator, not continuation of any independent-draw run.
 //! See docs/smc-r4-control.md for the unnormalized-measure identity and limits.
@@ -8,6 +9,7 @@ use crate::{
     docking::{self, DockingConfig},
     geometry::{Environment, Placed, Shape, SphereTree},
     math::Pose,
+    native_entry::CompleteNativeEntry,
     overlap_weight::{self, OverlapEnvelope},
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
 };
@@ -39,6 +41,9 @@ pub enum SmcBridge {
 pub struct SmcOptions {
     pub config: PathBuf,
     pub region: PathBuf,
+    /// Compiled complete-native predicate. Exclude native entry from this separate target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_native_entry: Option<PathBuf>,
     /// Optional complete UNFILTERED chart ball; its old q/capture/shell masks are ignored.
     pub initial_reference_region: Option<PathBuf>,
     /// Current-ball probability; must equal one when no reference is supplied.
@@ -63,6 +68,9 @@ struct Particle {
     latent: [f64; 6],
     /// The unconditional initialization draw; never replaced by an offspring index.
     initial_ancestor: usize,
+    /// Certified membership of the retained pose; absent in the unrestricted law.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_membership: Option<Value>,
 }
 
 #[derive(Default, Serialize)]
@@ -75,7 +83,57 @@ struct MutationCounts {
     region_rejected: usize,
     hard_rejected: usize,
     gate_rejected: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native_rejected: Option<usize>,
     raw_points: u64,
+}
+
+/// Only the complete compiled predicate is reachable through the public runner.
+/// The internal trait also permits synthetic masks in kernel/induction tests.
+trait NativeConstraint {
+    fn classify(&self, pose: Pose) -> Result<Value>;
+    fn binding(&self) -> Value;
+}
+
+impl NativeConstraint for CompleteNativeEntry {
+    fn classify(&self, pose: Pose) -> Result<Value> {
+        Ok(serde_json::to_value(CompleteNativeEntry::classify(
+            self, pose,
+        )?)?)
+    }
+    fn binding(&self) -> Value {
+        json!({"definition_sha256":self.definition_sha256(),
+            "compiled_sha256":self.compiled_sha256(), "shape_sha256":self.shape_sha256(),
+            "fixed_poses":self.fixed_poses()})
+    }
+}
+
+fn native_membership(predicate: &dyn NativeConstraint, pose: Pose) -> Result<Value> {
+    let mut decision = predicate.classify(pose)?;
+    ensure!(
+        decision.is_object() && decision["native_any"].is_boolean(),
+        "Malformed complete-native decision"
+    );
+    decision["pose"] = json!(pose);
+    decision["predicate_binding"] = predicate.binding();
+    Ok(decision)
+}
+
+fn retained_membership<'a>(
+    particle: &'a Particle,
+    predicate: &dyn NativeConstraint,
+) -> Result<&'a Value> {
+    let record = particle
+        .native_membership
+        .as_ref()
+        .context("Retained pose lost native membership")?;
+    ensure!(
+        record["native_any"] == json!(false)
+            && record["pose"] == json!(particle.pose)
+            && record["predicate_binding"] == predicate.binding(),
+        "Retained pose changed or violated the frozen native-exclusion target"
+    );
+    Ok(record)
 }
 
 fn stream(seed: u64, stage: usize, index: usize, subindex: usize, role: &str) -> StdRng {
@@ -216,9 +274,14 @@ fn mutate(
     beta: f64,
     reference: Option<&(Chart, f64, f64)>,
     log_volume: f64,
-) -> Result<(MutationCounts, Vec<Value>)> {
+    native: Option<&dyn NativeConstraint>,
+) -> Result<(MutationCounts, Vec<Value>, Vec<Value>)> {
     let mut counts = MutationCounts::default();
     let mut density_records = Vec::new();
+    let mut native_records = Vec::new();
+    if native.is_some() {
+        counts.native_rejected = Some(0);
+    }
     let lambda = if activity > 0. {
         cfg.poisson_lambda_ratio * activity
     } else {
@@ -229,6 +292,9 @@ fn mutate(
         "Invalid mutation count intensity"
     );
     for (index, particle) in particles.iter_mut().enumerate() {
+        if let Some(predicate) = native {
+            retained_membership(particle, predicate)?;
+        }
         let mut log_g = proposal_log_density(
             chart,
             reference,
@@ -256,6 +322,24 @@ fn mutate(
             }
             if !env.hard_valid(new) {
                 counts.hard_rejected += 1;
+                continue;
+            }
+            let candidate_membership = native
+                .map(|predicate| native_membership(predicate, new))
+                .transpose()?;
+            let old_membership = particle.native_membership.clone();
+            if candidate_membership
+                .as_ref()
+                .is_some_and(|d| d["native_any"] == json!(true))
+            {
+                *counts
+                    .native_rejected
+                    .as_mut()
+                    .context("Missing native rejection counter")? += 1;
+                native_records.push(json!({"particle":index,"sweep":sweep,
+                    "old_pose":particle.pose,"proposed_pose":new,
+                    "old_membership":old_membership,"proposed_membership":candidate_membership,
+                    "accepted":false,"outcome":"native_rejected","bath_gate_evaluated":false}));
                 continue;
             }
             // The proposal is symmetric in physical translation/Haar measure.
@@ -289,10 +373,17 @@ fn mutate(
                 .random::<f64>()
                 .ln();
             let accepted = log_uniform < log_acceptance;
-            if options.bridge == SmcBridge::ProposalDensity {
+            if options.bridge == SmcBridge::ProposalDensity || native.is_some() {
                 density_records.push(json!({"particle":index,"sweep":sweep,"old_pose":particle.pose,"proposed_pose":new,
                     "log_g_old":log_g,"log_g_new":new_log_g,"beta":beta,"deterministic_log_correction":correction,
                     "gate":gate,"log_acceptance":log_acceptance,"log_uniform":log_uniform,"accepted":accepted}));
+            }
+            if native.is_some() {
+                native_records.push(json!({"particle":index,"sweep":sweep,
+                    "old_pose":particle.pose,"proposed_pose":new,
+                    "old_membership":old_membership,"proposed_membership":candidate_membership,
+                    "accepted":accepted,"outcome":if accepted {"accepted"} else {"gate_rejected"},
+                    "bath_gate_evaluated":true}));
             }
             if accepted {
                 log_g = new_log_g;
@@ -302,16 +393,31 @@ fn mutate(
                     usize::from(new.orientation != particle.pose.orientation);
                 particle.pose = new;
                 particle.latent = latent;
+                particle.native_membership = candidate_membership;
                 counts.accepted += 1;
             } else {
                 counts.gate_rejected += 1;
             }
         }
     }
-    Ok((counts, density_records))
+    Ok((counts, density_records, native_records))
 }
 
 pub fn run(options: SmcOptions) -> Result<Value> {
+    #[cfg(test)]
+    {
+        run_impl(options, None)
+    }
+    #[cfg(not(test))]
+    {
+        run_impl(options)
+    }
+}
+
+fn run_impl(
+    options: SmcOptions,
+    #[cfg(test)] test_constraint: Option<&dyn NativeConstraint>,
+) -> Result<Value> {
     let alpha = options.initial_current_probability;
     ensure!(
         alpha.is_finite()
@@ -400,6 +506,50 @@ pub fn run(options: SmcOptions) -> Result<Value> {
         region["shape_sha256"] == json!(shape_hash),
         "Frozen shape mismatch"
     );
+    let native_raw = options
+        .exclude_native_entry
+        .as_ref()
+        .map(fs::read)
+        .transpose()?;
+    let compiled_native = options
+        .exclude_native_entry
+        .as_ref()
+        .map(CompleteNativeEntry::load)
+        .transpose()?;
+    if let Some(predicate) = &compiled_native {
+        ensure!(
+            predicate.compiled_sha256()
+                == hash_bytes(
+                    native_raw
+                        .as_ref()
+                        .context("Missing compiled predicate bytes")?
+                )
+                && predicate.shape_sha256() == shape_hash
+                && predicate.fixed_poses() == cfg.fixed_poses.as_slice(),
+            "Complete-native predicate shape/scaffold or bytes mismatch"
+        );
+    }
+    let native: Option<&dyn NativeConstraint> =
+        compiled_native.as_ref().map(|p| p as &dyn NativeConstraint);
+    #[cfg(test)]
+    let native = {
+        ensure!(
+            native.is_none() || test_constraint.is_none(),
+            "Ambiguous test/native predicate"
+        );
+        native.or(test_constraint)
+    };
+    let restricted = native.is_some();
+    let manifest_schema = if restricted {
+        "latent-region-smc-native-excluded-v1"
+    } else {
+        "latent-region-smc-v1"
+    };
+    let summary_schema = if restricted {
+        "latent-region-smc-native-excluded-summary-v1"
+    } else {
+        "latent-region-smc-summary-v1"
+    };
     let chart = Chart::new(&region, &shape_hash, cfg.capture_radius, fixed)?;
     let reference_raw = options
         .initial_reference_region
@@ -475,8 +625,14 @@ pub fn run(options: SmcOptions) -> Result<Value> {
             bytes,
         )?;
     }
+    if let Some(bytes) = &native_raw {
+        fs::write(
+            options.out.join("provenance/native-entry-compiled.json"),
+            bytes,
+        )?;
+    }
     let log_volume = 3. * PI.ln() + 6. * RADIUS.ln() - 6_f64.ln();
-    let manifest = json!({"schema":"latent-region-smc-v1", "options":options,
+    let mut manifest = json!({"schema":manifest_schema, "options":options,
         "config_sha256":hash_bytes(&config_raw), "region_sha256":hash_bytes(&region_raw), "shape_sha256":shape_hash,
         "source_bundle_sha256":hash_bytes(source_bundle), "executable_sha256":hash_file(&std::env::current_exe()?)?,
         "target":"H_capture H_hard I_original_R4 exp(z C) d3t dHaar(R); C uses the full fixed-neighbor exclusion union",
@@ -494,6 +650,28 @@ pub fn run(options: SmcOptions) -> Result<Value> {
         "terminal_estimator":"Zhat * mean_N(f(terminal_pose)); report fixed-region indicators with the unchanged independent complete classifier",
         "worker_count":1, "log_latent_ball_volume":log_volume,
         "scope":"Separate fixed-budget conditional normalizer. No protein convergence claim, automatic extension, classifier change, or existing Lean SMC theorem."});
+    if let Some(predicate) = native {
+        manifest["native_exclusion"] = predicate.binding();
+        manifest["target"] = json!(
+            "H_capture H_hard I_original_R4 (1-I_complete_native_entry) exp(z C) d3t dHaar(R)"
+        );
+        manifest["final_target_unchanged"] = json!(false);
+        manifest["bridge_density"] = json!(
+            "H_minus=H_capture H_hard I_original_R4 (1-I_complete_native_entry); physical_activity: gamma_beta=H_minus exp(beta*z*C); proposal_density: gamma_beta=H_minus g_physical^(1-beta) exp(beta*z*C), relative to fixed d3t dHaar"
+        );
+        manifest["mutation"] = json!(
+            "Reject complete-native entry after geometric validity and before the bath gate. On H_minus support, fixed symmetric physical proposals use the gained/lost gate at beta*z; proposal-density bridge adds (1-beta)*(log_g_new-log_g_old). Every native and bath-gate decision is retained."
+        );
+        manifest["target_scope"] = json!(
+            "Explicit restricted-region control, not the unrestricted physical target. Contact/no-entry and unbound reporting remain separate terminal indicators."
+        );
+        manifest["initialization"] = json!(
+            "All M unconditional attempts retained. target_valid=hard_valid AND NOT native_any; native rejection is a zero, never a refill. log_hard_weight retains unrestricted H/g; log_target_hard_weight is restricted H(1-native)/g. Operative resampling uses target_valid, with g correction for physical-activity bridge."
+        );
+        manifest["native_audit"] = json!(
+            "Every operative native decision contains pose, compiled/definition binding, all matched anchors/motif IDs. Current certificates follow retained/resampled poses. Every hard-valid mutation candidate, including native and bath-gate rejections, is recorded."
+        );
+    }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
     let cpu_start = cpu_seconds();
@@ -508,6 +686,8 @@ pub fn run(options: SmcOptions) -> Result<Value> {
         let mut stage_file = BufWriter::new(File::create(options.out.join("stages.jsonl"))?);
         let mut initial = Vec::new();
         let mut initial_logs = Vec::new();
+        let mut initial_native_rejected = 0usize;
+        let mut initial_geometric_hits = 0usize;
         for draw in 0..options.initial_draws {
             let mut rng = stream(options.seed, 0, draw, 0, "initial-pose");
             let from_current = alpha == 1. || rng.random::<f64>() < alpha;
@@ -564,28 +744,47 @@ pub fn run(options: SmcOptions) -> Result<Value> {
             let capture_valid = cfg.contains(pose);
             let hard_valid = capture_valid && current_ball && env.hard_valid(pose);
             let log_hard_weight = hard_valid.then_some(-log_density);
+            let membership = if hard_valid {
+                native
+                    .map(|predicate| native_membership(predicate, pose))
+                    .transpose()?
+            } else {
+                None
+            };
+            let target_valid = hard_valid
+                && membership
+                    .as_ref()
+                    .is_none_or(|d| d["native_any"] == json!(false));
+            initial_geometric_hits += usize::from(hard_valid);
+            initial_native_rejected += usize::from(hard_valid && !target_valid);
+            let log_target_hard_weight = target_valid.then_some(-log_density);
             let log_weight =
-                hard_valid.then_some(if options.bridge == SmcBridge::ProposalDensity {
+                target_valid.then_some(if options.bridge == SmcBridge::ProposalDensity {
                     0.
                 } else {
                     -log_density
                 });
-            jsonline(
-                &mut initial_file,
-                &json!({"draw":draw,"pose":pose,"latent":latent,"latent_radius":radius,
+            let mut initial_record = json!({"draw":draw,"pose":pose,"latent":latent,"latent_radius":radius,
                 "selected_initial_chart":if from_current {"current"} else {"reference"},
                 "selected_latent":selected_latent,"selected_log_physical_jacobian":selected_log_jacobian,
                 "reference_latent":reference_latent,"reference_log_physical_jacobian":reference_log_jacobian,
                 "reference_ball_valid":reference_ball,"current_ball_valid":current_ball,
                 "log_proposal_density":if alpha==1. {Some(-log_volume)} else {None},
                 "log_physical_proposal_density":log_density,"log_physical_jacobian":log_jacobian,
-                "capture_valid":capture_valid,"hard_valid":hard_valid,"log_hard_weight":log_hard_weight,"log_initial_weight":log_weight}),
-            )?;
+                "capture_valid":capture_valid,"hard_valid":hard_valid,"log_hard_weight":log_hard_weight,"log_initial_weight":log_weight});
+            if restricted {
+                initial_record["target_valid"] = json!(target_valid);
+                initial_record["native_evaluated"] = json!(membership.is_some());
+                initial_record["native_membership"] = json!(membership);
+                initial_record["log_target_hard_weight"] = json!(log_target_hard_weight);
+            }
+            jsonline(&mut initial_file, &initial_record)?;
             if let Some(weight) = log_weight {
                 initial.push(Particle {
                     pose,
                     latent: latent.context("Valid target missing chart coordinates")?,
                     initial_ancestor: draw,
+                    native_membership: membership,
                 });
                 initial_logs.push(weight);
             }
@@ -598,11 +797,14 @@ pub fn run(options: SmcOptions) -> Result<Value> {
                 "initial_draws":options.initial_draws,"initial_hits":0,"parents":[],"particles":[]}),
             )?;
             stage_file.flush()?;
-            return Ok(
-                json!({"schema":"latent-region-smc-summary-v1","complete":true,"zero_estimate":true,
+            let mut summary = json!({"schema":summary_schema,"complete":true,"zero_estimate":true,
                 "log_Z":null,"Z":0.,"initial_draws":options.initial_draws,"initial_hits":0,"completed_stage":0,
-                "terminal_particles":[],"ancestry":ancestry(&[]),"reason":"Zero initial mass in the fixed unconditional draw budget; retained without retry."}),
-            );
+                "terminal_particles":[],"ancestry":ancestry(&[]),"reason":"Zero initial mass in the fixed unconditional draw budget; retained without retry."});
+            if restricted {
+                summary["initial_geometric_hits"] = json!(initial_geometric_hits);
+                summary["initial_native_rejected"] = json!(initial_native_rejected);
+            }
+            return Ok(summary);
         }
         let (weights, log_sum, initial_ess) = scaled_weights(&initial_logs)?;
         let mut log_z = log_sum - (options.initial_draws as f64).ln();
@@ -636,6 +838,9 @@ pub fn run(options: SmcOptions) -> Result<Value> {
             let mut logs = Vec::with_capacity(options.population);
             let mut potential_rows = Vec::with_capacity(options.population);
             for (index, particle) in particles.iter().enumerate() {
+                if let Some(predicate) = native {
+                    retained_membership(particle, predicate)?;
+                }
                 let envelope = if delta > 0. {
                     Some(OverlapEnvelope::build(
                         &env,
@@ -681,8 +886,12 @@ pub fn run(options: SmcOptions) -> Result<Value> {
                 let log_weight =
                     cloud_log_sum - (options.cloud_replicates as f64).ln() + density_correction;
                 logs.push(log_weight);
-                potential_rows.push(json!({"particle":index,"pose":particle.pose,"latent":particle.latent,
-                    "initial_ancestor":particle.initial_ancestor,"clouds":clouds,"log_g":log_g,"deterministic_log_correction":density_correction,"log_incremental_weight":log_weight}));
+                let mut potential = json!({"particle":index,"pose":particle.pose,"latent":particle.latent,
+                    "initial_ancestor":particle.initial_ancestor,"clouds":clouds,"log_g":log_g,"deterministic_log_correction":density_correction,"log_incremental_weight":log_weight});
+                if restricted {
+                    potential["native_membership"] = json!(particle.native_membership);
+                }
+                potential_rows.push(potential);
             }
             let (weights, log_sum, weight_ess) = scaled_weights(&logs)?;
             let increment = log_sum - (options.population as f64).ln();
@@ -692,7 +901,7 @@ pub fn run(options: SmcOptions) -> Result<Value> {
                 / options.population as f64;
             let parents = systematic_at_offset(&weights, options.population, offset)?;
             particles = parents.iter().map(|&i| particles[i].clone()).collect();
-            let (counts, density_records) = mutate(
+            let (counts, density_records, native_records) = mutate(
                 &mut particles,
                 &cfg,
                 &env,
@@ -703,14 +912,16 @@ pub fn run(options: SmcOptions) -> Result<Value> {
                 beta,
                 reference.as_ref(),
                 log_volume,
+                native,
             )?;
-            jsonline(
-                &mut stage_file,
-                &json!({"stage":stage,"beta":beta,"delta_beta":delta_beta,"activity":activity,"previous_activity":previous_activity,
+            let mut stage_record = json!({"stage":stage,"beta":beta,"delta_beta":delta_beta,"activity":activity,"previous_activity":previous_activity,
                 "delta_activity":delta,"incremental_lambda":lambda,"log_Z_increment":increment,"log_Z":log_z,
                 "pre_resampling_weight_ESS":weight_ess,"potentials":potential_rows,"resampling_offset":offset,
-                "parents":parents,"mutation_counts":counts,"mutation_density_records":density_records,"particles":particles,"ancestry":ancestry(&particles)}),
-            )?;
+                "parents":parents,"mutation_counts":counts,"mutation_density_records":density_records,"particles":particles,"ancestry":ancestry(&particles)});
+            if restricted {
+                stage_record["native_mutation_records"] = json!(native_records);
+            }
+            jsonline(&mut stage_file, &stage_record)?;
             stage_file.flush()?;
             completed_stage = stage;
             save(
@@ -718,14 +929,22 @@ pub fn run(options: SmcOptions) -> Result<Value> {
                 &json!({"complete":false,"phase":"annealing","completed_stage":stage,"log_Z":log_z}),
             )?;
         }
+        if let Some(predicate) = native {
+            for particle in &particles {
+                retained_membership(particle, predicate)?;
+            }
+        }
         let linear_z = log_z.exp();
-        Ok(
-            json!({"schema":"latent-region-smc-summary-v1","complete":true,"zero_estimate":false,
+        let mut summary = json!({"schema":summary_schema,"complete":true,"zero_estimate":false,
             "log_Z":log_z,"Z":(linear_z.is_finite() && linear_z > 0.).then_some(linear_z),
             "linear_Z_representable":linear_z.is_finite() && linear_z > 0.,"completed_stage":completed_stage,
             "initial_draws":options.initial_draws,"initial_hits":initial.len(),"initial_weight_ESS":initial_ess,
-            "terminal_particles":particles,"ancestry":ancestry(&particles)}),
-        )
+            "terminal_particles":particles,"ancestry":ancestry(&particles)});
+        if restricted {
+            summary["initial_geometric_hits"] = json!(initial_geometric_hits);
+            summary["initial_native_rejected"] = json!(initial_native_rejected);
+        }
+        Ok(summary)
     })();
     match result {
         Ok(mut summary) => {
@@ -774,6 +993,444 @@ mod tests {
         }
         assert!(systematic_at_offset(&[0., 0.], 2, 0.).is_err());
         assert!(scaled_weights(&[0., -1000.]).is_err());
+        Ok(())
+    }
+
+    struct SyntheticMask {
+        // 0 excludes nothing, 1 excludes all, 2 excludes x>=0, 3 excludes x<0.
+        kind: u8,
+    }
+    impl NativeConstraint for SyntheticMask {
+        fn classify(&self, pose: Pose) -> Result<Value> {
+            let native = match self.kind {
+                0 => false,
+                1 => true,
+                2 => pose.position[0] >= 0.,
+                3 => pose.position[0] < 0.,
+                _ => unreachable!(),
+            };
+            Ok(json!({"native_any":native,
+                "matched_anchor_indices":if native {vec![0usize]} else {vec![]},
+                "per_anchor":[{"anchor_index":0,
+                    "matched_motif_ids":if native {vec![7i64]} else {vec![]},"matches":[]}]}))
+        }
+        fn binding(&self) -> Value {
+            json!({"definition_sha256":"a".repeat(64),"compiled_sha256":"b".repeat(64),
+                "test_only_synthetic_mask":self.kind})
+        }
+    }
+
+    struct TestDirectory(PathBuf);
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    fn synthetic_fixture(name: &str) -> Result<TestDirectory> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static INDEX: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "tetramer-smc-mask-{name}-{}-{}",
+            std::process::id(),
+            INDEX.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path)?;
+        let root = TestDirectory(path);
+        let identity = json!({"position":[0.,0.,0.],"orientation":[1.,0.,0.,0.]});
+        let native = json!({"position":[1.,0.,0.],"orientation":[1.,0.,0.,0.]});
+        let metadata = json!({"native_poses":[native],"rigid_members":[identity],
+            "member_error_scale":1.,"angle_error_scale_deg":15.});
+        fs::write(
+            root.0.join("shape.json"),
+            json!({"name":"synthetic mask sphere","volume":0.11309733552923254,
+            "atoms":[{"center":[0.,0.,0.],"radius":0.3}]})
+            .to_string(),
+        )?;
+        let shape = hash_file(&root.0.join("shape.json"))?;
+        fs::write(
+            root.0.join("config.json"),
+            json!({"shape":root.0.join("shape.json"),"fixed_poses":[identity],
+            "initial_pose":native,"capture_center":[0.,0.,0.],"capture_radius":2.2,
+            "depletant_radius":0.4,"reservoir_density":0.,"poisson_lambda_ratio":8.,
+            "translation_steps":[0.5,1.],"rotation_steps_deg":[30.,60.],"rotation_probability":0.5,
+            "local_attempts_per_cycle":1,"uniform_probability":0.1,"seed":1,"metadata":metadata})
+            .to_string(),
+        )?;
+        let covariance: [[f64; 6]; 6] = std::array::from_fn(|i| {
+            std::array::from_fn(|j| {
+                if i != j {
+                    0.
+                } else if i < 3 {
+                    0.36
+                } else {
+                    1.69
+                }
+            })
+        });
+        fs::write(root.0.join("region.json"),json!({"fixed_neighbor":identity,"physical_fixed_neighbors":[identity],
+            "capture_center":[0.,0.,0.],"capture_radius":2.2,"shape_sha256":shape,
+            "activity":0.,"depletant_radius":0.4,"physical_metric":metadata,"minimum_original_q":0.,
+            "minimum_mahalanobis_radius":0.,"mahalanobis_radius":4.,
+            "gaussian_chart":{"shape_sha256":shape,"angular_length":1.1,"coordinate_convention":"anchor-body-relative",
+                "anchors":[{"position":[0.,0.,0.],"rotation":[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]]}],
+                "means":[[0.,0.,0.,0.,0.,0.]],"covariances":[covariance],"weights":[1.]}}).to_string())?;
+        Ok(root)
+    }
+    fn synthetic_options(root: &TestDirectory, name: &str, seed: u64) -> SmcOptions {
+        SmcOptions {
+            config: root.0.join("config.json"),
+            region: root.0.join("region.json"),
+            exclude_native_entry: None,
+            initial_reference_region: None,
+            initial_current_probability: 1.,
+            out: root.0.join(name),
+            initial_draws: 1024,
+            population: 64,
+            seed,
+            bridge: SmcBridge::PhysicalActivity,
+            schedule: vec![0., 0.5, 1.],
+            sweeps_per_stage: 8,
+            cloud_replicates: 2,
+            lambda_ratio: 8.,
+        }
+    }
+    fn read_lines(path: PathBuf) -> Result<Vec<Value>> {
+        fs::read_to_string(path)?
+            .lines()
+            .map(|line| Ok(serde_json::from_str(line)?))
+            .collect()
+    }
+    fn read_json(path: PathBuf) -> Result<Value> {
+        Ok(serde_json::from_slice(&fs::read(path)?)?)
+    }
+    fn remove_native_fields(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                for key in [
+                    "native_membership",
+                    "native_mutation_records",
+                    "native_rejected",
+                    "target_valid",
+                    "native_evaluated",
+                    "log_target_hard_weight",
+                ] {
+                    map.remove(key);
+                }
+                for child in map.values_mut() {
+                    remove_native_fields(child);
+                }
+            }
+            Value::Array(values) => {
+                for child in values {
+                    remove_native_fields(child);
+                }
+            }
+            _ => (),
+        }
+    }
+    fn near(a: f64, b: f64) {
+        assert!(
+            (a - b).abs() < 2e-10 * (1. + a.abs() + b.abs()),
+            "{a} != {b}"
+        );
+    }
+
+    #[test]
+    fn unrestricted_default_serialization_and_identity_mask_preserve_random_streams() -> Result<()>
+    {
+        let root = synthetic_fixture("identity")?;
+        for bridge in [SmcBridge::PhysicalActivity, SmcBridge::ProposalDensity] {
+            let name = if bridge == SmcBridge::PhysicalActivity {
+                "physical"
+            } else {
+                "density"
+            };
+            let mut opts = synthetic_options(&root, &format!("{name}-full"), 882103);
+            opts.bridge = bridge;
+            let serialized = serde_json::to_value(&opts)?;
+            assert!(serialized.get("exclude_native_entry").is_none());
+            let restored: SmcOptions = serde_json::from_value(serialized)?;
+            assert!(restored.exclude_native_entry.is_none());
+            let full = run(opts.clone())?;
+            let full_out = opts.out.clone();
+            opts.out = root.0.join(format!("{name}-identity"));
+            let restricted = run_impl(opts.clone(), Some(&SyntheticMask { kind: 0 }))?;
+            assert_eq!(full["schema"], "latent-region-smc-summary-v1");
+            assert_eq!(
+                restricted["schema"],
+                "latent-region-smc-native-excluded-summary-v1"
+            );
+            near(
+                full["log_Z"].as_f64().unwrap(),
+                restricted["log_Z"].as_f64().unwrap(),
+            );
+            let original = read_lines(full_out.join("initialization.jsonl"))?;
+            let mut changed = read_lines(opts.out.join("initialization.jsonl"))?;
+            for row in &mut changed {
+                remove_native_fields(row);
+            }
+            assert_eq!(original, changed);
+            let original = read_lines(full_out.join("stages.jsonl"))?;
+            let mut changed = read_lines(opts.out.join("stages.jsonl"))?;
+            for row in &mut changed {
+                remove_native_fields(row);
+                if bridge == SmcBridge::PhysicalActivity
+                    && row.get("mutation_density_records").is_some()
+                {
+                    row["mutation_density_records"] = json!([]);
+                }
+            }
+            assert_eq!(original, changed);
+            assert!(
+                read_json(full_out.join("manifest.json"))?["options"]
+                    .get("exclude_native_entry")
+                    .is_none()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn entirely_native_initialization_retains_every_zero_without_retry() -> Result<()> {
+        let root = synthetic_fixture("zero")?;
+        let mut opts = synthetic_options(&root, "all-native", 33401);
+        opts.initial_draws = 257;
+        let result = run_impl(opts.clone(), Some(&SyntheticMask { kind: 1 }))?;
+        assert_eq!(result["zero_estimate"], true);
+        assert_eq!(result["initial_draws"], 257);
+        assert_eq!(result["initial_hits"], 0);
+        assert_eq!(result["Z"], 0.);
+        assert!(result["log_Z"].is_null());
+        assert!(result["terminal_particles"].as_array().unwrap().is_empty());
+        let rows = read_lines(opts.out.join("initialization.jsonl"))?;
+        assert_eq!(rows.len(), 257);
+        let mut hard = 0;
+        for (index, row) in rows.iter().enumerate() {
+            assert_eq!(row["draw"], index);
+            assert_eq!(row["target_valid"], false);
+            assert!(row["log_initial_weight"].is_null() && row["log_target_hard_weight"].is_null());
+            if row["hard_valid"] == true {
+                hard += 1;
+                assert!(row["log_hard_weight"].is_number());
+                assert_eq!(row["native_evaluated"], true);
+                assert_eq!(row["native_membership"]["native_any"], true);
+                assert_eq!(
+                    row["native_membership"]["per_anchor"][0]["matched_motif_ids"],
+                    json!([7])
+                );
+            } else {
+                assert_eq!(row["native_evaluated"], false);
+                assert!(row["native_membership"].is_null());
+            }
+        }
+        assert!(hard > 0);
+        assert_eq!(result["initial_native_rejected"], hard);
+        assert_eq!(result["initial_geometric_hits"], hard);
+        assert_eq!(read_lines(opts.out.join("stages.jsonl"))?.len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn halfspace_target_has_analytic_half_mass_and_partitioned_initial_estimator() -> Result<()> {
+        let root = synthetic_fixture("half-mass")?;
+        let mut masses = Vec::new();
+        for replicate in 0..4 {
+            let mut opts = synthetic_options(
+                &root,
+                &format!("full-{replicate}"),
+                92317 + 1009 * replicate,
+            );
+            opts.initial_draws = 4096;
+            opts.schedule = vec![0., 1.];
+            opts.sweeps_per_stage = 2;
+            let full = run(opts.clone())?;
+            opts.out = root.0.join(format!("left-{replicate}"));
+            let left = run_impl(opts.clone(), Some(&SyntheticMask { kind: 2 }))?;
+            let rows = read_lines(opts.out.join("initialization.jsonl"))?;
+            let mut sum = 0.;
+            let mut hits = 0;
+            for row in &rows {
+                let valid =
+                    row["hard_valid"] == true && row["pose"]["position"][0].as_f64().unwrap() < 0.;
+                assert_eq!(row["target_valid"], valid);
+                if valid {
+                    sum += row["log_target_hard_weight"].as_f64().unwrap().exp();
+                    hits += 1;
+                }
+            }
+            near(left["log_Z"].as_f64().unwrap(), (sum / 4096.).ln());
+            assert_eq!(left["initial_hits"], hits);
+            opts.out = root.0.join(format!("right-{replicate}"));
+            let right = run_impl(opts, Some(&SyntheticMask { kind: 3 }))?;
+            near(
+                left["Z"].as_f64().unwrap() + right["Z"].as_f64().unwrap(),
+                full["Z"].as_f64().unwrap(),
+            );
+            masses.push(left["Z"].as_f64().unwrap());
+        }
+        // Independent physical translation/Haar radial quadrature. By exact
+        // reflection symmetry the x<0 halfspace has half this full mass.
+        let f = |r: f64| {
+            let a = 1.3 / 1.1 * (16. - (r / 0.6).powi(2)).sqrt();
+            8. * r * r * (a.atan() - a / (1. + a * a))
+        };
+        let n = 8192;
+        let h = (2.2 - 0.6) / n as f64;
+        let exact = (f(0.6)
+            + f(2.2)
+            + (1..n)
+                .map(|i| f(0.6 + h * i as f64) * if i % 2 == 0 { 2. } else { 4. })
+                .sum::<f64>())
+            * h
+            / 6.;
+        let mean = masses.iter().sum::<f64>() / 4.;
+        let se = (masses.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / 12.).sqrt();
+        assert!(
+            (mean - exact).abs() < 6. * se + 1e-8,
+            "halfspace estimate {mean} vs exact {exact}, SE {se}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn restricted_mutation_ledger_preserves_native_and_gate_rejections() -> Result<()> {
+        let root = synthetic_fixture("mutations")?;
+        for bridge in [SmcBridge::PhysicalActivity, SmcBridge::ProposalDensity] {
+            let name = if bridge == SmcBridge::PhysicalActivity {
+                "physical"
+            } else {
+                "density"
+            };
+            let mut opts = synthetic_options(&root, name, 726901);
+            opts.bridge = bridge;
+            let result = run_impl(opts.clone(), Some(&SyntheticMask { kind: 2 }))?;
+            let mut native_rejected = 0u64;
+            let mut gate_rejected = 0u64;
+            let stages = read_lines(opts.out.join("stages.jsonl"))?;
+            let mut previous = stages[0]["particles"].as_array().unwrap().clone();
+            for stage in stages.iter().skip(1) {
+                for potential in stage["potentials"].as_array().unwrap() {
+                    assert_eq!(potential["native_membership"]["native_any"], false);
+                    assert_eq!(potential["native_membership"]["pose"], potential["pose"]);
+                }
+                let mut current: Vec<Value> = stage["parents"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|p| previous[p.as_u64().unwrap() as usize].clone())
+                    .collect();
+                let records = stage["native_mutation_records"].as_array().unwrap();
+                let gates = stage["mutation_density_records"].as_array().unwrap();
+                let counts = &stage["mutation_counts"];
+                let rejected = counts["native_rejected"].as_u64().unwrap();
+                native_rejected += rejected;
+                gate_rejected += counts["gate_rejected"].as_u64().unwrap();
+                assert_eq!(
+                    records.len() as u64,
+                    rejected
+                        + counts["accepted"].as_u64().unwrap()
+                        + counts["gate_rejected"].as_u64().unwrap()
+                );
+                assert_eq!(
+                    gates.len() as u64,
+                    counts["accepted"].as_u64().unwrap()
+                        + counts["gate_rejected"].as_u64().unwrap()
+                );
+                assert_eq!(
+                    counts["attempted"].as_u64().unwrap(),
+                    [
+                        "accepted",
+                        "capture_rejected",
+                        "region_rejected",
+                        "hard_rejected",
+                        "native_rejected",
+                        "gate_rejected"
+                    ]
+                    .iter()
+                    .map(|key| counts[key].as_u64().unwrap())
+                    .sum::<u64>()
+                );
+                for record in records {
+                    let i = record["particle"].as_u64().unwrap() as usize;
+                    assert_eq!(record["old_pose"], current[i]["pose"]);
+                    assert_eq!(record["old_membership"], current[i]["native_membership"]);
+                    assert_eq!(record["old_membership"]["native_any"], false);
+                    assert_eq!(
+                        record["proposed_membership"]["pose"],
+                        record["proposed_pose"]
+                    );
+                    let is_native = record["proposed_pose"]["position"][0].as_f64().unwrap() >= 0.;
+                    assert_eq!(record["proposed_membership"]["native_any"], is_native);
+                    let gate = gates.iter().find(|g| {
+                        g["particle"] == record["particle"] && g["sweep"] == record["sweep"]
+                    });
+                    if is_native {
+                        assert_eq!(record["outcome"], "native_rejected");
+                        assert_eq!(record["bath_gate_evaluated"], false);
+                        assert_eq!(record["accepted"], false);
+                        assert!(gate.is_none());
+                    } else {
+                        let gate = gate.context("Missing restricted acceptance record")?;
+                        assert_eq!(gate["old_pose"], record["old_pose"]);
+                        assert_eq!(gate["proposed_pose"], record["proposed_pose"]);
+                        assert_eq!(gate["accepted"], record["accepted"]);
+                    }
+                    if record["accepted"] == true {
+                        current[i]["pose"] = record["proposed_pose"].clone();
+                        current[i]["native_membership"] = record["proposed_membership"].clone();
+                    }
+                }
+                for (i, endpoint) in stage["particles"].as_array().unwrap().iter().enumerate() {
+                    assert_eq!(endpoint["pose"], current[i]["pose"]);
+                    assert_eq!(
+                        endpoint["native_membership"],
+                        current[i]["native_membership"]
+                    );
+                    assert!(endpoint["pose"]["position"][0].as_f64().unwrap() < 0.);
+                }
+                previous = stage["particles"].as_array().unwrap().clone();
+            }
+            assert!(native_rejected > 0);
+            if bridge == SmcBridge::ProposalDensity {
+                assert!(gate_rejected > 0);
+            }
+            for particle in result["terminal_particles"].as_array().unwrap() {
+                assert_eq!(particle["native_membership"]["native_any"], false);
+                assert_eq!(particle["native_membership"]["pose"], particle["pose"]);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn retained_native_certificates_fail_if_pose_or_definition_changes() -> Result<()> {
+        let mask = SyntheticMask { kind: 2 };
+        let pose = Pose {
+            position: [-1., 0., 0.],
+            orientation: [1., 0., 0., 0.],
+        };
+        let mut particle = Particle {
+            pose,
+            latent: [0.; 6],
+            initial_ancestor: 0,
+            native_membership: Some(native_membership(&mask, pose)?),
+        };
+        retained_membership(&particle, &mask)?;
+        particle.pose.position[0] = -2.;
+        assert!(retained_membership(&particle, &mask).is_err());
+        particle.pose = pose;
+        particle.native_membership.as_mut().unwrap()["predicate_binding"]["compiled_sha256"] =
+            json!("changed");
+        assert!(retained_membership(&particle, &mask).is_err());
+        particle.native_membership = Some(native_membership(
+            &mask,
+            Pose {
+                position: [1., 0., 0.],
+                ..pose
+            },
+        )?);
+        particle.pose.position[0] = 1.;
+        assert!(retained_membership(&particle, &mask).is_err());
         Ok(())
     }
 }

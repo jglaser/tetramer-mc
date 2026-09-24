@@ -97,6 +97,10 @@ and four streams. These initial conditions do not establish equilibrium assembly
 The [finite-assembly observer](docs/finite-assembly-observer.md) measures native
 components surrounded by free tetramers, retains unresolved registry, and reports
 contact fingerprints separately from instantaneous component-size occupancies.
+The [independent-stream comparison](docs/finite-assembly-comparison.md) checks
+complete matched blocks against original retained records and sampler CPU.
+The [runtime and boundary review](docs/finite-assembly-runtime-and-boundaries.md)
+identifies the periodic learned-kernel support still needed by the inert design.
 The [frozen cluster-size bias](docs/frozen-assembly-bias.md)
 adds an optional correction to each elementary reversible kernel and records
 physical reweighting factors. The [Lean project](formal/README.md) now checks

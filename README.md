@@ -88,7 +88,10 @@ The [conditional-ray reference](docs/conditional-ray-reference.md) implements th
 fixed 786,432-draw regional comparison before further full-vessel or finite-system
 assembly production. The [completed campaign](docs/conditional-ray-reference-results.md)
 fails its convergence gate, so those dependent production runs remain deferred;
-the physical assembly question is unresolved. The [frozen cluster-size bias](docs/frozen-assembly-bias.md)
+the physical assembly question is unresolved. The [finite-system design validator](docs/finite-assembly-contract.md)
+checks the separate N=12/N=24, initialization, model and equal-volume boundary
+comparisons without launching a campaign; unfilled preparations remain incomplete.
+The [frozen cluster-size bias](docs/frozen-assembly-bias.md)
 adds an optional correction to each elementary reversible kernel and records
 physical reweighting factors. The [Lean project](formal/README.md) now checks
 38 theorems, including the Poisson depletion estimator and conditional count gate;
@@ -102,8 +105,10 @@ redraw. The [matched docking pilot](docs/involution-docking-pilot.md) measures
 one-way entries and completed contact roundtrips separately.
 The [posterior-source variant](docs/posterior-chart-involution.md) now selects
 its source chart using the current pose and cancels the corresponding label
-factor against the map correction. Its zero-correlation arm supplies the
-matched independent-redraw control with a separate uniform branch.
+factor against the map correction. In that conditional docking experiment,
+its zero-correlation arm redraws within the Gaussian branch, alongside a
+separate uniform branch. The all-mobile full-mixture redraw control instead
+disables `frozen_posterior`, as described in the [examples](examples/README.md).
 The [all-mobile spherical integration](docs/frozen-posterior-assembly.md)
 now mixes this frozen posterior kernel with the original full-mixture capture
 move, retaining the complete many-body bath, GCA and center shifts. Tiny-system

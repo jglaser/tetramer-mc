@@ -119,10 +119,13 @@ target/release/tetramer-mc run \
 
 The sweep count is the cumulative endpoint, not an additional count. For an
 independent replicate, make a configuration copy with a fresh `seed` and start
-a fresh run. For the matched independent-redraw control, change only
-`frozen_posterior.correlation` to `0.0`, preserving its probability and every
-other move setting. Changing radius or activity defines a different physical
-run; efficiency of an existing atlas at those conditions is not established.
+a fresh run. For the matched independent-redraw control, remove
+`frozen_posterior` (or set it to `null`), preserving `global_probability`, the
+frozen model, the uniform component, local step sizes and collective-move
+schedule. Setting only `frozen_posterior.correlation` to `0.0` retains a
+posterior-component move and is a different control. Changing radius or activity
+defines a different physical run; efficiency of an existing atlas at those
+conditions is not established.
 
 Export a self-contained offline viewer with Python's standard library:
 

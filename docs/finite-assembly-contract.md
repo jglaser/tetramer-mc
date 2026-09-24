@@ -195,3 +195,10 @@ The [first attempt](../runs/finite-assembly-contract-validation-20260924/failure
 is preserved: Python 3.9 lacked `hashlib.file_digest`. The portable implementation
 now hashes bounded chunks with `hashlib.sha256`; the successful retry uses a fresh
 directory. Neither attempt generated physical draws or repeated geometry audits.
+
+The subsequent [configuration bank](finite-assembly-config-bank.md) now
+materializes all 432 inputs using the completed starting-state and observer
+archives and validated periodic proposal law. It deliberately leaves executable
+and timing tokens unresolved. A later binder must supply the actual frozen
+window and executable to instantiate this full campaign contract; the historical
+one-config schema exercise above is retained unchanged.

@@ -96,20 +96,7 @@ fn scrub(v: &mut Value) {
 }
 #[test]
 fn phase_retains_attempts_bias_and_exact_restart_and_replay() -> Result<()> {
-    check_phase_replay("restart", None)
-}
-#[test]
-fn joint_guide_retains_attempts_bias_and_exact_restart_and_replay() -> Result<()> {
-    check_phase_replay(
-        "guide-restart",
-        Some(json!({"steps":4,"anchor_count":2,"score_power":1.})),
-    )
-}
-fn check_phase_replay(name: &str, guide: Option<Value>) -> Result<()> {
-    let mut f = Fixture::new(name)?;
-    if let Some(guide) = &guide {
-        f.config["cluster_phase"]["guide"] = guide.clone();
-    }
+    let mut f = Fixture::new("restart")?;
     f.config["assembly_bias"] = json!({"values":[0.,0.2,0.4,0.6]});
     let summary = f.run("full", 120, None)?;
     f.run("part", 47, None)?;
@@ -202,27 +189,6 @@ fn check_phase_replay(name: &str, guide: Option<Value>) -> Result<()> {
         }
     }
     assert!(ev > 100 && rejects > 0 && transported > 0);
-    if guide.is_some() {
-        let c = &summary["counts"]["cluster_phase"];
-        assert!(c["guide_events"].as_u64().unwrap() > 20);
-        assert_eq!(
-            c["guide_inner_attempts"].as_u64().unwrap(),
-            4 * c["guide_events"].as_u64().unwrap()
-        );
-        for row in rows
-            .iter()
-            .filter(|r| r["proposal"]["branch"] == "oligomer_guide")
-        {
-            let p = &row["proposal"];
-            assert_eq!(p["inner_steps"].as_array().unwrap().len(), 4);
-            let ratio = p["old_log_guide"].as_f64().unwrap() - p["new_log_guide"].as_f64().unwrap();
-            assert_eq!(ratio, p["log_reverse_forward"].as_f64().unwrap());
-            if p["endpoint_changed"] == false {
-                assert!(row["proposed_poses"].is_null());
-                assert_eq!(row["accepted"], false);
-            }
-        }
-    }
     assert_eq!(summary["counts"]["cluster_phase"]["events"], ev);
     assert_eq!(summary["counts"]["cluster_phase"]["phases"], 120);
     assert_eq!(
@@ -284,20 +250,5 @@ fn scope_and_parameter_guards_are_explicit() -> Result<()> {
         c["cluster_phase"][key] = json!(-1.);
         assert!(serde_json::from_value::<Config>(c)?.validate().is_err());
     }
-    Ok(())
-}
-
-#[test]
-fn zero_step_guide_preserves_existing_phase_random_streams() -> Result<()> {
-    let mut f = Fixture::new("guide-disabled")?;
-    f.run("absent", 30, None)?;
-    f.config["cluster_phase"]["guide"] = json!({"steps":0});
-    f.run("zero", 30, None)?;
-    let mut a = f.rows("absent", "moves.jsonl")?;
-    let mut b = f.rows("zero", "moves.jsonl")?;
-    for r in a.iter_mut().chain(b.iter_mut()) {
-        scrub(r);
-    }
-    assert_eq!(a, b);
     Ok(())
 }

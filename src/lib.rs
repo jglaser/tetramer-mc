@@ -30,5 +30,3 @@ pub mod contact_memory;
 
 pub mod cluster_phase;
 pub mod rigid_subset;
-
-pub mod oligomer_guide;

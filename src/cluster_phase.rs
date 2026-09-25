@@ -7,7 +7,6 @@ use crate::{
     docking::DockingProposal,
     geometry::{Placed, SphereTree},
     math::*,
-    oligomer_guide::{self, OligomerGuideConfig},
     rigid_subset::RigidSubset,
     spherical::Container,
 };
@@ -26,8 +25,6 @@ pub struct ClusterPhaseConfig {
     pub trimer_rate: f64,
     pub transport_probability: f64,
     pub correlation: f64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub guide: Option<OligomerGuideConfig>,
     #[serde(rename = "local_translation_std_A")]
     pub local_translation_std_a: f64,
     pub local_small_angle_std_degrees: f64,
@@ -40,7 +37,6 @@ impl Default for ClusterPhaseConfig {
             trimer_rate: 0.25,
             transport_probability: 0.5,
             correlation: 0.9,
-            guide: None,
             local_translation_std_a: 0.2,
             local_small_angle_std_degrees: 1.,
         }
@@ -48,9 +44,6 @@ impl Default for ClusterPhaseConfig {
 }
 impl ClusterPhaseConfig {
     pub fn validate(&self) -> Result<()> {
-        if let Some(guide) = &self.guide {
-            guide.validate()?;
-        }
         for v in [
             self.duration,
             self.dimer_rate,
@@ -103,21 +96,6 @@ pub struct ClusterPhaseCounts {
     pub gate_raw_points: u64,
     pub zero_rate_stops: u64,
     pub horizon_stops: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub guide_events: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub guide_inner_attempts: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub guide_inner_hard_valid: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub guide_inner_accepted: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub guide_endpoint_nulls: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub guide_accepted: u64,
-}
-fn is_zero(value: &u64) -> bool {
-    *value == 0
 }
 macro_rules! fields {
     ($m:ident, $a:ident, $b:ident) => {
@@ -145,13 +123,7 @@ macro_rules! fields {
             lost_contacts,
             gate_raw_points,
             zero_rate_stops,
-            horizon_stops,
-            guide_events,
-            guide_inner_attempts,
-            guide_inner_hard_valid,
-            guide_inner_accepted,
-            guide_endpoint_nulls,
-            guide_accepted
+            horizon_stops
         )
     };
 }
@@ -395,12 +367,6 @@ impl<'a> ClusterPhase<'a> {
             !config.enabled() || config.transport_probability == 0. || proposal.is_some(),
             "cluster transport requires frozen learned proposal"
         );
-        if config.guide.as_ref().is_some_and(|g| g.enabled()) && config.transport_probability > 0. {
-            ensure!(
-                proposal.as_ref().is_some_and(|p| p.uniform_weight() > 0.),
-                "oligomer guide requires a frozen proposal with positive uniform support"
-            );
-        }
         let mut shape = tree.shape.clone();
         for atom in &mut shape.atoms {
             atom.radius += rd;
@@ -482,29 +448,7 @@ impl<'a> ClusterPhase<'a> {
                 counts.local_events += 1;
             }
             let mut info = json!({"branch":"local_rigid","log_reverse_forward":0.});
-            let guided = transport && self.config.guide.as_ref().is_some_and(|g| g.enabled());
-            let candidate = if guided {
-                let (candidate, trace, c) = oligomer_guide::propose(
-                    self.tree,
-                    &self.exclusion,
-                    self.wall,
-                    self.rd,
-                    poses,
-                    members,
-                    handle,
-                    self.proposal.as_ref().unwrap(),
-                    self.config.guide.as_ref().unwrap(),
-                    proposal_rng,
-                    record,
-                )?;
-                info = trace;
-                counts.guide_events += 1;
-                counts.guide_inner_attempts += c.inner_attempts;
-                counts.guide_inner_hard_valid += c.inner_hard_valid;
-                counts.guide_inner_accepted += c.inner_accepted;
-                counts.guide_endpoint_nulls += u64::from(!c.endpoint_changed);
-                candidate
-            } else if transport {
+            let candidate = if transport {
                 let spectator_indices: Vec<_> =
                     (0..poses.len()).filter(|i| !members.contains(i)).collect();
                 if spectator_indices.is_empty() {
@@ -599,7 +543,6 @@ impl<'a> ClusterPhase<'a> {
                                 graph = next_graph;
                                 channels = graph.channels(&self.config);
                                 counts.accepted += 1;
-                                counts.guide_accepted += u64::from(guided);
                                 counts.transformed_bodies += members.len() as u64;
                                 counts.gained_contacts += gained.len() as u64;
                                 counts.lost_contacts += lost.len() as u64;

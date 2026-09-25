@@ -363,24 +363,3 @@ not remove native information from any supplied base atlas. See the
 `s=6`. Run with `--method learned` and no model file. It fits means, full
 covariances, weights and a finite count law without a separate memory bank;
 see [the closure guide](../docs/conditional-closure.md).
-
-### Experimental oligomer-conditioned guide
-
-The optional [joint guide](../docs/oligomer-guide.md) evaluates every carried member
-in a fixed external-anchor neighborhood. Try it with the same physical settings
-as the cluster control:
-
-```bash
-target/release/tetramer-mc run \
-  --config examples/spherical-oligomer-guide.json \
-  --model examples/frozen-coverage-reciprocal-mixture.json \
-  --free-tetramers 256 --tetramer-concentration-um 500 \
-  --depletant-radius 1.4 --depletant-activity 0.0275 --seed 20260926 \
-  --out runs/oligomer-guide-seed8-free256 --sweeps 10000 --sample-every 100
-```
-
-`cluster_phase.guide.steps` controls fixed inner work (default example: 4),
-`anchor_count` the spectator-only pool size (4), and `score_power` the joint guide
-strength (1). Remove `guide` or set `steps` to zero for the existing cluster
-proposal. This is an experimental sampling control, not a recommendation based
-on a demonstrated protein mixing speedup.

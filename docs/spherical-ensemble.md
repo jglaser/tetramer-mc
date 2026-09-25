@@ -47,6 +47,17 @@ no acceptance decision. Rust uses stable quadratic roots and conservative
 whole-body pruning. Numerical geometry failures stop with an error; neither
 implementation silently substitutes an endpoint rejection for these kernels.
 
+A [frozen overlap-compensation diagnostic](gca-overlap-compensation.md) compares
+the current Poisson recruitment with an integrated pair-volume rule. The tested
+centered half-turns offer little compensating pair overlap; this diagnostic
+does not change the production cluster law.
+
+An optional [contact-conditioned half-turn selector](conditional-half-turn.md)
+uses a second conditional axis to cancel unknown angular normalizers. Set
+`gca_axis` to enable the corrected selector; omitting it retains the isotropic
+sequence. Its validation and frozen-state exchange benchmarks are documented
+separately from equilibrium sampling claims.
+
 GCA alone preserves body-frame radial vectors. Center shifts change this
 invariant; local/learned moves also allow internal rearrangement. These facts
 are not an ergodicity or mixing-time proof.
@@ -113,7 +124,8 @@ The existing exact conditional Poisson gate supplies the physical factor.
 The Gaussian conditional ratio cancels the transport Jacobian, including
 changes in `s_k(X)`. Local moves, model-independent GCA and center shifts need
 no auxiliary correction. For this relative-pose fitter, common shifts even
-leave `f,s` unchanged. No model-guided GCA axis selection is implemented.
+leave `f,s` unchanged. The optional geometry-based `gca_axis` selector uses its own exact correction;
+it does not use the Gaussian proposal model to select axes.
 
 The runner performs a random-permutation sweep of single-body moves, then
 independent state-independent Bernoulli GCA and center-shift attempts, in that

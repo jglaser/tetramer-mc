@@ -6,6 +6,8 @@ pub mod assembly_bias;
 pub mod depletion;
 pub mod docking;
 pub mod geometry;
+pub mod gca_overlap_diagnostic;
+pub mod initialization;
 pub mod latent_region;
 pub mod math;
 pub mod native_entry;
@@ -23,4 +25,8 @@ pub mod atlas_transport;
 pub mod auxiliary;
 pub mod basin_involution;
 pub mod conditional;
+pub mod conditional_axis;
 pub mod contact_memory;
+
+pub mod cluster_phase;
+pub mod rigid_subset;

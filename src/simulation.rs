@@ -11,6 +11,8 @@ use crate::{
     },
     auxiliary::{self, AuxiliaryConfig},
     conditional::{ConditionalConfig, ConditionalEngine, ConditionalFit, ConditionalState},
+    conditional_axis::{ConditionalAxis, ConditionalAxisConfig},
+    cluster_phase::{ClusterPhase, ClusterPhaseConfig, ClusterPhaseCounts},
     contact_memory::{MemoryConfig, MemoryState, ResolvedMemoryConfig},
     depletion::{self, GateOptions},
     docking::{DockingMethod, DockingProposal},
@@ -105,8 +107,13 @@ pub struct Config {
     /// Independent Bernoulli attempts after each ordinary single-body sweep.
     #[serde(default)]
     pub gca_probability: f64,
+    /// Optional contact-conditioned axis selection with an exact exchange gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gca_axis: Option<ConditionalAxisConfig>,
     #[serde(default)]
     pub center_shift_probability: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster_phase: Option<ClusterPhaseConfig>,
     pub initial_poses: Vec<Pose>,
     pub seed: u64,
     pub depletant_radius: f64,
@@ -175,6 +182,13 @@ impl Config {
                 radius.is_finite() && radius > 0.,
                 "invalid spherical wall radius"
             ),
+        }
+        if let Some(settings) = &self.gca_axis {
+            settings.validate()?;
+            ensure!(
+                self.boundary.radius().is_some(),
+                "contact-conditioned GCA axes require a spherical boundary"
+            );
         }
         ensure!(
             self.depletant_radius.is_finite()
@@ -274,6 +288,14 @@ impl Config {
                 "frozen posterior transport requires immutable charts; disable auxiliary, RJ, contact-memory, conditional and atlas adaptations"
             );
         }
+        if let Some(settings) = &self.cluster_phase {
+            settings.validate()?;
+            ensure!(self.boundary.radius().is_some(), "cluster phase currently requires a spherical boundary");
+            ensure!(self.auxiliary_transport.is_none() && self.reversible_jump.is_none()
+                && self.contact_memory.is_none() && self.conditional_closure.is_none()
+                && self.atlas_transport.is_none() && self.atlas_mask.is_none(),
+                "cluster phase requires frozen proposals; disable auxiliary/adaptive modes");
+        }
         if let Some(bias) = &self.assembly_bias {
             bias.validate(self.initial_poses.len())?;
             ensure!(
@@ -310,8 +332,12 @@ pub struct RunCounts {
     pub global: Counts,
     #[serde(default)]
     pub gca: CollectiveCounts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gca_axis: Option<AxisCounts>,
     #[serde(default)]
     pub center_shift: CollectiveCounts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cluster_phase: Option<ClusterPhaseCounts>,
     #[serde(default)]
     pub model_jumps: JumpCounts,
     #[serde(default)]
@@ -344,6 +370,34 @@ impl CollectiveCounts {
             attempted: self.attempted - old.attempted,
             completed: self.completed - old.completed,
             transformed_bodies: self.transformed_bodies - old.transformed_bodies,
+        }
+    }
+}
+/// Selector stages are distinct from any subsequent auxiliary/bias gate.
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq)]
+pub struct AxisCounts {
+    pub attempted: u64,
+    pub forward_candidates: u64,
+    pub reverse_candidates: u64,
+    pub forward_failed: u64,
+    pub reverse_failed: u64,
+    pub physical_proposals: u64,
+    pub selector_accepted: u64,
+    pub selector_rejected: u64,
+    pub completed_tag_exchanges: u64,
+}
+impl AxisCounts {
+    fn since(&self, old: &Self) -> Self {
+        Self {
+            attempted: self.attempted - old.attempted,
+            forward_candidates: self.forward_candidates - old.forward_candidates,
+            reverse_candidates: self.reverse_candidates - old.reverse_candidates,
+            forward_failed: self.forward_failed - old.forward_failed,
+            reverse_failed: self.reverse_failed - old.reverse_failed,
+            physical_proposals: self.physical_proposals - old.physical_proposals,
+            selector_accepted: self.selector_accepted - old.selector_accepted,
+            selector_rejected: self.selector_rejected - old.selector_rejected,
+            completed_tag_exchanges: self.completed_tag_exchanges - old.completed_tag_exchanges,
         }
     }
 }
@@ -401,7 +455,10 @@ impl RunCounts {
             local: self.local.since(&old.local),
             global: self.global.since(&old.global),
             gca: self.gca.since(&old.gca),
+            gca_axis: self.gca_axis.as_ref().map(|c| c.since(
+                old.gca_axis.as_ref().expect("GCA selector mode changed"))),
             center_shift: self.center_shift.since(&old.center_shift),
+            cluster_phase: self.cluster_phase.as_ref().map(|c| c.since(old.cluster_phase.as_ref().expect("cluster phase mode changed"))),
             model_jumps: self.model_jumps.since(&old.model_jumps),
             contact_memory: self.contact_memory.since(&old.contact_memory),
             conditional_refreshes: self.conditional_refreshes - old.conditional_refreshes,
@@ -615,14 +672,74 @@ fn atlas_diagnostic(fit: &AtlasTransportFit) -> Value {
         "component_counts":fit.component_counts,"coordinates":fit.coordinates})
 }
 
+/// Optional startup overrides. They define a new input identity and may not be
+/// applied while continuing a checkpoint; resume the archived effective input.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RunOverrides {
+    pub initialization: Option<crate::initialization::FreeTetramerStart>,
+    /// Explicit opt-out of retaining seed_labels while generating new free bodies.
+    pub discard_seed: bool,
+    /// Angstroms. The frozen proposal model is not refitted.
+    pub depletant_radius: Option<f64>,
+    /// Ideal-depletant activity in inverse cubic angstroms.
+    pub depletant_activity: Option<f64>,
+}
+
 pub fn run(options: RunOptions) -> Result<Value> {
+    run_with_overrides(options, RunOverrides::default())
+}
+
+/// CLI preparation overrides are materialized and hashed as a new input config.
+/// Resume that archived input without overrides to retain exact continuation.
+pub fn run_with_free_tetramers(
+    options: RunOptions,
+    initialization: Option<crate::initialization::FreeTetramerStart>,
+) -> Result<Value> {
+    run_with_overrides(
+        options,
+        RunOverrides {
+            initialization,
+            ..Default::default()
+        },
+    )
+}
+
+pub fn run_with_overrides(options: RunOptions, overrides: RunOverrides) -> Result<Value> {
+    let initialization = overrides.initialization;
+    let bath_overridden =
+        overrides.depletant_radius.is_some() || overrides.depletant_activity.is_some();
+    let any_override = initialization.is_some() || bath_overridden;
+    ensure!(
+        !overrides.discard_seed || initialization.is_some(),
+        "discard-seed requires free-tetramer initialization"
+    );
     ensure!(
         options.sweeps > 0 && options.sample_every > 0,
         "positive sweep counts required"
     );
-    let raw_config = fs::read(&options.config)?;
-    let config_sha = hash_bytes(&raw_config);
+    ensure!(
+        !any_override || options.resume.is_none(),
+        "startup overrides cannot be combined with resume; use the archived provenance/input-config.json without override flags"
+    );
+    let mut raw_config = fs::read(&options.config)?;
+    let template_raw = any_override.then(|| raw_config.clone());
     let mut config: Config = serde_json::from_slice(&raw_config)?;
+    config.validate()?;
+    let original_bath = json!({"depletant_radius":config.depletant_radius,"reservoir_density":config.reservoir_density});
+    if let Some(radius) = overrides.depletant_radius {
+        ensure!(
+            radius.is_finite() && radius >= 0.,
+            "depletant radius must be finite and nonnegative (angstroms)"
+        );
+        config.depletant_radius = radius;
+    }
+    if let Some(activity) = overrides.depletant_activity {
+        ensure!(
+            activity.is_finite() && activity >= 0.,
+            "depletant activity must be finite and nonnegative (A^-3)"
+        );
+        config.reservoir_density = activity;
+    }
     config.validate()?;
     let declared: Value = serde_json::from_slice(&raw_config)?;
     if let Some(radius) = declared.get("spherical_radius").filter(|v| !v.is_null()) {
@@ -644,6 +761,40 @@ pub fn run(options: RunOptions) -> Result<Value> {
         fs::read(&shape_path).with_context(|| format!("shape {}", shape_path.display()))?;
     let shape_sha = hash_bytes(&shape_raw);
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
+    // Performance-only geometry; cold reconstruction preserves checkpoint RNG streams.
+    let mut envelope_cache = depletion::BodyEnvelopeCache::new(&tree, config.depletant_radius)?;
+    if let Some(settings) = initialization {
+        // The new exclusion radius also determines separated-start geometry.
+        let discarded_seed_labels = overrides.discard_seed.then(|| config.seed_labels.clone());
+        if overrides.discard_seed {
+            config.seed_labels.clear();
+        }
+        settings.apply(&mut config, &tree)?;
+        if let Some(labels) = discarded_seed_labels {
+            config.metadata["free_tetramer_initialization"]["discarded_seed_source_indices"] = json!(labels);
+        }
+    }
+    if bath_overridden {
+        if initialization.is_none() {
+            // Old preparation certificates may refer to the previous bath.
+            // Preserve them as provenance, not as current contact guarantees.
+            let previous = std::mem::take(&mut config.metadata);
+            let motifs = previous.get("native_pair_motifs").cloned();
+            config.metadata = json!({"template_metadata":previous});
+            if let Some(motifs) = motifs {
+                config.metadata["native_pair_motifs"] = motifs;
+            }
+        }
+        config.metadata["depletant_overrides"] = json!({
+            "template_bath":original_bath,
+            "requested_radius_A":overrides.depletant_radius,
+            "requested_activity_A_minus3":overrides.depletant_activity,
+            "effective_radius_A":config.depletant_radius,
+            "effective_activity_A_minus3":config.reservoir_density,
+            "proposal_model_refitted":false,
+            "initial_poses_regenerated":initialization.is_some()
+        });
+    }
     let assembly_bias = config
         .assembly_bias
         .as_ref()
@@ -662,6 +813,9 @@ pub fn run(options: RunOptions) -> Result<Value> {
         .radius()
         .map(|radius| Container::new(radius, &tree))
         .transpose()?;
+    let gca_axis = config.gca_axis.as_ref().map(|settings| {
+        ConditionalAxis::new(&tree, config.depletant_radius, settings.clone())
+    }).transpose()?;
     let uniform_lengths = match config.boundary {
         Boundary::Periodic => config.box_lengths,
         Boundary::Spherical { radius } => [2. * (radius + tree.bound); 3],
@@ -688,6 +842,13 @@ pub fn run(options: RunOptions) -> Result<Value> {
         };
         config.metadata["native_pair_motifs"] = json!(fs::canonicalize(path)?);
     }
+    if any_override {
+        // Include effective bath, poses, dimensions, seed and resolved input paths in
+        // the checkpoint identity. Archive the original template separately.
+        raw_config = serde_json::to_vec_pretty(&config)?;
+        raw_config.push(b'\n');
+    }
+    let config_sha = hash_bytes(&raw_config);
     let model_raw = options.model.as_ref().map(fs::read).transpose()?;
     let model_sha = model_raw.as_ref().map(|raw| hash_bytes(raw));
     let conditional_engine = config
@@ -762,6 +923,18 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 [0.; 3],
             )
         })
+        .transpose()?;
+    let cluster_proposal = config.cluster_phase.as_ref()
+        .filter(|c| c.enabled() && c.transport_probability > 0.)
+        .map(|c| DockingProposal::new(
+            proposal.as_ref().context("cluster transport requires --method learned and --model")?.clone(),
+            DockingMethod::PosteriorInvolution, c.correlation, [0.;3]))
+        .transpose()?;
+    let cluster_engine = config.cluster_phase.as_ref().filter(|c|c.enabled())
+        .map(|c| ClusterPhase::new(&tree, wall.as_ref().context("cluster phase needs spherical wall")?,
+            config.depletant_radius, config.reservoir_density,
+            if config.reservoir_density > 0. {config.reservoir_density * config.poisson_lambda_ratio} else {1.},
+            config.endpoint_gate, c.clone(), cluster_proposal))
         .transpose()?;
     let atlas_engine = config
         .atlas_transport
@@ -872,6 +1045,8 @@ pub fn run(options: RunOptions) -> Result<Value> {
         .map(|engine| engine.initialize(&mut stream(config.seed, 0, "atlas-mask-init")))
         .transpose()?;
     let mut counts = RunCounts {
+        gca_axis: config.gca_axis.as_ref().map(|_| AxisCounts::default()),
+        cluster_phase: cluster_engine.as_ref().map(|_| ClusterPhaseCounts::default()),
         selected_body_updates_by_body: vec![0; poses.len()],
         assembly_bias: config
             .assembly_bias
@@ -927,6 +1102,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 && checkpoint.conditional_state.is_some() == config.conditional_closure.is_some(),
             "checkpoint auxiliary mode mismatch"
         );
+        ensure!(
+            checkpoint.counts.gca_axis.is_some() == config.gca_axis.is_some(),
+            "checkpoint GCA axis selector mode mismatch"
+        );
+        ensure!(checkpoint.counts.cluster_phase.is_some() == cluster_engine.is_some(),
+            "checkpoint cluster phase mode mismatch");
         ensure!(
             checkpoint.atlas_state.is_some() == config.atlas_transport.is_some(),
             "checkpoint atlas mode mismatch"
@@ -1041,6 +1222,9 @@ pub fn run(options: RunOptions) -> Result<Value> {
         source_bundle,
     )?;
     fs::write(options.out.join("provenance/input-config.json"), raw_config)?;
+    if let Some(raw) = template_raw {
+        fs::write(options.out.join("provenance/template-config.json"), raw)?;
+    }
     fs::write(options.out.join("provenance/shape.json"), shape_raw)?;
     if let Some(raw) = &model_raw {
         fs::write(
@@ -1065,6 +1249,10 @@ pub fn run(options: RunOptions) -> Result<Value> {
     save(&options.out.join("config.json"), &effective)?;
     let executable_sha = hash_file(&std::env::current_exe()?)?;
     let mut manifest = json!({"schema":1,"config_sha256":config_sha,"shape_sha256":shape_sha,"model_sha256":model_sha,"executable_sha256":executable_sha,"source_bundle_sha256":hash_bytes(source_bundle.as_bytes()),"version":env!("CARGO_PKG_VERSION"),"resume":options.resume,"initial_sweep":completed,"rng":"sha256-master-sweep-stream-v1; rand pinned by Cargo.lock","physical_target":"hard(X) wall(X) exp[-z * exclusion_union_volume(X)]","boundary":config.boundary,"bath_wall_permeable":wall.is_some(),"collective_schedule":"after each single-body sweep: independent state-independent Bernoulli GCA, then center shift; dedicated RNG streams","auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask,"scope":"Frozen atlas/contact-memory modes or normalized current-geometry conditional full-GMM closure; explicit auxiliary state and corrections; no unrecorded training history; algorithmic MC time, not physical kinetics"});
+    if let Some(settings) = &config.gca_axis {
+        manifest["gca_axis"] = json!(settings);
+        manifest["gca_axis_protocol"] = json!("conditional-axis-exchange-v1; capped independent searches; failures retain state; physical GCA followed by selector and existing auxiliary/bias gates");
+    }
     if let Some(settings) = config.frozen_posterior {
         manifest["frozen_posterior"] = json!(settings);
     }
@@ -1078,6 +1266,12 @@ pub fn run(options: RunOptions) -> Result<Value> {
         manifest["assembly_bias_reweighting"] = json!(
             "Normalized physical expectations use exp(log_reweight), where log_reweight = B; every saved frame including rejected updates is retained."
         );
+    }
+    if let Some(settings) = &config.cluster_phase {
+        manifest["cluster_phase"] = json!(settings);
+        manifest["cluster_phase_protocol"] = json!("internal-contact-rates-fixed-duration-v1");
+        manifest["cluster_phase_schedule"] = json!("fixed algorithmic duration after ordinary single-body, GCA and center-shift kernels; rejection consumes event time; trajectory sampled only at sweep endpoints");
+        manifest["cluster_phase_target_obligation"] = json!("Internal eligibility invariant under rigid move, fixed-subset map+union-Poisson gate reversible; finite-duration semigroup preserves target. No claim that event-indexed states are equilibrium samples.");
     }
     save(&options.out.join("manifest.json"), &manifest)?;
     let mut trajectory = BufWriter::new(File::create(options.out.join("trajectory.jsonl"))?);
@@ -1103,6 +1297,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
     let mut proposal_cpu = 0.;
     let mut gca_cpu = 0.;
     let mut shift_cpu = 0.;
+    let mut cluster_cpu = 0.;
     let mut memory_cpu = 0.;
     let mut memory_gate_points = 0_u64;
     let mut conditional_fit_cpu = 0.;
@@ -1477,7 +1672,7 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     } else {
                         1.
                     };
-                    let result = depletion::sample(
+                    let result = envelope_cache.sample(
                         &mut gate_rng,
                         &env,
                         old,
@@ -1551,36 +1746,51 @@ pub fn run(options: RunOptions) -> Result<Value> {
                 let before = cpu_seconds();
                 let previous = (conditional_engine.is_some() || assembly_bias.is_some())
                     .then(|| poses.clone());
-                let axis = uniform_direction(&mut gca_rng);
-                let result = spherical::update(
-                    &tree,
-                    wall,
-                    &mut poses,
-                    HalfTurn::new(axis)?,
-                    config.depletant_radius,
-                    config.reservoir_density,
-                    &mut gca_rng,
-                )?;
+                let (axis, result, selector, mut accepted) = if let Some(engine) = &gca_axis {
+                    let mut guide_rng = stream(config.seed, sweep, "spherical-gca-axis-guide-v1");
+                    let outcome = engine.update(wall, &mut poses, config.reservoir_density,
+                        &mut guide_rng, &mut gca_rng)?;
+                    let c = counts.gca_axis.as_mut().unwrap();
+                    c.attempted += 1;
+                    c.forward_candidates += outcome.stats.forward.attempts as u64;
+                    c.reverse_candidates += outcome.stats.reverse.attempts as u64;
+                    c.forward_failed += u64::from(outcome.stats.forward.capped_failure);
+                    c.reverse_failed += u64::from(outcome.stats.reverse.capped_failure);
+                    c.physical_proposals += u64::from(outcome.gca.is_some());
+                    c.selector_accepted += u64::from(outcome.accepted);
+                    c.selector_rejected += u64::from(outcome.stats.log_acceptance.is_some() && !outcome.accepted);
+                    (outcome.stats.forward.selected_axis, outcome.gca,
+                        Some(outcome.stats), outcome.accepted)
+                } else {
+                    // Keep the original RNG order exactly when the option is absent.
+                    let axis = uniform_direction(&mut gca_rng);
+                    let result = spherical::update(
+                        &tree, wall, &mut poses, HalfTurn::new(axis)?,
+                        config.depletant_radius, config.reservoir_density, &mut gca_rng,
+                    )?;
+                    (Some(axis), Some(result), None, true)
+                };
+                let selector_accepted = accepted;
                 gca_cpu += cpu_seconds() - before;
                 let mut count_ratio = 0.;
-                let mut accepted = true;
-                if let Some(engine) = &conditional_engine {
-                    let before = cpu_seconds();
-                    let fit = engine.fit(&poses)?;
-                    conditional_fit_calls += 1;
-                    let k = conditional_state.as_ref().unwrap().k;
-                    count_ratio = fit.log_probabilities[k]
-                        - conditional_fit.as_ref().unwrap().log_probabilities[k];
-                    let mut rng = stream(config.seed, sweep, "conditional-gca-accept");
-                    accepted =
-                        rng.random::<f64>().max(f64::MIN_POSITIVE).ln() < count_ratio.min(0.);
-                    if accepted {
-                        conditional_fit = Some(fit);
-                    } else {
-                        poses = previous.as_ref().unwrap().clone();
-                        counts.conditional_gca_rejected += 1;
+                if accepted {
+                    if let Some(engine) = &conditional_engine {
+                        let before = cpu_seconds();
+                        let fit = engine.fit(&poses)?;
+                        conditional_fit_calls += 1;
+                        let k = conditional_state.as_ref().unwrap().k;
+                        count_ratio = fit.log_probabilities[k]
+                            - conditional_fit.as_ref().unwrap().log_probabilities[k];
+                        let mut rng = stream(config.seed, sweep, "conditional-gca-accept");
+                        accepted = rng.random::<f64>().max(f64::MIN_POSITIVE).ln() < count_ratio.min(0.);
+                        if accepted {
+                            conditional_fit = Some(fit);
+                        } else {
+                            poses = previous.as_ref().unwrap().clone();
+                            counts.conditional_gca_rejected += 1;
+                        }
+                        conditional_fit_cpu += cpu_seconds() - before;
                     }
-                    conditional_fit_cpu += cpu_seconds() - before;
                 }
                 let physical_accepted = accepted;
                 let mut bias_decision = None;
@@ -1610,10 +1820,29 @@ pub fn run(options: RunOptions) -> Result<Value> {
                     atlas_fit_cpu += cpu_seconds() - before;
                 }
                 if accepted {
-                    counts.gca.transformed_bodies += result.flipped_indices.len() as u64;
+                    counts.gca.transformed_bodies += result.as_ref().map_or(0, |r| r.flipped_indices.len() as u64);
+                    if let Some(stats) = &selector {
+                        counts.gca_axis.as_mut().unwrap().completed_tag_exchanges +=
+                            u64::from(!stats.proposed_lost.is_empty() && !stats.proposed_gained.is_empty());
+                    }
                 }
                 if let Some(writer) = &mut moves {
                     let mut row = json!({"sweep":sweep,"kind":"gca","axis":axis,"result":result,"accepted":accepted,"conditional_count_log_ratio":count_ratio,"sampler_cpu_seconds":cpu_seconds()-start_cpu});
+                    if let Some(stats) = &selector {
+                        row["axis_selector"] = json!(stats);
+                        row["axis_selector_accepted"] = json!(selector_accepted);
+                        row["retained_tag_contacts"] = json!(if accepted {
+                            &stats.proposed_contacts
+                        } else { &stats.initial_contacts });
+                        row["retained_tag_lost"] = json!(if accepted {
+                            stats.proposed_lost.as_slice()
+                        } else { &[] });
+                        row["retained_tag_gained"] = json!(if accepted {
+                            stats.proposed_gained.as_slice()
+                        } else { &[] });
+                        row["completed_tag_exchange"] = json!(accepted
+                            && !stats.proposed_lost.is_empty() && !stats.proposed_gained.is_empty());
+                    }
                     if assembly_bias.is_some() {
                         row["physical_accepted"] = json!(physical_accepted);
                         row["assembly_bias_decision"] = json!(bias_decision);
@@ -1706,6 +1935,25 @@ pub fn run(options: RunOptions) -> Result<Value> {
                         row["physical_accepted"] = json!(physical_accepted);
                         row["assembly_bias_decision"] = json!(bias_decision);
                     }
+                    jsonline(writer, &row)?;
+                }
+            }
+        }
+        if let Some(engine) = &cluster_engine {
+            let before = cpu_seconds();
+            let (stats, rows) = engine.run(&mut poses,
+                &mut stream(config.seed, sweep, "cluster-phase-clock-v1"),
+                &mut stream(config.seed, sweep, "cluster-phase-proposal-v1"),
+                &mut stream(config.seed, sweep, "cluster-phase-gate-v1"),
+                &mut stream(config.seed, sweep, "cluster-phase-accept-v1"),
+                &mut stream(config.seed, sweep, "cluster-phase-bias-v1"),
+                assembly_bias.as_ref(), &mut bias_state, moves.is_some())?;
+            cluster_cpu += cpu_seconds() - before;
+            counts.cluster_phase.as_mut().unwrap().add(&stats);
+            if let Some(writer) = &mut moves {
+                for mut row in rows {
+                    row["sweep"] = json!(sweep);
+                    row["sampler_cpu_seconds"] = json!(cpu_seconds()-start_cpu);
                     jsonline(writer, &row)?;
                 }
             }
@@ -1818,6 +2066,13 @@ pub fn run(options: RunOptions) -> Result<Value> {
         }
     }
     let mut summary = json!({"complete":true,"completed_sweeps":completed,"initial_sweep":start_sweep,"requested_sweeps":options.sweeps,"method":options.method,"bodies":poses.len(),"all_bodies_mobile":true,"boundary":config.boundary.name(),"spherical_wall_radius":config.boundary.radius(),"bath_wall_permeable":wall.is_some(),"counts":counts,"initial_counts":initial_counts,"segment_counts":counts.since(&initial_counts),"timing_scope":"CPU, wall and cost cover this invocation only; pair them with segment_counts","sampler_cpu_seconds":cpu_seconds()-start_cpu,"wall_seconds":start.elapsed().as_secs_f64(),"cost":{"proposal_cpu_seconds":proposal_cpu,"geometry_cpu_seconds":geometry_cpu,"gate_cpu_seconds":gate_cpu,"gate_raw_points":gate_points,"gca_cpu_seconds":gca_cpu,"center_shift_cpu_seconds":shift_cpu,"contact_memory_cpu_seconds":memory_cpu,"contact_memory_gate_raw_points":memory_gate_points,"contact_memory_initialization_cpu_seconds":memory_initialization_cpu,"conditional_fit_cpu_seconds":conditional_fit_cpu,"conditional_fit_calls":conditional_fit_calls,"conditional_initialization_cpu_seconds":conditional_initialization_cpu,"atlas_fit_cpu_seconds":atlas_fit_cpu,"atlas_fit_calls":atlas_fit_calls,"atlas_initialization_cpu_seconds":atlas_initialization_cpu},"model_sha256":model_sha,"shape_sha256":shape_sha,"config_sha256":config_sha,"initial_metadata":config.metadata,"auxiliary_transport":config.auxiliary_transport,"reversible_jump":config.reversible_jump,"contact_memory":resolved_contact_memory,"conditional_closure":config.conditional_closure,"atlas_transport":config.atlas_transport,"atlas_mask":config.atlas_mask});
+    if let Some(settings) = &config.gca_axis {
+        summary["gca_axis"] = json!(settings);
+    }
+    if let Some(settings) = &config.cluster_phase {
+        summary["cluster_phase"] = json!(settings);
+        summary["cost"]["cluster_phase_cpu_seconds"] = json!(cluster_cpu);
+    }
     if let Some(settings) = config.frozen_posterior {
         summary["frozen_posterior"] = json!(settings);
     }

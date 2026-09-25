@@ -242,6 +242,110 @@ correctness of the Rust floating-point implementation follows from these
 proofs. Connecting a specific transport, geometric Poisson thinning implementation,
 or reversible-jump implementation to the hypotheses remains separate work.
 
+## Internal-geometry subset rates and fixed-duration cluster phases
+
+`ReversibleSampling/ClusterRates.lean` supplies a new **finite-state,
+exact-arithmetic** bridge for the collective proposal. It leaves the earlier
+general measurable-state theorems unchanged. It is not a formal discretization
+of the continuous protein-pose problem or a proof of the Rust program.
+
+For each fixed labelled subset `S`, let `K_S` be the complete physical
+accepted/rejected kernel, already reversible for `π`. Its rate `a_S(x)` must
+be unchanged on every transition of `K_S` carrying nonzero stationary flow.
+A sufficient geometric construction is `a_S(x) = κ_S w(D_S(x))`, where
+`D_S` consists only of internal relative geometry and the proposal moves all
+members rigidly. The subset remains eligible after attachment to a larger
+aggregate: membership is not redefined as the entire physical component.
+The proofs establish
+
+\[
+R(x,y)=\sum_S a_S(x)K_S(x,y),\quad
+\Lambda(x)=\sum_S a_S(x),\quad
+\pi(x)R(x,y)=\pi(y)R(y,x).
+\]
+
+For a fixed positive finite global bound `M ≥ Λ(x)`, the uniformized kernel
+
+\[
+Q(x,y)=R(x,y)/M+[1-\Lambda(x)/M]\mathbf1_{x=y}
+\]
+
+is stochastic, reversible, and invariant. Its diagonal includes failed
+physical proposals as well as clock thinning. Every power is invariant,
+and every **state-independent normalized count mixture** is invariant.
+In particular, a fixed algorithmic duration `t` gives
+
+\[
+P_t=\sum_{n\ge0}\Pr\{\mathrm{Pois}(Mt)=n\}Q^n,
+\qquad \pi P_t=\pi.
+\]
+
+`internal_subset_phase_correct` combines these steps. Zero duration and
+zero local total rate are covered by this uniformized construction.
+`compose_invariant` proves that a phase of fixed algorithmic duration can
+be composed with other invariant steps; the ordered hybrid need not be
+reversible. A duration selected from CPU time, successful-move count, or
+a configuration-dependent stopping criterion is not justified here.
+
+`event_chain_rate_bias` proves a useful contrast: normalizing event selection
+at the current state gives `J(x,y)=R(x,y)/Λ(x)`, whose reversible invariant
+measure is `π(x)Λ(x)`, assuming positive finite `Λ`. Dropping residence times
+therefore generally changes equilibrium. This event chain counts rejected
+attempts; an accepted-jump-only chain has a different escape rate again.
+
+A production implementation may skip uniformization null events using
+exponential residence times of rate `Λ(x)`, select subsets with probabilities
+`a_S(x)/Λ(x)`, and stop at fixed elapsed algorithmic time. Its equivalence to
+the Poisson uniformization formula is a standard mathematical construction
+but is **not formalized in this file**. Exact exponential races, refreshing
+rates after accepted moves, preserving null-event time, and correct handling
+of an overshooting final waiting time remain implementation obligations.
+The general measurable-state extension below proves the same uniformization
+and fixed-time mixture construction without a finite-state restriction.
+Neither version establishes ergodicity, mixing efficiency, or physical assembly.
+
+`ReversibleSampling/ClusterMeasureRates.lean` strengthens the rate and
+uniformization bridge to **arbitrary measurable state spaces**, including
+continuous poses and singular deterministic proposal kernels. For a finite
+stationary measure `π` and a finite reversible kernel `K`, it first proves
+that stationary pair flow `μ = π(dx)K(x,dy)` is invariant under swapping its
+two coordinates. If `a` is measurable, uniformly bounded, and
+
+\[
+a(x)=a(y)\quad\text{for }\mu\text{-almost every }(x,y),
+\]
+
+then `K.withDensity (fun x _ => a x)` is reversible for the original `π`.
+No common Lebesgue or pose-coordinate density is assumed. This covers
+accepted subkernels and complete accepted/rejected fixed-subset kernels,
+provided their balance and internal-rate invariance have been established.
+
+`measurable_subset_uniformization_correct` adds finitely many such weighted
+kernels with normalized rates `b_S = a_S/M` and `Σ_S b_S(x) ≤ 1`, then applies
+the existing rejection-completion theorem. It proves that the resulting
+continuous-state `Q` is Markov, reversible, and invariant.
+`measurable_count_mixture_correct` proves invariance for any state-independent
+PMF mixture of invariant Markov kernels; `measurable_poisson_phase_correct`
+specializes this to the Poisson mixture of `Q`'s iterates. This directly
+covers the fixed-duration uniformized phase on the intended continuous
+state space. The earlier `invariant_hybrid` theorem then allows composition
+with the other equilibrium kernels. These results do not require finite
+physical state cardinality. The separate finite-state file retains the
+explicit event-chain `πΛ` calculation and a convenient matrix reference.
+
+The remaining scheduling gap is precisely the mathematical equivalence
+between the optimized state-dependent exponential race used in production
+and this uniformized Poisson-mixture definition, followed by its numerical
+implementation. Neither equivalence nor random-clock floating-point
+execution is claimed to be Lean-checked here.
+
+Other implementation obligations are exact contact predicates and subset
+enumeration, internal-rate invariance under the actual rigid transform,
+fixed-subset proposal balance (including anchor selection, Jacobians, chart
+restrictions, auxiliary laws and many-body depletion), finite bounded rates,
+RNG laws, and floating-point execution. In particular, cancelling the subset
+rate does not cancel the physical Metropolis correction.
+
 ## Pinned environment and reproducible check
 
 - Lean `v4.24.0`, compiler commit
@@ -273,7 +377,7 @@ ELAN_HOME="$PWD/.elan" .elan/bin/lake env lean Audit.lean
 
 `python3 check.py` runs both checks, verifies that every printed axiom list is
 within the standard trusted set, and writes commands, outputs, and source
-SHA-256 hashes to `validation.json`. The current audit contains 38 theorems.
+SHA-256 hashes to `validation.json`. The current audit contains 65 theorems.
 `validation-before-poisson-20260921.json` preserves the preceding successful
 19-theorem record. No physical campaign is rerun by this check.
 

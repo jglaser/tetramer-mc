@@ -1,0 +1,262 @@
+{
+  "box_lengths": [
+    709.0164157267411,
+    709.0164157267411,
+    709.0164157267411
+  ],
+  "depletant_radius": 1.5,
+  "endpoint_gate": {
+    "max_cells": 2047,
+    "max_depth": 14,
+    "min_width": 0.5
+  },
+  "fixed_body_indices": [],
+  "global_probability": 0.5,
+  "initial_poses": [
+    {
+      "position": [
+        65.58686779813884,
+        -34.61816366477446,
+        -128.9012003347649
+      ],
+      "orientation": [
+        0.8395356890165728,
+        -0.3931298046223575,
+        -0.0536472144502254,
+        -0.37114789500519435
+      ]
+    },
+    {
+      "position": [
+        69.1257621963389,
+        -2.559364983024711,
+        -135.03478823043923
+      ],
+      "orientation": [
+        0.37114789500519435,
+        -0.0536472144502254,
+        0.3931298046223575,
+        0.8395356890165728
+      ]
+    },
+    {
+      "position": [
+        106.98420555758953,
+        -30.813918927826325,
+        -145.70903986812232
+      ],
+      "orientation": [
+        0.0536472144502254,
+        0.37114789500519435,
+        0.8395356890165728,
+        -0.3931298046223575
+      ]
+    },
+    {
+      "position": [
+        118.21719542858075,
+        -1.760308938797852,
+        -177.9646286324181
+      ],
+      "orientation": [
+        0.8395356890165728,
+        -0.3931298046223575,
+        -0.0536472144502254,
+        -0.37114789500519435
+      ]
+    },
+    {
+      "position": [
+        129.37553870805704,
+        -46.68675638730657,
+        -163.69151748257195
+      ],
+      "orientation": [
+        0.3933983489692759,
+        0.8394913605725255,
+        -0.37088233318019836,
+        0.054205991247741954
+      ]
+    },
+    {
+      "position": [
+        72.51039321986686,
+        -0.7346389109769866,
+        -193.94453580451506
+      ],
+      "orientation": [
+        0.3931298046223575,
+        0.8395356890165728,
+        -0.37114789500519435,
+        0.0536472144502254
+      ]
+    },
+    {
+      "position": [
+        53.83378707374034,
+        -55.61292988330628,
+        -186.968541688296
+      ],
+      "orientation": [
+        0.37114789500519435,
+        -0.0536472144502254,
+        0.3931298046223575,
+        0.8395356890165728
+      ]
+    },
+    {
+      "position": [
+        50.13167912074529,
+        15.143431791470544,
+        -175.91702147251738
+      ],
+      "orientation": [
+        0.0536472144502254,
+        0.37114789500519435,
+        0.8395356890165728,
+        -0.3931298046223575
+      ]
+    },
+    {
+      "position": [
+        -36.249325824668006,
+        -153.87818305912074,
+        254.5403536257793
+      ],
+      "orientation": [
+        0.9391068950766904,
+        0.20500286405415877,
+        -0.1657078605600954,
+        -0.22043813258509967
+      ]
+    },
+    {
+      "position": [
+        -97.18196556122201,
+        -80.15622423348717,
+        8.101665647368577
+      ],
+      "orientation": [
+        0.3087728425486948,
+        0.7720749783317944,
+        0.2438748567913438,
+        -0.4990837742938149
+      ]
+    },
+    {
+      "position": [
+        121.76156469843183,
+        30.332097573783074,
+        -184.08844181911587
+      ],
+      "orientation": [
+        0.37091675758493614,
+        -0.053708782232456544,
+        0.3933315073393603,
+        0.8395394278936107
+      ]
+    },
+    {
+      "position": [
+        -102.65907118218114,
+        -108.54433347587289,
+        23.72439996434707
+      ],
+      "orientation": [
+        -0.4995446925238845,
+        -0.24381922350254887,
+        0.7719042158129652,
+        -0.30849824640020734
+      ]
+    }
+  ],
+  "learned_uniform_weight": 0.1,
+  "local_small_angle_std_degrees": 1.0,
+  "local_translation_std_A": 0.2,
+  "metadata": {
+    "arm": "seeded",
+    "global_protein_packing_fraction": 0.002792059687504742,
+    "initial_free_tetramers": 4,
+    "initial_snapshot_sha256": "bd37701a2c08f99882de1933e0311b928c3d805013cee0616b820015af816532",
+    "initialization": "supplied fixed preparation; repeated with new RNG",
+    "method": "learned",
+    "model_sha256": "feb4011c622c3104bbe909a29685bd7f077e28f0c847f630c69d8fa87939c20e",
+    "native_pair_motifs": "native-pair-motifs.json",
+    "preparation_equilibrated": false,
+    "replicate": 0,
+    "source": "Frozen-proposal pilot independent production start r00, repeated for Rust validation",
+    "training_feedback": false,
+    "spherical_initialization": "unwrapped preassembled fragments independently placed in equal-volume sphere",
+    "source_sha256": "3b2d4d05c718ce38f841ff6a00dd02c9fea53d7a3b402fa2ec586a5da6aeda48",
+    "initial_fragments": [
+      [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        10
+      ],
+      [
+        9,
+        11
+      ],
+      [
+        8
+      ]
+    ],
+    "sphere_volume_matches_original_periodic_volume": true,
+    "model_label": "native-informed-frozen-coverage-reciprocal-atlas",
+    "native_informed_proposal": true,
+    "exact_reciprocal_proposal": true,
+    "reciprocal_base_components": 178,
+    "reciprocal_virtual_components": 328,
+    "proposal_mode": "frozen-posterior-c09",
+    "portable_initial_config": "spherical-seeded.json",
+    "portable_initial_config_sha256": "a4d8922aac2eb0ea8272efbb440634defa5b715f8a3af98a67b52b5c954a24bd",
+    "scope": "Portable twelve-body all-mobile assembly example using the validated native-informed reciprocal proposal. Initial geometry is supplied; a short smoke test does not establish assembly, equilibrium, or sampling speedup.",
+    "gca_axis_note": "Experimental contact-conditioned half-turns; geometry-only axis selection; existing native-informed frozen learned proposal retained as a control.",
+    "template_proposal_metadata": {
+      "model_sha256": "dc9218c9706e1691af9336ef1c0e87a75a86994933dfd41cc6e1d1cd3dc52aa3",
+      "model_label": "native-informed-frozen-exact-reciprocal-atlas",
+      "reciprocal_base_components": 150,
+      "reciprocal_virtual_components": 300
+    }
+  },
+  "method": "learned",
+  "monomer_shape": "monomer-shape.json",
+  "poisson_lambda_ratio": 64.0,
+  "reservoir_density": 0.035,
+  "sample_every": 10,
+  "seed": 121602019,
+  "seed_labels": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "shape": "tetramer-shape.json",
+  "sweeps": 10000,
+  "boundary": {
+    "kind": "spherical",
+    "radius": 354.50820786337056
+  },
+  "gca_probability": 1.0,
+  "center_shift_probability": 1.0,
+  "frozen_posterior": {
+    "probability": 0.5,
+    "correlation": 0.9
+  },
+  "gca_axis": {
+    "score_floor": 0.02,
+    "max_candidates": 64,
+    "uniform_axis_weight": 0.25
+  }
+}

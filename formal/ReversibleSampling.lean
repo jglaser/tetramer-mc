@@ -5,3 +5,5 @@ import ReversibleSampling.ImportanceSampling
 import ReversibleSampling.Poisson
 import ReversibleSampling.CountGate
 import ReversibleSampling.ConditionalPoisson
+import ReversibleSampling.ClusterRates
+import ReversibleSampling.ClusterMeasureRates

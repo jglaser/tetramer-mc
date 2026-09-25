@@ -42,6 +42,8 @@ files = ["lean-toolchain", "lakefile.toml", "lake-manifest.json",
          "ReversibleSampling/ImportanceSampling.lean",
          "ReversibleSampling/Poisson.lean", "ReversibleSampling/CountGate.lean",
          "ReversibleSampling/ConditionalPoisson.lean",
+         "ReversibleSampling/ClusterRates.lean",
+         "ReversibleSampling/ClusterMeasureRates.lean",
          "Audit.lean", "check.py"]
 record = {
     "checked_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -58,7 +60,7 @@ record = {
              "expectation identities; Poisson generating function, depletion mean/second "
              "moment/relative variance and concrete importance/marginal corollaries; "
              "normalized auxiliary-count MH and the simplified gained/lost Poisson gate, "
-             "including zero-activity and zero-volume limits. Not a proof "
+             "including zero-activity and zero-volume limits; internally invariant subset-rate symmetry, finite-state and general measurable-state uniformization and invariant fixed-duration Poisson phases, plus finite-state rate-biased event chains. Not a proof "
              "of concrete geometric proposal densities, Rust code, "
              "numerical arithmetic, ergodicity, or mixing.",
 }

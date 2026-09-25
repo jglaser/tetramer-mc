@@ -491,9 +491,11 @@ fn contains(
 /// exclusion regions outside the transformed union. Each point joins ALL old
 /// owners. Lexicographic bounding-pair ownership prevents triple overcounting.
 ///
-/// The axis must be selected independently of the current state/model, with
-/// no post-hoc favorable-axis selection. All particles are mobile. The tree
-/// must be the same immutable shape used to construct the wall.
+/// This kernel is reversible for each fixed axis. A caller may either select
+/// an axis independently of the current state/model, or wrap state-dependent
+/// selection in a proven forward/reverse correction (see conditional_axis).
+/// Uncorrected favorable-axis selection is not valid. All particles are mobile.
+/// The tree must be the same immutable shape used to construct the wall.
 pub fn update(
     tree: &SphereTree,
     wall: &Container,

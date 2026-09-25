@@ -40,3 +40,34 @@ import ReversibleSampling
 #print axioms ReversibleSampling.poissonCountMass_zero_changes
 #print axioms ReversibleSampling.poissonGateAcceptance_zero_changes
 #print axioms ReversibleSampling.conditional_poisson_zero_activity_correct
+
+/-! Internal-geometry subset rate / fixed-duration finite-state bridge. -/
+#print axioms ReversibleSampling.ClusterRates.weighted_rate_reversible
+#print axioms ReversibleSampling.ClusterRates.descriptor_rate_equal
+#print axioms ReversibleSampling.ClusterRates.sum_reversible
+#print axioms ReversibleSampling.ClusterRates.rateMatrix_row_mass
+#print axioms ReversibleSampling.ClusterRates.rateMatrix_reversible
+#print axioms ReversibleSampling.ClusterRates.completeMatrix_stochastic
+#print axioms ReversibleSampling.ClusterRates.completeMatrix_reversible
+#print axioms ReversibleSampling.ClusterRates.reversible_invariant
+#print axioms ReversibleSampling.ClusterRates.uniformized_correct
+#print axioms ReversibleSampling.ClusterRates.compose_stochastic
+#print axioms ReversibleSampling.ClusterRates.compose_invariant
+#print axioms ReversibleSampling.ClusterRates.iterate_stochastic
+#print axioms ReversibleSampling.ClusterRates.iterate_invariant
+#print axioms ReversibleSampling.ClusterRates.countMixture_stochastic
+#print axioms ReversibleSampling.ClusterRates.countMixture_invariant
+#print axioms ReversibleSampling.ClusterRates.poisson_phase_correct
+#print axioms ReversibleSampling.ClusterRates.event_chain_rate_bias
+#print axioms ReversibleSampling.ClusterRates.internal_subset_phase_correct
+
+/-! General measurable-state subset-rate and fixed-duration Poisson mixture bridge. -/
+#print axioms ReversibleSampling.reversible_pair_flow_swap
+#print axioms ReversibleSampling.measurable_internal_rate_reversible
+#print axioms ReversibleSampling.measurable_internal_rate_complete_correct
+#print axioms ReversibleSampling.measurable_finite_sum_reversible
+#print axioms ReversibleSampling.measurable_subset_uniformization_correct
+#print axioms ReversibleSampling.measurableCountMixture_apply
+#print axioms ReversibleSampling.measurable_count_mixture_correct
+#print axioms ReversibleSampling.measurableKernelIterate_invariant
+#print axioms ReversibleSampling.measurable_poisson_phase_correct

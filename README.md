@@ -46,10 +46,58 @@ independent-redraw control, a geometry-only atlas, independent seeds, and
 checkpoint continuation.
 All runtime assets use relative paths within `examples/`.
 
+To generate a fresh all-free start at a chosen tetramer count and concentration:
+
+```bash
+target/release/tetramer-mc run \
+  --config examples/spherical-reciprocal-free.json \
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --free-tetramers 24 --tetramer-concentration-um 106.8 --seed 20260924 \
+  --out runs/coverage-free-N24-106p8uM --sweeps 100000 --sample-every 100
+```
+
+The paired options retain the bodies listed in the template's `seed_labels`
+and generate the requested number of **additional free tetramers**, replacing
+its previous free poses. A seed-free template still produces exactly the
+requested count. Use `--discard-seed` explicitly to replace a supplied seed.
+The existing boundary type is resized for the **total seed + free** count.
+Concentration is in **μM of total tetramers** per full vessel volume; it is
+distinct from depletant activity. `--concentration-um` is a shorter alias.
+The optional `--seed` sets the random seed; it does not select or remove seed
+particles. The total count must be at least two. Every body remains mobile.
+Shapes, bath parameters and move schedules come from the template.
+See [generated starts and continuation](examples/README.md#choose-count-and-concentration)
+for placement limits, provenance, and the resume command.
+
+For the supplied eight-tetramer seed plus 248 free tetramers (256 total), use
+`--config examples/spherical-reciprocal-seeded.json --free-tetramers 248`.
+
+Add `--depletant-radius 1.4 --depletant-activity 0.04` to either run command to
+override the bath while keeping the supplied move map. Radius is in Å and
+ideal-depletant activity in Å⁻³. Either flag can be used alone, including with
+the original configured poses; an omitted value comes from the input JSON.
+Both values must be finite and nonnegative; activity zero disables depletion.
+Overrides are archived in the checkpoint-bound input configuration. To resume,
+use `provenance/input-config.json` without repeating override flags.
+
 Add `--offline` to Cargo commands when dependencies are already cached. Configure
-radius, activity, local steps, mixture floor, and Poisson planning budget in the
-input JSON. Changing those inputs defines a new run; the example mixture may
-be inefficient at other physical conditions, but its correction remains valid.
+local steps, mixture floor, and Poisson planning budget in the input JSON.
+Changing bath conditions defines a new physical run; the example mixture may
+be inefficient at other conditions, but its correction remains valid.
+
+The production single-body depletion gate reuses a bounded body-frame geometry
+cache automatically. Fixed-endpoint protein benchmarks measured about 1.9x faster
+envelope construction and 1.5–1.6x faster complete gate evaluation with bitwise
+equivalent results and RNG continuation. These are kernel timings, not whole-run
+or mixing speedups; see the [geometry cache report](docs/body-envelope-cache.md).
+The gate also [reuses cell classifications](docs/depletion-cell-certificates.md)
+to bypass known point queries; the first matched protein benchmark measured
+about 1% additional gate CPU reduction, with identical RNG continuation.
+
+For the GCA, a [frozen overlap diagnostic](docs/gca-overlap-compensation.md)
+measures whether integrated pair-volume bonds could reduce recruitment under
+the current half-turn moves, with explicit many-body shielding and volume
+uncertainty. It is a diagnostic, and production GCA retains its existing rule.
 
 The earlier periodic frozen-model campaign can run in the background:
 
@@ -63,6 +111,13 @@ nohup python3 tools/run_campaign.py --out runs/frozen-4000 \
 The launcher repeats the supplied initial configurations with independent paired
 RNG seeds. It does not create new equilibrated fluid preparations. This campaign
 uses a frozen mixture. See `progress.json` and per-job logs.
+
+The optional [rigid dimer/trimer phase](docs/rigid-subset-phase.md) applies the
+existing map to one member and carries its selected neighbors, using an exact
+whole-union depletion gate and fixed algorithmic duration. Use
+`examples/spherical-cluster-phase.json` with the coverage model. Its
+[validation report](docs/rigid-subset-validation.md) distinguishes sphere
+stationarity and Lean balance checks from the still-unproven protein speedup.
 
 For spherical GCA, common center shifts, and optional reversible transport of
 a conditional Gaussian model, see [the spherical ensemble guide](docs/spherical-ensemble.md).

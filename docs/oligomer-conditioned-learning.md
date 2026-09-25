@@ -1,5 +1,7 @@
 # Oligomer-conditioned proposal learning
 
+An optional [fixed-length joint guide](oligomer-guide.md) is now implemented and benchmarked. It scores all carried members using the frozen atlas; it does not yet learn an oligomer-conditioned covariance or directly sample the conditional mixture proposed below.
+
 Status: design and code audit, 2026-09-25. No production kernel or running job is
 changed by this note. The current rigid-subset phase still uses a frozen
 single-handle atlas.

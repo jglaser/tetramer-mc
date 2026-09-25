@@ -325,6 +325,30 @@ impl DockingProposal {
         };
         self.components[index].relative_log_density(pose.position, rotation(pose.orientation))
     }
+    /// Broad-plus-learned density averaged over a fixed external anchor pool.
+    /// Coordinates and normalized rotational Haar measure match `propose`.
+    pub fn guide_log_density(&self, pose: Pose, anchors: &[Pose]) -> Result<f64> {
+        ensure!(!anchors.is_empty(), "empty guide anchor pool");
+        let centered = |p: Pose| Pose {
+            position: sub(p.position, self.center),
+            ..p
+        };
+        let p = centered(pose);
+        let values = anchors
+            .iter()
+            .map(|&a| self.model.log_density(&p, &centered(a)))
+            .collect::<Result<Vec<_>>>()?;
+        let maximum = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        ensure!(maximum.is_finite(), "nonfinite guide anchor density");
+        Ok(
+            maximum + values.iter().map(|v| (v - maximum).exp()).sum::<f64>().ln()
+                - (anchors.len() as f64).ln(),
+        )
+    }
+    pub fn uniform_weight(&self) -> f64 {
+        self.model.uniform_weight()
+    }
+
     pub fn propose(
         &self,
         rng: &mut StdRng,

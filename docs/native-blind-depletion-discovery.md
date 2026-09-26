@@ -440,3 +440,41 @@ target/release/tetramer-mc run --config examples/spherical-cluster-oligomer.json
 They were built for \(r_d=1.4\) Å. The contact search used only the shape;
 the activity enters only through the refinement kernel and the weight
 tempering. No native motif, label or production pose entered either map.
+
+### Converged chart centers and the twisted competitor family
+
+In an assembly run with the 512 map, the free tetramers formed native bonds
+but attached to the seed in a disordered way. A contact census at sweep 600
+explained it. The run had 11 strong non-native contacts, 10 of them map
+slot 2, versus none in the native-informed run. Slots 0, 2 and 4 form one
+family: the native contacts of motifs 7, 6 and 5 with the partner twisted
+about 90° around its long axis and slid about 21 Å. This is not a symmetry
+image (the shape changes by 6.3 Å rms under that rotation). As a single pair
+it packs more excluded volume than any native contact (slot 2: 1656–1696 Å³
+after convergence; the best native is 1535 Å³).
+
+At the seed, native lattice sites still win through multiple contacts. In
+the native-informed run at sweep 600, seed newcomers had a median total
+overlap of 2121 Å³ with their neighbors (maximum 4771), and 6 of 7 exceeded
+the twisted single contact. The disorder is therefore kinetic: at
+z = 0.0275 a twisted contact is worth about 45 kT and never anneals.
+
+**Converged starts.** Rerunning seeded discovery on the same 512 FFT starts
+with 2,000 local search steps and 8,192 score points (otherwise unchanged)
+converges the native charts onto the motifs. {6,7} reaches 1530 Å³
+held-out (scaled error 0.94) and {3,8} reaches 1416 Å³ (0.14). They now
+rank 1 and 2 by search score, and their tempered mass rises from 8.1% to
+14.2%. Slot 2 remains the strongest contact. Mean held-out overlap rises
+from 638 to 694 Å³. With \(z_w=0.005\), the refit has 37.8 effective slots.
+
+In the matched benchmark (sums over two streams at sweep 200), the converged
+map accepted 18 learned captures versus 15. It formed 18 native bonds
+between free bodies versus 14, and 14 strong twisted contacts versus 11, at
+the same CPU cost (333 versus 338 s). Convergence thus makes the native
+charts exact but does not change the native-to-twisted ratio (about 1.3).
+Fixing the ordering needs twisted contacts to be reversible (lower
+activity) or a proposal criterion that favors lattice-compatible,
+multi-contact placements.
+
+- `examples/frozen-blind-contact-mixture-512-converged.json` (sha256 prefix
+  `fc353bcc0c120297`): source `runs/fft-seeded-discovery-512-converged-20260926/frozen-fit-tempered-z0005/`.

@@ -66,6 +66,15 @@ assembly bias is corrected per elementary cluster attempt. This is an experiment
 sampling control, not a demonstrated protein assembly speedup. See the
 [figure, balance derivation, tests and limitations](../docs/rigid-subset-phase.md).
 
+`examples/spherical-cluster-members.json` is the same configuration with
+`"transport_charts": "members"` and `"anchor_count": 4`. Transport then uses the
+frozen atlas for every carried member against a pool of four spectator anchors,
+so any member can dock and rotations act about that member. Nothing is fitted;
+covariances and weights are the single-body atlas's. Use the same command with
+this config and a new output directory. The sphere stationarity checks pass;
+there is no protein efficiency result yet. See
+[member charts](../docs/oligomer-conditioned-learning.md#implemented-member-charts-no-fitting).
+
 ### Experimental contact-conditioned GCA axes
 
 Use `--config examples/spherical-conditioned-axis.json` with the same coverage

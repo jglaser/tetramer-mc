@@ -118,6 +118,8 @@ whole-union depletion gate and fixed algorithmic duration. Use
 `examples/spherical-cluster-phase.json` with the coverage model. Its
 [validation report](docs/rigid-subset-validation.md) distinguishes sphere
 stationarity and Lean balance checks from the still-unproven protein speedup.
+`examples/spherical-cluster-members.json` enables the opt-in
+[member/anchor transport charts](docs/oligomer-conditioned-learning.md#implemented-member-charts-no-fitting).
 
 For spherical GCA, common center shifts, and optional reversible transport of
 a conditional Gaussian model, see [the spherical ensemble guide](docs/spherical-ensemble.md).

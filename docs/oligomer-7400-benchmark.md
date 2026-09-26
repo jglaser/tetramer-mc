@@ -75,6 +75,36 @@ near-tied fits, or account explicitly for different endpoint catalogues in the
 reverse proposal. Then repeat validation before making production sampling
 claims. Merely relaxing the reconstruction test would not resolve the issue.
 
+## Resolution
+
+Construction now reads internal offsets rounded to a fixed grid (1e-5 Å,
+quaternion components 1e-9), and the cluster phase rejects an oligomer trial
+whose rounded key changes. The guard is symmetric in the endpoints, and when it
+holds all construction inputs are bitwise identical, so the catalogue is too.
+Details and tests are in [the oligomer chart doc](oligomer-proposal.md#balance).
+The reconstruction test now asserts bitwise equality, and a new capped stress
+test fails with unrounded offsets and passes with the key.
+
+The oligomer arm was rerun on the same frozen input, seeds, 4 x 128 phases and
+two concurrent jobs (`runs/oligomer-7400-keyed-20260926`, with the base commit,
+uncommitted diff and executable hash):
+
+| | `f2e33c3` | Rounded key and guard |
+|---|---:|---:|
+| Learned attempts | 709 | 707 |
+| Hard-valid learned trials | 142 | 140 |
+| Accepted learned moves | 13 | 12 |
+| Accepted contact-changing moves | 1 | 1 |
+| Guard rejections | | 0 |
+| Kernel CPU seconds | 77.49 | 77.9 |
+
+The contact-changing move is the same attachment: dimer `[27,132]` onto 228,
+gaining contacts 27-228 and 132-228 and losing none. The other accepted moves
+are again small embedded refinements. The counts differ slightly because the
+rounded offsets change fits in their last digits, which changes later random
+draws. The earlier caveats stand: one attachment from one frozen state is not an
+efficiency, mixing or assembly result.
+
 ## Artifacts
 
 - [Full conditional report](../runs/oligomer-7400-benchmark-20260926/report.md)

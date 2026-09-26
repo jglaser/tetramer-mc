@@ -10,7 +10,7 @@ use tetramer_mc::{
     docking::{DockingMethod, DockingProposal},
     geometry::{Atom, Shape, SphereTree},
     math::{Pose, cayley, invert_relative_pose, matmul, matvec, norm, quaternion, rotation, sub},
-    oligomer_proposal::{OligomerConfig, OligomerMixture},
+    oligomer_proposal::{OligomerConfig, OligomerMixture, internal_key},
     proposal::FrozenRelativePoseProposal,
     rigid_subset::transport_members,
     spherical::Container,
@@ -154,8 +154,12 @@ fn without_fused_components_the_mixture_is_the_member_mixture() -> Result<()> {
             let mixture =
                 OligomerMixture::build(&p, &tree, &wall, &members, &anchors, &anchors, &none)?;
             assert!(mixture.fused.is_empty());
+            // The catalogue uses the rounded internal offsets; the member
+            // mixture on members rebuilt from them is the same function.
+            let (_, offsets) = internal_key(&members);
+            let rounded: Vec<_> = offsets.iter().map(|&u| compose(members[0], u)).collect();
             let a = mixture.log_density(&members);
-            let b = p.members_log_density(&members, &anchors)?;
+            let b = p.members_log_density(&rounded, &anchors)?;
             assert!((a - b).abs() < 1e-10 * (1. + b.abs()), "{a} vs {b}");
         }
     }
@@ -181,22 +185,73 @@ fn docked_pair_fuses_and_context_rebuilds_identically() -> Result<()> {
             .expect("docked label pair must fuse");
         assert!(docked.mismatch < 1e-8, "{}", docked.mismatch);
         assert!(same_pose(docked.center, members[0], 1e-6));
-        // Rigidly carry the subset anywhere: every construction output agrees.
+        // Rigidly carry the subset anywhere: equal rounded offsets must give
+        // a bitwise identical catalogue.
         let (s, m) = state(&members);
         let moved = transport_members(&s, &m, 1, random_pose(&mut rng, 4.))?;
         let y = OligomerMixture::build(&p, &tree, &wall, &moved, &anchors, &anchors, &loose())?;
-        assert_eq!(x.fused.len(), y.fused.len());
-        for (a, b) in x.fused.iter().zip(&y.fused) {
-            assert_eq!((a.first, a.second), (b.first, b.second));
-            assert!(same_pose(a.center, b.center, 1e-7));
-        }
-        for (a, b) in x.log_weights().iter().zip(y.log_weights()) {
-            assert!((a - b).abs() < 1e-9);
-        }
-        for g in [members.clone(), moved.clone()] {
-            assert!((x.log_density(&g) - y.log_density(&g)).abs() < 1e-7);
-        }
+        assert_eq!(x.key(), y.key());
+        assert_same_catalogue(&x, &y, &[members.clone(), moved.clone()]);
     }
+    Ok(())
+}
+
+fn assert_same_catalogue(x: &OligomerMixture, y: &OligomerMixture, at: &[Vec<Pose>]) {
+    assert_eq!(x.fused.len(), y.fused.len());
+    for (a, b) in x.fused.iter().zip(&y.fused) {
+        assert_eq!((a.first, a.second), (b.first, b.second));
+        assert_eq!(a.mismatch.to_bits(), b.mismatch.to_bits());
+        assert_eq!(a.center, b.center);
+    }
+    assert_eq!(x.log_weights(), y.log_weights());
+    for g in at {
+        assert_eq!(x.log_density(g).to_bits(), y.log_density(g).to_bits());
+    }
+}
+
+/// Tight caps make the retained set depend on the order of near-equal fits,
+/// which is where recomputed offsets used to change the catalogue. With the
+/// rounded internal key, every carry with an unchanged key must rebuild the
+/// identical catalogue; changed keys are the guarded (rejected) trials.
+#[test]
+fn capped_catalogue_is_bitwise_identical_whenever_the_key_is() -> Result<()> {
+    let (tree, wall) = small_sphere();
+    let tight = OligomerConfig {
+        max_components: 3,
+        max_hard_checks: 5,
+        max_candidates: 24,
+        ..loose()
+    };
+    let p = proposal(true, 0.6)?;
+    let mut rng = StdRng::seed_from_u64(20260927);
+    let (mut same, mut changed, mut capped) = (0, 0, 0);
+    for _ in 0..20 {
+        let (members, anchors) = docked_scene(&p, &mut rng);
+        let x = OligomerMixture::build(&p, &tree, &wall, &members, &anchors, &anchors, &tight)?;
+        capped += usize::from(x.fused.len() == tight.max_components);
+        let (s, m) = state(&members);
+        let mut current = members.clone();
+        for _ in 0..25 {
+            // Chains of carries accumulate roundoff like a trajectory does.
+            let (cs, _) = state(&current);
+            current =
+                transport_members(&cs, &m, rng.random_range(0..2), random_pose(&mut rng, 30.))?;
+            let y = OligomerMixture::build(&p, &tree, &wall, &current, &anchors, &anchors, &tight)?;
+            if x.key() == y.key() {
+                assert_same_catalogue(&x, &y, &[members.clone(), current.clone()]);
+                same += 1;
+            } else {
+                changed += 1;
+            }
+        }
+        let _ = s;
+    }
+    eprintln!("capped scenes {capped}/20, unchanged keys {same}, changed keys {changed}");
+    assert!(capped >= 10, "caps must bind in most scenes: {capped}");
+    assert!(
+        same >= 490 && changed <= 10,
+        "{same} same, {changed} changed keys"
+    );
     Ok(())
 }
 

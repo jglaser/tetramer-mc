@@ -7,7 +7,7 @@ use crate::{
     docking::{DockingMethod, DockingProposal},
     geometry::{Placed, SphereTree},
     math::*,
-    oligomer_proposal::{OligomerConfig, OligomerMixture},
+    oligomer_proposal::{OligomerConfig, OligomerMixture, internal_key},
     rigid_subset::RigidSubset,
     spherical::Container,
 };
@@ -736,6 +736,7 @@ impl<'a> ClusterPhase<'a> {
             let mut gained = Vec::new();
             let mut lost = Vec::new();
             let mut internal_equal = true;
+            let mut offsets_preserved = true;
             if let Some(new_handle) = candidate {
                 let mut correction = if anchor_selection.is_some() {
                     &info["map_log_reverse_forward"]
@@ -757,7 +758,15 @@ impl<'a> ClusterPhase<'a> {
                     }
                     let next_graph = graph.updated(&self.exclusion, &next, members);
                     internal_equal = graph.internal_equal(&next_graph, members);
-                    if internal_equal {
+                    // The oligomer catalogue is a function of the rounded
+                    // internal offsets. Rejecting a trial that changes them is
+                    // symmetric in the endpoints and makes both catalogues
+                    // bitwise identical whenever the trial proceeds.
+                    if info["charts"] == "oligomer" {
+                        offsets_preserved = internal_key(&old_member_poses).0
+                            == internal_key(trial.proposed_poses()).0;
+                    }
+                    if internal_equal && offsets_preserved {
                         if let Some((primary, forward, epsilon)) = anchor_selection {
                             let reverse =
                                 next_graph.anchor_probabilities(members, epsilon)?[primary];
@@ -837,7 +846,7 @@ impl<'a> ClusterPhase<'a> {
                 "duration":self.config.duration,"total_rate":rate,"selected_rate":selected.rate,"members":members,"handle":handle,
                 "old_poses":old_member_poses,"proposed_poses":proposed_member_poses,
                 "retained_poses":members.iter().map(|&i|poses[i]).collect::<Vec<_>>(),"proposal":info,
-                "hard_valid":hard_valid,"internal_contact_graph_preserved":internal_equal,
+                "hard_valid":hard_valid,"internal_contact_graph_preserved":internal_equal,"internal_offsets_preserved":offsets_preserved,
                 "physical_accepted":physical_accepted,"accepted":accepted,"gate":sampled,"log_acceptance":alpha,
                 "assembly_bias_decision":bias_decision,"proposed_gained_contacts":gained,"proposed_lost_contacts":lost,
                 "selection_log_correction":0.,"subset_context":subset_context}));

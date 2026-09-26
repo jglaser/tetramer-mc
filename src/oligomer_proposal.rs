@@ -10,10 +10,16 @@
 //!
 //! Construction reads only invariant context: the internal offsets
 //! u_i = g0^{-1} g_i, the fixed pool anchors, the fixed spectators and the
-//! wall. It never reads g0 itself, so the same normalized mixture is rebuilt
-//! at both endpoints of a rigid move, up to floating-point roundoff in the
-//! recomputed offsets. The posterior-source map and its correction
-//! log G_O(old) - log G_O(new) then follow the member-chart argument exactly.
+//! wall. It never reads g0 itself. The offsets recomputed from carried
+//! floating-point poses differ in the last bits, and any cutoff (component
+//! cap, check budget, mismatch threshold) can turn that into a different
+//! catalogue. So construction uses offsets rounded to a fixed grid, and the
+//! caller rejects any trial whose rounded offsets change (`internal_key`).
+//! That condition is symmetric in the two endpoints, so it is a valid guard,
+//! and when it holds every construction input is bitwise identical: the
+//! same catalogue is rebuilt at both endpoints, near-tied fits included. The
+//! posterior-source map and its correction log G_O(old) - log G_O(new) then
+//! follow the member-chart argument exactly.
 use crate::{
     basin_involution::{BasinPair, BasinStep, FixedBasinInvolution, cross_chart_step},
     docking::{DockingProposal, draw_log_category},
@@ -29,6 +35,42 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 type Vec6 = [f64; 6];
+
+/// Rounding grids of the catalogue's internal offsets: translation in
+/// angstrom, and components of the sign-canonical unit quaternion. Offsets
+/// are recomputed with errors near 1e-13 angstrom, so a rounding boundary is
+/// crossed with probability of order 1e-7 per coordinate and move.
+pub const OFFSET_POSITION_GRID: f64 = 1e-5;
+pub const OFFSET_QUATERNION_GRID: f64 = 1e-9;
+
+/// Integer key of the rounded internal offsets g0^{-1} g_i, first member as
+/// g0, and the offset poses rebuilt from it. The catalogue is a function of
+/// the key, the pool, the spectators and the wall.
+pub fn internal_key(members: &[Pose]) -> (Vec<i64>, Vec<Pose>) {
+    let g0_inverse = invert_relative_pose(members[0]);
+    let mut key = Vec::with_capacity(7 * members.len());
+    let mut offsets = Vec::with_capacity(members.len());
+    for &g in members {
+        let u = compose(g0_inverse, g);
+        let mut q = u.orientation;
+        if q.iter().find(|x| **x != 0.).is_some_and(|x| *x < 0.) {
+            q = q.map(|x| -x);
+        }
+        let kt = u
+            .position
+            .map(|x| (x / OFFSET_POSITION_GRID).round() as i64);
+        let kq = q.map(|x| (x / OFFSET_QUATERNION_GRID).round() as i64);
+        key.extend(kt);
+        key.extend(kq);
+        let q = kq.map(|k| k as f64 * OFFSET_QUATERNION_GRID);
+        let n = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+        offsets.push(Pose {
+            position: kt.map(|k| k as f64 * OFFSET_POSITION_GRID),
+            orientation: q.map(|x| x / n),
+        });
+    }
+    (key, offsets)
+}
 type Mat6 = [[f64; 6]; 6];
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -112,6 +154,7 @@ pub struct OligomerMixture<'p> {
     map: &'p FixedBasinInvolution,
     inverted: Vec<bool>,
     offsets: Vec<Pose>,
+    key: Vec<i64>,
     anchors: Vec<Pose>,
     fused_map: Option<FixedBasinInvolution>,
     pub fused: Vec<FusedComponent>,
@@ -197,12 +240,12 @@ impl<'p> OligomerMixture<'p> {
         let (map, inverted, log_branch) = proposal.member_chart_parts();
         let nb = log_branch.len();
         let na = pool.len();
-        let g0_inverse = invert_relative_pose(members[0]);
-        let offsets: Vec<_> = members.iter().map(|&g| compose(g0_inverse, g)).collect();
+        let (key, offsets) = internal_key(members);
         let mut mixture = Self {
             map,
             inverted,
             offsets,
+            key,
             anchors: pool.to_vec(),
             fused_map: None,
             fused: Vec::new(),
@@ -359,6 +402,10 @@ impl<'p> OligomerMixture<'p> {
         Ok(mixture)
     }
 
+    /// Rounded internal geometry this catalogue was built from.
+    pub fn key(&self) -> &[i64] {
+        &self.key
+    }
     pub fn fit_candidates(&self) -> usize {
         self.fit_candidates
     }

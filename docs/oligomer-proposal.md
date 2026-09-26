@@ -1,11 +1,11 @@
 # Two-contact oligomer charts for rigid-subset transport
 
-Status (2026-09-26): opt-in; the sweep-7400 audit of HEAD `f2e33c3` reproduced a
-catalogue-reconstruction failure in one targeted test. The unchanged-HEAD
-conditional diagnostic found one oligomer attachment, but does not establish a
-validated sampling speedup. See [the sweep-7400 audit](oligomer-7400-benchmark.md).
-It
-extends the [member charts](oligomer-conditioned-learning.md#implemented-member-charts-no-fitting)
+Status (2026-09-26): opt-in. The sweep-7400 audit of `f2e33c3` found that
+catalogues rebuilt after a rigid carry could differ; this is fixed by rounding
+the internal offsets and guarding on the rounded key (see Balance). The
+conditional diagnostic found one oligomer attachment, before and after the fix,
+but no validated sampling speedup. See [the sweep-7400 audit](oligomer-7400-benchmark.md).
+It extends the [member charts](oligomer-conditioned-learning.md#implemented-member-charts-no-fitting)
 and works with or without [contact-aware anchors](contact-aware-cluster-anchors.md).
 
 ## Why
@@ -54,10 +54,31 @@ proposal is exactly the member proposal.
 
 ## Balance
 
-Every construction input is invariant under the move: the offsets `u_i`, the
-pool anchors, the spectators and the wall. `g0` itself is never read. So the
-same normalized mixture is rebuilt at both endpoints, and the posterior-source
-argument of the member charts applies unchanged:
+Every construction input is invariant under the move in exact arithmetic: the
+offsets `u_i`, the pool anchors, the spectators and the wall. `g0` itself is
+never read.
+
+In floating point the offsets recomputed from carried poses differ in the last
+bits. The fit order, the component cap, the check budget and the mismatch
+threshold can turn that into a different catalogue. The audit found exactly
+this: two fits with residuals 13.0416257636645 and 13.0416257636630 swapped
+across the 32-component cap, changing the log density by 1.79. Sorting the
+survivors does not help once one of them is dropped.
+
+So construction uses rounded offsets: translations on a 1e-5 Å grid and the
+sign-canonical quaternion components on a 1e-9 grid (`internal_key`). The
+cluster phase rejects an oligomer trial whose rounded key differs between the
+old and proposed member poses, recorded as `internal_offsets_preserved: false`
+and counted with `internal_geometry_nulls`. That condition is symmetric in the
+two endpoints, so it is a valid guard, like the internal-contact check. When it
+holds, every construction input is bitwise identical, and so is the catalogue,
+near-tied fits included. Offsets are recomputed with errors near 1e-13 Å, so
+the guard should fire with probability of order 1e-7 per coordinate and move.
+It never fired in the tests or the sweep-7400 rerun. As for every map here, the
+reverse endpoint itself is reproduced to roundoff, not bitwise.
+
+With the same catalogue at both endpoints, the posterior-source argument of the
+member charts applies unchanged:
 
 - source label drawn by responsibility at the old pose, destination label by
   weight, the existing correlated latent map between the two charts;
@@ -66,11 +87,8 @@ argument of the member charts applies unchanged:
   unchanged.
 
 The fit, the thresholds and the budgets only decide which components exist.
-Any deterministic rule reading only invariant context is admissible; it
-affects efficiency, not balance. One caveat: the offsets are recomputed from
-carried floating-point poses, so a fit exactly at a threshold could fall on
-different sides at the two endpoints. This has roundoff probability and is the
-same class of guard as the internal-contact check.
+Any deterministic rule reading only the rounded key, the pool, the spectators
+and the wall is admissible; it affects efficiency, not balance.
 
 ## Configuration
 
@@ -99,10 +117,16 @@ mismatch), the component count, fit candidates, hard checks and build time.
 
 `tests/oligomer_proposal.rs`, base and reciprocal atlases:
 
-- With no fused component the density equals the member mixture to 1e-10.
+- With no fused component the density equals the member mixture on the rounded
+  offsets to 1e-10.
 - Two anchors placed at two branch means fuse with mismatch below 1e-8 at the
-  true subset pose. After a random rigid carry the rebuilt mixture has the same
-  components, weights and density.
+  true subset pose. After a random rigid carry the key is unchanged and the
+  rebuilt catalogue is bitwise identical: label pairs, mismatches, centers,
+  weights and densities.
+- Stress test with binding caps (3 components, 5 checks, 24 fits): 20 scenes,
+  each carried 25 times in a chain. The caps bound in all 20 scenes; all 500
+  keys were unchanged and every catalogue was bitwise identical. With unrounded
+  offsets the same test fails on the first scene.
 - Exact inverse through swapped labels and inverse noise; label/Jacobian
   expansion equals `log G_O(old) - log G_O(new)`. More than 300 of the checked
   moves use fused charts.

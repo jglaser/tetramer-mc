@@ -72,8 +72,32 @@ frozen atlas for every carried member against a pool of four spectator anchors,
 so any member can dock and rotations act about that member. Nothing is fitted;
 covariances and weights are the single-body atlas's. Use the same command with
 this config and a new output directory. The sphere stationarity checks pass;
-there is no protein efficiency result yet. See
+the matched protein audit found no accepted learned cluster moves through sweep
+7,400. See
 [member charts](../docs/oligomer-conditioned-learning.md#implemented-member-charts-no-fitting).
+
+`examples/spherical-cluster-contact-anchors.json` adds
+`"anchor_contact_uniform_probability": 0.1` to the member-chart example.
+The primary spectator is chosen preferentially from existing external exclusion
+contacts, with its reverse-selection probability included in acceptance.
+The 10% uniform anchor choice is separate from the 10% uniform pose branch.
+Use this config with a fresh output directory to test the optional extension:
+
+```bash
+target/release/tetramer-mc run \
+  --config examples/spherical-cluster-contact-anchors.json \
+  --model examples/frozen-coverage-reciprocal-mixture.json \
+  --free-tetramers 256 --tetramer-concentration-um 500 --seed 2026092609 \
+  --depletant-radius 1.4 --depletant-activity 0.0275 \
+  --out runs/cluster-contact-anchors-seed8-free256 --sweeps 10000 --sample-every 100
+```
+
+See the [selection law, balance argument and validation](../docs/contact-aware-cluster-anchors.md).
+Omitting the new option keeps the existing member-chart path. The example retains
+the native-informed atlas. The fixed protein diagnostic improved current-interface
+coverage from 2.8% to 91.4%, but neither arm accepted a learned oligomer move;
+there is no demonstrated docking speedup. This conditional diagnostic does not
+establish native assembly or equilibrium.
 
 ### Experimental contact-conditioned GCA axes
 

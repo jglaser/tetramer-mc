@@ -32,10 +32,16 @@ pub struct ClusterPhaseConfig {
     /// joint member/anchor mixture of `DockingProposal::propose_members`.
     #[serde(skip_serializing_if = "TransportCharts::is_handle")]
     pub transport_charts: TransportCharts,
-    /// Member charts only: uniformly drawn spectator anchor plus its nearest
-    /// spectators, `anchor_count` in total. Fixed by spectators alone.
+    /// Member charts only: primary spectator anchor plus its nearest spectators,
+    /// `anchor_count` in total. The pool is fixed by spectators alone; primary
+    /// selection is uniform unless `anchor_contact_uniform_probability` is set.
     #[serde(skip_serializing_if = "is_one")]
     pub anchor_count: usize,
+    /// Members only: defensive uniform fraction of primary-anchor selection.
+    /// The remaining probability is proportional to boundary contact edges.
+    /// None preserves the original uniformly anchored mixture and RNG order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor_contact_uniform_probability: Option<f64>,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -64,6 +70,7 @@ impl Default for ClusterPhaseConfig {
             local_small_angle_std_degrees: 1.,
             transport_charts: TransportCharts::Handle,
             anchor_count: 1,
+            anchor_contact_uniform_probability: None,
         }
     }
 }
@@ -94,6 +101,16 @@ impl ClusterPhaseConfig {
             self.anchor_count > 0,
             "cluster anchor count must be positive"
         );
+        if let Some(epsilon) = self.anchor_contact_uniform_probability {
+            ensure!(
+                self.transport_charts == TransportCharts::Members,
+                "contact-aware anchors require member transport charts"
+            );
+            ensure!(
+                epsilon.is_finite() && epsilon > 0. && epsilon <= 1.,
+                "anchor contact uniform probability must be in (0, 1]"
+            );
+        }
         Ok(())
     }
     pub fn enabled(&self) -> bool {
@@ -240,6 +257,56 @@ impl ContactGraph {
             external_contacts,
             external_neighbors: neighbors.iter().filter(|&&v| v).count(),
         })
+    }
+    /// Primary-anchor probabilities for a fixed labeled moving subset.
+    /// If c_a is the number of subset-to-spectator contact edges at a, then
+    /// q_a = epsilon/M + (1-epsilon)c_a/sum(c). With no boundary contacts the
+    /// law is uniform. Every spectator has positive probability, including a
+    /// departing contact partner in the reverse move. No native labels enter.
+    pub fn anchor_probabilities(&self, members: &[usize], epsilon: f64) -> Result<Vec<f64>> {
+        ensure!(
+            epsilon.is_finite() && epsilon > 0. && epsilon <= 1.,
+            "anchor contact uniform probability must be in (0, 1]"
+        );
+        let n = self.adjacency.len();
+        ensure!(
+            self.adjacency.iter().all(|row| row.len() == n),
+            "invalid anchor contact graph dimensions"
+        );
+        ensure!(!members.is_empty(), "empty anchor-selection subset");
+        let mut selected = vec![false; n];
+        for &i in members {
+            ensure!(
+                i < n && !selected[i],
+                "invalid anchor-selection subset index"
+            );
+            selected[i] = true;
+        }
+        let spectators = n - members.len();
+        ensure!(spectators > 0, "no external anchor");
+        let contacts: Vec<usize> = (0..n)
+            .map(|a| {
+                if selected[a] {
+                    0
+                } else {
+                    members.iter().filter(|&&i| self.adjacency[i][a]).count()
+                }
+            })
+            .collect();
+        let total: usize = contacts.iter().sum();
+        let uniform = if total == 0 { 1. } else { epsilon } / spectators as f64;
+        ensure!(uniform > 0., "unrepresentable defensive anchor probability");
+        Ok((0..n)
+            .map(|a| {
+                if selected[a] {
+                    0.
+                } else if total == 0 {
+                    uniform
+                } else {
+                    uniform + (1. - epsilon) * (contacts[a] as f64 / total as f64)
+                }
+            })
+            .collect())
     }
     pub fn build(exclusion: &SphereTree, poses: &[Pose]) -> Self {
         let mut g = Self {
@@ -510,12 +577,59 @@ impl<'a> ClusterPhase<'a> {
                 counts.local_events += 1;
             }
             let mut info = json!({"branch":"local_rigid","log_reverse_forward":0.});
+            // Retain the sampled primary label for its exact reverse law.
+            // This selection is separate from the invariant internal-subset clock.
+            let mut anchor_selection: Option<(usize, f64, f64)> = None;
             let candidate = if transport {
                 let spectator_indices: Vec<_> =
                     (0..poses.len()).filter(|i| !members.contains(i)).collect();
                 if spectator_indices.is_empty() {
                     info = json!({"branch":"transport","null_reason":"no_external_anchor"});
                     None
+                } else if let Some(epsilon) = self.config.anchor_contact_uniform_probability {
+                    let proposal = self.proposal.as_ref().unwrap();
+                    // The defensive branch is an independent symmetric kernel.
+                    // It must not inherit a state-dependent anchor label that it
+                    // never uses to generate its candidate.
+                    if proposal_rng.random::<f64>() < proposal.member_uniform_weight() {
+                        let (p, trace) = proposal.draw_member_uniform(proposal_rng)?;
+                        info = trace;
+                        p
+                    } else {
+                        let probabilities = graph.anchor_probabilities(members, epsilon)?;
+                        let mut draw =
+                            proposal_rng.random::<f64>() * probabilities.iter().sum::<f64>();
+                        let mut primary = *spectator_indices.last().unwrap();
+                        for &a in &spectator_indices {
+                            if draw < probabilities[a] {
+                                primary = a;
+                                break;
+                            }
+                            draw -= probabilities[a];
+                        }
+                        let forward = probabilities[primary];
+                        let pool = anchor_pool(poses, members, primary, self.config.anchor_count)?;
+                        let anchors: Vec<_> = pool.iter().map(|&i| poses[i]).collect();
+                        let position = members.iter().position(|&i| i == handle).unwrap();
+                        let (p, mut trace) = proposal.propose_members_learned(
+                            proposal_rng,
+                            &old_member_poses,
+                            position,
+                            &anchors,
+                        )?;
+                        trace["primary_anchor"] = json!(primary);
+                        trace["anchor_pool"] = json!(pool);
+                        trace["anchor_forward_probability"] = json!(forward);
+                        trace["anchor_reverse_probability"] = Value::Null;
+                        trace["anchor_log_reverse_forward"] = Value::Null;
+                        trace["map_log_reverse_forward"] = trace["log_reverse_forward"].clone();
+                        // The complete correction exists only after evaluating
+                        // the reverse primary probability at a valid endpoint.
+                        trace["log_reverse_forward"] = Value::Null;
+                        anchor_selection = Some((primary, forward, epsilon));
+                        info = trace;
+                        p
+                    }
                 } else if self.config.transport_charts == TransportCharts::Members {
                     let primary =
                         spectator_indices[proposal_rng.random_range(0..spectator_indices.len())];
@@ -570,9 +684,13 @@ impl<'a> ClusterPhase<'a> {
             let mut lost = Vec::new();
             let mut internal_equal = true;
             if let Some(new_handle) = candidate {
-                let correction = info["log_reverse_forward"]
-                    .as_f64()
-                    .context("cluster proposal correction missing")?;
+                let mut correction = if anchor_selection.is_some() {
+                    &info["map_log_reverse_forward"]
+                } else {
+                    &info["log_reverse_forward"]
+                }
+                .as_f64()
+                .context("cluster proposal correction missing")?;
                 ensure!(correction.is_finite(), "nonfinite cluster map correction");
                 let trial =
                     RigidSubset::new(self.tree, poses, members, handle, new_handle, self.rd)?;
@@ -587,6 +705,23 @@ impl<'a> ClusterPhase<'a> {
                     let next_graph = graph.updated(&self.exclusion, &next, members);
                     internal_equal = graph.internal_equal(&next_graph, members);
                     if internal_equal {
+                        if let Some((primary, forward, epsilon)) = anchor_selection {
+                            let reverse =
+                                next_graph.anchor_probabilities(members, epsilon)?[primary];
+                            ensure!(
+                                forward.is_finite()
+                                    && forward > 0.
+                                    && reverse.is_finite()
+                                    && reverse > 0.,
+                                "invalid forward/reverse primary-anchor probability"
+                            );
+                            let anchor_correction = reverse.ln() - forward.ln();
+                            correction += anchor_correction;
+                            ensure!(correction.is_finite(), "nonfinite total cluster correction");
+                            info["anchor_reverse_probability"] = json!(reverse);
+                            info["anchor_log_reverse_forward"] = json!(anchor_correction);
+                            info["log_reverse_forward"] = json!(correction);
+                        }
                         let old_edges = graph.boundary_edges(members);
                         let new_edges = next_graph.boundary_edges(members);
                         gained = new_edges.difference(&old_edges).copied().collect();

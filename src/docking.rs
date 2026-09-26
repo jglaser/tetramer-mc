@@ -581,6 +581,28 @@ impl DockingProposal {
         Ok(log_sum(&self.member_label_logs(members, pool)?))
     }
 
+    /// State-independent weight of the defensive uniform member proposal.
+    /// Callers may choose this branch before selecting a state-dependent
+    /// primary anchor; the uniform branch has no anchor-selection factor.
+    pub fn member_uniform_weight(&self) -> f64 {
+        self.model.uniform_weight()
+    }
+
+    /// Draw the defensive uniform branch without choosing an anchor or drawing
+    /// a branch coin. Its rigid-subset forward/reverse correction is zero.
+    pub fn draw_member_uniform(&self, rng: &mut StdRng) -> Result<(Option<Pose>, Value)> {
+        ensure!(
+            self.method == DockingMethod::PosteriorInvolution && !self.model.is_periodic(),
+            "Member charts need a nonperiodic posterior-involution model"
+        );
+        let mut p = uniform_pose(rng, self.cube);
+        p.position = add(sub(p.position, scale(self.cube, 0.5)), self.center);
+        Ok((
+            Some(p),
+            json!({"branch":"uniform","charts":"members","log_reverse_forward":0.}),
+        ))
+    }
+
     /// Posterior-source involution over joint (member, anchor, branch) charts.
     /// Any carried member can be the docking interface, and rotations act
     /// about that member instead of the handle. The anchor pool must be fixed
@@ -601,14 +623,31 @@ impl DockingProposal {
             handle < members.len() && !pool.is_empty(),
             "Invalid member-chart handle or empty anchor pool"
         );
-        if rng.random::<f64>() < self.model.uniform_weight() {
-            let mut p = uniform_pose(rng, self.cube);
-            p.position = add(sub(p.position, scale(self.cube, 0.5)), self.center);
-            return Ok((
-                Some(p),
-                json!({"branch":"uniform","charts":"members","log_reverse_forward":0.}),
-            ));
+        if rng.random::<f64>() < self.member_uniform_weight() {
+            return self.draw_member_uniform(rng);
         }
+        self.propose_members_learned(rng, members, handle, pool)
+    }
+
+    /// Draw only the learned member-chart branch, without a branch coin.
+    /// A caller selecting its primary anchor with a state-dependent law must
+    /// separately include that same primary label's reverse/forward probability.
+    /// The spectator-only pool is frozen across the paired forward/reverse move.
+    pub fn propose_members_learned(
+        &self,
+        rng: &mut StdRng,
+        members: &[Pose],
+        handle: usize,
+        pool: &[Pose],
+    ) -> Result<(Option<Pose>, Value)> {
+        ensure!(
+            self.method == DockingMethod::PosteriorInvolution && !self.model.is_periodic(),
+            "Member charts need a nonperiodic posterior-involution model"
+        );
+        ensure!(
+            handle < members.len() && !pool.is_empty(),
+            "Invalid member-chart handle or empty anchor pool"
+        );
         let old_logs = self.member_label_logs(members, pool)?;
         let Some(source) = draw_log_category(rng, &old_logs)? else {
             return Ok((

@@ -96,7 +96,23 @@ fn scrub(v: &mut Value) {
 }
 #[test]
 fn phase_retains_attempts_bias_and_exact_restart_and_replay() -> Result<()> {
-    let mut f = Fixture::new("restart")?;
+    check_restart_and_replay(false)
+}
+#[test]
+fn contact_anchor_phase_retains_bias_restart_and_independent_log_reconstruction() -> Result<()> {
+    check_restart_and_replay(true)
+}
+fn check_restart_and_replay(contact_anchors: bool) -> Result<()> {
+    let mut f = Fixture::new(if contact_anchors {
+        "contact-restart"
+    } else {
+        "restart"
+    })?;
+    if contact_anchors {
+        f.config["cluster_phase"]["transport_charts"] = json!("members");
+        f.config["cluster_phase"]["anchor_count"] = json!(2);
+        f.config["cluster_phase"]["anchor_contact_uniform_probability"] = json!(0.2);
+    }
     f.config["assembly_bias"] = json!({"values":[0.,0.2,0.4,0.6]});
     let summary = f.run("full", 120, None)?;
     f.run("part", 47, None)?;
@@ -125,6 +141,8 @@ fn phase_retains_attempts_bias_and_exact_restart_and_replay() -> Result<()> {
     let mut ev = 0;
     let mut rejects = 0;
     let mut transported = 0;
+    let mut anchor_corrected = 0;
+    let mut uniform = 0;
     let mut phase_times = vec![0.; 121];
     for (k, row) in rows.iter().enumerate() {
         let sweep = row["sweep"].as_u64().unwrap() as usize;
@@ -164,9 +182,89 @@ fn phase_retains_attempts_bias_and_exact_restart_and_replay() -> Result<()> {
                     json!(ids.iter().map(|&i| poses[i]).collect::<Vec<_>>()),
                     row["old_poses"]
                 );
-                if let Some(a) = row["proposal"]["anchor_index"].as_u64() {
+                if let Some(a) = row["proposal"]["anchor_index"]
+                    .as_u64()
+                    .or_else(|| row["proposal"]["primary_anchor"].as_u64())
+                {
                     assert!(!ids.contains(&(a as usize)));
                     transported += 1;
+                }
+                if contact_anchors {
+                    let info = &row["proposal"];
+                    if info["branch"] == "uniform" {
+                        uniform += 1;
+                        assert!(info.get("primary_anchor").is_none());
+                        assert!(info.get("anchor_pool").is_none());
+                        assert_eq!(info["log_reverse_forward"], 0.);
+                    }
+                    if let Some(primary) = info["primary_anchor"].as_u64() {
+                        // Reconstruct from center distances, independently of
+                        // ContactGraph::anchor_probabilities and graph updates.
+                        let probability = |state: &[Pose]| {
+                            let contacts: Vec<usize> = (0..state.len())
+                                .map(|j| {
+                                    if ids.contains(&j) {
+                                        0
+                                    } else {
+                                        ids.iter()
+                                            .filter(|&&i| {
+                                                norm(sub(state[i].position, state[j].position))
+                                                    < 1.7
+                                            })
+                                            .count()
+                                    }
+                                })
+                                .collect();
+                            let total: usize = contacts.iter().sum();
+                            let m = (state.len() - ids.len()) as f64;
+                            if total == 0 {
+                                1. / m
+                            } else {
+                                0.2 / m + 0.8 * contacts[primary as usize] as f64 / total as f64
+                            }
+                        };
+                        let qx = probability(&poses);
+                        assert!(
+                            (qx - info["anchor_forward_probability"].as_f64().unwrap()).abs()
+                                < 1e-12
+                        );
+                        if row["hard_valid"] == true
+                            && row["internal_contact_graph_preserved"] == true
+                        {
+                            let mut proposed = poses.clone();
+                            for (&i, p) in ids.iter().zip(row["proposed_poses"].as_array().unwrap())
+                            {
+                                proposed[i] = serde_json::from_value(p.clone())?;
+                            }
+                            let qy = probability(&proposed);
+                            assert!(
+                                (qy - info["anchor_reverse_probability"].as_f64().unwrap()).abs()
+                                    < 1e-12
+                            );
+                            let correction = qy.ln() - qx.ln();
+                            anchor_corrected += usize::from(correction.abs() > 1e-8);
+                            assert!(
+                                (correction - info["anchor_log_reverse_forward"].as_f64().unwrap())
+                                    .abs()
+                                    < 1e-12
+                            );
+                            let total =
+                                correction + info["map_log_reverse_forward"].as_f64().unwrap();
+                            assert!(
+                                (total - info["log_reverse_forward"].as_f64().unwrap()).abs()
+                                    < 1e-12
+                            );
+                            let expected =
+                                (total + row["gate"]["log_weight"].as_f64().unwrap()).min(0.);
+                            assert!(
+                                (expected - row["log_acceptance"].as_f64().unwrap()).abs() < 1e-12
+                            );
+                        } else {
+                            assert!(info["anchor_reverse_probability"].is_null());
+                            assert!(info["anchor_log_reverse_forward"].is_null());
+                            assert!(info["log_reverse_forward"].is_null());
+                        }
+                    }
                 }
                 for (&i, p) in ids.iter().zip(row["retained_poses"].as_array().unwrap()) {
                     poses[i] = serde_json::from_value(p.clone())?;
@@ -189,6 +287,9 @@ fn phase_retains_attempts_bias_and_exact_restart_and_replay() -> Result<()> {
         }
     }
     assert!(ev > 100 && rejects > 0 && transported > 0);
+    if contact_anchors {
+        assert!(anchor_corrected > 0 && uniform > 0);
+    }
     assert_eq!(summary["counts"]["cluster_phase"]["events"], ev);
     assert_eq!(summary["counts"]["cluster_phase"]["phases"], 120);
     assert_eq!(
@@ -249,6 +350,56 @@ fn scope_and_parameter_guards_are_explicit() -> Result<()> {
         let mut c = f.config.clone();
         c["cluster_phase"][key] = json!(-1.);
         assert!(serde_json::from_value::<Config>(c)?.validate().is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn absent_and_null_contact_anchor_option_preserve_existing_member_rng_sequences() -> Result<()> {
+    let mut f = Fixture::new("contact-disabled")?;
+    f.config["cluster_phase"]["transport_charts"] = json!("members");
+    f.config["cluster_phase"]["anchor_count"] = json!(2);
+    f.run("absent", 30, None)?;
+    f.config["cluster_phase"]["anchor_contact_uniform_probability"] = Value::Null;
+    f.run("null", 30, None)?;
+    // Raw-input provenance differs intentionally; all dynamical state and
+    // counters must match after excluding only that source-document hash.
+    let mut checkpoints = [
+        f.read("absent", "checkpoint.json")?,
+        f.read("null", "checkpoint.json")?,
+    ];
+    for checkpoint in &mut checkpoints {
+        checkpoint.as_object_mut().unwrap().remove("config_sha256");
+    }
+    assert_eq!(checkpoints[0], checkpoints[1]);
+    let mut a = f.rows("absent", "moves.jsonl")?;
+    let mut b = f.rows("null", "moves.jsonl")?;
+    for r in a.iter_mut().chain(b.iter_mut()) {
+        scrub(r);
+    }
+    assert_eq!(a, b);
+    Ok(())
+}
+#[test]
+fn contact_anchor_parameter_and_chart_guards_are_explicit() -> Result<()> {
+    let f = Fixture::new("contact-guards")?;
+    for value in [0., -0.1, 1.01] {
+        let mut c = f.config.clone();
+        c["cluster_phase"]["transport_charts"] = json!("members");
+        c["cluster_phase"]["anchor_contact_uniform_probability"] = json!(value);
+        assert!(serde_json::from_value::<Config>(c)?.validate().is_err());
+    }
+    for value in [0.2, 1.] {
+        let mut c = f.config.clone();
+        c["cluster_phase"]["anchor_contact_uniform_probability"] = json!(value);
+        assert!(
+            serde_json::from_value::<Config>(c.clone())?
+                .validate()
+                .is_err(),
+            "option must reject handle charts"
+        );
+        c["cluster_phase"]["transport_charts"] = json!("members");
+        serde_json::from_value::<Config>(c)?.validate()?;
     }
     Ok(())
 }

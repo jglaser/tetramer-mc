@@ -189,14 +189,27 @@ struct Chain {
     accepted_involutions: u64,
     accepted_corrected_involutions: u64,
     member_switches: u64,
+    anchor_corrected_involutions: u64,
+    accepted_anchor_corrected_involutions: u64,
 }
 fn run_chain(
+    tree: &SphereTree,
+    wall: &Container,
+    poses: Vec<Pose>,
+    seed: u64,
+    learned: bool,
+    charts: TransportCharts,
+) -> Chain {
+    run_chain_with_anchor(tree, wall, poses, seed, learned, charts, None)
+}
+fn run_chain_with_anchor(
     tree: &SphereTree,
     wall: &Container,
     mut poses: Vec<Pose>,
     seed: u64,
     learned: bool,
     charts: TransportCharts,
+    anchor_contact_uniform_probability: Option<f64>,
 ) -> Chain {
     let bodies = poses.len();
     let cfg = ClusterPhaseConfig {
@@ -208,6 +221,7 @@ fn run_chain(
         local_small_angle_std_degrees: 20.,
         transport_charts: charts,
         anchor_count: 2,
+        anchor_contact_uniform_probability,
         ..ClusterPhaseConfig::default()
     };
     let gate = GateOptions {
@@ -236,6 +250,8 @@ fn run_chain(
     let mut accepted_involutions = 0;
     let mut accepted_corrected_involutions = 0;
     let mut member_switches = 0;
+    let mut anchor_corrected_involutions = 0;
+    let mut accepted_anchor_corrected_involutions = 0;
     for sweep in 0..burn + block_size * blocks {
         // Fixed three single-body attempts; proposals are uniform in the same
         // sphere-center domain in both directions. Orientations are Haar.
@@ -287,6 +303,26 @@ fn run_chain(
                                 && row["accepted"] == true,
                         );
                     }
+                    if anchor_contact_uniform_probability.is_some() {
+                        let anchor_correction =
+                            row["proposal"]["anchor_log_reverse_forward"].as_f64();
+                        let nonzero = anchor_correction.is_some_and(|x| x.abs() > 1e-8);
+                        anchor_corrected_involutions += u64::from(nonzero);
+                        accepted_anchor_corrected_involutions +=
+                            u64::from(nonzero && row["accepted"] == true);
+                        if let Some(ac) = anchor_correction {
+                            let qx = row["proposal"]["anchor_forward_probability"]
+                                .as_f64()
+                                .unwrap();
+                            let qy = row["proposal"]["anchor_reverse_probability"]
+                                .as_f64()
+                                .unwrap();
+                            assert!((ac - (qy.ln() - qx.ln())).abs() < 1e-12);
+                            let map = row["proposal"]["map_log_reverse_forward"].as_f64().unwrap();
+                            let total = row["proposal"]["log_reverse_forward"].as_f64().unwrap();
+                            assert!((map + ac - total).abs() < 1e-12);
+                        }
+                    }
                     let corrected = row["proposal"]["log_reverse_forward"]
                         .as_f64()
                         .is_some_and(|x| x.abs() > 1e-6);
@@ -327,6 +363,8 @@ fn run_chain(
         accepted_involutions,
         accepted_corrected_involutions,
         member_switches,
+        anchor_corrected_involutions,
+        accepted_anchor_corrected_involutions,
     }
 }
 
@@ -500,5 +538,82 @@ fn member_chart_cluster_phase_matches_independent_four_sphere_equilibrium() {
                 reference.se[k]
             );
         }
+    }
+}
+
+/// Exercise the actual state-biased primary draw, full member-map correction,
+/// and many-body Poisson gate against independent analytic physical weights.
+/// Two starts give an initialization check; no protein native labels occur.
+#[test]
+fn contact_anchor_cluster_phase_matches_independent_four_sphere_equilibrium() {
+    let tree = SphereTree::new(Shape {
+        name: "analytic sphere".into(),
+        volume: 4. * PI / 3.,
+        atoms: vec![Atom {
+            center: [0.; 3],
+            radius: 1.,
+        }],
+    })
+    .unwrap();
+    let wall = Container::new(WALL, &tree).unwrap();
+    let reference = reference(1_000_000, 4);
+    assert!(reference.valid > 100_000 && reference.ess > 80_000.);
+    let preparations = [
+        vec![
+            pose([-1.8, -1.1, 0.]),
+            pose([1.8, -1.1, 0.]),
+            pose([0., 2., 0.]),
+            pose([0., 0., 2.2]),
+        ],
+        vec![
+            pose([0., 0., 0.]),
+            pose([2.05, 0., 0.]),
+            pose([0., 2.05, 0.]),
+            pose([0., 0., 2.05]),
+        ],
+    ];
+    let chains: Vec<_> = preparations
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            run_chain_with_anchor(
+                &tree,
+                &wall,
+                p,
+                840001 + i as u64,
+                true,
+                TransportCharts::Members,
+                Some(0.2),
+            )
+        })
+        .collect();
+    eprintln!("contact_anchor_four_sphere_reference: {reference:?}");
+    for (i, c) in chains.iter().enumerate() {
+        eprintln!("contact_anchor_chain_{i}: {c:?}");
+        assert!(c.cluster.transport_events > 5_000);
+        assert!(
+            c.anchor_corrected_involutions > 100 && c.accepted_anchor_corrected_involutions > 20,
+            "must accept nonzero anchor-corrected production involutions: {c:?}"
+        );
+        assert!(c.member_switches > 20);
+        assert!(c.cluster.accepted_attachments > 100 && c.cluster.accepted_detachments > 100);
+        for k in 0..OBS {
+            let tolerance = 5. * (c.se[k].powi(2) + reference.se[k].powi(2)).sqrt() + 0.002;
+            assert!(
+                (c.mean[k] - reference.mean[k]).abs() < tolerance,
+                "chain {i}, observable {k}: {} +/- {} vs {} +/- {}",
+                c.mean[k],
+                c.se[k],
+                reference.mean[k],
+                reference.se[k]
+            );
+        }
+    }
+    for k in 0..OBS {
+        let tolerance = 5. * (chains[0].se[k].powi(2) + chains[1].se[k].powi(2)).sqrt() + 0.002;
+        assert!(
+            (chains[0].mean[k] - chains[1].mean[k]).abs() < tolerance,
+            "initialization discrepancy observable {k}"
+        );
     }
 }

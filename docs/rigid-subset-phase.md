@@ -146,6 +146,11 @@ It needs a nonperiodic posterior-involution model. The portable example is
 [spherical-cluster-members.json](../examples/spherical-cluster-members.json). Omitting both keys keeps
 the handle charts and the existing random stream.
 
+For member charts, optional `"anchor_contact_uniform_probability": 0.1` enables
+[contact-aware primary selection](contact-aware-cluster-anchors.md), with an explicit
+forward/reverse anchor correction. It is separate from the unchanged internal
+subset-selection clock.
+
 These values are a starting point for tests, not a tuned recommendation. Expected attempt count is approximately `duration * Lambda` over a slowly changing state, rather than a prescribed number per phase. Doubling every rate is equivalent to doubling the duration for this isolated phase. Separate size rates control the relative rate of dimers and trimers, while the local/transport mixture controls how a selected subset is moved.
 
 The implemented initial scope is spherical boundaries and frozen proposal models. A local-only rigid branch can operate without an atlas. The phase runs after the ordinary single-body move, GCA, and center-shift schedules and before any auxiliary refresh. It uses separate named streams and archives configuration, clock diagnostics and all attempted events when move logging is enabled; checkpoint continuation is deterministic. Assembly bias corrects each elementary subset move with the existing instantaneous cluster-size observable. Cluster bias counts live under `counts.cluster_phase` (`physical_accepted`, `bias_rejected`, `accepted`), separately from the original `counts.assembly_bias` per-kernel counters. Unsupported periodic and adaptive-model combinations fail validation. The portable configuration is [spherical-cluster-phase.json](../examples/spherical-cluster-phase.json), with a command in the [example guide](../examples/README.md#experimental-dimertrimer-transport-phase).

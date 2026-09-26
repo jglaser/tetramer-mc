@@ -265,6 +265,36 @@ fn witness(tree: &SphereTree, pose: Pose) -> Result<ContactWitness> {
     })
 }
 
+/// Witness for a supplied (possibly interlocked) pose: the globally closest
+/// atom pair. `radial_contact` carries `kind = "nearest_pair"`; the lever is
+/// measured from the pose origin, the analogue of the radial zero-gap origin.
+pub fn nearest_pair_witness(tree: &SphereTree, pose: Pose) -> Result<ContactWitness> {
+    let r = rotation(pose.orientation);
+    let atoms = &tree.shape.atoms;
+    let mut best = (f64::INFINITY, 0, 0);
+    for (m, a) in atoms.iter().enumerate() {
+        let p = add(pose.position, matvec(r, a.center));
+        for (f, b) in atoms.iter().enumerate() {
+            let gap = norm(sub(p, b.center)) - a.radius - b.radius;
+            if gap < best.0 {
+                best = (gap, m, f);
+            }
+        }
+    }
+    let (gap, moving, fixed) = best;
+    ensure!(gap >= 0., "supplied pose overlaps the anchored body");
+    let b = &atoms[fixed];
+    let delta = sub(add(pose.position, matvec(r, atoms[moving].center)), b.center);
+    let surface_point = add(b.center, scale(delta, b.radius / norm(delta)));
+    Ok(ContactWitness {
+        surface_point,
+        mobile_surface_lever: sub(surface_point, pose.position),
+        radial_contact: serde_json::json!({
+            "kind": "nearest_pair", "moving_atom": moving, "fixed_atom": fixed,
+            "gap": gap, "orientation": pose.orientation, "position": pose.position}),
+    })
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchAttempt {
     pub step: usize,
@@ -325,6 +355,20 @@ pub fn discover_slot(
     config: &DiscoveryConfig,
     slot: usize,
 ) -> Result<SlotDiscovery> {
+    discover_slot_from(tree, config, slot, None)
+}
+
+/// As `discover_slot`, optionally starting from a supplied hard-valid pose
+/// (for example a shape-only exhaustive scan candidate). A supplied start is
+/// never projected outward: its search is a local greedy translation/rotation
+/// perturbation with the same fixed score uniforms, exact hard rejection and
+/// strict-improvement rule, and its witnesses are nearest atom pairs.
+pub fn discover_slot_from(
+    tree: &SphereTree,
+    config: &DiscoveryConfig,
+    slot: usize,
+    supplied: Option<Pose>,
+) -> Result<SlotDiscovery> {
     config.validate()?;
     ensure!(slot < config.starts, "slot index outside configured starts");
     let seeds = slot_seeds(config.seed, slot);
@@ -332,8 +376,33 @@ pub fn discover_slot(
     let mut initialization_rng = StdRng::seed_from_u64(seeds.initialization);
     let mut state =
         MemoryState::initialize(tree, &resolved_memory_config, &mut initialization_rng)?;
+    if let Some(pose) = supplied {
+        pose.validate()?;
+        let pose = Pose {
+            position: pose.position,
+            orientation: quaternion(rotation(pose.orientation)),
+        };
+        ensure!(
+            norm(pose.position) < resolved_memory_config.radius,
+            "supplied pose lies outside the anchored pair ball"
+        );
+        ensure!(
+            !tree.overlaps(&Placed::new(pose), &Placed::new(identity())),
+            "supplied pose is not hard-valid"
+        );
+        state.poses[0] = pose;
+        state.validate(tree, &resolved_memory_config)?;
+    }
+    let local = supplied.is_some();
+    let contact_witness = |pose| {
+        if local {
+            nearest_pair_witness(tree, pose)
+        } else {
+            witness(tree, pose)
+        }
+    };
     let initial_pose = state.poses[0];
-    let initial_contact = witness(tree, initial_pose)?;
+    let initial_contact = contact_witness(initial_pose)?;
     let opts = config.gate_options();
     let score = |pose, seed, draws| estimate_pair_overlap(tree, pose, config.rd, draws, seed, opts);
     let search_initial_score = score(initial_pose, seeds.search_score, config.search_points)?;
@@ -345,6 +414,52 @@ pub fn discover_slot(
     let mut search_attempts = Vec::with_capacity(config.search_steps);
     for step in 1..=config.search_steps {
         let mode = rng.random_range(0..3);
+        if local {
+            // Local mode: 0 rotates about the moving origin, 1 translates, 2 both.
+            let level = rng.random_range(0..3);
+            let angle_degrees = [0.25, 1., 4.][level];
+            let mut orientation = rotation(optimized_pose.orientation);
+            let mut position = optimized_pose.position;
+            if mode != 1 {
+                orientation = matmul(perturbation(&mut rng, angle_degrees), orientation);
+            }
+            if mode != 0 {
+                let step = [0.1, 0.3, 1.][level];
+                position = add(
+                    position,
+                    std::array::from_fn(|_| {
+                        let z: f64 = StandardNormal.sample(&mut rng);
+                        step * z
+                    }),
+                );
+            }
+            let pose = Pose {
+                position,
+                orientation: quaternion(orientation),
+            };
+            pose.validate()?;
+            let mut attempt = SearchAttempt {
+                step,
+                mode,
+                angle_degrees,
+                proposed_pose: Some(pose),
+                hard_valid: norm(pose.position) < resolved_memory_config.radius
+                    && !tree.overlaps(&Placed::new(pose), &fixed),
+                accepted: false,
+                score: None,
+            };
+            if attempt.hard_valid {
+                let estimate = score(pose, seeds.search_score, config.search_points)?;
+                attempt.accepted = estimate.volume > search_optimized_score.volume;
+                if attempt.accepted {
+                    optimized_pose = pose;
+                    search_optimized_score = estimate.clone();
+                }
+                attempt.score = Some(estimate);
+            }
+            search_attempts.push(attempt);
+            continue;
+        }
         let angle_degrees = [1., 4., 12.][rng.random_range(0..3)];
         let mut orientation = rotation(optimized_pose.orientation);
         let mut direction = scale(optimized_pose.position, 1. / norm(optimized_pose.position));
@@ -387,7 +502,7 @@ pub fn discover_slot(
         }
         search_attempts.push(attempt);
     }
-    let optimized_contact = witness(tree, optimized_pose)?;
+    let optimized_contact = contact_witness(optimized_pose)?;
     // The validation allocations and seeds never feed the search/refinement RNGs.
     let initial_validation = [
         score(

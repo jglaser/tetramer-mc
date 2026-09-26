@@ -140,6 +140,8 @@ def contact_lever(contact, pose, shape):
     construction as contact_atlas.rs, not a fitted physical spring constant.
     """
     ray = contact['radial_contact']
+    if ray.get('kind') == 'nearest_pair':
+        return nearest_pair_lever(contact, pose, shape)
     direction = np.asarray(ray['direction'], dtype=float)
     distance = float(ray['distance'])
     require(direction.shape == (3,) and np.isfinite(direction).all()
@@ -161,6 +163,38 @@ def contact_lever(contact, pose, shape):
     require(length > 0 and abs(length-radius) < 1e-7*max(1., radius), 'Witness atoms are not tangent')
     surface = np.asarray(atoms[fixed]['center'])+delta/length*atoms[fixed]['radius']
     lever = surface-contact_position
+    require(np.allclose(surface, contact['surface_point'], rtol=1e-10, atol=1e-8)
+            and np.allclose(lever, contact['mobile_surface_lever'], rtol=1e-10, atol=1e-8),
+            'Recorded surface point or rolling lever differs from shape witness')
+    return lever
+
+
+def nearest_pair_lever(contact, pose, shape):
+    """Validate a supplied-start witness: the globally closest atom pair.
+
+    Such poses may lie inside their outermost radial contact (interlocked
+    interfaces), so the lever is measured from the pose origin instead.
+    """
+    witness = contact['radial_contact']
+    position, rotation = pose_arrays(pose)
+    _, witness_r = pose_arrays(dict(position=[0., 0., 0.], orientation=witness['orientation']))
+    require(np.allclose(rotation, witness_r, rtol=0, atol=1e-9)
+            and np.allclose(position, witness['position'], rtol=0, atol=1e-9),
+            'Nearest-pair witness differs from pose')
+    atoms = shape['atoms']
+    centers = np.asarray([a['center'] for a in atoms], dtype=float)
+    radii = np.asarray([a['radius'] for a in atoms], dtype=float)
+    moving, fixed = witness['moving_atom'], witness['fixed_atom']
+    require(type(moving) is int and type(fixed) is int and 0 <= moving < len(atoms)
+            and 0 <= fixed < len(atoms), 'Invalid contact witness atom indices')
+    placed = centers@rotation.T+position
+    gaps = np.linalg.norm(placed[:, None, :]-centers[None, :, :], axis=2)-radii[:, None]-radii[None, :]
+    require(gaps.min() >= 0, 'Nearest-pair pose is not hard-valid')
+    require(abs(gaps[moving, fixed]-gaps.min()) < 1e-9
+            and abs(gaps[moving, fixed]-witness['gap']) < 1e-7, 'Witness is not the closest atom pair')
+    delta = placed[moving]-centers[fixed]
+    surface = centers[fixed]+delta/np.linalg.norm(delta)*radii[fixed]
+    lever = surface-position
     require(np.allclose(surface, contact['surface_point'], rtol=1e-10, atol=1e-8)
             and np.allclose(lever, contact['mobile_surface_lever'], rtol=1e-10, atol=1e-8),
             'Recorded surface point or rolling lever differs from shape witness')
@@ -277,7 +311,7 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
             source_seed=discoveries[source_index].get('config', {}).get('seed'),
             seeds=copy.deepcopy(slot.get('seeds', {})), raw_slot_weight=1., slot_proposal_mass=1./count,
             initial_component=2*index, refined_component=2*index+1,
-            reference_pose=copy.deepcopy(reference), reference_rule='recorded optimized radial-contact pose',
+            reference_pose=copy.deepcopy(reference), reference_rule='recorded optimized contact pose (radial or nearest-pair witness)',
             retained_steps=steps, retained_rejected_count=sum(not sample['accepted'] for sample in samples),
             retained_accepted_count=sum(sample['accepted'] for sample in samples),
             unique_retained_poses=len({serialized(pose) for pose in poses}),

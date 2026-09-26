@@ -319,3 +319,67 @@ configurations, RNG checkpoints, and output cadence, in fresh directories:
 `runs/cluster-oligomer-seed8-free256-2-resume4000/`. Original partial tails were
 preserved and not appended to. Binary, replay, launch, and checkpoint receipts
 are archived at `/vast/xvg/tetramer-mc-runs/storage-recovery-20260926/`.
+
+## Exhaustive FFT pose scan (2026-09-26)
+
+The pilot's random outermost-ray starts cannot reach interlocked interfaces.
+Post-hoc, the 14 ideal native motifs have union overlaps of 188–1507 Å³
+(nine of them 697–1507 Å³), versus a pilot optimum of 487 Å³. So the pair
+objective already favors native contacts, and the search was the limitation.
+
+[`tools/fft_depletion_docking.py`](../tools/fft_depletion_docking.py) scans a
+300,000-rotation super-Fibonacci SO(3) grid (maximum nearest-grid angle
+3.07° in a 2,000-draw check). For each rotation, FFT cross-correlation of
+1 Å indicator grids gives the inflated-union overlap \(C(t)\) and a clash
+volume of cores shrunk by 0.5 Å for every translation. The four best local
+maxima (3 Å suppression) with clash ≤ 2 Å³ and ≤ 10 Å³ are kept. The full
+scan took 4,724 s wall time on 110 workers (1.4 CPU-days).
+[`tools/select_fft_contact_starts.py`](../tools/select_fft_contact_starts.py)
+takes the 10,000 best grid peaks from each clash class and repairs each one
+to exact hard validity by greedy reduction of squared atom penetration
+(19,330 of 20,000 succeed). It scores them with the exact envelope estimator
+(`pair-overlap-score`, 8,192 points) and keeps 64 distinct contacts by
+non-maximum suppression (4 Å / 20°, with a pose and its physical inverse
+treated as the same contact). Only the particle shape enters these stages.
+
+The resolution settings (1 Å grid, 0.5 Å shrink, about 3° rotation coverage)
+were checked against the ideal native motifs before the scan: the native
+overlap peak degrades between 3° and 6° of rotation error. That is a
+calibration of resolution, not a selection; no native quantity ranks or
+filters any candidate.
+
+Supplied starts enter the unchanged discovery binary through
+`--initial-poses`. Such slots use a local non-projecting greedy search
+(0.1/0.3/1 Å translation and 0.25/1/4° rotation steps; same fixed score
+uniforms, exact hard rejection, strict improvement). Their contact witness
+is the globally closest atom pair (`kind = "nearest_pair"`), whose rolling
+lever is measured from the pose origin. The fitter validates that witness
+by an all-pairs check. Refinement, validation, the fit and the production
+balance are unchanged.
+
+**Results.** The selected 64 starts have exact overlaps of 1571, 1366,
+1259, 1237, … Å³. Mean held-out overlap after local search and refinement
+is 810 Å³ (maximum 1523). Post-hoc, one start is native motif 8 (0.37 Å,
+0.14°) and one lies 2.4 Å / 3.4° from motif 6, just outside complete entry.
+The other 62, including the highest-scoring contact, are non-native pair
+contacts of comparable strength. At the pair level the shape model supports
+strong competitors, not only native interfaces. Native motifs weaker than
+about 800 Å³ fall below the 64-contact cut.
+
+In the matched 200-sweep, two-stream benchmark from the seed8/free256
+geometry configuration (seeds as in the storage-recovery pilot), the atlas
+fitted from these 64 slots accepted 12 of 23,897 learned independent
+capture redraws. The pilot atlas accepted 0 and reproduced its earlier
+counts exactly. Hard-valid fractions fall from about 33% to 6%, as expected
+for charts centered on interlocked contacts. Correlated posterior transport
+still accepted 0 of about 24,000 in both arms. At sweep 200 the FFT-atlas
+runs have 5 and 6 complete native-entry bonds between initially free bodies,
+one of them fully registered; the pilot arm has none. These are two short
+realizations: evidence that native-blind proposals can now create native
+contacts, not a rate, equilibrium or assembly-yield estimate.
+
+Artifacts (on `/vast`, symlinked under `runs/`): `fft-depletion-docking-20260926/`,
+`fft-contact-starts-20260926/`, `fft-seeded-discovery-20260926/` (populations
+and `frozen-fit/`), `fft-seeded-benchmark-20260926/` and
+`fft-seeded-benchmark-native-20260926/`. Post-hoc recall:
+`tools/posthoc_native_recall.py <selected.json|discovery.json>`.

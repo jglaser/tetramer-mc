@@ -6,7 +6,10 @@ use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, f64::consts::PI};
 use tetramer_mc::{
-    contact_discovery::{DiscoveryConfig, discover, estimate_pair_overlap, slot_seeds},
+    contact_discovery::{
+        DiscoveryConfig, discover, discover_slot_from, estimate_pair_overlap, nearest_pair_witness,
+        slot_seeds,
+    },
     contact_memory::{MemoryCounts, MemoryState},
     depletion::GateOptions,
     geometry::{Atom, Shape, SphereTree},
@@ -414,5 +417,36 @@ fn command_line_archives_complete_hashes_and_refuses_overwrite() -> Result<()> {
     assert_eq!(fs::read(output.join("manifest.json"))?, manifest_bytes);
     assert_eq!(fs::read(output.join("discovery.json"))?, discovery_bytes);
     fs::remove_dir_all(temporary)?;
+    Ok(())
+}
+
+#[test]
+fn nearest_pair_witness_measures_the_lever_from_the_pose_origin() -> Result<()> {
+    let tree = sphere(1);
+    let witness = nearest_pair_witness(&tree, pose(2.5))?;
+    assert_eq!(witness.radial_contact["kind"], "nearest_pair");
+    assert!((witness.radial_contact["gap"].as_f64().unwrap() - 0.5).abs() < 1e-12);
+    assert!((witness.surface_point[0] - 1.).abs() < 1e-12);
+    assert!((witness.mobile_surface_lever[0] + 1.5).abs() < 1e-12);
+    assert!(nearest_pair_witness(&tree, pose(1.5)).is_err());
+    Ok(())
+}
+
+#[test]
+fn supplied_start_is_kept_improved_locally_and_never_overlapping() -> Result<()> {
+    let tree = sphere(1);
+    let config = small_config();
+    let start = pose(2.3);
+    let slot = discover_slot_from(&tree, &config, 0, Some(start))?;
+    assert_eq!(slot.initial_pose.position, start.position);
+    assert_eq!(slot.initial_contact.radial_contact["kind"], "nearest_pair");
+    assert!(slot.search_optimized_score.volume >= slot.search_initial_score.volume);
+    for attempt in &slot.search_attempts {
+        // Local mode never projects to a radial contact; hard-invalid moves are rejected.
+        assert!(attempt.proposed_pose.is_some());
+        assert!(!attempt.accepted || attempt.hard_valid);
+    }
+    assert_eq!(slot.refinement_trace.len(), config.refine_steps);
+    assert!(discover_slot_from(&tree, &config, 0, Some(pose(1.9))).is_err());
     Ok(())
 }

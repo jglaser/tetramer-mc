@@ -11,7 +11,8 @@ use std::{
     time::Instant,
 };
 use tetramer_mc::{
-    contact_discovery::{DiscoveryConfig, DiscoveryResult, discover_slot},
+    contact_discovery::{DiscoveryConfig, DiscoveryResult, discover_slot_from},
+    math::Pose,
     geometry::{Shape, SphereTree},
     simulation::hash_bytes,
 };
@@ -56,6 +57,10 @@ struct Args {
     lambda_ratio: f64,
     #[arg(long, default_value_t = 2047)]
     envelope_max_cells: usize,
+    /// Optional JSON list of shape-only start poses, one per slot (`--starts`
+    /// must equal its length). Such slots use the local, non-projecting search.
+    #[arg(long)]
+    initial_poses: Option<PathBuf>,
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
@@ -109,6 +114,18 @@ fn main() -> Result<()> {
     let shape_sha256 = hash_bytes(&shape_bytes);
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_bytes)?)?;
     config.memory_config(&tree)?;
+    let (initial_poses, initial_poses_sha256) = match &args.initial_poses {
+        Some(path) => {
+            let bytes = fs::read(path)?;
+            let poses: Vec<Pose> = serde_json::from_slice(&bytes)?;
+            ensure!(
+                poses.len() == config.starts,
+                "--starts must equal the number of supplied initial poses"
+            );
+            (Some(poses), Some(hash_bytes(&bytes)))
+        }
+        None => (None, None),
+    };
     let source_bundle = include_bytes!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     if let Some(parent) = args.out.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
@@ -131,13 +148,16 @@ fn main() -> Result<()> {
             "refinement":"Existing exact MemoryState::update, one slot, no global refresh, finite anchored pair ball. Fixed burn and save stride, including rejections. Finite runs do not establish stationarity or basin masses.",
             "selection":"Every initialized slot is preserved. No validation winner, native score, or trajectory from production enters construction.",
         "rng":"StdRng with SHA256-derived master-seed/slot/stream keys; pinned rand version in source bundle Cargo.lock",
-            "completion":"manifest.json is written only after all outputs are complete and hashed"
+            "completion":"manifest.json is written only after all outputs are complete and hashed",
+            "initial_poses_sha256":initial_poses_sha256,
+            "initial_poses_scope":"When supplied, start poses must come from a shape-only procedure (no native motif, label or production pose); each slot then uses local non-projecting greedy search and nearest-pair witnesses."
         }),
     )?;
     let mut slots = Vec::with_capacity(config.starts);
     for slot in 0..config.starts {
         let slot_started = Instant::now();
-        let result = discover_slot(&tree, &config, slot)?;
+        let supplied = initial_poses.as_ref().map(|poses| poses[slot]);
+        let result = discover_slot_from(&tree, &config, slot, supplied)?;
         eprintln!(
             "{}",
             json!({"slot":slot,"slots":config.starts,

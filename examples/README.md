@@ -99,6 +99,14 @@ coverage from 2.8% to 91.4%, but neither arm accepted a learned oligomer move;
 there is no demonstrated docking speedup. This conditional diagnostic does not
 establish native assembly or equilibrium.
 
+`examples/spherical-cluster-oligomer.json` adds `"oligomer": {}` to the
+contact-anchor example. Transport destinations then also include fused
+two-contact charts, built each attempt from pairs of member/anchor atlas
+basins that agree on one subset pose and pass a hard-core screen. Use the same
+command with this config. On the portable 12-body start it accepted only
+contact-preserving local refinements, at about five times the phase CPU. See
+[construction, balance, validation and diagnostic](../docs/oligomer-proposal.md).
+
 ### Experimental contact-conditioned GCA axes
 
 Use `--config examples/spherical-conditioned-axis.json` with the same coverage

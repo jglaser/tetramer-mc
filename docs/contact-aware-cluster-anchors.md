@@ -200,3 +200,5 @@ launcher, analysis and every attempted event are retained under
 python tools/plot_contact_anchor_benchmark.py \
   --benchmark runs/contact-anchor-benchmark-20260926
 ```
+
+Destination follow-up: [two-contact oligomer charts](oligomer-proposal.md).

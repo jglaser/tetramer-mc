@@ -318,6 +318,23 @@ impl FixedBasinInvolution {
         Ok(self.decode_and_log_volume(chart_index, z)?.0)
     }
 
+    pub fn correlation(&self) -> f64 {
+        self.correlation
+    }
+
+    /// Normalized chart density in translation times Haar measure:
+    /// standard normal of the latent over the chart volume element. Poses on
+    /// the Cayley seam or outside representable range have zero density.
+    pub fn log_density(&self, chart_index: usize, pose: Pose) -> f64 {
+        let Ok(z) = self.encode(chart_index, pose) else {
+            return f64::NEG_INFINITY;
+        };
+        let Ok((_, log_volume)) = self.decode_and_log_volume(chart_index, z) else {
+            return f64::NEG_INFINITY;
+        };
+        -0.5 * z.iter().map(|x| x * x).sum::<f64>() - 3. * (2. * PI).ln() - log_volume
+    }
+
     /// Pure deterministic transformation. Numerical seams and invalid traces
     /// return errors; callers must never retry until a valid pose is obtained.
     pub fn apply(&self, old: Pose, trace: &BasinTrace) -> Result<BasinStep> {
@@ -369,4 +386,56 @@ impl FixedBasinInvolution {
             log_correction,
         })
     }
+}
+
+/// The correlated latent map between a chart of `source` and a chart of
+/// `target`, which may be different chart sets on the same pose space. Uses
+/// the source set's correlation. The inverse applies the same function with
+/// the roles swapped and `inverse_trace.noise`; `inverse_trace` indices refer
+/// to (target chart, source chart).
+pub fn cross_chart_step(
+    source: (&FixedBasinInvolution, usize),
+    target: (&FixedBasinInvolution, usize),
+    old: Pose,
+    noise: Vec6,
+) -> Result<BasinStep> {
+    let (from, s) = source;
+    let (to, t) = target;
+    ensure!(
+        noise.iter().all(|x| x.is_finite()),
+        "Nonfinite auxiliary noise"
+    );
+    ensure!(
+        from.correlation == to.correlation && from.angular_length == to.angular_length,
+        "Cross-chart maps need one correlation and angular length"
+    );
+    let source_latent = from.encode(s, old)?;
+    let target_latent: Vec6 =
+        std::array::from_fn(|i| from.correlation * source_latent[i] + from.sine * noise[i]);
+    let inverse_noise: Vec6 =
+        std::array::from_fn(|i| from.sine * source_latent[i] - from.correlation * noise[i]);
+    let (pose, new_volume) = to.decode_and_log_volume(t, target_latent)?;
+    let (_, old_volume) = from.decode_and_log_volume(s, source_latent)?;
+    let old_square = noise.iter().map(|x| x * x).sum::<f64>();
+    let new_square = inverse_noise.iter().map(|x| x * x).sum::<f64>();
+    let log_auxiliary_ratio = 0.5 * (old_square - new_square);
+    let log_extended_jacobian = new_volume - old_volume;
+    let log_correction = log_extended_jacobian + log_auxiliary_ratio;
+    ensure!(
+        log_correction.is_finite(),
+        "Unrepresentable involution correction"
+    );
+    Ok(BasinStep {
+        pose,
+        inverse_trace: BasinTrace {
+            source: t,
+            target: s,
+            noise: inverse_noise,
+        },
+        source_latent,
+        target_latent,
+        log_extended_jacobian,
+        log_auxiliary_ratio,
+        log_correction,
+    })
 }

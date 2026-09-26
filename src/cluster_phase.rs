@@ -7,6 +7,7 @@ use crate::{
     docking::{DockingMethod, DockingProposal},
     geometry::{Placed, SphereTree},
     math::*,
+    oligomer_proposal::{OligomerConfig, OligomerMixture},
     rigid_subset::RigidSubset,
     spherical::Container,
 };
@@ -42,6 +43,10 @@ pub struct ClusterPhaseConfig {
     /// None preserves the original uniformly anchored mixture and RNG order.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anchor_contact_uniform_probability: Option<f64>,
+    /// Members only: add deterministic two-contact oligomer components to the
+    /// learned member-chart mixture. None keeps the member mixture.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oligomer: Option<OligomerConfig>,
 }
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -71,6 +76,7 @@ impl Default for ClusterPhaseConfig {
             transport_charts: TransportCharts::Handle,
             anchor_count: 1,
             anchor_contact_uniform_probability: None,
+            oligomer: None,
         }
     }
 }
@@ -110,6 +116,13 @@ impl ClusterPhaseConfig {
                 epsilon.is_finite() && epsilon > 0. && epsilon <= 1.,
                 "anchor contact uniform probability must be in (0, 1]"
             );
+        }
+        if let Some(oligomer) = &self.oligomer {
+            ensure!(
+                self.transport_charts == TransportCharts::Members,
+                "oligomer components require member transport charts"
+            );
+            oligomer.validate()?;
         }
         Ok(())
     }
@@ -512,6 +525,37 @@ impl<'a> ClusterPhase<'a> {
             proposal,
         })
     }
+    /// Learned member-chart branch: the plain member mixture, or the member
+    /// mixture with fused oligomer components. Neither draws a branch coin.
+    fn learned_member_proposal(
+        &self,
+        rng: &mut StdRng,
+        poses: &[Pose],
+        members: &[usize],
+        handle_position: usize,
+        anchors: &[Pose],
+    ) -> Result<(Option<Pose>, Value)> {
+        let proposal = self.proposal.as_ref().unwrap();
+        let member_poses: Vec<_> = members.iter().map(|&i| poses[i]).collect();
+        let Some(settings) = &self.config.oligomer else {
+            return proposal.propose_members_learned(rng, &member_poses, handle_position, anchors);
+        };
+        let spectators: Vec<_> = (0..poses.len())
+            .filter(|i| !members.contains(i))
+            .map(|i| poses[i])
+            .collect();
+        let mixture = OligomerMixture::build(
+            proposal,
+            self.tree,
+            self.wall,
+            &member_poses,
+            &spectators,
+            anchors,
+            settings,
+        )?;
+        mixture.propose(rng, &member_poses, handle_position)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn run(
         &self,
@@ -611,9 +655,10 @@ impl<'a> ClusterPhase<'a> {
                         let pool = anchor_pool(poses, members, primary, self.config.anchor_count)?;
                         let anchors: Vec<_> = pool.iter().map(|&i| poses[i]).collect();
                         let position = members.iter().position(|&i| i == handle).unwrap();
-                        let (p, mut trace) = proposal.propose_members_learned(
+                        let (p, mut trace) = self.learned_member_proposal(
                             proposal_rng,
-                            &old_member_poses,
+                            poses,
+                            members,
                             position,
                             &anchors,
                         )?;
@@ -637,12 +682,20 @@ impl<'a> ClusterPhase<'a> {
                     let member_poses: Vec<_> = members.iter().map(|&i| poses[i]).collect();
                     let anchors: Vec<_> = pool.iter().map(|&i| poses[i]).collect();
                     let position = members.iter().position(|&i| i == handle).unwrap();
-                    let (p, mut trace) = self.proposal.as_ref().unwrap().propose_members(
-                        proposal_rng,
-                        &member_poses,
-                        position,
-                        &anchors,
-                    )?;
+                    let proposal = self.proposal.as_ref().unwrap();
+                    let (p, mut trace) = if self.config.oligomer.is_none() {
+                        proposal.propose_members(proposal_rng, &member_poses, position, &anchors)?
+                    } else if proposal_rng.random::<f64>() < proposal.member_uniform_weight() {
+                        proposal.draw_member_uniform(proposal_rng)?
+                    } else {
+                        self.learned_member_proposal(
+                            proposal_rng,
+                            poses,
+                            members,
+                            position,
+                            &anchors,
+                        )?
+                    };
                     trace["anchor_pool"] = json!(pool);
                     info = trace;
                     p

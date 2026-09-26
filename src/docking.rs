@@ -534,6 +534,22 @@ impl DockingProposal {
         Ok((Some(proposed), info))
     }
 
+    /// Fixed single-member charts for derived member-chart mixtures:
+    /// the virtual-branch map, inversion labels and log branch weights.
+    pub fn member_chart_parts(&self) -> (&FixedBasinInvolution, Vec<bool>, &[f64]) {
+        (
+            &self.map,
+            self.branches.iter().map(|b| b.inverted).collect(),
+            &self.log_component_weights,
+        )
+    }
+    pub fn angular_length(&self) -> f64 {
+        self.model.angular_length()
+    }
+    pub fn correlation(&self) -> f64 {
+        self.correlation
+    }
+
     pub fn method(&self) -> DockingMethod {
         self.method
     }
@@ -817,7 +833,7 @@ fn log_sum(values: &[f64]) -> f64 {
 
 /// Gumbel-max avoids exponentiating tiny component responsibilities or silently
 /// imposing a responsibility cutoff. The finite RNG still has finite precision.
-fn draw_log_category(rng: &mut StdRng, log_weights: &[f64]) -> Result<Option<usize>> {
+pub(crate) fn draw_log_category(rng: &mut StdRng, log_weights: &[f64]) -> Result<Option<usize>> {
     let mut best = f64::NEG_INFINITY;
     let mut index = None;
     for (i, &weight) in log_weights.iter().enumerate() {

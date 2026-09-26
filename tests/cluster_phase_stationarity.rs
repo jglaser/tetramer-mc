@@ -16,6 +16,7 @@ use tetramer_mc::{
     docking::{DockingMethod, DockingProposal},
     geometry::{Atom, Shape, SphereTree},
     math::{IDENTITY, Pose, cayley, norm, sub},
+    oligomer_proposal::OligomerConfig,
     proposal::FrozenRelativePoseProposal,
     rigid_subset::RigidSubset,
     simulation::hash_bytes,
@@ -191,6 +192,8 @@ struct Chain {
     member_switches: u64,
     anchor_corrected_involutions: u64,
     accepted_anchor_corrected_involutions: u64,
+    fused_proposals: u64,
+    accepted_fused: u64,
 }
 fn run_chain(
     tree: &SphereTree,
@@ -211,6 +214,29 @@ fn run_chain_with_anchor(
     charts: TransportCharts,
     anchor_contact_uniform_probability: Option<f64>,
 ) -> Chain {
+    run_chain_full(
+        tree,
+        wall,
+        poses,
+        seed,
+        learned,
+        charts,
+        anchor_contact_uniform_probability,
+        None,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn run_chain_full(
+    tree: &SphereTree,
+    wall: &Container,
+    mut poses: Vec<Pose>,
+    seed: u64,
+    learned: bool,
+    charts: TransportCharts,
+    anchor_contact_uniform_probability: Option<f64>,
+    oligomer: Option<OligomerConfig>,
+) -> Chain {
+    let fused_charts = oligomer.is_some();
     let bodies = poses.len();
     let cfg = ClusterPhaseConfig {
         duration: 0.5,
@@ -222,6 +248,7 @@ fn run_chain_with_anchor(
         transport_charts: charts,
         anchor_count: 2,
         anchor_contact_uniform_probability,
+        oligomer,
         ..ClusterPhaseConfig::default()
     };
     let gate = GateOptions {
@@ -252,6 +279,8 @@ fn run_chain_with_anchor(
     let mut member_switches = 0;
     let mut anchor_corrected_involutions = 0;
     let mut accepted_anchor_corrected_involutions = 0;
+    let mut fused_proposals = 0;
+    let mut accepted_fused = 0;
     for sweep in 0..burn + block_size * blocks {
         // Fixed three single-body attempts; proposals are uniform in the same
         // sphere-center domain in both directions. Orientations are Haar.
@@ -295,7 +324,14 @@ fn run_chain_with_anchor(
         if sweep >= burn {
             for row in &records {
                 if row["kind"] == "cluster_event" && row["proposal"]["branch"] == "involution" {
-                    if charts == TransportCharts::Members {
+                    if fused_charts {
+                        assert_eq!(row["proposal"]["charts"], "oligomer");
+                        let o = &row["proposal"]["oligomer"];
+                        let fused = o["source_label"]["kind"] == "fused"
+                            || o["target_label"]["kind"] == "fused";
+                        fused_proposals += u64::from(fused);
+                        accepted_fused += u64::from(fused && row["accepted"] == true);
+                    } else if charts == TransportCharts::Members {
                         assert_eq!(row["proposal"]["charts"], "members");
                         member_switches += u64::from(
                             row["proposal"]["labels"]["source"]["member"]
@@ -365,6 +401,8 @@ fn run_chain_with_anchor(
         member_switches,
         anchor_corrected_involutions,
         accepted_anchor_corrected_involutions,
+        fused_proposals,
+        accepted_fused,
     }
 }
 
@@ -615,5 +653,80 @@ fn contact_anchor_cluster_phase_matches_independent_four_sphere_equilibrium() {
             (chains[0].mean[k] - chains[1].mean[k]).abs() < tolerance,
             "initialization discrepancy observable {k}"
         );
+    }
+}
+
+/// Contact-aware anchors plus fused two-contact oligomer charts in the
+/// production phase, against the same analytic four-sphere reference.
+#[test]
+fn oligomer_chart_cluster_phase_matches_independent_four_sphere_equilibrium() {
+    let tree = SphereTree::new(Shape {
+        name: "analytic sphere".into(),
+        volume: 4. * PI / 3.,
+        atoms: vec![Atom {
+            center: [0.; 3],
+            radius: 1.,
+        }],
+    })
+    .unwrap();
+    let wall = Container::new(WALL, &tree).unwrap();
+    let reference = reference(1_000_000, 4);
+    let preparations = [
+        vec![
+            pose([-1.8, -1.1, 0.]),
+            pose([1.8, -1.1, 0.]),
+            pose([0., 2., 0.]),
+            pose([0., 0., 2.2]),
+        ],
+        vec![
+            pose([0., 0., 0.]),
+            pose([2.05, 0., 0.]),
+            pose([0., 2.05, 0.]),
+            pose([0., 0., 2.05]),
+        ],
+    ];
+    let chains: Vec<_> = preparations
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            run_chain_full(
+                &tree,
+                &wall,
+                p,
+                850001 + i as u64,
+                true,
+                TransportCharts::Members,
+                Some(0.2),
+                // Loose fusion so the toy atlas yields frequent fused charts.
+                Some(OligomerConfig {
+                    max_mismatch: 40.,
+                    pair_angle_degrees: 120.,
+                    max_candidates: 128,
+                    max_hard_checks: 64,
+                    ..OligomerConfig::default()
+                }),
+            )
+        })
+        .collect();
+    eprintln!("oligomer_four_sphere_reference: {reference:?}");
+    for (i, c) in chains.iter().enumerate() {
+        eprintln!("oligomer_chain_{i}: {c:?}");
+        assert!(c.cluster.transport_events > 5_000);
+        assert!(
+            c.fused_proposals > 1_000 && c.accepted_fused > 50,
+            "must accept production moves through fused charts: {c:?}"
+        );
+        assert!(c.cluster.accepted_attachments > 100 && c.cluster.accepted_detachments > 100);
+        for k in 0..OBS {
+            let tolerance = 5. * (c.se[k].powi(2) + reference.se[k].powi(2)).sqrt() + 0.002;
+            assert!(
+                (c.mean[k] - reference.mean[k]).abs() < tolerance,
+                "chain {i}, observable {k}: {} +/- {} vs {} +/- {}",
+                c.mean[k],
+                c.se[k],
+                reference.mean[k],
+                reference.se[k]
+            );
+        }
     }
 }

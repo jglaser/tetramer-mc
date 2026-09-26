@@ -1,0 +1,58 @@
+{
+  "kind": "explanatory schematic; synthetic geometry, no simulation data",
+  "implementation_commit": "a394662617218a259a9a202ef0dd04146ac8d914",
+  "script_sha256": "91599c3213a96e81dc0db07a90df21cc2539d8543a3a0624064303788a3760b1",
+  "sources": {
+    "src/oligomer_proposal.rs": "f8c9eaca913b6395f644f9040bb9cb44a50df3509fed43ef4bdd008d14d778fc",
+    "src/cluster_phase.rs": "022811a1beacbcd9c1d1da582a8376c5fce7065693f6962c5518f4506e7e9154",
+    "src/basin_involution.rs": "13873fd5f08190b9afbbdb8803c6dfd9d2f47cdcf4eb057856da82fd19affb1e"
+  },
+  "illustrative_gaussians": {
+    "means": [
+      [
+        -0.34,
+        0.12
+      ],
+      [
+        0.35,
+        -0.1
+      ]
+    ],
+    "covariances": [
+      [
+        [
+          1.2,
+          0.82
+        ],
+        [
+          0.82,
+          0.68
+        ]
+      ],
+      [
+        [
+          0.88,
+          -0.64
+        ],
+        [
+          -0.64,
+          0.66
+        ]
+      ]
+    ],
+    "fused_mean": [
+      -0.09317119210105995,
+      0.26339334978945844
+    ],
+    "fused_covariance": [
+      [
+        0.1204472193988674,
+        0.017598373747640447
+      ],
+      [
+        0.017598373747640447,
+        0.07666327864091765
+      ]
+    ]
+  }
+}

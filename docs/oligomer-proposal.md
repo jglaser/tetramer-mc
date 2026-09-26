@@ -23,6 +23,23 @@ atlas and the fixed context of each attempt.
 
 ## Construction
 
+![Schematic of the two-contact update](assets/two-contact-update.png)
+
+[Editable SVG](assets/two-contact-update.svg) ·
+[PDF](assets/two-contact-update.pdf) ·
+[Plotting source](../tools/plot_two_contact_update.py)
+
+The colored bodies in panel 1 are rigid tetramers carried together. Two contacts
+mean two distinct member--spectator interfaces: two members may contact one
+spectator, one member may contact two spectators, or two members may contact
+two different spectators. The ellipses in panel 2 are an illustrative slice of
+one collective six-dimensional pose space, not separate particle coordinates
+or measured basin weights. The fit combines their local constraints; panel 3
+then reuses the normalized catalogue and reversible transport. Panel 4 applies
+the full many-body physical correction to the actual trial pose. Uniform
+primary-anchor selection makes the anchor ratio unity; an enabled assembly
+bias adds its existing separate correction, not shown in the schematic.
+
 Write `g0` for the pose of the first selected member and `u_i = g0^{-1} g_i`
 for the internal offsets. A single label `l = (i, a, b)` is the existing member
 chart: branch `b` of the atlas on `g_a^{-1} g0 u_i`, with reciprocal inversion

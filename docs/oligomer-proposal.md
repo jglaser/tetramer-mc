@@ -1,6 +1,10 @@
 # Two-contact oligomer charts for rigid-subset transport
 
-Status (2026-09-26): opt-in, validated for balance, no protein speedup. It
+Status (2026-09-26): opt-in; the sweep-7400 audit of HEAD `f2e33c3` reproduced a
+catalogue-reconstruction failure in one targeted test. The unchanged-HEAD
+conditional diagnostic found one oligomer attachment, but does not establish a
+validated sampling speedup. See [the sweep-7400 audit](oligomer-7400-benchmark.md).
+It
 extends the [member charts](oligomer-conditioned-learning.md#implemented-member-charts-no-fitting)
 and works with or without [contact-aware anchors](contact-aware-cluster-anchors.md).
 

@@ -365,15 +365,18 @@ def proposal_preflight(model, seed):
     normal_log = float(-3*np.log(2*np.pi)-.5*latent@latent)
     roundtrip, measure, independent = [], [], []
     probes = []
-    for label in range(len(density.weights)):
-        pose, log_jacobian = audit.decode(label, latent)
+    decoded = [audit.decode(label, latent) for label in range(len(density.weights))]
+    # One batched mixture evaluation of every probe pose (identical values; avoids
+    # a quadratic number of per-component Python iterations for large atlases).
+    full_log, _, component_logs = density.evaluate([pose for pose, _ in decoded])
+    for label, (pose, log_jacobian) in enumerate(decoded):
         roundtrip.append(float(np.max(np.abs(audit.encode(label, pose)-latent))))
-        component_log = density.evaluate([pose])[2][0, label]-np.log(density.weights[label])
+        component_log = component_logs[label, label]-np.log(density.weights[label])
         measure.append(float(abs(component_log+log_jacobian-normal_log)))
         independent.append(float(abs(audit.gaussian(label, pose)-component_log)))
         if label < 4:
             probes.append(dict(label=label, latent=latent.tolist(), pose=pose,
-                physical_log_jacobian=log_jacobian, full_log_density=float(density.evaluate([pose])[0][0]),
+                physical_log_jacobian=log_jacobian, full_log_density=float(full_log[label]),
                 unweighted_component_log_density=float(component_log)))
     # Check ordinary and inverse physical charts for the first and last slots.
     jacobian_checks = []

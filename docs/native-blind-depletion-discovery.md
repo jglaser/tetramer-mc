@@ -478,3 +478,63 @@ multi-contact placements.
 
 - `examples/frozen-blind-contact-mixture-512-converged.json` (sha256 prefix
   `fc353bcc0c120297`): source `runs/fft-seeded-discovery-512-converged-20260926/frozen-fit-tempered-z0005/`.
+
+### GPU rescan for the weaker native contacts
+
+Post-hoc, the CPU scan had no peak near the five weaker native contacts. At
+their rotations the four kept peaks lay 20–48 Å away. So the scan was
+rerun keeping **every** local maximum.
+
+- [`tools/fft_depletion_docking_gpu.py`](../tools/fft_depletion_docking_gpu.py)
+  (CuPy/cuFFT, raw-kernel voxelization) matches the CPU maps to 0.02 Å³. It
+  keeps all local maxima with grid overlap ≥ 1000 Å³ at clash ≤ 2 Å³: about
+  70 per rotation, 20.8M peaks. The full 300k-rotation scan takes 4.6 min on
+  two H100s, versus 79 min on 110 CPU cores.
+- [`tools/gpu_rescore_peaks.py`](../tools/gpu_rescore_peaks.py) keeps one
+  peak per basin (about 7.6° rotation cells and 3 Å translation cells; 12.4M
+  basins) and rescores the best 3M by grid overlap on the GPU. The score is
+  the 0.5 Å fine-grid union overlap, summed over the fixed body's depletion
+  shell (the only region a hard-valid overlap can occupy), with a full-core
+  clash check. Each basin is also tried under 35 perturbations (radial
+  pushes of 0–2 Å, and ±1.5°/±3° rotations about the interface pivot). On
+  native and selected poses the fine score correlates 0.991 with the exact
+  estimator (median ratio 0.996). Runtime: 7 min on two GPUs; 299,187
+  basins become clash-free.
+- The best 20,000 then pass through the unchanged exact repair, scoring and
+  selection (`--basin-rotations` also exposes the basin reduction there).
+
+Post-hoc, the resulting 512 starts contain complete native entries for
+{3,8}, {4,5} and {10,12}, with {6,7} at scaled error 1.5. {4,5} is the
+contact the native-informed seed grows through. {2,9} and {0,1} (about 500
+and 190 Å³) and {11,13} remain missing.
+
+**Union map.** Converged discovery (2,000 steps) from these starts, merged
+with the converged radial-FFT slots, is ranked by search score and reduced
+by NMS to 768 distinct contacts. A final converged pass then has complete
+native entries for {6,7} (search rank 1, 1521 Å³), {3,8} (rank 3, 1322),
+{4,5} (rank 73, 839) and {10,12} (rank 462, 694). With \(z_w=0.005\)
+(54.4 effective slots) native slots carry 9.1% of the proposal mass, of
+which {4,5} carries 0.17%. \(z_w=0.0025\) flattens the map to 577 effective
+slots.
+
+In the 200-sweep, two-stream benchmark, measured against the converged 512
+map (18 accepted captures, 18 free–free native monomer bonds, 14 strong
+twisted contacts, 330 CPU s):
+
+- union \(z_w=0.005\): 14, 14, 14, 420 CPU s;
+- union \(z_w=0.0025\): 4, 4, 4, 416 CPU s (dilution).
+
+No arm grows the seed within 200 sweeps, so this benchmark cannot test the
+added seed-growth contacts. An assembly run with the union map at
+z = 0.0275 is the relevant test:
+`runs/cluster-oligomer-seed8-free256-discovery-union768` (on `/vast`),
+matched to the converged-map run.
+
+- `examples/frozen-blind-contact-mixture-768-union.json` (sha256 prefix
+  `175cf0ec68ece727`): source
+  `runs/fft-union-discovery-768-20260926/frozen-fit-tempered-z0005/`.
+
+The fitter's preflight now evaluates the whole mixture once, on all probe
+poses, instead of once per component (identical output bytes). The
+768-slot fit drops from about 15 minutes to under a minute. The GPU
+environment is a separate uv venv with `cupy-cuda13x` (see the tool docstrings).

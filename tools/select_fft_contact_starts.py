@@ -114,6 +114,25 @@ def pose_distance(a, b):
     return best
 
 
+def basin_maxima(rows, coarse, cell):
+    """Keep the best-scoring peak per (coarse rotation cell, translation cell).
+
+    A physical basin appears at several neighbouring fine rotations; this keeps
+    one representative per coarse cell so exact repair/scoring covers distinct
+    basins. Shape-only: uses the grid scores already in the scan.
+    """
+    from fft_depletion_docking import super_fibonacci
+    centers = super_fibonacci(coarse)
+    tree = cKDTree(np.vstack([centers, -centers]))
+    _, idx = tree.query(rows[:, 2:6])
+    rot = idx % coarse
+    tcell = np.floor(rows[:, 6:9]/cell).astype(np.int64)+512
+    key = ((rot.astype(np.int64)*1024+tcell[:, 0])*1024+tcell[:, 1])*1024+tcell[:, 2]
+    order = np.lexsort((-rows[:, 9], key))
+    first = np.r_[True, key[order][1:] != key[order][:-1]]
+    return rows[order[first]]
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--scan', required=True)
@@ -129,11 +148,17 @@ def main():
     p.add_argument('--distinct-angle', type=float, default=20.0)
     p.add_argument('--workers', type=int, default=100)
     p.add_argument('--seed', type=int, default=20260926501)
+    p.add_argument('--basin-rotations', type=int, default=0,
+                   help='coarse super-Fibonacci cells for basin maxima (0 = off)')
+    p.add_argument('--basin-translation', type=float, default=3.0)
     a = p.parse_args()
     out = Path(a.out); out.mkdir(parents=True)
     scan = Path(a.scan)
-    assert json.loads((scan/'manifest.json').read_text())['complete']
-    rows = np.concatenate([np.load(f) for f in sorted(scan.glob('shard-*.npy'))])
+    manifests = sorted(scan.glob('manifest*.json'))
+    assert manifests and all(json.loads(m.read_text())['complete'] for m in manifests)
+    rows = np.concatenate([np.load(f).astype(float) for f in sorted(scan.glob('shard-*.npy'))])
+    if a.basin_rotations:
+        rows = basin_maxima(rows, a.basin_rotations, a.basin_translation)
     # Deduplicate identical (rotation, translation) peaks found under both tolerances.
     key = np.round(rows[:, [0, 6, 7, 8]]).astype(np.int64)
     _, first = np.unique(key, axis=0, return_index=True)
@@ -167,7 +192,7 @@ def main():
     (out/'candidates.json').write_text(json.dumps(records)+'\n')
     (out/'selected.json').write_text(json.dumps(chosen, indent=1)+'\n')
     (out/'initial-poses.json').write_text(json.dumps([c['pose'] for c in chosen], indent=1)+'\n')
-    summary = dict(native_information=False, arguments=vars(a), scan_manifest_sha256=sha(scan/'manifest.json'),
+    summary = dict(native_information=False, arguments=vars(a), scan_manifest_sha256={m.name: sha(m) for m in manifests},
                    shape_sha256=sha(a.shape), script_sha256=sha(__file__), scorer_sha256=sha(SCORER),
                    pooled=len(rows), repaired_hard_valid=len(records), selected=len(chosen),
                    selected_overlap=[c['exact_overlap'] for c in chosen], wall_seconds=time.time()-started,

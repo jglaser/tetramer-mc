@@ -383,3 +383,60 @@ Artifacts (on `/vast`, symlinked under `runs/`): `fft-depletion-docking-20260926
 and `frozen-fit/`), `fft-seeded-benchmark-20260926/` and
 `fft-seeded-benchmark-native-20260926/`. Post-hoc recall:
 `tools/posthoc_native_recall.py <selected.json|discovery.json>`.
+
+### 512 contacts and the frozen assembly maps
+
+The same scan, with a 60,000-peak pool (30,000 per clash class), yields
+57,756 hard-valid repaired candidates and 512 distinct contacts
+(exact overlap 1386 down to 545 Å³). The motifs are directed, so they form
+seven inverse pairs. Counting pose inverses, post-hoc recall finds the two
+strongest native contacts, {3,8} (0.17 scaled error) and {6,7} (slot 1:
+motif 7 complete entry). The five weaker native contacts (about
+190–780 Å³) are not among the 512. At a native rotation, stronger
+near-clash grid peaks can take the four peaks kept per rotation, so
+recovering them would need a rescan that keeps more peaks.
+
+With equal slot masses, the 512-slot atlas diluted the useful charts. It
+accepted 1 of 23,897 learned captures versus 12 for the 64-slot atlas, at
+about 45% more CPU. The fitter therefore gained
+`--weight-activity z_w`: slot masses become proportional to
+\(\exp(z_w\,C_{\rm search})\), using each slot's own search-side score.
+Held-out clouds still never enter, and any positive frozen weights leave
+the physical target unchanged. \(z_w=0.005\) Å⁻³ gives 60.6 effective
+slots. Full pair-Boltzmann weighting at the physical \(z=0.0275\) would
+put 89% of the mass on one non-native contact.
+
+Matched 200-sweep, two-stream benchmark (the same seeds as above):
+
+| Atlas | Learned captures accepted | Free–free native bonds at sweep 200 | Registered free–free edges | Sampler CPU (s) |
+|---|---:|---:|---:|---:|
+| pilot (32 radial slots) | 0 | 0 | 0 | 245 |
+| FFT, 64 slots, equal | 12 | 11 | 1 | 230 |
+| FFT, 512 slots, equal | 1 | 1 | 0 | 334 |
+| FFT, 512 slots, tempered \(z_w=0.005\) | 15 | 14 | 4 | 343 |
+
+Per CPU second the two useful FFT atlases are comparable. These are two
+short realizations per arm, not rate or yield estimates.
+
+**Frozen proposal maps for assembly runs:**
+
+- `examples/frozen-blind-contact-mixture-512.json` (sha256 prefix
+  `c460dc61fb7bf9e7`): 512 slots, tempered weights, 1024 base / 2048
+  virtual components. Source: `runs/fft-seeded-discovery-512-20260926/frozen-fit-tempered-z0005/`.
+- `examples/frozen-blind-contact-mixture-64.json` (`481524a9a335cc02`):
+  64 slots, equal weights, about 35% cheaper per sweep in this benchmark.
+  Source: `runs/fft-seeded-discovery-20260926/frozen-fit/`.
+
+Both are ordinary `reciprocal-pose-mixture-v1` files for `--model`, for example:
+
+```bash
+target/release/tetramer-mc run --config examples/spherical-cluster-oligomer.json \
+  --model examples/frozen-blind-contact-mixture-512.json \
+  --free-tetramers 256 --tetramer-concentration-um 500 --seed 20260926 \
+  --depletant-radius 1.4 --depletant-activity 0.0275 \
+  --out runs/<fresh> --sweeps 10000 --sample-every 100
+```
+
+They were built for \(r_d=1.4\) Å. The contact search used only the shape;
+the activity enters only through the refinement kernel and the weight
+tempering. No native motif, label or production pose entered either map.

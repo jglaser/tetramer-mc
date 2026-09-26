@@ -33,6 +33,7 @@ import shutil
 import numpy as np
 import scipy
 from scipy.linalg import solve_triangular
+from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
 from analyze_involution_docking_campaign import ChartAudit
@@ -75,6 +76,7 @@ class FitOptions:
     shrinkage: float = 0.25
     covariance_floor: float = 0.01
     initial_weight: float = 0.5
+    weight_activity: float = 0.0
     audit_seed: int = 130200011
 
     def validate(self):
@@ -85,6 +87,8 @@ class FitOptions:
                 'shrinkage must lie in [0,1]')
         require(math.isfinite(self.initial_weight) and 0 < self.initial_weight < 1,
                 'initial_weight must lie strictly between zero and one; both branches are required')
+        require(math.isfinite(self.weight_activity) and self.weight_activity >= 0,
+                'weight_activity must be finite and nonnegative')
         require(type(self.audit_seed) is int and 0 <= self.audit_seed < 2**64,
                 'audit_seed must fit in u64')
 
@@ -188,10 +192,14 @@ def nearest_pair_lever(contact, pose, shape):
     require(type(moving) is int and type(fixed) is int and 0 <= moving < len(atoms)
             and 0 <= fixed < len(atoms), 'Invalid contact witness atom indices')
     placed = centers@rotation.T+position
-    gaps = np.linalg.norm(placed[:, None, :]-centers[None, :, :], axis=2)-radii[:, None]-radii[None, :]
-    require(gaps.min() >= 0, 'Nearest-pair pose is not hard-valid')
-    require(abs(gaps[moving, fixed]-gaps.min()) < 1e-9
-            and abs(gaps[moving, fixed]-witness['gap']) < 1e-7, 'Witness is not the closest atom pair')
+    recorded = float(np.linalg.norm(placed[moving]-centers[fixed])-radii[moving]-radii[fixed])
+    require(abs(recorded-witness['gap']) < 1e-7, 'Witness gap differs from its atom pair')
+    # Every pair with a gap below the recorded one lies within this center distance.
+    reach = recorded+2*float(radii.max())+1e-9
+    pairs = cKDTree(placed).sparse_distance_matrix(cKDTree(centers), reach, output_type='ndarray')
+    gaps = pairs['v']-radii[pairs['i']]-radii[pairs['j']]
+    require(len(gaps) > 0 and gaps.min() >= 0, 'Nearest-pair pose is not hard-valid')
+    require(abs(gaps.min()-recorded) < 1e-9, 'Witness is not the closest atom pair')
     delta = placed[moving]-centers[fixed]
     surface = centers[fixed]+delta/np.linalg.norm(delta)*radii[fixed]
     lever = surface-position
@@ -286,6 +294,16 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
             seed_slots.add(key)
         indexed.extend((source_index, slot) for slot in slots)
     count = len(indexed)
+    # Slot proposal masses: equal (weight_activity = 0), or tempered pair Boltzmann
+    # factors exp(z_w C) of each slot's own search-side score. Held-out validation
+    # clouds never enter. Any positive frozen weights leave the target unchanged
+    # because production uses the complete proposal density.
+    if options.weight_activity > 0:
+        log_raw = np.array([options.weight_activity*float(slot['search_optimized_score']['volume'])
+                            for _, slot in indexed])
+        masses = np.exp(log_raw-log_raw.max()); masses /= masses.sum()
+    else:
+        masses = np.full(count, 1./count)
     base, initial = empty_model(shape_hash, ell), empty_model(shape_hash, ell)
     reports = []
     for index, (source_index, slot) in enumerate(indexed):
@@ -304,12 +322,13 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
         poses = [sample['pose'] for sample in samples]
         coordinates, seam_distance = chart_coordinates(reference, poses, ell)
         mean, covariance, report = regularized_moments(coordinates, fit_baseline, options)
-        append_component(base, initial_anchor, np.zeros(6), initial_cov, options.initial_weight/count)
-        append_component(base, chart_anchor(reference), mean, covariance, (1-options.initial_weight)/count)
-        append_component(initial, initial_anchor, np.zeros(6), initial_cov, 1./count)
+        mass = float(masses[index])
+        append_component(base, initial_anchor, np.zeros(6), initial_cov, options.initial_weight*mass)
+        append_component(base, chart_anchor(reference), mean, covariance, (1-options.initial_weight)*mass)
+        append_component(initial, initial_anchor, np.zeros(6), initial_cov, mass)
         report.update(global_slot=index, source_index=source_index, local_slot=slot['slot'],
             source_seed=discoveries[source_index].get('config', {}).get('seed'),
-            seeds=copy.deepcopy(slot.get('seeds', {})), raw_slot_weight=1., slot_proposal_mass=1./count,
+            seeds=copy.deepcopy(slot.get('seeds', {})), raw_slot_weight=1., slot_proposal_mass=mass,
             initial_component=2*index, refined_component=2*index+1,
             reference_pose=copy.deepcopy(reference), reference_rule='recorded optimized contact pose (radial or nearest-pair witness)',
             retained_steps=steps, retained_rejected_count=sum(not sample['accepted'] for sample in samples),
@@ -327,7 +346,10 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
         angular_length=ell, angular_length_rule='2*max(atom-center RMS about their mean, maximum atom radius)',
         shape_scale=scale, options=asdict(options), retained_count=sum(r['retained_count'] for r in reports),
         retained_rejected_count=sum(r['retained_rejected_count'] for r in reports), slots=reports,
-        slot_allocation='All independent slots equally weighted; no score or population-size weights.',
+        slot_allocation=('All independent slots equally weighted; no score or population-size weights.'
+                         if options.weight_activity == 0 else
+                         'Tempered search-score weights exp(weight_activity*C_search); held-out clouds unused.'),
+        effective_slot_count=float(1/np.sum(masses**2)),
         covariance_rule=__doc__.split('\n\n')[2], limitation=LIMITATION,
         native_geometry_inputs=0, production_pose_inputs=0, physical_updates=0, bath_queries=0,
         full_gaussian_support=True, uniform_branch_in_model=False)
@@ -482,7 +504,8 @@ def main():
                         help='Completed discovery directories, in fixed order; may be repeated')
     parser.add_argument('--out', type=Path, required=True)
     defaults = FitOptions()
-    for name in ('translation_width', 'angle_width_degrees', 'shrinkage', 'covariance_floor', 'initial_weight'):
+    for name in ('translation_width', 'angle_width_degrees', 'shrinkage', 'covariance_floor', 'initial_weight',
+                 'weight_activity'):
         parser.add_argument('--'+name.replace('_', '-'), type=float, default=getattr(defaults, name))
     parser.add_argument('--audit-seed', type=int, default=defaults.audit_seed)
     args = parser.parse_args()

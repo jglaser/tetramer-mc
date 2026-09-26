@@ -1,8 +1,73 @@
 # Oligomer-conditioned proposal learning
 
-Status: design and code audit, 2026-09-25. No production kernel or running job is
-changed by this note. The current rigid-subset phase still uses a frozen
-single-handle atlas.
+Status: design and code audit, 2026-09-25. No running job is changed by this
+note. The rigid-subset phase uses the frozen single-handle atlas by default; the
+opt-in member charts below (2026-09-26) are the first step toward the
+conditional model.
+
+## Implemented: member charts (no fitting)
+
+With the default handle charts, transport evaluates the pair atlas only for the
+handle relative to one spectator anchor. Two consequences for a carried
+subset:
+
+- A subset touching the environment through a non-handle member sees only the
+  broad or defensive part of `G` at that endpoint. Detachments and exchanges then
+  pay the full broad/narrow volume ratio.
+- Rotations act about the handle center. Carried members swing through lever
+  arms, so the feasible cluster basin volume `v_S` inside a component of volume
+  `v_t` shrinks. Attachment flux falls by about `v_S/v_t`: entries show it as
+  hard rejections, exits as an explicit factor `v_S/v_t` in the acceptance.
+
+`transport_charts: "members"` replaces `G` by the exact mixture
+
+\[
+ G_S(g_h)=\frac1{|S|\,|A|}\sum_{i\in S}\sum_{a\in A}
+ G\big(g_a^{-1}g_h u_i\big),\qquad u_i=g_h^{-1}g_i .
+\]
+
+Right multiplication by the fixed `u_i` and left multiplication by `g_a^{-1}`
+preserve translation volume times Haar measure. So each term is a normalized
+density of the handle pose, and `G_S` is too. It does not depend on which
+member is the handle. The posterior-source map draws a joint
+(member, anchor, branch) source label by responsibility, and an independent
+uniform member, uniform anchor and weight-distributed branch as destination.
+It applies the existing virtual-chart map, including reciprocal branches, to the
+source member's anchor-relative pose. Then it carries all members with
+`H = g_i' g_i^{-1}`. The correction is `log G_S(old) - log G_S(new)`, with the
+same algebra as the single-handle posterior map. `A` is a uniformly drawn
+spectator plus its `anchor_count - 1` nearest spectators (center distance,
+label ties). It is built from spectators only, so it is identical at both
+endpoints. The uniform defensive branch is unchanged.
+
+What this covers from the plan above: conditioning on `S`, `xi` and a fixed
+spectator context, one collective pose and one correction, reuse of
+`RigidSubset` and the full moving-union gate, and preserved reciprocal
+branches. It does **not** learn anything. Component weights and covariances
+are still the single-body atlas's, so the `v_S/v_t` mismatch remains for
+cooperative, multiply-bound or crowded basins. Next is a size- or
+`xi`-conditioned rescaling of covariance **together with** component weights
+(narrowing alone moves the penalty into the Jacobian term). A deterministic
+per-context reconstruction as described below comes after that.
+
+Validation (`tests/cluster_member_charts.rs`,
+`tests/cluster_phase_stationarity.rs`):
+
+- Exact inverse through the swapped labels and inverse noise.
+- Label/Jacobian expansion equal to `log G_S(old) - log G_S(new)`, base and
+  reciprocal models.
+- Endpoint independent of handle choice; spectator-only pool unchanged by a
+  carried move.
+- An exact `G_S` sample stays `G_S`-distributed under the `c = 0.7` map, with
+  unit acceptance on every trial.
+- The production phase with member charts matches an independent analytic
+  four-sphere depletion reference from dispersed and aggregated starts. About
+  300 accepted corrected transports per chain; 120 and 142 of them switch the
+  chart member.
+
+A 20-sweep protein smoke run with the coverage reciprocal model completes. It is
+too short for any efficiency statement. A matched protein comparison against
+handle charts (completed exchanges and contact ESS per CPU) is still to do.
 
 ## What the conditioning must contain
 

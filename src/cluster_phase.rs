@@ -4,7 +4,7 @@
 use crate::{
     assembly_bias::{self, AssemblyBias, AssemblyBiasState},
     depletion::GateOptions,
-    docking::DockingProposal,
+    docking::{DockingMethod, DockingProposal},
     geometry::{Placed, SphereTree},
     math::*,
     rigid_subset::RigidSubset,
@@ -28,6 +28,29 @@ pub struct ClusterPhaseConfig {
     #[serde(rename = "local_translation_std_A")]
     pub local_translation_std_a: f64,
     pub local_small_angle_std_degrees: f64,
+    /// Transport chart family: the single-body handle atlas (default) or the
+    /// joint member/anchor mixture of `DockingProposal::propose_members`.
+    #[serde(skip_serializing_if = "TransportCharts::is_handle")]
+    pub transport_charts: TransportCharts,
+    /// Member charts only: uniformly drawn spectator anchor plus its nearest
+    /// spectators, `anchor_count` in total. Fixed by spectators alone.
+    #[serde(skip_serializing_if = "is_one")]
+    pub anchor_count: usize,
+}
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportCharts {
+    #[default]
+    Handle,
+    Members,
+}
+impl TransportCharts {
+    fn is_handle(&self) -> bool {
+        *self == Self::Handle
+    }
+}
+fn is_one(v: &usize) -> bool {
+    *v == 1
 }
 impl Default for ClusterPhaseConfig {
     fn default() -> Self {
@@ -39,6 +62,8 @@ impl Default for ClusterPhaseConfig {
             correlation: 0.9,
             local_translation_std_a: 0.2,
             local_small_angle_std_degrees: 1.,
+            transport_charts: TransportCharts::Handle,
+            anchor_count: 1,
         }
     }
 }
@@ -64,6 +89,10 @@ impl ClusterPhaseConfig {
         ensure!(
             self.correlation.is_finite() && (-1. ..=1.).contains(&self.correlation),
             "invalid cluster map correlation"
+        );
+        ensure!(
+            self.anchor_count > 0,
+            "cluster anchor count must be positive"
         );
         Ok(())
     }
@@ -299,6 +328,33 @@ pub struct Channel {
     pub rate: f64,
 }
 
+/// Primary spectator plus its nearest spectators by center distance, ties
+/// by label; at most `count` labels. Only spectator poses enter, so a rigid
+/// move of `members` leaves the pool unchanged.
+pub fn anchor_pool(
+    state: &[Pose],
+    members: &[usize],
+    primary: usize,
+    count: usize,
+) -> Result<Vec<usize>> {
+    ensure!(
+        count > 0 && primary < state.len() && !members.contains(&primary),
+        "invalid cluster primary anchor"
+    );
+    let mut rest: Vec<_> = (0..state.len())
+        .filter(|&i| i != primary && !members.contains(&i))
+        .map(|i| {
+            let d = sub(state[i].position, state[primary].position);
+            (dot(d, d), i)
+        })
+        .collect();
+    rest.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    Ok(std::iter::once(primary)
+        .chain(rest.into_iter().map(|(_, i)| i))
+        .take(count)
+        .collect())
+}
+
 /// None means no event inside the remaining fixed horizon. Rejecting events
 /// still consume this waiting time. Zero rate consumes no RNG.
 pub fn next_wait(rng: &mut StdRng, rate: f64, remaining: f64) -> Result<Option<f64>> {
@@ -367,6 +423,12 @@ impl<'a> ClusterPhase<'a> {
             !config.enabled() || config.transport_probability == 0. || proposal.is_some(),
             "cluster transport requires frozen learned proposal"
         );
+        if let (TransportCharts::Members, Some(p)) = (config.transport_charts, &proposal) {
+            ensure!(
+                p.method() == DockingMethod::PosteriorInvolution && !p.is_periodic(),
+                "member transport charts need a nonperiodic posterior-involution model"
+            );
+        }
         let mut shape = tree.shape.clone();
         for atom in &mut shape.atoms {
             atom.radius += rd;
@@ -454,6 +516,22 @@ impl<'a> ClusterPhase<'a> {
                 if spectator_indices.is_empty() {
                     info = json!({"branch":"transport","null_reason":"no_external_anchor"});
                     None
+                } else if self.config.transport_charts == TransportCharts::Members {
+                    let primary =
+                        spectator_indices[proposal_rng.random_range(0..spectator_indices.len())];
+                    let pool = anchor_pool(poses, members, primary, self.config.anchor_count)?;
+                    let member_poses: Vec<_> = members.iter().map(|&i| poses[i]).collect();
+                    let anchors: Vec<_> = pool.iter().map(|&i| poses[i]).collect();
+                    let position = members.iter().position(|&i| i == handle).unwrap();
+                    let (p, mut trace) = self.proposal.as_ref().unwrap().propose_members(
+                        proposal_rng,
+                        &member_poses,
+                        position,
+                        &anchors,
+                    )?;
+                    trace["anchor_pool"] = json!(pool);
+                    info = trace;
+                    p
                 } else {
                     let spectators: Vec<_> = spectator_indices.iter().map(|&i| poses[i]).collect();
                     let (p, mut trace) = self.proposal.as_ref().unwrap().propose(

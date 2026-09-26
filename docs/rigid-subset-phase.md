@@ -139,6 +139,12 @@ The opt-in configuration is
 }
 ```
 
+Optional `"transport_charts": "members"` with `"anchor_count": 4` replaces the
+single-handle transport charts by the member/anchor mixture described in
+[oligomer-conditioned learning](oligomer-conditioned-learning.md#implemented-member-charts-no-fitting).
+It needs a nonperiodic posterior-involution model. Omitting both keys keeps
+the handle charts and the existing random stream.
+
 These values are a starting point for tests, not a tuned recommendation. Expected attempt count is approximately `duration * Lambda` over a slowly changing state, rather than a prescribed number per phase. Doubling every rate is equivalent to doubling the duration for this isolated phase. Separate size rates control the relative rate of dimers and trimers, while the local/transport mixture controls how a selected subset is moved.
 
 The implemented initial scope is spherical boundaries and frozen proposal models. A local-only rigid branch can operate without an atlas. The phase runs after the ordinary single-body move, GCA, and center-shift schedules and before any auxiliary refresh. It uses separate named streams and archives configuration, clock diagnostics and all attempted events when move logging is enabled; checkpoint continuation is deterministic. Assembly bias corrects each elementary subset move with the existing instantaneous cluster-size observable. Cluster bias counts live under `counts.cluster_phase` (`physical_accepted`, `bias_rejected`, `accepted`), separately from the original `counts.assembly_bias` per-kernel counters. Unsupported periodic and adaptive-model combinations fail validation. The portable configuration is [spherical-cluster-phase.json](../examples/spherical-cluster-phase.json), with a command in the [example guide](../examples/README.md#experimental-dimertrimer-transport-phase).
@@ -151,7 +157,7 @@ Spherical GCA, center shifts, and this phase can complement each other. GCA reta
 |---|---|---|
 | Connected pairs and triples only | Small exhaustive catalogue, direct test of observed solution oligomers | Evidence that larger oligomers dominate blocked productive moves |
 | Constant rate per subset size | Internal invariance is transparent | A cheap internal-geometry score predictive of useful accepted exchanges |
-| Existing single-handle covariance | Reuses the validated six-dimensional map | Multiple carried bodies consistently narrow or rotate the useful docking basin |
+| Existing single-handle covariance | Reuses the validated six-dimensional map | Multiple carried bodies consistently narrow or rotate the useful docking basin. Opt-in member charts now let any member dock and rotate about it; covariances and weights are still single-body |
 | Exclusion contact for connectivity | Native-blind predicate with exact sphere-union queries | Better geometric recruitment score with an equally explicit reverse law |
 | Spherical boundaries first | Matches the currently stalled seeded run | A separate periodic rigid-subset transform and image-consistency audit |
 | Rebuild eligible list after changes | Simple correctness baseline | Profiling shows local graph updates or caching are needed |

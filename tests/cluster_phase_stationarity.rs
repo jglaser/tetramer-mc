@@ -5,12 +5,13 @@
 //! many-body ideal-depletion target therefore has an exact analytic pair-lens
 //! reference, independently importance sampled in the protein-only spherical
 //! wall. The bath itself has no wall exclusion. Saved samples retain rejections.
+//! A second test repeats the check with four spheres and member transport charts.
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
 use serde_json::json;
 use std::f64::consts::PI;
 use tetramer_mc::{
-    cluster_phase::{ClusterPhase, ClusterPhaseConfig, ClusterPhaseCounts},
+    cluster_phase::{ClusterPhase, ClusterPhaseConfig, ClusterPhaseCounts, TransportCharts},
     depletion::GateOptions,
     docking::{DockingMethod, DockingProposal},
     geometry::{Atom, Shape, SphereTree},
@@ -57,32 +58,44 @@ fn lens(distance: f64) -> f64 {
     }
 }
 fn exact(poses: &[Pose]) -> Option<(f64, [f64; OBS])> {
+    let n = poses.len();
     let mut weight = 0.;
     let mut contacts = 0;
     let mut distance2 = 0.;
-    for i in 0..3 {
-        for j in i + 1..3 {
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            i = parent[i];
+        }
+        i
+    }
+    for i in 0..n {
+        for j in i + 1..n {
             let d = norm(sub(poses[i].position, poses[j].position));
             if d < 2. {
                 return None;
             }
             weight += Z * lens(d);
-            contacts += usize::from(d < 2. * (1. + RD));
+            if d < 2. * (1. + RD) {
+                contacts += 1;
+                let (a, b) = (root(&mut parent, i), root(&mut parent, j));
+                parent[a] = b;
+            }
             distance2 += d * d;
         }
     }
-    let largest = match contacts {
-        0 => 1,
-        1 => 2,
-        _ => 3,
-    };
+    let mut sizes = vec![0; n];
+    for i in 0..n {
+        sizes[root(&mut parent, i)] += 1;
+    }
+    let largest = *sizes.iter().max().unwrap();
     Some((
         weight.exp(),
         [
             contacts as f64,
             largest as f64,
-            distance2 / 3.,
-            poses.iter().map(|p| p.orientation[0].powi(2)).sum::<f64>() / 3.,
+            distance2 / (n * (n - 1) / 2) as f64,
+            poses.iter().map(|p| p.orientation[0].powi(2)).sum::<f64>() / n as f64,
         ],
     ))
 }
@@ -94,7 +107,7 @@ struct Reference {
     ess: f64,
     valid: usize,
 }
-fn reference(draws: usize) -> Reference {
+fn reference(draws: usize, bodies: usize) -> Reference {
     let mut rng = StdRng::seed_from_u64(10459359);
     let mut sumw = 0.;
     let mut sumw2 = 0.;
@@ -103,11 +116,7 @@ fn reference(draws: usize) -> Reference {
     let mut sumw2f = [0.; OBS];
     let mut sumw2f2 = [0.; OBS];
     for _ in 0..draws {
-        let poses = [
-            uniform_pose(&mut rng),
-            uniform_pose(&mut rng),
-            uniform_pose(&mut rng),
-        ];
+        let poses: Vec<_> = (0..bodies).map(|_| uniform_pose(&mut rng)).collect();
         let Some((w, f)) = exact(&poses) else {
             continue;
         };
@@ -179,6 +188,7 @@ struct Chain {
     corrected_involutions: u64,
     accepted_involutions: u64,
     accepted_corrected_involutions: u64,
+    member_switches: u64,
 }
 fn run_chain(
     tree: &SphereTree,
@@ -186,7 +196,9 @@ fn run_chain(
     mut poses: Vec<Pose>,
     seed: u64,
     learned: bool,
+    charts: TransportCharts,
 ) -> Chain {
+    let bodies = poses.len();
     let cfg = ClusterPhaseConfig {
         duration: 0.5,
         dimer_rate: 4.,
@@ -194,6 +206,8 @@ fn run_chain(
         transport_probability: if learned { 0.7 } else { 0. },
         local_translation_std_a: 0.5,
         local_small_angle_std_degrees: 20.,
+        transport_charts: charts,
+        anchor_count: 2,
         ..ClusterPhaseConfig::default()
     };
     let gate = GateOptions {
@@ -221,11 +235,12 @@ fn run_chain(
     let mut corrected_involutions = 0;
     let mut accepted_involutions = 0;
     let mut accepted_corrected_involutions = 0;
+    let mut member_switches = 0;
     for sweep in 0..burn + block_size * blocks {
         // Fixed three single-body attempts; proposals are uniform in the same
         // sphere-center domain in both directions. Orientations are Haar.
-        for _ in 0..3 {
-            let i = single_rng.random_range(0..3);
+        for _ in 0..bodies {
+            let i = single_rng.random_range(0..bodies);
             let proposed = uniform_pose(&mut single_rng);
             let trial = RigidSubset::new(tree, &poses, &[i], i, proposed, RD).unwrap();
             if sweep >= burn {
@@ -264,6 +279,14 @@ fn run_chain(
         if sweep >= burn {
             for row in &records {
                 if row["kind"] == "cluster_event" && row["proposal"]["branch"] == "involution" {
+                    if charts == TransportCharts::Members {
+                        assert_eq!(row["proposal"]["charts"], "members");
+                        member_switches += u64::from(
+                            row["proposal"]["labels"]["source"]["member"]
+                                != row["proposal"]["labels"]["target"]["member"]
+                                && row["accepted"] == true,
+                        );
+                    }
                     let corrected = row["proposal"]["log_reverse_forward"]
                         .as_f64()
                         .is_some_and(|x| x.abs() > 1e-6);
@@ -303,6 +326,7 @@ fn run_chain(
         corrected_involutions,
         accepted_involutions,
         accepted_corrected_involutions,
+        member_switches,
     }
 }
 
@@ -319,7 +343,7 @@ fn fixed_duration_cluster_phase_matches_independent_sphere_equilibrium() {
     })
     .unwrap();
     let wall = Container::new(WALL, &tree).unwrap();
-    let reference = reference(250_000);
+    let reference = reference(250_000, 3);
     assert!(reference.ess > 60_000. && reference.valid > 60_000);
     let dispersed = vec![
         pose([-1.8, -1.1, 0.]),
@@ -336,9 +360,30 @@ fn fixed_duration_cluster_phase_matches_independent_sphere_equilibrium() {
     assert_eq!(exact(&dispersed).unwrap().1[0], 0.);
     assert_eq!(exact(&aggregated).unwrap().1[0], 3.);
     let chains = [
-        run_chain(&tree, &wall, dispersed, 820001, false),
-        run_chain(&tree, &wall, aggregated.clone(), 820002, false),
-        run_chain(&tree, &wall, aggregated, 820003, true),
+        run_chain(
+            &tree,
+            &wall,
+            dispersed,
+            820001,
+            false,
+            TransportCharts::Handle,
+        ),
+        run_chain(
+            &tree,
+            &wall,
+            aggregated.clone(),
+            820002,
+            false,
+            TransportCharts::Handle,
+        ),
+        run_chain(
+            &tree,
+            &wall,
+            aggregated,
+            820003,
+            true,
+            TransportCharts::Handle,
+        ),
     ];
     eprintln!("independent_reference: {reference:?}");
     for (i, c) in chains.iter().enumerate() {
@@ -377,5 +422,83 @@ fn fixed_duration_cluster_phase_matches_independent_sphere_equilibrium() {
             (chains[0].mean[k] - chains[1].mean[k]).abs() < tolerance,
             "initialization disagreement in observable {k}"
         );
+    }
+}
+
+/// Same production phase with joint member/anchor charts. Four spheres give
+/// dimers two spectators, so the anchor pool has more than one label.
+#[test]
+fn member_chart_cluster_phase_matches_independent_four_sphere_equilibrium() {
+    let tree = SphereTree::new(Shape {
+        name: "analytic sphere".into(),
+        volume: 4. * PI / 3.,
+        atoms: vec![Atom {
+            center: [0.; 3],
+            radius: 1.,
+        }],
+    })
+    .unwrap();
+    let wall = Container::new(WALL, &tree).unwrap();
+    let reference = reference(1_000_000, 4);
+    assert!(
+        reference.valid > 100_000 && reference.ess > 80_000.,
+        "{reference:?}"
+    );
+    let dispersed = vec![
+        pose([-1.8, -1.1, 0.]),
+        pose([1.8, -1.1, 0.]),
+        pose([0., 2., 0.]),
+        pose([0., 0., 2.2]),
+    ];
+    let aggregated = vec![
+        pose([0., 0., 0.]),
+        pose([2.05, 0., 0.]),
+        pose([0., 2.05, 0.]),
+        pose([0., 0., 2.05]),
+    ];
+    assert_eq!(exact(&dispersed).unwrap().1[0], 0.);
+    assert_eq!(exact(&aggregated).unwrap().1[0], 3.);
+    let chains = [
+        run_chain(
+            &tree,
+            &wall,
+            dispersed,
+            830001,
+            true,
+            TransportCharts::Members,
+        ),
+        run_chain(
+            &tree,
+            &wall,
+            aggregated,
+            830002,
+            true,
+            TransportCharts::Members,
+        ),
+    ];
+    eprintln!("four_sphere_reference: {reference:?}");
+    for (i, c) in chains.iter().enumerate() {
+        eprintln!("member_chart_chain_{i}: {c:?}");
+        assert!(c.cluster.transport_events > 5_000);
+        assert!(
+            c.corrected_involutions > 1_000 && c.accepted_corrected_involutions > 50,
+            "need accepted nontrivially corrected member-chart trials"
+        );
+        assert!(
+            c.member_switches > 20,
+            "accepted moves must switch the chart member"
+        );
+        assert!(c.cluster.accepted_attachments > 100 && c.cluster.accepted_detachments > 100);
+        for k in 0..OBS {
+            let tolerance = 5. * (c.se[k].powi(2) + reference.se[k].powi(2)).sqrt() + 0.002;
+            assert!(
+                (c.mean[k] - reference.mean[k]).abs() < tolerance,
+                "chain {i}, observable {k}: chain {} +/- {}, reference {} +/- {}",
+                c.mean[k],
+                c.se[k],
+                reference.mean[k],
+                reference.se[k]
+            );
+        }
     }
 }

@@ -533,6 +533,247 @@ impl DockingProposal {
         }
         Ok((Some(proposed), info))
     }
+
+    pub fn method(&self) -> DockingMethod {
+        self.method
+    }
+    pub fn is_periodic(&self) -> bool {
+        self.model.is_periodic()
+    }
+
+    /// Joint label log weights w_b N_b(g_a^{-1} g_i) / (|S| |A|), flattened
+    /// member-major, then anchor, then virtual branch. Their log-sum is the
+    /// normalized member-chart density log G_S of the carried handle pose.
+    fn member_label_logs(&self, members: &[Pose], pool: &[Pose]) -> Result<Vec<f64>> {
+        let offset = ((members.len() * pool.len()) as f64).ln();
+        let mut out = Vec::with_capacity(members.len() * pool.len() * self.branches.len());
+        for &m in members {
+            for &a in pool {
+                let relative = anchor_relative(a, m);
+                for (b, w) in self.log_component_weights.iter().enumerate() {
+                    out.push(w + self.component_log_density(b, relative)? - offset);
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// log w_b N_b(g_a^{-1} g) for every virtual branch b.
+    pub fn branch_log_densities(&self, pose: Pose, anchor: Pose) -> Result<Vec<f64>> {
+        let relative = anchor_relative(anchor, pose);
+        self.log_component_weights
+            .iter()
+            .enumerate()
+            .map(|(b, w)| Ok(w + self.component_log_density(b, relative)?))
+            .collect()
+    }
+
+    /// Learned member-chart density of a rigid subset, excluding the uniform
+    /// branch. Right-multiplication by a fixed internal offset preserves
+    /// translation volume times Haar measure, so each term is a normalized
+    /// density of the handle pose; the average over members and anchors is too.
+    /// It is independent of which member serves as handle.
+    pub fn members_log_density(&self, members: &[Pose], pool: &[Pose]) -> Result<f64> {
+        ensure!(
+            !members.is_empty() && !pool.is_empty(),
+            "Member charts need members and anchors"
+        );
+        Ok(log_sum(&self.member_label_logs(members, pool)?))
+    }
+
+    /// Posterior-source involution over joint (member, anchor, branch) charts.
+    /// Any carried member can be the docking interface, and rotations act
+    /// about that member instead of the handle. The anchor pool must be fixed
+    /// by spectators alone, so it is identical at both endpoints. Returns the
+    /// proposed handle pose. Nonperiodic frozen posterior models only.
+    pub fn propose_members(
+        &self,
+        rng: &mut StdRng,
+        members: &[Pose],
+        handle: usize,
+        pool: &[Pose],
+    ) -> Result<(Option<Pose>, Value)> {
+        ensure!(
+            self.method == DockingMethod::PosteriorInvolution && !self.model.is_periodic(),
+            "Member charts need a nonperiodic posterior-involution model"
+        );
+        ensure!(
+            handle < members.len() && !pool.is_empty(),
+            "Invalid member-chart handle or empty anchor pool"
+        );
+        if rng.random::<f64>() < self.model.uniform_weight() {
+            let mut p = uniform_pose(rng, self.cube);
+            p.position = add(sub(p.position, scale(self.cube, 0.5)), self.center);
+            return Ok((
+                Some(p),
+                json!({"branch":"uniform","charts":"members","log_reverse_forward":0.}),
+            ));
+        }
+        let old_logs = self.member_label_logs(members, pool)?;
+        let Some(source) = draw_log_category(rng, &old_logs)? else {
+            return Ok((
+                None,
+                json!({"branch":"involution","charts":"members",
+                    "null_reason":"No finite Gaussian source density"}),
+            ));
+        };
+        let nb = self.branches.len();
+        let na = pool.len();
+        let source = MemberLabel {
+            member: source / (na * nb),
+            anchor: source / nb % na,
+            branch: source % nb,
+        };
+        let target_member = rng.random_range(0..members.len());
+        let target_anchor = rng.random_range(0..na);
+        let target = MemberLabel {
+            member: target_member,
+            anchor: target_anchor,
+            branch: draw_log_category(rng, &self.log_component_weights)?
+                .context("No destination component")?,
+        };
+        let noise = std::array::from_fn(|_| StandardNormal.sample(rng));
+        let labels = json!({"source":source,"target":target});
+        match self.apply_member_trace(members, handle, pool, source, target, noise) {
+            Ok(step) => {
+                let mut info = serde_json::to_value(&step)?;
+                info["branch"] = json!("involution");
+                info["charts"] = json!("members");
+                info["source_law"] = json!("posterior");
+                info["labels"] = labels;
+                Ok((Some(step.handle), info))
+            }
+            Err(error) => Ok((
+                None,
+                json!({"branch":"involution","charts":"members","labels":labels,
+                    "noise":noise,"null_reason":error.to_string()}),
+            )),
+        }
+    }
+
+    /// Deterministic member-chart map for given labels and noise. The inverse
+    /// uses the swapped labels and `step.inverse_trace.noise` from the carried
+    /// endpoint with the same pool.
+    pub fn apply_member_trace(
+        &self,
+        members: &[Pose],
+        handle: usize,
+        pool: &[Pose],
+        source: MemberLabel,
+        target: MemberLabel,
+        noise: [f64; 6],
+    ) -> Result<MemberStep> {
+        let nb = self.branches.len();
+        let na = pool.len();
+        let index = |l: MemberLabel| (l.member * na + l.anchor) * nb + l.branch;
+        ensure!(
+            handle < members.len()
+                && [source, target]
+                    .iter()
+                    .all(|l| l.member < members.len() && l.anchor < na && l.branch < nb),
+            "Invalid member-chart label"
+        );
+        let old_logs = self.member_label_logs(members, pool)?;
+        let full_old = log_sum(&old_logs);
+        ensure!(full_old.is_finite(), "Nonfinite member-chart density");
+        let trace = BasinTrace {
+            source: source.branch,
+            target: target.branch,
+            noise,
+        };
+        let relative = anchor_relative(pool[source.anchor], members[source.member]);
+        let step = self.apply_relative_trace(relative, &trace)?;
+        if self.correlation == 1. && source == target {
+            return Ok(MemberStep {
+                handle: members[handle],
+                step,
+                identity: true,
+                full_old_member_log_density: full_old,
+                full_new_member_log_density: full_old,
+                label_log_reverse_forward: 0.,
+                expanded_log_reverse_forward: 0.,
+                log_reverse_forward: 0.,
+            });
+        }
+        let anchor = pool[target.anchor];
+        let ar = rotation(anchor.orientation);
+        let moved = Pose {
+            position: add(anchor.position, matvec(ar, step.pose.position)),
+            orientation: quaternion(matmul(ar, rotation(step.pose.orientation))),
+        };
+        moved.validate()?;
+        // Common rigid motion H = g_i' g_i^{-1}, applied to every member.
+        let reference = members[target.member];
+        let delta = matmul(
+            rotation(moved.orientation),
+            transpose(rotation(reference.orientation)),
+        );
+        let carry = |p: Pose| Pose {
+            position: add(
+                moved.position,
+                matvec(delta, sub(p.position, reference.position)),
+            ),
+            orientation: quaternion(matmul(delta, rotation(p.orientation))),
+        };
+        let proposed = carry(members[handle]);
+        proposed.validate()?;
+        let new_members: Vec<_> = members.iter().map(|&p| carry(p)).collect();
+        let new_logs = self.member_label_logs(&new_members, pool)?;
+        let full_new = log_sum(&new_logs);
+        ensure!(full_new.is_finite(), "Nonfinite member-chart density");
+        // Same algebra as the single-handle posterior map: responsibilities,
+        // destination law and chart Jacobian combine to log G_S(old)-log G_S(new).
+        let labels = (new_logs[index(target)] - full_new) - (old_logs[index(source)] - full_old)
+            + self.log_component_weights[source.branch]
+            - self.log_component_weights[target.branch];
+        Ok(MemberStep {
+            handle: proposed,
+            identity: false,
+            full_old_member_log_density: full_old,
+            full_new_member_log_density: full_new,
+            label_log_reverse_forward: labels,
+            expanded_log_reverse_forward: step.log_correction + labels,
+            log_reverse_forward: full_old - full_new,
+            step,
+        })
+    }
+}
+
+/// Joint chart label: carried member, pool anchor, virtual atlas branch.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemberLabel {
+    pub member: usize,
+    pub anchor: usize,
+    pub branch: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MemberStep {
+    pub handle: Pose,
+    pub step: BasinStep,
+    pub identity: bool,
+    pub full_old_member_log_density: f64,
+    pub full_new_member_log_density: f64,
+    pub label_log_reverse_forward: f64,
+    pub expanded_log_reverse_forward: f64,
+    pub log_reverse_forward: f64,
+}
+
+/// Body-frame pose of `pose` relative to `anchor`, without periodic images.
+fn anchor_relative(anchor: Pose, pose: Pose) -> Pose {
+    let ar = transpose(rotation(anchor.orientation));
+    Pose {
+        position: matvec(ar, sub(pose.position, anchor.position)),
+        orientation: quaternion(matmul(ar, rotation(pose.orientation))),
+    }
+}
+
+fn log_sum(values: &[f64]) -> f64 {
+    let maximum = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if !maximum.is_finite() {
+        return maximum;
+    }
+    maximum + values.iter().map(|v| (v - maximum).exp()).sum::<f64>().ln()
 }
 
 /// Gumbel-max avoids exponentiating tiny component responsibilities or silently

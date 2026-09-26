@@ -26,6 +26,7 @@ pub mod auxiliary;
 pub mod basin_involution;
 pub mod conditional;
 pub mod conditional_axis;
+pub mod contact_discovery;
 pub mod contact_memory;
 
 pub mod cluster_phase;

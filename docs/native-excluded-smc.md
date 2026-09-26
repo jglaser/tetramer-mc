@@ -231,8 +231,9 @@ output authentication, resealed tampering, no overwrite and failure stopping.
 The common resource-aware executor retains its previously validated worker-limit
 and child-draining implementation. An independent review found no launch blocker.
 
-The campaign launched from its frozen runner and is still an independent
-fixed-scaffold denominator control:
+The campaign completed on 2026-09-25 with all 12 physical populations and
+12 independent audits. It remains an independent fixed-scaffold denominator
+control:
 
 - [Frozen control plan](../runs/native-excluded-smc-control-20260924/plan.json)
 - [Launch receipt](../runs/native-excluded-smc-control-20260924/launch-receipt.json)
@@ -242,3 +243,36 @@ Completion does not authorize full-vessel or assembly production. Even agreement
 of this denominator control cannot repair all native-region strata failures in
 the completed importance campaign. The finite-system thermodynamic conclusion
 remains unresolved.
+
+
+## Completed results — reviewed 2026-09-26
+
+The [summary-only review](../runs/native-excluded-smc-review-20260926/report.md)
+reconstructs the linear population means from the saved outputs and preserves
+all arms. No physical samples or classifications were rerun.
+
+| Arm | log competing-contact mass | Population relative SE |
+|---|---:|---:|
+| narrow | 42.592945 | 2.36% |
+| large | 42.470307 | 7.64% |
+| broad | 43.052265 | 18.47% |
+
+Both narrow-step arms agree with all four matching importance estimates.
+All 12 hard-only volume comparisons pass. This supplies independent support for
+the earlier competing denominator, while leaving its convergence unresolved:
+the broad control fails the 10% precision and 0.2-log agreement criteria.
+All aggregate comparisons remain within three combined linear standard errors.
+Even narrow versus large fails one significant orthant comparison (58,
+0.2234 log units, about 1% of mass).
+
+Broad final-stage acceptance is 0.842%, versus about 35.72% for narrow steps.
+Its largest initial family accounts for 25.7–53.4% of terminal descendants;
+these genealogy diagnostics are not independent-sample ESS. The broad excess
+is spread among existing important subdivisions rather than demonstrating a
+new dominant basin. Poor mutation is a plausible contributor, and the fixed
+allocation does not determine which mean is closest to the true integral.
+
+The deterministic unbound bound inside R4 is negligible relative to the measured
+contact scale, but unseen contact contributions and space outside R4 remain
+unbounded by this calculation. Native mass is excluded by construction. The
+native numerator and finite-system assembly verdict remain unresolved.

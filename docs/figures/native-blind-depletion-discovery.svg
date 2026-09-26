@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="475" viewBox="0 0 1320 475" role="img" aria-labelledby="title desc">
+  <title id="title">Native-blind contact discovery, frozen fitting, and exact production acceptance</title>
+  <desc id="desc">Rigid shape and bath supply random outer contacts. A greedy union-overlap search supplies optimized contacts, followed by exact pair Monte Carlo refinement. All slots and repeated states are fitted and frozen before exact many-body physical sampling. Independent holdout overlap estimates are a reporting branch and never select or weight the model. Initial contacts also supply the matched initial-only control and protective half of the discovered proposal.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#526175"/></marker>
+    <style>
+      text{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;fill:#162336}
+      .title{font-size:25px;font-weight:650}.label{font-size:17px;font-weight:650}.body{font-size:14px}.small{font-size:13px;fill:#465871}
+      .box{stroke-width:1.5;rx:12}.flow{fill:none;stroke:#526175;stroke-width:2;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1320" height="475" fill="#fafbfd"/>
+  <text x="28" y="40" class="title">Native-blind discovery → frozen proposals → exact physical sampling</text>
+  <text x="28" y="66" class="body">Only shape, bath, explicit budgets, and independent random streams enter preparation.</text>
+  <rect x="20" y="98" width="185" height="170" class="box" fill="#eaf1fa" stroke="#9ab4d6"/>
+  <text x="36" y="130" class="label">1. Rigid shape</text>
+  <text x="36" y="158" class="body"><tspan x="36">Atomic sphere union</tspan><tspan x="36" dy="23">Depletant radius/activity</tspan><tspan x="36" dy="23">No native pair labels</tspan><tspan x="36" dy="23">No production poses</tspan></text>
+  <rect x="235" y="98" width="185" height="170" class="box" fill="#eaf1fa" stroke="#9ab4d6"/>
+  <text x="251" y="130" class="label">2. Outer contacts</text>
+  <text x="251" y="158" class="body"><tspan x="251">Haar rotations</tspan><tspan x="251" dy="23">Isotropic contact rays</tspan><tspan x="251" dy="23">Exact hard checks</tspan><tspan x="251" dy="23">Every slot preserved</tspan></text>
+  <rect x="450" y="98" width="185" height="170" class="box" fill="#fff3df" stroke="#d8ac61"/>
+  <text x="466" y="130" class="label">3. Overlap search</text>
+  <text x="466" y="158" class="body"><tspan x="466">Union score L + U·k/n</tspan><tspan x="466" dy="23">Perturb and project</tspan><tspan x="466" dy="23">Greedy improvement</tspan><tspan x="466" dy="23">Offline heuristic</tspan></text>
+  <rect x="665" y="98" width="185" height="170" class="box" fill="#e8f4ed" stroke="#83b79a"/>
+  <text x="681" y="130" class="label">4. Exact pair MC</text>
+  <text x="681" y="158" class="body"><tspan x="681">Existing Poisson gate</tspan><tspan x="681" dy="23">Fixed burn and stride</tspan><tspan x="681" dy="23">Keep rejected repeats</tspan><tspan x="681" dy="23">Finite local exploration</tspan></text>
+  <rect x="880" y="98" width="185" height="170" class="box" fill="#eeeaf8" stroke="#a999cc"/>
+  <text x="896" y="130" class="label">5. Fit and freeze</text>
+  <text x="896" y="158" class="body"><tspan x="896">All slots; equal mass</tspan><tspan x="896" dy="23">Regularized Gaussians</tspan><tspan x="896" dy="23">Exact inverse branches</tspan><tspan x="896" dy="23">Full normalized density</tspan></text>
+  <rect x="1095" y="98" width="205" height="170" class="box" fill="#e8f4ed" stroke="#83b79a"/>
+  <text x="1111" y="130" class="label">6. Physical sampling</text>
+  <text x="1111" y="158" class="body"><tspan x="1111">Full proposal correction</tspan><tspan x="1111" dy="23">Hard cores and wall</tspan><tspan x="1111" dy="23">Many-body exclusion union</tspan><tspan x="1111" dy="23">Exact auxiliary acceptance</tspan></text>
+  <path d="M205 180H231 M420 180H446 M635 180H661 M850 180H876 M1065 180H1091" class="flow"/>
+  <rect x="370" y="332" width="400" height="89" class="box" fill="#f2f4f7" stroke="#b4becb"/>
+  <text x="387" y="359" class="label">Independent holdouts: reporting only</text>
+  <text x="387" y="384" class="body">Two fresh clouds for each initial and optimized pose.</text>
+  <text x="387" y="406" class="small">No winner selection, slot removal, weighting, or feedback.</text>
+  <path d="M542 268V328" class="flow"/>
+  <path d="M327 268V306H395V328" class="flow"/>
+  <path d="M280 268V446H968V272" class="flow" stroke-dasharray="5 4"/>
+  <rect x="790" y="332" width="485" height="75" rx="10" fill="#fafbfd"/>
+  <text x="803" y="353" class="body">Initial contacts remain in both frozen arms:</text>
+  <text x="803" y="376" class="small">initial-only control; 50% initial + 50% refined proposal.</text>
+  <text x="803" y="398" class="small">Finite search and refinement do not establish equilibrium.</text>
+</svg>

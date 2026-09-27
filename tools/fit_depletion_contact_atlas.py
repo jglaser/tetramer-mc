@@ -77,6 +77,7 @@ class FitOptions:
     covariance_floor: float = 0.01
     initial_weight: float = 0.5
     weight_activity: float = 0.0
+    target_effective_slots: float = 0.0
     audit_seed: int = 130200011
 
     def validate(self):
@@ -89,6 +90,10 @@ class FitOptions:
                 'initial_weight must lie strictly between zero and one; both branches are required')
         require(math.isfinite(self.weight_activity) and self.weight_activity >= 0,
                 'weight_activity must be finite and nonnegative')
+        require(math.isfinite(self.target_effective_slots) and self.target_effective_slots >= 0,
+                'target_effective_slots must be finite and nonnegative')
+        require(not (self.weight_activity > 0 and self.target_effective_slots > 0),
+                'give either weight_activity or target_effective_slots, not both')
         require(type(self.audit_seed) is int and 0 <= self.audit_seed < 2**64,
                 'audit_seed must fit in u64')
 
@@ -298,12 +303,23 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
     # factors exp(z_w C) of each slot's own search-side score. Held-out validation
     # clouds never enter. Any positive frozen weights leave the target unchanged
     # because production uses the complete proposal density.
-    if options.weight_activity > 0:
-        log_raw = np.array([options.weight_activity*float(slot['search_optimized_score']['volume'])
-                            for _, slot in indexed])
-        masses = np.exp(log_raw-log_raw.max()); masses /= masses.sum()
-    else:
-        masses = np.full(count, 1./count)
+    weighted = options.weight_activity > 0 or options.target_effective_slots > 0
+    scores = (np.array([float(slot['search_optimized_score']['volume']) for _, slot in indexed])
+              if weighted else np.zeros(count))
+    def tempered(z):
+        log_raw = z*scores  # same arithmetic as the original weight_activity path
+        m = np.exp(log_raw-log_raw.max()); return m/m.sum()
+    weight_activity = options.weight_activity
+    if options.target_effective_slots > 0:
+        # Shape-independent choice: the z_w whose tempered masses have the requested
+        # effective slot count 1/sum(m^2) (monotone in z_w; bisection in log z_w).
+        target = min(options.target_effective_slots, float(count))
+        lo, hi = 1e-9, 10.
+        for _ in range(200):
+            mid = math.sqrt(lo*hi)
+            lo, hi = (mid, hi) if 1/np.sum(tempered(mid)**2) > target else (lo, mid)
+        weight_activity = math.sqrt(lo*hi)
+    masses = tempered(weight_activity) if weight_activity > 0 else np.full(count, 1./count)
     base, initial = empty_model(shape_hash, ell), empty_model(shape_hash, ell)
     reports = []
     for index, (source_index, slot) in enumerate(indexed):
@@ -347,8 +363,9 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
         shape_scale=scale, options=asdict(options), retained_count=sum(r['retained_count'] for r in reports),
         retained_rejected_count=sum(r['retained_rejected_count'] for r in reports), slots=reports,
         slot_allocation=('All independent slots equally weighted; no score or population-size weights.'
-                         if options.weight_activity == 0 else
+                         if weight_activity == 0 else
                          'Tempered search-score weights exp(weight_activity*C_search); held-out clouds unused.'),
+        resolved_weight_activity=weight_activity,
         effective_slot_count=float(1/np.sum(masses**2)),
         covariance_rule=__doc__.split('\n\n')[2], limitation=LIMITATION,
         native_geometry_inputs=0, production_pose_inputs=0, physical_updates=0, bath_queries=0,
@@ -508,7 +525,7 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     defaults = FitOptions()
     for name in ('translation_width', 'angle_width_degrees', 'shrinkage', 'covariance_floor', 'initial_weight',
-                 'weight_activity'):
+                 'weight_activity', 'target_effective_slots'):
         parser.add_argument('--'+name.replace('_', '-'), type=float, default=getattr(defaults, name))
     parser.add_argument('--audit-seed', type=int, default=defaults.audit_seed)
     args = parser.parse_args()

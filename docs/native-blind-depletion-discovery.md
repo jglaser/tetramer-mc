@@ -538,3 +538,66 @@ The fitter's preflight now evaluates the whole mixture once, on all probe
 poses, instead of once per component (identical output bytes). The
 768-slot fit drops from about 15 minutes to under a minute. The GPU
 environment is a separate uv venv with `cupy-cuda13x` (see the tool docstrings).
+
+## Other bodies: lysozyme monomers
+
+Every discovery stage takes the rigid shape as an input, so the pipeline
+applies unchanged to `examples/monomer-shape.json` (1LYZ, 1001 atoms):
+
+```bash
+S=examples/monomer-shape.json; PY=/vast/xvg/venvs/tetramer-gpu/bin/python
+# 1. GPU scan (68 s on two H100s) and 2. GPU basin rescoring (3 min)
+for d in 0 1; do $PY tools/fft_depletion_docking_gpu.py --shape $S --out scan --min-overlap 250 \
+    --clash-tolerances 2 --batch 32 --device $d --devices 2 & done; wait
+for d in 0 1; do $PY tools/gpu_rescore_peaks.py --scan scan --shape $S --out rescored \
+    --device $d --part $d --parts 2 & done; wait
+# 3. exact repair/score/select
+python3 tools/select_fft_contact_starts.py --scan rescored --shape $S --out select --pool 20000 --select 512
+# 4. converged seeded discovery (one process per 8-slot population)
+target/release/depletion-contact-discovery --shape $S --initial-poses starts-rXX.json --starts 8 \
+    --search-steps 2000 --search-points 8192 --validation-points 65536 --seed <per population> --out populations/rXX
+# 5. frozen fit; choose the tempering by effective slot count, not by a body-specific z_w
+python3 tools/fit_depletion_contact_atlas.py --shape $S --discovery populations/r* \
+    --target-effective-slots 54 --out frozen-fit
+```
+
+`--target-effective-slots N` bisects for the \(z_w\) whose tempered masses
+have \(1/\sum m^2 = N\). A fixed \(z_w\) does not carry over between bodies.
+At \(z_w=0.005\) the monomer map was almost flat (476 effective slots),
+because monomer overlaps span only about 400–760 Å³. Targeting 54 gives
+\(z_w=0.0172\) Å⁻³.
+
+**Monomer map.** `examples/frozen-blind-monomer-contact-mixture-512.json`
+(sha256 prefix `525a5ff50cfe2ca1`; source
+`runs/monomer-seeded-discovery-512-20260926/frozen-fit-eff54/`). Post-hoc,
+the lysozyme crystal has 7 distinct monomer contacts, with exact overlaps
+of 698, 361, 333, 168, 37, 11 and 1 Å³. The strongest is the global optimum
+of the blind scan (search rank 0, scaled error 0.31, 11.3% of the proposal
+mass). The other six are not in the map: the closest slots have scaled
+errors of 2.5–7. The second- and third-strongest native contacts rank
+behind thousands of non-native contacts of 420–600 Å³. The native-lattice
+free-energy comparison is in
+`runs/monomer-crystal-free-energy-20260926/` (separate report).
+
+**Monomer assembly config.** `tools/make_monomer_config.py` expands the
+labelled seed tetramers of a tetramer config into their member monomers
+at the exact native poses. For `examples/spherical-cluster-oligomer.json`
+this gives 32 seed monomers (hard-valid, minimum gap 0.011 Å, 93 contacting
+pairs) with the same bath, schedule and cluster phase:
+`examples/spherical-cluster-monomer.json`. Run it with body-neutral flags:
+
+```bash
+target/release/tetramer-mc run --config examples/spherical-cluster-monomer.json \
+  --model examples/frozen-blind-monomer-contact-mixture-512.json \
+  --free-bodies 1024 --concentration-um 2000 --seed 20260926 \
+  --out runs/<fresh> --sweeps 10000 --sample-every 100
+```
+
+1024 free monomers at 2000 µM match the protein mass concentration of 256
+tetramers at 500 µM. The first sweeps cost about 3.5 CPU s each, about 5×
+the tetramer run's early cost. `--free-bodies` and `--concentration-um`
+replace `--free-tetramers` and `--tetramer-concentration-um`, which remain
+as aliases. Preparation metadata adds body-neutral keys (`total_bodies`,
+`body_concentration_uM`, `body_shape`) next to the legacy tetramer keys.
+The tetramer-level native observer is not configured for monomer bodies;
+classify monomer contacts post hoc.

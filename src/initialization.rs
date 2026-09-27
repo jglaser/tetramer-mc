@@ -1,6 +1,7 @@
 //! Reproducible, non-equilibrium free-body preparations around an optional seed.
 //!
-//! Concentration refers to tetramers per full geometric vessel volume. The
+//! Concentration refers to bodies of the configured rigid shape (tetramers,
+//! monomers, ...) per full geometric vessel volume. The
 //! conservative separation test excludes depletion contacts of new free bodies; it
 //! does not constrain subsequent Monte Carlo moves or change the target.
 use crate::{
@@ -38,15 +39,15 @@ impl FreeTetramerStart {
     fn volume_for_total(&self, total: usize) -> Result<f64> {
         ensure!(
             total >= 2,
-            "at least two total tetramers (seed plus free) are required"
+            "at least two total bodies (seed plus free) are required"
         );
         ensure!(
             self.count <= MAX_PLACEMENT_ATTEMPTS,
-            "--free-tetramers exceeds the {MAX_PLACEMENT_ATTEMPTS}-attempt preparation budget"
+            "--free-bodies exceeds the {MAX_PLACEMENT_ATTEMPTS}-attempt preparation budget"
         );
         ensure!(
             self.concentration_um.is_finite() && self.concentration_um > 0.,
-            "tetramer concentration must be finite and positive (in micromolar)"
+            "body concentration must be finite and positive (in micromolar)"
         );
         let volume = total as f64 / (self.concentration_um * NUMBER_DENSITY_PER_MICROMOLAR);
         ensure!(
@@ -73,7 +74,7 @@ impl FreeTetramerStart {
         let total = self
             .count
             .checked_add(seed_count)
-            .ok_or_else(|| anyhow::anyhow!("tetramer count overflow"))?;
+            .ok_or_else(|| anyhow::anyhow!("body count overflow"))?;
         let volume = self.volume_for_total(total)?;
         let seed = self.seed.unwrap_or(config.seed);
         let exclusion_bound = tree.bound + config.depletant_radius;
@@ -184,7 +185,7 @@ impl FreeTetramerStart {
         }
         ensure!(
             poses.len() == total,
-            "could place only {} of {} free tetramers in {MAX_PLACEMENT_ATTEMPTS} attempts at {} uM; lower the concentration or try another --seed. This conservative dispersed preparation requires separated exclusion bounds, not just non-overlapping atomic cores",
+            "could place only {} of {} free bodies in {MAX_PLACEMENT_ATTEMPTS} attempts at {} uM; lower the concentration or try another --seed. This conservative dispersed preparation requires separated exclusion bounds, not just non-overlapping atomic cores",
             poses.len() - seed_count,
             self.count,
             self.concentration_um
@@ -201,6 +202,10 @@ impl FreeTetramerStart {
             "initial_free_tetramers": self.count,
             "initial_seed_tetramers": seed_count,
             "total_tetramers": total,
+            "initial_free_bodies": self.count,
+            "initial_seed_bodies": seed_count,
+            "total_bodies": total,
+            "body_shape": tree.shape.name.clone(),
             "initial_fragments": fragments,
             "preparation_equilibrated": false,
             "template_metadata": original_metadata,
@@ -215,9 +220,10 @@ impl FreeTetramerStart {
                 "seed_geometry": "spherical poses unchanged; periodic compact seeds may be unwrapped and translated without rotation or rescaling",
                 "seed_remains_mobile": true,
                 "tetramer_concentration_uM": self.concentration_um,
+                "body_concentration_uM": self.concentration_um,
                 "number_density_A_minus3": self.concentration_um * NUMBER_DENSITY_PER_MICROMOLAR,
                 "vessel_volume_A3": volume,
-                "concentration_convention": "tetramers / full geometric vessel volume, not solvent-accessible or center-accessible volume",
+                "concentration_convention": "bodies of the configured shape / full geometric vessel volume, not solvent-accessible or center-accessible volume; legacy *_tetramer* keys hold the same body counts",
                 "master_seed": seed,
                 "preparation_rng": "SHA256(tetramer-mc-free-preparation-v1 || little-endian u64 seed); rand pinned by Cargo.lock",
                 "attempts": attempts,

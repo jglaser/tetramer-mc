@@ -32,9 +32,11 @@ enum Command {
         sample_every: u64,
         #[arg(long)]
         resume: Option<PathBuf>,
-        /// Preserve labeled seed bodies and generate N free tetramers; size the vessel from the total count.
+        /// Preserve labeled seed bodies and generate N free bodies of the configured
+        /// shape (tetramers, monomers, ...); size the vessel from the total count.
         #[arg(
-            long,
+            long = "free-bodies",
+            visible_alias = "free-tetramers",
             requires = "tetramer_concentration_um",
             conflicts_with = "resume"
         )]
@@ -42,10 +44,11 @@ enum Command {
         /// Explicitly discard labeled seed bodies when generating the free preparation.
         #[arg(long, requires = "free_tetramers", conflicts_with = "resume")]
         discard_seed: bool,
-        /// Total seed-plus-free tetramer concentration in micromolar per full vessel volume.
+        /// Total seed-plus-free body concentration in micromolar per full vessel volume
+        /// (bodies of the configured shape).
         #[arg(
-            long,
-            visible_alias = "concentration-um",
+            long = "concentration-um",
+            visible_alias = "tetramer-concentration-um",
             requires = "free_tetramers",
             conflicts_with = "resume"
         )]

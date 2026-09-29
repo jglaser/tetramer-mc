@@ -16,6 +16,7 @@ use rand::{RngExt, SeedableRng, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -33,6 +34,15 @@ pub struct DiscoveryConfig {
     pub gap: f64,
     pub refine_translation_std_a: f64,
     pub refine_angle_std_degrees: f64,
+    /// Discarded warmup may tune one multiplier shared by both local widths.
+    pub refine_adapt: bool,
+    pub refine_adapt_target: f64,
+    pub refine_adapt_window: usize,
+    pub refine_adapt_gain: f64,
+    pub refine_adapt_min_scale: f64,
+    pub refine_adapt_max_scale: f64,
+    /// Freeze the optimized contact witness as a material pivot for refinement.
+    pub refine_contact_pivot: bool,
     pub lambda_ratio: f64,
     pub envelope_max_cells: usize,
 }
@@ -53,6 +63,13 @@ impl Default for DiscoveryConfig {
             gap: 0.25,
             refine_translation_std_a: 0.2,
             refine_angle_std_degrees: 1.,
+            refine_adapt: false,
+            refine_adapt_target: 0.3,
+            refine_adapt_window: 16,
+            refine_adapt_gain: 2.,
+            refine_adapt_min_scale: 1e-4,
+            refine_adapt_max_scale: 10.,
+            refine_contact_pivot: false,
             lambda_ratio: 64.,
             envelope_max_cells: 2047,
         }
@@ -90,6 +107,26 @@ impl DiscoveryConfig {
         ensure!(
             self.lambda_ratio.is_finite() && self.lambda_ratio > 0.,
             "invalid lambda ratio"
+        );
+        ensure!(
+            self.refine_adapt_target.is_finite()
+                && self.refine_adapt_target > 0.
+                && self.refine_adapt_target < 1.
+                && self.refine_adapt_window > 0
+                && self.refine_adapt_gain.is_finite()
+                && self.refine_adapt_gain > 0.
+                && self.refine_adapt_min_scale.is_finite()
+                && self.refine_adapt_min_scale > 0.
+                && self.refine_adapt_min_scale <= 1.
+                && self.refine_adapt_max_scale.is_finite()
+                && self.refine_adapt_max_scale >= 1.,
+            "invalid refinement warmup adaptation settings"
+        );
+        ensure!(
+            !self.refine_adapt
+                || (self.burn > 0
+                    && (self.refine_translation_std_a > 0. || self.refine_angle_std_degrees > 0.)),
+            "adaptive refinement requires discarded warmup and a nonzero proposal width"
         );
         self.gate_options().validate()?;
         Ok(())
@@ -153,13 +190,29 @@ pub fn estimate_pair_overlap(
     seed: u64,
     opts: GateOptions,
 ) -> Result<VolumeEstimate> {
-    ensure!(draws > 0, "positive fixed score allocation required");
     let env = Environment {
         tree,
         fixed: vec![Placed::new(identity())],
         labels: vec![],
         rd,
     };
+    estimate_environment_overlap(&env, pose, draws, seed, opts)
+}
+
+/// Union overlap with an arbitrary fixed neighborhood. Membership in several
+/// neighbors is still counted once. The estimator is diagnostic only and has
+/// exactly the same geometric envelope and fixed-cloud arithmetic as the pair
+/// specialization above.
+pub fn estimate_environment_overlap(
+    env: &Environment<'_>,
+    pose: Pose,
+    draws: usize,
+    seed: u64,
+    opts: GateOptions,
+) -> Result<VolumeEstimate> {
+    ensure!(draws > 0, "positive fixed score allocation required");
+    let tree = env.tree;
+    let rd = env.rd;
     let envelope = OverlapEnvelope::build(&env, pose, opts)?;
     let moving = Placed::new(pose);
     let mut rng = StdRng::seed_from_u64(seed);
@@ -284,7 +337,10 @@ pub fn nearest_pair_witness(tree: &SphereTree, pose: Pose) -> Result<ContactWitn
     let (gap, moving, fixed) = best;
     ensure!(gap >= 0., "supplied pose overlaps the anchored body");
     let b = &atoms[fixed];
-    let delta = sub(add(pose.position, matvec(r, atoms[moving].center)), b.center);
+    let delta = sub(
+        add(pose.position, matvec(r, atoms[moving].center)),
+        b.center,
+    );
     let surface_point = add(b.center, scale(delta, b.radius / norm(delta)));
     Ok(ContactWitness {
         surface_point,
@@ -313,6 +369,35 @@ pub struct RefinementSample {
     pub accepted: bool,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RefinementAdaptationWindow {
+    /// The scale update occurs after this discarded warmup attempt.
+    pub after_step: usize,
+    pub attempted: usize,
+    pub accepted: usize,
+    pub acceptance_rate: f64,
+    pub scale_before: f64,
+    pub scale_after: f64,
+    pub at_lower_bound: bool,
+    pub at_upper_bound: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RefinementProtocol {
+    pub contact_pivot_body: Option<Vec3>,
+    pub adaptation_enabled: bool,
+    pub target_acceptance: f64,
+    pub window: usize,
+    pub gain: f64,
+    pub min_scale: f64,
+    pub max_scale: f64,
+    pub initial_scale: f64,
+    pub final_scale: f64,
+    pub frozen_after_step: usize,
+    pub updates: Vec<RefinementAdaptationWindow>,
+    pub frozen_memory_config: ResolvedMemoryConfig,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct SlotDiscovery {
     pub slot: usize,
@@ -329,6 +414,11 @@ pub struct SlotDiscovery {
     pub refinement_samples: Vec<RefinementSample>,
     pub refinement_trace: Vec<MemoryMove>,
     pub refinement_counts: MemoryCounts,
+    pub refinement_warmup_counts: MemoryCounts,
+    pub refinement_production_counts: MemoryCounts,
+    /// Exact repeated poses count once; acceptance alone is not exploration.
+    pub refinement_distinct_retained_poses: usize,
+    pub refinement_protocol: RefinementProtocol,
     pub resolved_memory_config: ResolvedMemoryConfig,
 }
 
@@ -534,9 +624,81 @@ pub fn discover_slot_from(
     let mut refinement_trace = Vec::with_capacity(config.refine_steps);
     let mut refinement_samples = Vec::new();
     let mut refinement_counts = MemoryCounts::default();
+    let mut refinement_warmup_counts = MemoryCounts::default();
+    let mut refinement_production_counts = MemoryCounts::default();
+    let pivot_body = config.refine_contact_pivot.then(|| {
+        matvec(
+            transpose(rotation(optimized_pose.orientation)),
+            sub(optimized_contact.surface_point, optimized_pose.position),
+        )
+    });
+    let mut active_memory_config = resolved_memory_config.clone();
+    let mut protocol = RefinementProtocol {
+        contact_pivot_body: pivot_body,
+        adaptation_enabled: config.refine_adapt,
+        target_acceptance: config.refine_adapt_target,
+        window: config.refine_adapt_window,
+        gain: config.refine_adapt_gain,
+        min_scale: config.refine_adapt_min_scale,
+        max_scale: config.refine_adapt_max_scale,
+        initial_scale: 1.,
+        final_scale: 1.,
+        frozen_after_step: config.burn,
+        updates: Vec::new(),
+        frozen_memory_config: resolved_memory_config.clone(),
+    };
+    let mut window_attempted = 0;
+    let mut window_accepted = 0;
     for step in 1..=config.refine_steps {
-        let result = state.update(tree, &resolved_memory_config, opts, &mut rng)?;
+        let result = state.update_with_local_pivot(
+            tree,
+            &active_memory_config,
+            opts,
+            pivot_body,
+            &mut rng,
+        )?;
         refinement_counts.record(&result);
+        if step <= config.burn {
+            refinement_warmup_counts.record(&result);
+            if config.refine_adapt {
+                window_attempted += 1;
+                window_accepted += usize::from(result.accepted);
+                if window_attempted == config.refine_adapt_window || step == config.burn {
+                    let acceptance_rate = window_accepted as f64 / window_attempted as f64;
+                    let scale_before = protocol.final_scale;
+                    let log_scale = (scale_before.ln()
+                        + config.refine_adapt_gain
+                            * (acceptance_rate - config.refine_adapt_target))
+                        .clamp(
+                            config.refine_adapt_min_scale.ln(),
+                            config.refine_adapt_max_scale.ln(),
+                        );
+                    let scale_after = log_scale
+                        .exp()
+                        .clamp(config.refine_adapt_min_scale, config.refine_adapt_max_scale);
+                    active_memory_config.local_translation_std_a =
+                        resolved_memory_config.local_translation_std_a * scale_after;
+                    active_memory_config.local_small_angle_std_degrees =
+                        resolved_memory_config.local_small_angle_std_degrees * scale_after;
+                    active_memory_config.validate()?;
+                    protocol.final_scale = scale_after;
+                    protocol.updates.push(RefinementAdaptationWindow {
+                        after_step: step,
+                        attempted: window_attempted,
+                        accepted: window_accepted,
+                        acceptance_rate,
+                        scale_before,
+                        scale_after,
+                        at_lower_bound: log_scale <= config.refine_adapt_min_scale.ln(),
+                        at_upper_bound: log_scale >= config.refine_adapt_max_scale.ln(),
+                    });
+                    window_attempted = 0;
+                    window_accepted = 0;
+                }
+            }
+        } else {
+            refinement_production_counts.record(&result);
+        }
         if step > config.burn && (step - config.burn) % config.save_every == 0 {
             refinement_samples.push(RefinementSample {
                 step,
@@ -546,6 +708,26 @@ pub fn discover_slot_from(
         }
         refinement_trace.push(result);
     }
+    protocol.frozen_memory_config = active_memory_config;
+    let refinement_distinct_retained_poses = refinement_samples
+        .iter()
+        .map(|sample| {
+            let mut coordinates = [0_u64; 7];
+            for (i, value) in sample
+                .pose
+                .position
+                .iter()
+                .chain(&sample.pose.orientation)
+                .enumerate()
+            {
+                // Canonical quaternions are already used by the kernel; collapse
+                // signed zeros so their representation does not create a new pose.
+                coordinates[i] = if *value == 0. { 0 } else { value.to_bits() };
+            }
+            coordinates
+        })
+        .collect::<BTreeSet<_>>()
+        .len();
     Ok(SlotDiscovery {
         slot,
         seeds,
@@ -561,6 +743,10 @@ pub fn discover_slot_from(
         refinement_samples,
         refinement_trace,
         refinement_counts,
+        refinement_warmup_counts,
+        refinement_production_counts,
+        refinement_distinct_retained_poses,
+        refinement_protocol: protocol,
         resolved_memory_config,
     })
 }

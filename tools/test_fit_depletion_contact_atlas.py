@@ -10,7 +10,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from fit_depletion_contact_atlas import (
-    DISCOVERY_SCHEMA, FitOptions, chart_coordinates, fit_model, prepare,
+    DISCOVERY_SCHEMA, ExplorationGateError, FitOptions, autocorrelation_ess,
+    chart_coordinates, exploration_metrics, fit_model, prepare,
     proposal_preflight, regularized_moments, rolling_covariance, serialized,
     sha_bytes, shape_scale,
 )
@@ -215,13 +216,119 @@ class DepletionContactFitTests(unittest.TestCase):
             fit_model(shape, discovery, shape_hash)
 
     def test_invalid_regularization_and_branch_weights_rejected(self):
-        for options in (FitOptions(initial_weight=0), FitOptions(initial_weight=1),
+        for options in (FitOptions(initial_weight=-.1), FitOptions(initial_weight=1),
                         FitOptions(shrinkage=-.1), FitOptions(shrinkage=1.1),
                         FitOptions(covariance_floor=0), FitOptions(translation_width=float('nan')),
-                        FitOptions(angle_width_degrees=-1)):
+                        FitOptions(angle_width_degrees=-1), FitOptions(minimum_unique_poses=-1),
+                        FitOptions(minimum_unique_poses=1.2), FitOptions(minimum_empirical_rank=7),
+                        FitOptions(minimum_ess=float('inf'))):
             with self.subTest(options=options):
                 with self.assertRaises(ValueError):
                     options.validate()
+
+    def test_refined_only_retains_every_slot_full_support_and_correct_indices(self):
+        shape, discovery, shape_hash = fixture(3)
+        options = FitOptions(initial_weight=0, shrinkage=.02, covariance_floor=1e-6)
+        model, initial, metrics = fit_model(shape, discovery, shape_hash, options)
+        self.assertEqual(model['base_model']['weights'], [1/3]*3)
+        self.assertEqual(initial['base_model']['weights'], [1/3]*3)
+        self.assertEqual([r['initial_component'] for r in metrics['slots']], [None]*3)
+        self.assertEqual([r['refined_component'] for r in metrics['slots']], [0, 1, 2])
+        self.assertTrue(metrics['full_gaussian_support'])
+        self.assertTrue(proposal_preflight(model, 74)['passed'])
+
+    def test_zero_scatter_is_explicit_and_requested_gate_rejects_all_slots(self):
+        shape, discovery, shape_hash = fixture(2)
+        constant = discovery['slots'][0]['refinement_samples'][3]['pose']
+        discovery['slots'][0]['refinement_samples'] = [dict(step=i, pose=copy.deepcopy(constant), accepted=True)
+                                                     for i in range(40)]
+        _, _, metrics = fit_model(shape, discovery, shape_hash)
+        first = metrics['slots'][0]
+        self.assertEqual(first['empirical_rank'], 0)
+        self.assertEqual(first['covariance_evidence'], 'regularizer_only_no_observed_scatter')
+        self.assertEqual(first['unique_physical_chart_poses'], 1)
+        self.assertEqual(first['minimum_retained_pca_ess_estimate'], 0)
+        self.assertEqual(metrics['slots_with_regularizer_only_covariance'], 1)
+        with self.assertRaises(ExplorationGateError) as rejected:
+            fit_model(shape, discovery, shape_hash, FitOptions(minimum_unique_poses=2))
+        self.assertEqual(len(rejected.exception.metrics['slots']), 2)
+        self.assertEqual(rejected.exception.metrics['slots'][1]['global_slot'], 1)
+        self.assertIn('no slots discarded', str(rejected.exception))
+
+    def test_failed_freeze_writes_diagnostics_and_no_model(self):
+        shape, discovery, _ = fixture(2)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shape_path = archive_fixture(root/'discovery', shape, discovery)
+            with self.assertRaises(ExplorationGateError):
+                prepare(shape_path, [root/'discovery'], root/'failed', FitOptions(minimum_unique_poses=32))
+            report = json.loads((root/'failed'/'fit-metrics.json').read_text())
+            self.assertEqual(len(report['slots']), 2)
+            self.assertFalse((root/'failed'/'model.json').exists())
+            self.assertFalse(json.loads((root/'failed'/'freeze-rejected.json').read_text())['model_written'])
+
+    def test_quaternion_double_cover_does_not_fake_exploration(self):
+        shape, discovery, shape_hash = fixture(1)
+        reference = discovery['slots'][0]['optimized_pose']
+        samples = []
+        for i in range(32):
+            value = copy.deepcopy(reference)
+            if i % 2:
+                value['orientation'] = [-x for x in value['orientation']]
+            samples.append(dict(step=i, pose=value, accepted=True))
+        discovery['slots'][0]['refinement_samples'] = samples
+        _, _, metrics = fit_model(shape, discovery, shape_hash)
+        report = metrics['slots'][0]
+        self.assertEqual(report['unique_retained_poses'], 1)
+        self.assertEqual(report['unique_serialized_pose_records'], 2)
+        self.assertEqual(report['empirical_rank'], 0)
+        with self.assertRaises(ExplorationGateError):
+            fit_model(shape, discovery, shape_hash, FitOptions(minimum_unique_poses=2))
+
+    def test_refinement_protocol_cannot_include_retained_adaptation(self):
+        shape, discovery, shape_hash = fixture(1)
+        discovery['slots'][0]['refinement_protocol'] = dict(frozen_after_step=9, updates=[dict(after_step=8)])
+        fit_model(shape, discovery, shape_hash)
+        discovery['slots'][0]['refinement_protocol']['updates'].append(dict(after_step=11))
+        with self.assertRaisesRegex(ValueError, 'adaptation must stop'):
+            fit_model(shape, discovery, shape_hash)
+        discovery['slots'][0]['refinement_protocol'] = dict(frozen_after_step=10, updates=[])
+        with self.assertRaisesRegex(ValueError, 'follow the adaptation freeze'):
+            fit_model(shape, discovery, shape_hash)
+
+    def test_ess_distinguishes_independent_correlated_and_constant_traces(self):
+        rng = np.random.default_rng(707)
+        independent = rng.normal(size=32768)
+        correlated = np.zeros(len(independent))
+        rho = .9
+        for i in range(1, len(correlated)):
+            correlated[i] = rho*correlated[i-1]+np.sqrt(1-rho*rho)*independent[i]
+        self.assertGreater(autocorrelation_ess(independent), .8*len(independent))
+        expected = len(independent)*(1-rho)/(1+rho)
+        self.assertGreater(autocorrelation_ess(correlated), .65*expected)
+        self.assertLess(autocorrelation_ess(correlated), 1.35*expected)
+        self.assertEqual(autocorrelation_ess(np.full(128, .123)), 0)
+        self.assertEqual(autocorrelation_ess(np.arange(7)), 0)
+
+    def test_full_covariance_recovery_and_temporal_holdout_diagnostic(self):
+        rng = np.random.default_rng(811)
+        lower = np.diag([.05, .02, .08, .006, .009, .004])
+        lower[0, 3], lower[2, 4] = .015, -.02
+        covariance = lower@lower.T
+        values = rng.normal(size=(16384, 6))@lower.T+np.array([.1, -.2, .3, .01, -.01, .02])
+        options = FitOptions(initial_weight=0, shrinkage=0, covariance_floor=1e-12,
+                             minimum_unique_poses=32, minimum_empirical_rank=6, minimum_ess=200)
+        _, fitted, _ = regularized_moments(values, np.eye(6), options)
+        np.testing.assert_allclose(np.diag(fitted), np.diag(covariance), rtol=.04)
+        self.assertLess(np.linalg.norm(fitted-covariance)/np.linalg.norm(covariance), .03)
+        report = exploration_metrics(values, np.eye(6), {}, options)
+        self.assertTrue(report['exploration_gate_passed'])
+        self.assertEqual(report['empirical_rank'], 6)
+        coverage = report['chronological_holdout']['observed_ellipsoid_fractions']
+        np.testing.assert_allclose(coverage, [.5, .9, .99], atol=.025)
+        shifted = values.copy(); shifted[3*len(values)//4:] += np.array([1., 0., 0., 0., 0., 0.])
+        bad = exploration_metrics(shifted, np.eye(6), {}, options)
+        self.assertEqual(bad['chronological_holdout']['observed_ellipsoid_fractions'], [0., 0., 0.])
 
     def test_one_slot_freeze_is_deterministic_and_reads_no_native_data(self):
         shape, discovery, _ = fixture(1)

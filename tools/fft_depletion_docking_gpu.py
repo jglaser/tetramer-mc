@@ -18,6 +18,7 @@ from scipy.spatial.transform import Rotation
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fft_depletion_docking import super_fibonacci
+from fft_rotation_indices import freeze_rotation_indices, load_rotation_indices, shard_rotation_indices
 
 VOXELIZE = cp.RawKernel(r'''
 extern "C" __global__ void voxelize(const float* centers, const float* radii, int natoms,
@@ -105,6 +106,7 @@ def main():
     p.add_argument('--spacing', type=float, default=1.0)
     p.add_argument('--core-shrink', type=float, default=0.5)
     p.add_argument('--rotations', type=int, default=300000)
+    p.add_argument('--rotation-indices', help='Unique integer .npy indices into the fixed --rotations grid; sorted then sharded')
     p.add_argument('--clash-tolerances', type=float, nargs='+', default=[2., 10.])
     p.add_argument('--min-overlap', type=float, default=500.)
     p.add_argument('--separation', type=float, default=3.)
@@ -112,6 +114,8 @@ def main():
     p.add_argument('--device', type=int, default=0)
     p.add_argument('--devices', type=int, default=1, help='total devices; this process takes indices device::devices')
     a = p.parse_args()
+    if a.rotation_indices is not None:
+        load_rotation_indices(a.rotation_indices, a.rotations)
     cp.cuda.Device(a.device).use()
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     shard = out/f'shard-gpu{a.device}.npy'
@@ -120,9 +124,11 @@ def main():
     plan = dict(vars(a), shape=str(Path(a.shape).resolve()), shape_sha256=sha(a.shape), script_sha256=sha(__file__),
                 native_information=False,
                 columns=['rotation_index', 'tol_class', 'qw', 'qx', 'qy', 'qz', 'tx', 'ty', 'tz', 'grid_overlap_A3', 'grid_clash_A3'])
+    if a.rotation_indices is not None:
+        plan.update(freeze_rotation_indices(a.rotation_indices, out/f'rotation-indices-gpu{a.device}.npy', a.rotations))
     (out/f'plan-gpu{a.device}.json').write_text(json.dumps(plan, indent=2)+'\n')
     S = GpuScanner(json.loads(Path(a.shape).read_text()), a.rd, a.spacing, a.core_shrink)
-    indices = np.arange(a.device, a.rotations, a.devices)
+    indices = shard_rotation_indices(a.rotations, a.device, a.devices, plan.get('rotation_indices'))
     started, chunks = time.time(), []
     for s in range(0, len(indices), a.batch):
         ids = indices[s:s+a.batch]

@@ -12,8 +12,8 @@ use std::{
 };
 use tetramer_mc::{
     contact_discovery::{DiscoveryConfig, DiscoveryResult, discover_slot_from},
-    math::Pose,
     geometry::{Shape, SphereTree},
+    math::Pose,
     simulation::hash_bytes,
 };
 
@@ -53,6 +53,22 @@ struct Args {
     refine_translation_std_a: f64,
     #[arg(long, default_value_t = 1.)]
     refine_angle_std_degrees: f64,
+    /// Tune the common local step multiplier during discarded burn only.
+    #[arg(long, default_value_t = false)]
+    refine_adapt: bool,
+    #[arg(long, default_value_t = 0.3)]
+    refine_adapt_target: f64,
+    #[arg(long, default_value_t = 16)]
+    refine_adapt_window: usize,
+    #[arg(long, default_value_t = 2.)]
+    refine_adapt_gain: f64,
+    #[arg(long, default_value_t = 1e-4)]
+    refine_adapt_min_scale: f64,
+    #[arg(long, default_value_t = 10.)]
+    refine_adapt_max_scale: f64,
+    /// Rotate about a frozen body material point from the optimized contact.
+    #[arg(long, default_value_t = false)]
+    refine_contact_pivot: bool,
     #[arg(long, default_value_t = 64.)]
     lambda_ratio: f64,
     #[arg(long, default_value_t = 2047)]
@@ -101,6 +117,13 @@ fn main() -> Result<()> {
         gap: args.gap,
         refine_translation_std_a: args.refine_translation_std_a,
         refine_angle_std_degrees: args.refine_angle_std_degrees,
+        refine_adapt: args.refine_adapt,
+        refine_adapt_target: args.refine_adapt_target,
+        refine_adapt_window: args.refine_adapt_window,
+        refine_adapt_gain: args.refine_adapt_gain,
+        refine_adapt_min_scale: args.refine_adapt_min_scale,
+        refine_adapt_max_scale: args.refine_adapt_max_scale,
+        refine_contact_pivot: args.refine_contact_pivot,
         lambda_ratio: args.lambda_ratio,
         envelope_max_cells: args.envelope_max_cells,
     };
@@ -145,7 +168,7 @@ fn main() -> Result<()> {
             "native_information_scope":"Only the supplied rigid body's internal geometry is used; no inter-body native motif, label, covariance, atlas, or production pose is read.",
             "search":"Offline greedy optimization on outermost radial contacts. Equal-probability orientation-only, ray-only, and paired perturbations; independent 1/4/12 degree scales. Fixed pseudorandom score uniforms mapped through each pose's union-overlap envelope. Not an equilibrium trajectory.",
             "validation":"Two fresh fixed-size clouds for each initial and optimized pose, never used for selection. Binomial standard errors and Wilson intervals are pointwise diagnostic uncertainty, not selection-adjusted confidence statements.",
-            "refinement":"Existing exact MemoryState::update, one slot, no global refresh, finite anchored pair ball. Fixed burn and save stride, including rejections. Finite runs do not establish stationarity or basin masses.",
+            "refinement":"Exact MemoryState depletion gate, one slot, no global refresh, finite anchored pair ball. Optional material pivot c is frozen from the optimized witness; p=t+Rc has unit translation/Haar Jacobian and centered displacement/Cayley increments are inverse symmetric. Optional scalar adaptation occurs only after discarded warmup windows, with frozen widths during all retained samples. Fixed burn/save stride include rejections; finite runs do not establish stationarity or basin masses.",
             "selection":"Every initialized slot is preserved. No validation winner, native score, or trajectory from production enters construction.",
         "rng":"StdRng with SHA256-derived master-seed/slot/stream keys; pinned rand version in source bundle Cargo.lock",
             "completion":"manifest.json is written only after all outputs are complete and hashed",
@@ -165,6 +188,9 @@ fn main() -> Result<()> {
             "search_initial_volume":result.search_initial_score.volume,
             "search_optimized_volume":result.search_optimized_score.volume,
             "refinement_accepted":result.refinement_counts.accepted,
+            "refinement_production_accepted":result.refinement_production_counts.accepted,
+            "refinement_final_scale":result.refinement_protocol.final_scale,
+            "refinement_distinct_retained_poses":result.refinement_distinct_retained_poses,
             "refinement_samples":result.refinement_samples.len()})
         );
         slots.push(result);

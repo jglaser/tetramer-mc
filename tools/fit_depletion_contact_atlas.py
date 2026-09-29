@@ -2,10 +2,14 @@
 """Freeze an equally allocated contact proposal from native-blind discovery.
 
 Only the supplied rigid shape and completed discovery outputs supply data.
-Every independent slot contributes an initial shape-contact rolling Gaussian
-and a Gaussian fit to ALL retained exact pair-MC poses, including rejected
-repeats. These correlated, finite traces do not estimate equilibrium basin
-weights, converged local masses, IID errors or effective sample sizes.
+Every independent slot contributes a Gaussian fit to ALL retained exact pair-MC
+poses, including rejected
+repeats. These correlated, finite traces do not establish equilibrium basin
+weights, converged local masses or independent sample counts. Within-trace
+autocorrelation estimates and chronological holdout checks are diagnostics.
+The optional initial shape-contact Gaussian has mass initial_weight (default
+one half); initial_weight=0 freezes only the fitted Gaussians. Exploration
+gates, when requested, fail the entire freeze rather than remove a slot.
 
 In the reference chart x=(t-t_ref, ell*Cayley(R R_ref.T)), the fit uses the
 population scatter S (denominator n). For the shape-contact rolling baseline
@@ -35,6 +39,7 @@ import scipy
 from scipy.linalg import solve_triangular
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
+from scipy.stats import chi2
 
 from analyze_involution_docking_campaign import ChartAudit
 from prepare_mobile_posterior_pilot import validate_model
@@ -45,14 +50,24 @@ from prepare_smc_normalizer_atlas import Density
 DISCOVERY_SCHEMA = 'native-blind-depletion-contact-discovery-v1'
 FIT_SCHEMA = 'native-blind-depletion-contact-atlas-fit-v1'
 LIMITATION = ('Finite correlated refinement traces, including rejected repeated states, are '
-              'proposal-design data only. No IID, effective sample size, convergence, '
-              'local-mass or equilibrium basin-weight claim is made. Every slot has equal '
-              'proposal mass irrespective of scores, acceptance, or retained sample count.')
+              'proposal-design data only. No IID, validated effective sample size, convergence, '
+              'local-mass or equilibrium basin-weight claim is made. Every slot is retained; '
+              'configured equal or tempered search-score proposal masses are not equilibrium basin masses.')
 
 
 def require(condition, message):
     if not condition:
         raise ValueError(message)
+
+
+class ExplorationGateError(ValueError):
+    """A complete fit diagnostic may be inspected, but no proposal is frozen."""
+    def __init__(self, metrics):
+        self.metrics = metrics
+        failures = [f'{row["source_index"]}:{row["local_slot"]} '
+                    +', '.join(row['exploration_gate_failures'])
+                    for row in metrics['slots'] if not row['exploration_gate_passed']]
+        super().__init__('Exploration gate failed; no slots discarded and no model frozen: '+'; '.join(failures))
 
 
 def serialized(value):
@@ -78,6 +93,9 @@ class FitOptions:
     initial_weight: float = 0.5
     weight_activity: float = 0.0
     target_effective_slots: float = 0.0
+    minimum_unique_poses: int = 0
+    minimum_empirical_rank: int = 0
+    minimum_ess: float = 0.0
     audit_seed: int = 130200011
 
     def validate(self):
@@ -86,14 +104,20 @@ class FitOptions:
             require(math.isfinite(value) and value > 0, f'{name} must be positive and finite')
         require(math.isfinite(self.shrinkage) and 0 <= self.shrinkage <= 1,
                 'shrinkage must lie in [0,1]')
-        require(math.isfinite(self.initial_weight) and 0 < self.initial_weight < 1,
-                'initial_weight must lie strictly between zero and one; both branches are required')
+        require(math.isfinite(self.initial_weight) and 0 <= self.initial_weight < 1,
+                'initial_weight must lie in [0,1); zero keeps only refined components')
         require(math.isfinite(self.weight_activity) and self.weight_activity >= 0,
                 'weight_activity must be finite and nonnegative')
         require(math.isfinite(self.target_effective_slots) and self.target_effective_slots >= 0,
                 'target_effective_slots must be finite and nonnegative')
         require(not (self.weight_activity > 0 and self.target_effective_slots > 0),
                 'give either weight_activity or target_effective_slots, not both')
+        require(type(self.minimum_unique_poses) is int and self.minimum_unique_poses >= 0,
+                'minimum_unique_poses must be a nonnegative integer')
+        require(type(self.minimum_empirical_rank) is int and 0 <= self.minimum_empirical_rank <= 6,
+                'minimum_empirical_rank must be an integer in [0,6]')
+        require(math.isfinite(self.minimum_ess) and self.minimum_ess >= 0,
+                'minimum_ess must be finite and nonnegative')
         require(type(self.audit_seed) is int and 0 <= self.audit_seed < 2**64,
                 'audit_seed must fit in u64')
 
@@ -231,7 +255,10 @@ def regularized_moments(coordinates, baseline, options):
     require(coordinates.ndim == 2 and coordinates.shape[1] == 6 and len(coordinates) > 0
             and np.isfinite(coordinates).all(), 'Require nonempty finite six-dimensional coordinates')
     mean = coordinates.mean(axis=0)
-    centered = coordinates-mean
+    # Center after subtracting one observation so an exactly constant trace
+    # remains exactly zero even when repeated summation rounds its mean.
+    centered = coordinates-coordinates[0]
+    centered -= centered.mean(axis=0)
     scatter = centered.T@centered/len(coordinates)
     lower = np.linalg.cholesky(baseline)
     whitened = solve_triangular(lower, centered.T, lower=True).T
@@ -248,6 +275,97 @@ def regularized_moments(coordinates, baseline, options):
         whitened_empirical_eigenvalues=raw_values.tolist(), whitened_final_eigenvalues=values.tolist(),
         floored_eigenvalues=int(np.count_nonzero(shrunk < options.covariance_floor)),
         retained_count=len(coordinates), scatter_denominator=len(coordinates))
+
+
+def autocorrelation_ess(values):
+    """Initial-positive, monotone paired autocovariance estimate for one trace.
+
+    This is a mixing diagnostic under stationarity, not an independence or
+    convergence certificate. Constants and traces shorter than eight samples
+    return zero instead of spuriously reporting an IID effective sample size.
+    The FFT computes the biased autocovariance (denominator n at every lag).
+    """
+    values = np.asarray(values, dtype=float)
+    count = len(values)
+    centered = values-values[0]
+    centered -= centered.mean()
+    if count < 8 or not np.any(centered):
+        return 0.
+    size = 1 << (2*count-1).bit_length()
+    transform = np.fft.rfft(centered, n=size)
+    covariance = np.fft.irfft(transform*np.conj(transform), n=size)[:count]/count
+    if covariance[0] <= 0:
+        return 0.
+    previous, pair_sum = math.inf, 0.
+    for index in range(0, count-1, 2):
+        pair = float((covariance[index]+covariance[index+1])/covariance[0])
+        if pair <= 0:
+            break
+        previous = min(previous, pair)
+        pair_sum += previous
+    tau = max(1., 2*pair_sum-1.)
+    return float(min(count, count/tau))
+
+
+def exploration_metrics(coordinates, baseline, slot, options):
+    """Inspect all retained observations, including repeats, without selecting slots."""
+    count = len(coordinates)
+    centered = coordinates-coordinates[0]
+    centered -= centered.mean(axis=0)
+    whitened = solve_triangular(np.linalg.cholesky(baseline), centered.T, lower=True).T
+    _, singular, axes = np.linalg.svd(whitened, full_matrices=False)
+    # np.linalg.matrix_rank uses the same numerical relative singular threshold.
+    rank = int(np.linalg.matrix_rank(whitened))
+    projected = whitened@axes.T
+    ess = [autocorrelation_ess(projected[:, index]) if index < rank else 0.
+           for index in range(projected.shape[1])]
+    ess += [0.]*(6-len(ess))
+    unique = len(np.unique(coordinates, axis=0))
+    if rank == 0:
+        status = 'regularizer_only_no_observed_scatter'
+    elif rank < 6:
+        status = 'partially_observed_scatter_regularizer_in_unexplored_directions'
+    else:
+        status = 'full_rank_observed_scatter_not_a_convergence_claim'
+    failures = []
+    for label, measured, threshold in (
+            ('unique poses', unique, options.minimum_unique_poses),
+            ('empirical rank', rank, options.minimum_empirical_rank),
+            ('minimum PCA ESS estimate', min(ess), options.minimum_ess)):
+        if measured < threshold:
+            failures.append(f'{label} {measured:g} < {threshold:g}')
+    protocol = slot.get('refinement_protocol')
+    production_counts = copy.deepcopy(slot.get('refinement_production_counts'))
+    holdout = dict(available=False, reason='Fewer than 16 retained observations')
+    if count >= 16:
+        split = 3*count//4
+        train_mean, train_covariance, _ = regularized_moments(coordinates[:split], baseline, options)
+        lower = np.linalg.cholesky(train_covariance)
+        whitened_holdout = solve_triangular(lower, (coordinates[split:]-train_mean).T, lower=True).T
+        distances = np.sum(whitened_holdout**2, axis=1)
+        quantiles = [.5, .9, .99]
+        holdout = dict(available=True, training_count=split, holdout_count=count-split,
+            rule='Chronological first 75% fits a diagnostic Gaussian; final 25% is never used in that fit. '
+                 'Production model still fits ALL retained data. This split is correlated, not independent validation.',
+            nominal_ellipsoid_probabilities=quantiles,
+            observed_ellipsoid_fractions=[float(np.mean(distances <= chi2.ppf(p, 6))) for p in quantiles],
+            mean_squared_mahalanobis=float(distances.mean()),
+            gaussian_mean_squared_mahalanobis_reference=6.,
+            mean_chart_negative_log_density=float(3*np.log(2*np.pi)
+                +np.log(np.diag(lower)).sum()+.5*distances.mean()),
+            maximum_squared_mahalanobis=float(distances.max()),
+            parameter_selection=False)
+    return dict(covariance_evidence=status, empirical_rank=rank,
+        whitened_centered_singular_values=singular.tolist(), unique_physical_chart_poses=unique,
+        retained_pca_ess_estimates=ess, minimum_retained_pca_ess_estimate=min(ess),
+        ess_method='FFT biased autocovariance, initial-positive monotone adjacent-lag pairs, capped at retained count; '
+                   'constant/missing modes and n<8 have ESS=0. Estimated PCA axes come from this same trace.',
+        ess_limitation='A within-trace diagnostic assuming stationarity; unseen modes and initialization bias are untested.',
+        production_counts=production_counts, refinement_protocol=copy.deepcopy(protocol),
+        chronological_holdout=holdout,
+        requested_gate=dict(minimum_unique_poses=options.minimum_unique_poses,
+            minimum_empirical_rank=options.minimum_empirical_rank, minimum_ess=options.minimum_ess),
+        exploration_gate_passed=not failures, exploration_gate_failures=failures)
 
 
 def width_metrics(covariance, ell):
@@ -273,7 +391,10 @@ def append_component(model, anchor, mean, covariance, weight):
 
 
 def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
-    """Pure deterministic fit; no paths, native references, scores or RNG enter it."""
+    """Pure deterministic fit; no paths, native references or RNG enter it.
+
+    Search scores enter only the explicitly requested tempered allocation.
+    """
     options.validate()
     if isinstance(discoveries, dict):
         discoveries = [discoveries]
@@ -334,22 +455,38 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
         require(all(type(step) is int and step >= 0 for step in steps)
                 and all(a < b for a, b in zip(steps, steps[1:])), 'Retained steps must strictly increase')
         require(all(type(sample['accepted']) is bool for sample in samples), 'Retained acceptance flags must be Boolean')
+        protocol = slot.get('refinement_protocol')
+        if protocol is not None:
+            frozen_after = protocol.get('frozen_after_step')
+            require(type(frozen_after) is int and frozen_after >= 0,
+                    'Refinement protocol must record a nonnegative frozen_after_step')
+            require(all(step > frozen_after for step in steps),
+                    'Retained refinement samples must follow the adaptation freeze')
+            require(all(type(update.get('after_step')) is int and 0 < update['after_step'] <= frozen_after
+                        for update in protocol.get('updates', [])),
+                    'Refinement adaptation must stop before all retained samples')
         # Do not condition on accepted, score, validation, motif or any label.
         poses = [sample['pose'] for sample in samples]
         coordinates, seam_distance = chart_coordinates(reference, poses, ell)
         mean, covariance, report = regularized_moments(coordinates, fit_baseline, options)
         mass = float(masses[index])
-        append_component(base, initial_anchor, np.zeros(6), initial_cov, options.initial_weight*mass)
+        initial_component = None
+        if options.initial_weight > 0:
+            initial_component = len(base['weights'])
+            append_component(base, initial_anchor, np.zeros(6), initial_cov, options.initial_weight*mass)
+        refined_component = len(base['weights'])
         append_component(base, chart_anchor(reference), mean, covariance, (1-options.initial_weight)*mass)
         append_component(initial, initial_anchor, np.zeros(6), initial_cov, mass)
+        report.update(exploration_metrics(coordinates, fit_baseline, slot, options))
         report.update(global_slot=index, source_index=source_index, local_slot=slot['slot'],
             source_seed=discoveries[source_index].get('config', {}).get('seed'),
             seeds=copy.deepcopy(slot.get('seeds', {})), raw_slot_weight=1., slot_proposal_mass=mass,
-            initial_component=2*index, refined_component=2*index+1,
+            initial_component=initial_component, refined_component=refined_component,
             reference_pose=copy.deepcopy(reference), reference_rule='recorded optimized contact pose (radial or nearest-pair witness)',
             retained_steps=steps, retained_rejected_count=sum(not sample['accepted'] for sample in samples),
             retained_accepted_count=sum(sample['accepted'] for sample in samples),
-            unique_retained_poses=len({serialized(pose) for pose in poses}),
+            unique_retained_poses=report['unique_physical_chart_poses'],
+            unique_serialized_pose_records=len({serialized(pose) for pose in poses}),
             minimum_absolute_reference_quaternion_scalar=seam_distance,
             initial_width=width_metrics(initial_cov, ell), refined_width=width_metrics(covariance, ell),
             refinement_regularizer_width=width_metrics(fit_baseline, ell),
@@ -369,7 +506,12 @@ def fit_model(shape, discoveries, shape_hash, options=FitOptions()):
         effective_slot_count=float(1/np.sum(masses**2)),
         covariance_rule=__doc__.split('\n\n')[2], limitation=LIMITATION,
         native_geometry_inputs=0, production_pose_inputs=0, physical_updates=0, bath_queries=0,
-        full_gaussian_support=True, uniform_branch_in_model=False)
+        full_gaussian_support=True, uniform_branch_in_model=False,
+        exploration_gate_passed=all(r['exploration_gate_passed'] for r in reports),
+        slots_with_regularizer_only_covariance=sum(r['empirical_rank'] == 0 for r in reports),
+        slots_with_full_rank_empirical_covariance=sum(r['empirical_rank'] == 6 for r in reports))
+    if not metrics['exploration_gate_passed']:
+        raise ExplorationGateError(metrics)
     return reciprocal_envelope(base), reciprocal_envelope(initial), metrics
 
 
@@ -472,7 +614,18 @@ def prepare(shape_path, discovery_paths, out, options=FitOptions()):
             'Repeated discovery directories are not independent populations')
     require(len({sha_bytes(archive['discovery']) for archive in archives}) == len(archives),
             'Identical discovery populations cannot be counted as independent slots twice')
-    model, initial, metrics = fit_model(shape, discoveries, shape_hash, options)
+    try:
+        model, initial, metrics = fit_model(shape, discoveries, shape_hash, options)
+    except ExplorationGateError as error:
+        # Preserve complete diagnostics for every slot; never freeze a selected
+        # subset, silently weaken a gate, or write a production model on failure.
+        out.mkdir(parents=True)
+        write_new(out/'fit-metrics.json', error.metrics)
+        write_new(out/'freeze-rejected.json', dict(schema=FIT_SCHEMA, complete=False,
+            reason=str(error), model_written=False, all_slots_preserved=True,
+            shape_sha256=shape_hash, options=asdict(options),
+            discovery_sha256=[sha_bytes(a['discovery']) for a in archives]))
+        raise
     metrics['sources'] = [dict(source_index=i, directory=a['directory'],
         discovery_sha256=sha_bytes(a['discovery']), manifest_sha256=sha_bytes(a['manifest']))
         for i, a in enumerate(archives)]
@@ -525,8 +678,10 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     defaults = FitOptions()
     for name in ('translation_width', 'angle_width_degrees', 'shrinkage', 'covariance_floor', 'initial_weight',
-                 'weight_activity', 'target_effective_slots'):
+                 'weight_activity', 'target_effective_slots', 'minimum_ess'):
         parser.add_argument('--'+name.replace('_', '-'), type=float, default=getattr(defaults, name))
+    for name in ('minimum_unique_poses', 'minimum_empirical_rank'):
+        parser.add_argument('--'+name.replace('_', '-'), type=int, default=getattr(defaults, name))
     parser.add_argument('--audit-seed', type=int, default=defaults.audit_seed)
     args = parser.parse_args()
     options = FitOptions(**{name: getattr(args, name) for name in asdict(defaults)})

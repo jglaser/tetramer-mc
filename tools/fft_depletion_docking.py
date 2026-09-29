@@ -18,6 +18,7 @@ import numpy as np
 import scipy.fft as sfft
 from scipy.ndimage import maximum_filter
 from scipy.spatial.transform import Rotation
+from fft_rotation_indices import freeze_rotation_indices, load_rotation_indices, shard_rotation_indices
 
 PHI, PSI = np.sqrt(2.), 1.533751168755204288118041
 
@@ -99,7 +100,7 @@ def scan_shard(job):
     args, worker = job
     shape = json.loads(Path(args['shape']).read_text())
     S = Scanner(shape, args['rd'], args['spacing'], args['core_shrink'])
-    indices = np.arange(worker, args['rotations'], args['workers'])
+    indices = shard_rotation_indices(args['rotations'], worker, args['workers'], args.get('rotation_indices'))
     rows = []
     started = time.process_time()
     for i, q in zip(indices, super_fibonacci(args['rotations'], indices)):
@@ -128,11 +129,14 @@ def main():
     p.add_argument('--spacing', type=float, default=1.0)
     p.add_argument('--core-shrink', type=float, default=0.5)
     p.add_argument('--rotations', type=int, default=300000)
+    p.add_argument('--rotation-indices', help='Unique integer .npy indices into the fixed --rotations grid; sorted then sharded')
     p.add_argument('--clash-tolerances', type=float, nargs='+', default=[2., 10.])
     p.add_argument('--peaks', type=int, default=4)
     p.add_argument('--separation', type=float, default=3.)
     p.add_argument('--workers', type=int, default=100)
     a = p.parse_args()
+    if a.rotation_indices is not None:
+        load_rotation_indices(a.rotation_indices, a.rotations)
     out = Path(a.out)
     out.mkdir(parents=True)   # refuse to reuse an existing scan
     args = dict(vars(a), shape=str(Path(a.shape).resolve()), shape_sha256=sha(a.shape),
@@ -140,6 +144,8 @@ def main():
                 columns=['rotation_index', 'tol_class', 'qw', 'qx', 'qy', 'qz',
                          'tx', 'ty', 'tz', 'grid_overlap_A3', 'grid_clash_A3'],
                 scope='Grid correlation scores; approximate. Poses are shape-only candidates for exact refinement.')
+    if a.rotation_indices is not None:
+        args.update(freeze_rotation_indices(a.rotation_indices, out/'rotation-indices.npy', a.rotations))
     (out/'plan.json').write_text(json.dumps(args, indent=2)+'\n')
     started = time.time()
     with Pool(a.workers) as pool:

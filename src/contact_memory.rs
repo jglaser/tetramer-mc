@@ -290,6 +290,36 @@ fn inside(pose: Pose, radius: f64) -> bool {
     norm(pose.position) < radius
 }
 
+/// Symmetric local proposal in material-pivot coordinates `p = t + R c`.
+/// Here `c` is frozen in the body frame, independent of the current pose.
+/// The map `(t, R) -> (p, R)` has unit Jacobian in translation × Haar measure.
+/// Thus `(p, R) -> (p + d, Delta R)` has reverse increments `(-d, Delta^-1)`.
+/// A centered Gaussian displacement and centered isotropic Cayley increment
+/// have the same density as their inverse, requiring no proposal correction.
+pub fn pivoted_local_pose(
+    old: Pose,
+    displacement: Vec3,
+    cayley_increment: Vec3,
+    pivot_body: Vec3,
+) -> Pose {
+    let old_rotation = rotation(old.orientation);
+    let new_rotation = matmul(cayley(cayley_increment), old_rotation);
+    let position = add(
+        add(
+            old.position,
+            sub(
+                matvec(old_rotation, pivot_body),
+                matvec(new_rotation, pivot_body),
+            ),
+        ),
+        displacement,
+    );
+    Pose {
+        position,
+        orientation: quaternion(new_rotation),
+    }
+}
+
 impl MemoryState {
     /// Geometry-only nonequilibrium initialization. No production poses, native
     /// templates, or accepted-history archive are consumed by this constructor.
@@ -366,8 +396,27 @@ impl MemoryState {
         gate_options: GateOptions,
         rng: &mut StdRng,
     ) -> Result<MemoryMove> {
+        self.update_with_local_pivot(tree, config, gate_options, None, rng)
+    }
+
+    /// As `update`, optionally rotating about a frozen material point. The
+    /// pivot may be learned during discarded preparation, but must remain
+    /// fixed throughout a retained chain. It is not selected from the current
+    /// nearest contact. `None` preserves the original arithmetic and RNG stream.
+    pub fn update_with_local_pivot(
+        &mut self,
+        tree: &SphereTree,
+        config: &ResolvedMemoryConfig,
+        gate_options: GateOptions,
+        pivot_body: Option<Vec3>,
+        rng: &mut StdRng,
+    ) -> Result<MemoryMove> {
         config.validate()?;
         gate_options.validate()?;
+        ensure!(
+            pivot_body.is_none_or(|p| p.iter().all(|x| x.is_finite())),
+            "Invalid frozen material pivot"
+        );
         ensure!(
             self.poses.len() == config.slots,
             "Contact-memory slot count mismatch"
@@ -400,9 +449,12 @@ impl MemoryState {
             });
             (
                 MemoryProposalKind::Local,
-                Pose {
-                    position: add(old.position, displacement),
-                    orientation: quaternion(matmul(cayley(c), rotation(old.orientation))),
+                match pivot_body {
+                    Some(pivot) => pivoted_local_pose(old, displacement, c, pivot),
+                    None => Pose {
+                        position: add(old.position, displacement),
+                        orientation: quaternion(matmul(cayley(c), rotation(old.orientation))),
+                    },
                 },
             )
         };

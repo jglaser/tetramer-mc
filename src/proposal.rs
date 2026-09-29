@@ -723,6 +723,31 @@ impl FrozenRelativePoseProposal {
         branches
     }
 
+    /// Draw from one specified learned branch, without a uniform draw, image
+    /// restriction, hard rejection or retry. Diagnostic callers must retain
+    /// failed draws. This uses the same Gaussian and pose map as `propose`.
+    pub fn draw_relative_branch(
+        &self,
+        rng: &mut StdRng,
+        component_index: usize,
+        inverted: bool,
+    ) -> Result<Option<Pose>> {
+        ensure!(component_index < self.components.len(), "Invalid component index");
+        ensure!(!inverted || self.reciprocal_components[component_index], "Inactive inverse branch");
+        let component = &self.components[component_index];
+        let Some(latent) = component.draw(rng) else { return Ok(None) };
+        let mut t = std::array::from_fn(|i| component.anchor_position[i] + latent[i]);
+        let c = std::array::from_fn(|i| latent[i + 3] / self.angular_length);
+        if !finite3(t) || !finite3(c) { return Ok(None) }
+        let mut r = matmul(cayley(c), component.anchor_rotation);
+        if inverted {
+            r = transpose(r);
+            t = matvec(r, t).map(|x| -x);
+        }
+        if !finite3(t) { return Ok(None) }
+        Ok(Some(Pose { position: t, orientation: quaternion(r) }))
+    }
+
     fn require_base_only(&self, operation: &str) -> Result<()> {
         ensure!(
             !self.has_reciprocal_components(),

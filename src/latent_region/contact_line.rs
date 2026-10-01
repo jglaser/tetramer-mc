@@ -421,6 +421,71 @@ impl ContactLineGuide {
         self.density_trace(u, inside, volume, chart, outer, false)
     }
 
+    /// World-pose queries can have genuine zero conditional support. Establish
+    /// that support from intervals and fallback predicates, independently of
+    /// floating-point Gaussian values. Geometry is traversed only once; this
+    /// check reuses the saved intervals and repeats only cheap Normal algebra.
+    /// The existing regional/diagnostic methods and their arithmetic are intact.
+    pub(super) fn density_compact_checked(
+        &self,
+        u: [f64; 6],
+        inside: bool,
+        volume: f64,
+        chart: &Chart,
+        outer: f64,
+    ) -> Result<(f64, Value, bool)> {
+        ensure!(
+            self.hard_free_only,
+            "Checked vessel scorer requires hard-free law"
+        );
+        let (density, detail) = self.density_compact(u, inside, volume, chart, outer)?;
+        let mut active = vec![self.beta < 1.; self.base.components.len()];
+        if self.base.alpha < 1. && self.beta == 1. {
+            let x = chart.coordinates(u);
+            let axes = detail["axes"]
+                .as_array()
+                .context("Missing hard-free axes")?;
+            ensure!(axes.len() == self.axes.len(), "Incomplete hard-free axes");
+            for (ai, &axis) in self.axes.iter().enumerate() {
+                let intervals = IntervalSet::from_intervals(serde_json::from_value(
+                    axes[ai]["hard_free_intervals"].clone(),
+                )?)?;
+                let allowed = intervals.contains(x[axis]);
+                for (ci, normal) in self.conditionals[ai].iter().enumerate() {
+                    let (mean, sigma) = normal.conditional(x);
+                    let (_, mass) = Self::masses(&intervals, mean, sigma)?;
+                    active[ci] |= mass <= self.minimum_mass || allowed;
+                }
+            }
+        }
+        if self.base.alpha < 1. {
+            for (component, &present) in self.base.components.iter().zip(&active) {
+                if !present {
+                    continue;
+                }
+                let mut z = [0.; 6];
+                for i in 0..6 {
+                    z[i] = (u[i]
+                        - component.mean[i]
+                        - (0..i).map(|j| component.lower[i][j] * z[j]).sum::<f64>())
+                        / component.lower[i][i];
+                }
+                let log_g = component.log_normalizer - 0.5 * z.iter().map(|v| v * v).sum::<f64>();
+                ensure!(
+                    log_g.is_finite(),
+                    "Unrepresentable active Gaussian log density, not a support zero"
+                );
+            }
+        }
+        let positive =
+            (inside && self.base.alpha > 0.) || (self.base.alpha < 1. && active.iter().any(|v| *v));
+        ensure!(
+            (positive && density.is_finite()) || (!positive && density == f64::NEG_INFINITY),
+            "Conditional density disagrees with analytic support"
+        );
+        Ok((density, detail, !positive))
+    }
+
     fn density_trace(
         &self,
         u: [f64; 6],

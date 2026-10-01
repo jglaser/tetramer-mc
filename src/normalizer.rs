@@ -40,7 +40,7 @@ pub struct NormalizerOptions {
     pub activity: Option<f64>,
 }
 
-/// Frozen source chart and normalized Gaussian guide. Neither source R4 nor
+/// Frozen source chart and normalized latent guide. Neither source R4 nor
 /// source capture restricts the full-vessel physical integration domain.
 #[derive(Clone, Debug)]
 pub struct NormalizerLatentGuideFiles {
@@ -258,7 +258,9 @@ fn run_impl(
                 wall_spec.is_some(),
                 "Latent vessel guide requires an atomic wall"
             );
-            let value = PhysicalLatentGuide::from_bytes(region, guide, &shape_sha)?;
+            let value = PhysicalLatentGuide::from_bytes_with_geometry(
+                region, guide, &shape_sha, &cfg, &tree,
+            )?;
             value.validate_physical_context(&shape_sha, &cfg.fixed_poses)?;
             Ok(value)
         })
@@ -429,11 +431,30 @@ fn run_impl(
         );
         manifest["pose_streams"] = json!({"outer_branch":"outer-mixture", "vessel":"pose", "latent":"latent-pose", "generator":"tetramer-normalizer-independent-v1"});
         manifest["latent_reference_ball_is_target_restriction"] = json!(false);
+        if guide.is_hard_free_line() {
+            manifest["schema"] = json!(6);
+            manifest["outer_mixture_schema"] = json!("full-vessel-hard-free-line-half-mixture-v1");
+            manifest["latent_guide_schema"] = json!("defensive-hard-free-line-guide-v1");
+            manifest["latent_source_capture"]["conditions_guide"] = json!(true);
+            manifest["latent_density_trace"] =
+                json!("complete all-axis intervals, scored once at the world pose");
+            manifest["attempt_journal"] =
+                json!("attempts.jsonl; begin before each attempt; no retries");
+            manifest["resume_supported"] = json!(false);
+        }
     }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
     let cpu_start = cpu_seconds();
     let mut writer = BufWriter::new(File::create(options.out.join("samples.jsonl"))?);
+    let hard_free_line = latent_guide
+        .as_ref()
+        .is_some_and(PhysicalLatentGuide::is_hard_free_line);
+    let mut journal = if hard_free_line {
+        Some(File::create(options.out.join("attempts.jsonl"))?)
+    } else {
+        None
+    };
     let mut moments: BTreeMap<String, Moments> = BTreeMap::new();
     for name in [
         "total",
@@ -467,187 +488,227 @@ fn run_impl(
     let mut envelope_cpu = 0.;
     let mut cloud_cpu = 0.;
     for draw in 0..options.samples {
-        let before = cpu_seconds();
-        // The old no-guide path consumes exactly its original streams. The
-        // outer branch and latent branch have separately named streams, so
-        // neither shifts vessel draws nor either independent cloud stream.
-        let use_latent = latent_guide.is_some()
-            && stream(options.seed, draw, 0, "outer-mixture").random::<f64>() < 0.5;
-        let (candidate, outcome, latent_proposal) = if use_latent {
-            let draw = latent_guide.as_ref().unwrap().draw(&mut stream(
-                options.seed,
-                draw,
-                0,
-                "latent-pose",
-            ))?;
-            let metadata = json!({"latent":draw.latent,"latent_radius":draw.latent_radius,
-                "gaussian_component":draw.gaussian_component});
-            (Some(draw.pose), None, Some(metadata))
-        } else {
-            let outcome = model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
-            ensure!(
-                (!reciprocal && wall.is_none() && options.proposal_anchor_index.is_none())
-                    || outcome.candidate.is_some(),
-                "{} importance draw produced a numerical null: {:?}; stop instead of censoring",
-                if reciprocal {
-                    "Reciprocal"
-                } else {
-                    "Selected-anchor"
-                },
-                outcome.null_reason
-            );
-            let candidate = outcome.candidate.map(|p| Pose {
-                position: add(p.position, cfg.capture_center),
-                orientation: p.orientation,
-            });
-            (candidate, Some(outcome), None)
-        };
-        let log_vessel_proposal = if let Some(p_world) = candidate {
-            // Preserve the historical exact coordinates on the no-guide path.
-            // On mixed draws both component densities use the WORLD pose.
-            let p = if latent_guide.is_some() {
-                centered(p_world)
-            } else {
-                outcome.as_ref().unwrap().candidate.unwrap()
-            };
-            let mut total = f64::NEG_INFINITY;
-            for anchor in &poses[1..] {
-                total = log_add(total, model.log_density(&p, anchor)?);
-            }
-            let density = total - ((poses.len() - 1) as f64).ln();
-            ensure!(
-                density.is_finite() || (latent_guide.is_some() && density == f64::NEG_INFINITY),
-                "Nonfinite vessel proposal density"
-            );
-            Some(density)
-        } else {
-            None
-        };
-        let latent_density = if let Some(guide) = &latent_guide {
-            Some(guide.evaluate(candidate.context("Mixed draw has no pose")?)?)
-        } else {
-            None
-        };
-        let log_proposal = if let Some(density) = &latent_density {
-            let mixed = half_mixture_log_density(
-                log_vessel_proposal.unwrap(),
-                density.log_physical_density,
-            )?;
-            ensure!(
-                mixed.is_finite(),
-                "Generated mixture draw has zero or nonfinite density"
-            );
-            Some(mixed)
-        } else {
-            log_vessel_proposal
-        };
-        proposal_cpu += cpu_seconds() - before;
-        let mut capture_valid = false;
-        let mut hard_valid = false;
-        let mut wall_valid = false;
-        let mut q = None;
-        let mut contact = None;
-        let mut region = None;
-        let mut clouds = Vec::new();
-        let mut log_weight = None;
-        let mut log_hard = None;
-        if let Some(p) = candidate {
-            let before = cpu_seconds();
-            capture_valid = cfg.contains(p);
-            wall_valid = wall.as_ref().is_none_or(|container| {
-                container.contains(Pose {
-                    position: sub(p.position, wall_spec.unwrap().center),
-                    ..p
-                })
-            });
-            if capture_valid && wall_valid {
-                hard_valid = env.hard_valid(p);
-            }
-            if !capture_valid {
-                capture_rejected += 1;
-            } else if !wall_valid {
-                wall_rejected += 1;
-            } else if !hard_valid {
-                hard_rejected += 1;
-            }
-            if hard_valid {
-                let score = metric.q(p);
-                ensure!(score.is_finite(), "Invalid native coordinate");
-                q = Some(score);
-                let placed = Placed::new(p);
-                let bound = env.fixed.iter().any(|f| contact_tree.overlaps(&placed, f));
-                contact = Some(bound);
-                region = Some(region_name(score, bound));
-            }
-            geometry_cpu += cpu_seconds() - before;
-            if hard_valid {
-                valid += 1;
-                let before = cpu_seconds();
-                let envelope = OverlapEnvelope::build(&env, p, cfg.endpoint_gate)?;
-                envelope_cpu += cpu_seconds() - before;
-                let before = cpu_seconds();
-                let mut log_cloud_sum = f64::NEG_INFINITY;
-                for cloud in 0..options.cloud_replicates {
-                    let weight = overlap_weight::sample_with_envelope(
-                        &mut stream(options.seed, draw, cloud, "cloud"),
-                        &env,
-                        p,
-                        lambda,
-                        cfg.reservoir_density,
-                        &envelope,
-                    )?;
-                    raw_points += weight.raw_points;
-                    log_cloud_sum = log_add(log_cloud_sum, weight.log_weight);
-                    clouds.push(weight);
-                }
-                cloud_cpu += cpu_seconds() - before;
-                let inverse_q = -log_proposal.unwrap();
-                let importance = log_cloud_sum - (options.cloud_replicates as f64).ln() + inverse_q;
-                ensure!(importance.is_finite(), "Nonfinite importance weight");
-                log_weight = Some(importance);
-                log_hard = Some(inverse_q);
-                let basin = if q.unwrap() <= 1. { "native" } else { "other" };
-                for key in ["total", basin, region.as_ref().unwrap().as_str()] {
-                    moments.get_mut(key).unwrap().add(importance);
-                }
-                moments.get_mut("hard_total").unwrap().add(inverse_q);
-                moments
-                    .get_mut(&format!("hard_{basin}"))
-                    .unwrap()
-                    .add(inverse_q);
-            }
-        } else {
-            numerical_nulls += 1;
+        if let Some(journal) = &mut journal {
+            writeln!(journal, "{}", json!({"draw":draw,"state":"begin"}))?;
+            journal.flush()?;
         }
-        let mut row = json!({"draw":draw,"pose":candidate,"proposal":outcome,
+        let attempt = (|| -> Result<()> {
+            let before = cpu_seconds();
+            // The old no-guide path consumes exactly its original streams. The
+            // outer branch and latent branch have separately named streams, so
+            // neither shifts vessel draws nor either independent cloud stream.
+            let use_latent = latent_guide.is_some()
+                && stream(options.seed, draw, 0, "outer-mixture").random::<f64>() < 0.5;
+            let (candidate, outcome, latent_proposal) = if use_latent {
+                let guide = latent_guide.as_ref().unwrap();
+                let mut rng = stream(options.seed, draw, 0, "latent-pose");
+                if guide.is_hard_free_line() {
+                    let generated = guide.draw_only(&mut rng)?;
+                    let metadata = json!({"latent":generated.latent,"latent_radius":generated.latent_radius,
+                    "gaussian_component":generated.gaussian_component,
+                    "hard_free_line_draw":generated.hard_free_line_draw});
+                    (Some(generated.pose), None, Some(metadata))
+                } else {
+                    let generated = guide.draw(&mut rng)?;
+                    let metadata = json!({"latent":generated.latent,"latent_radius":generated.latent_radius,
+                    "gaussian_component":generated.gaussian_component});
+                    (Some(generated.pose), None, Some(metadata))
+                }
+            } else {
+                let outcome =
+                    model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
+                ensure!(
+                    (!reciprocal && wall.is_none() && options.proposal_anchor_index.is_none())
+                        || outcome.candidate.is_some(),
+                    "{} importance draw produced a numerical null: {:?}; stop instead of censoring",
+                    if reciprocal {
+                        "Reciprocal"
+                    } else {
+                        "Selected-anchor"
+                    },
+                    outcome.null_reason
+                );
+                let candidate = outcome.candidate.map(|p| Pose {
+                    position: add(p.position, cfg.capture_center),
+                    orientation: p.orientation,
+                });
+                (candidate, Some(outcome), None)
+            };
+            let log_vessel_proposal = if let Some(p_world) = candidate {
+                // Preserve the historical exact coordinates on the no-guide path.
+                // On mixed draws both component densities use the WORLD pose.
+                let p = if latent_guide.is_some() {
+                    centered(p_world)
+                } else {
+                    outcome.as_ref().unwrap().candidate.unwrap()
+                };
+                let mut total = f64::NEG_INFINITY;
+                for anchor in &poses[1..] {
+                    total = log_add(total, model.log_density(&p, anchor)?);
+                }
+                let density = total - ((poses.len() - 1) as f64).ln();
+                ensure!(
+                    density.is_finite() || (latent_guide.is_some() && density == f64::NEG_INFINITY),
+                    "Nonfinite vessel proposal density"
+                );
+                Some(density)
+            } else {
+                None
+            };
+            let latent_density = if let Some(guide) = &latent_guide {
+                Some(guide.evaluate(candidate.context("Mixed draw has no pose")?)?)
+            } else {
+                None
+            };
+            let log_proposal = if let Some(density) = &latent_density {
+                let mixed = half_mixture_log_density(
+                    log_vessel_proposal.unwrap(),
+                    density.log_physical_density,
+                )?;
+                ensure!(
+                    mixed.is_finite(),
+                    "Generated mixture draw has zero or nonfinite density"
+                );
+                Some(mixed)
+            } else {
+                log_vessel_proposal
+            };
+            proposal_cpu += cpu_seconds() - before;
+            let mut capture_valid = false;
+            let mut hard_valid = false;
+            let mut wall_valid = false;
+            let mut q = None;
+            let mut contact = None;
+            let mut region = None;
+            let mut clouds = Vec::new();
+            let mut log_weight = None;
+            let mut log_hard = None;
+            if let Some(p) = candidate {
+                let before = cpu_seconds();
+                capture_valid = cfg.contains(p);
+                wall_valid = wall.as_ref().is_none_or(|container| {
+                    container.contains(Pose {
+                        position: sub(p.position, wall_spec.unwrap().center),
+                        ..p
+                    })
+                });
+                if capture_valid && wall_valid {
+                    hard_valid = env.hard_valid(p);
+                }
+                if !capture_valid {
+                    capture_rejected += 1;
+                } else if !wall_valid {
+                    wall_rejected += 1;
+                } else if !hard_valid {
+                    hard_rejected += 1;
+                }
+                if hard_valid {
+                    let score = metric.q(p);
+                    ensure!(score.is_finite(), "Invalid native coordinate");
+                    q = Some(score);
+                    let placed = Placed::new(p);
+                    let bound = env.fixed.iter().any(|f| contact_tree.overlaps(&placed, f));
+                    contact = Some(bound);
+                    region = Some(region_name(score, bound));
+                }
+                geometry_cpu += cpu_seconds() - before;
+                if hard_valid {
+                    valid += 1;
+                    let before = cpu_seconds();
+                    let envelope = OverlapEnvelope::build(&env, p, cfg.endpoint_gate)?;
+                    envelope_cpu += cpu_seconds() - before;
+                    let before = cpu_seconds();
+                    let mut log_cloud_sum = f64::NEG_INFINITY;
+                    for cloud in 0..options.cloud_replicates {
+                        let weight = overlap_weight::sample_with_envelope(
+                            &mut stream(options.seed, draw, cloud, "cloud"),
+                            &env,
+                            p,
+                            lambda,
+                            cfg.reservoir_density,
+                            &envelope,
+                        )
+                        .with_context(|| format!("Poisson cloud {cloud} for draw {draw}"))?;
+                        raw_points += weight.raw_points;
+                        log_cloud_sum = log_add(log_cloud_sum, weight.log_weight);
+                        clouds.push(weight);
+                    }
+                    cloud_cpu += cpu_seconds() - before;
+                    let inverse_q = -log_proposal.unwrap();
+                    let importance =
+                        log_cloud_sum - (options.cloud_replicates as f64).ln() + inverse_q;
+                    ensure!(importance.is_finite(), "Nonfinite importance weight");
+                    log_weight = Some(importance);
+                    log_hard = Some(inverse_q);
+                    let basin = if q.unwrap() <= 1. { "native" } else { "other" };
+                    for key in ["total", basin, region.as_ref().unwrap().as_str()] {
+                        moments.get_mut(key).unwrap().add(importance);
+                    }
+                    moments.get_mut("hard_total").unwrap().add(inverse_q);
+                    moments
+                        .get_mut(&format!("hard_{basin}"))
+                        .unwrap()
+                        .add(inverse_q);
+                }
+            } else {
+                numerical_nulls += 1;
+            }
+            let mut row = json!({"draw":draw,"pose":candidate,"proposal":outcome,
             "capture_valid":capture_valid,"hard_valid":hard_valid,"q":q,"depletion_contact":contact,"region":region,
             "log_proposal_density":log_proposal,"log_importance_weight":log_weight,"log_hard_weight":log_hard,"clouds":clouds});
-        if let Some(density) = &latent_density {
-            row["outer_branch"] = json!(if use_latent { "latent" } else { "vessel" });
-            row["log_vessel_proposal_density"] = json!(log_vessel_proposal);
-            row["log_latent_physical_density"] = json!(density.log_physical_density);
-            row["latent_density"] = json!({"latent":density.latent,
+            if let Some(density) = &latent_density {
+                row["outer_branch"] = json!(if use_latent { "latent" } else { "vessel" });
+                row["log_vessel_proposal_density"] = json!(log_vessel_proposal);
+                row["log_latent_physical_density"] = json!(density.log_physical_density);
+                row["latent_density"] = json!({"latent":density.latent,
                 "in_reference_ball":density.in_reference_ball,
                 "log_latent_density":density.log_latent_density,
                 "log_physical_jacobian":density.log_physical_jacobian,
                 "coordinate_chart_seam":density.latent.is_none()});
-            row["latent_proposal"] = json!(latent_proposal);
-        }
-        if wall.is_some() {
-            row["wall_valid"] = json!(wall_valid);
-        }
-        serde_json::to_writer(&mut writer, &row)?;
-        writer.write_all(b"\n")?;
-        if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
-            writer.flush()?;
-            save(
-                &options.out.join("progress.json"),
-                &json!({"completed_draws":draw+1,"requested_draws":options.samples,
+                row["latent_proposal"] = json!(latent_proposal);
+                if hard_free_line {
+                    row["latent_density"]["hard_free_line_density"] =
+                        json!(density.hard_free_line_density);
+                    row["latent_density"]["structural_zero"] = json!(density.structural_zero);
+                }
+            }
+            if wall.is_some() {
+                row["wall_valid"] = json!(wall_valid);
+            }
+            serde_json::to_writer(&mut writer, &row)?;
+            writer.write_all(b"\n")?;
+            if hard_free_line {
+                writer.flush()?;
+            }
+            if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
+                writer.flush()?;
+                save(
+                    &options.out.join("progress.json"),
+                    &json!({"completed_draws":draw+1,"requested_draws":options.samples,
                 "hard_valid":valid,"sampler_cpu_seconds":cpu_seconds()-cpu_start,"complete":draw+1==options.samples}),
-            )?;
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = attempt {
+            if let Some(journal) = &mut journal {
+                writer.flush()?;
+                writer.get_ref().sync_data()?;
+                journal.sync_data()?;
+                save(
+                    &options.out.join("failure.json"),
+                    &json!({"complete":false,"draw":draw,
+                    "retry_performed":false,"error":format!("{error:#}")}),
+                )?;
+            }
+            return Err(error);
         }
     }
     writer.flush()?;
+    if let Some(journal) = &mut journal {
+        writer.get_ref().sync_data()?;
+        journal.sync_data()?;
+    }
     let estimates: BTreeMap<_, _> = moments
         .into_iter()
         .map(|(k, m)| (k, m.value(options.samples)))
@@ -659,6 +720,10 @@ fn run_impl(
         "manifest":manifest});
     if wall.is_some() {
         summary["wall_rejected"] = json!(wall_rejected);
+    }
+    if hard_free_line {
+        summary["attempts_sha256"] = json!(hash_file(&options.out.join("attempts.jsonl"))?);
+        summary["samples_sha256"] = json!(hash_file(&options.out.join("samples.jsonl"))?);
     }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)

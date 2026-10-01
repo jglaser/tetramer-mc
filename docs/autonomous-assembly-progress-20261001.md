@@ -22,11 +22,11 @@ independent reconstruction of 16,704 reference/control rows and attempted-draw
 failure checks. One test-helper mutation was corrected and recorded separately;
 the validated physical outputs were reused without rerunning them.
 
-The [fixed physical pilot](hard-free-line-physical-pilot.md) has now started at
-the original 1.5 Å / 0.035 Å⁻³ conditions. It uses four fresh 16,384-draw
-populations per arm, two independent clouds per valid pose, and at most two
-physical workers. Independent audits and a single complete native/contact
-classification pass follow automatically. All original convergence gates,
+The [fixed physical pilot](hard-free-line-physical-pilot.md) has completed all
+131,072 physical draws at the original 1.5 Å / 0.035 Å⁻³ conditions. It uses four
+fresh 16,384-draw populations per arm, two independent clouds per valid pose,
+and at most two physical workers. Independent audits are running; a single
+complete native/contact classification pass follows automatically. All original convergence gates,
 unconditional zeros and strata remain; neither full-vessel nor assembly
 production is enabled by this pilot. Earlier completed calculations remain
 retrospective evidence and are not rerun or pooled.
@@ -52,6 +52,18 @@ only standard Lean axioms. This estimator preserves the current draw law but
 could avoid the complete new-mixture density evaluation. Its retrospective
 variance/cost estimates are provisional; the running experiment still uses its
 original full-density weights. No physical convergence gate has been relaxed.
+
+The [full-vessel wrapper](hard-free-vessel-guide.md) now accepts this normalized
+guide while preserving its probability outside the source R4/capture domain.
+It evaluates both mixture densities in world coordinates, divides the latent
+density by the Jacobian once, and retains the original wall and vessel support.
+Thirteen Rust coordinate/support/normalization tests and nine independent
+Python tests passed. A fixed new sphere allocation retained 17,024 attempts;
+its two analytic references and disabled-guide/legacy controls passed, followed
+by independent reconstruction of all 16,640 new-format rows. These reference
+checks do not launch or authorize a protein full-vessel campaign. The cheaper
+indexed regional estimator cannot be reused unchanged outside its support;
+this extension therefore retains complete-mixture weighting.
 
 ## Keep the two ensembles separate
 

@@ -38,6 +38,14 @@ from `b_b ≥ a_b ≥ 0`. With the same label-independent conditional Poisson la
 replace `F²` by the conditional second moment of the noisy integrand. These
 inequalities do not establish finite integrated variance, coverage or speed.
 
+This construction is restricted to the original regional target. It cannot be
+copied unchanged into the full-vessel calculation: outside the source domain,
+some conditioned components have zero density even though their old Gaussian
+responsibilities are positive. Keeping those responsibilities would then lose
+target mass. The full-vessel implementation therefore retains complete-mixture
+weighting. Any future indexed vessel estimator needs a new partition of the
+target that respects each component's support, including the vessel branch.
+
 The [Lean module](../formal/ReversibleSampling/IndexedImportance.lean) checks
 the indexed mean, upper second-moment inequality, weighted-variance identity
 and lower second-moment inequality for finite labels. Its assumptions are

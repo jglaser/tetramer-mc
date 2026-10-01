@@ -1,11 +1,12 @@
-//! A frozen latent Gaussian guide as a normalized physical-pose proposal.
+//! A frozen latent guide as a normalized physical-pose proposal.
 //!
 //! Density is `q_D(u(x)) / J_D(u(x))` relative to d^3t times normalized
 //! SO(3) Haar. The radius-4 indicator restricts only the uniform branch:
-//! untruncated Gaussian mass outside R4 remains present. This module has no
-//! physical hard, capture, wall, native, or Poisson-weight predicate.
-use super::{Chart, ImportanceGuide, PI, log_add};
-use crate::{math::*, simulation::hash_bytes};
+//! Gaussian or conditional fallback mass outside R4 remains present. The
+//! optional hard-free law uses source capture/core geometry only to define its
+//! normalized proposal, never as a physical-target or wall predicate.
+use super::{Chart, ImportanceGuide, PI, contact_line::ContactLineGuide, log_add};
+use crate::{docking::DockingConfig, geometry::SphereTree, math::*, simulation::hash_bytes};
 use anyhow::{Context, Result, ensure};
 use rand::rngs::StdRng;
 use serde_json::Value;
@@ -21,6 +22,10 @@ pub struct PhysicalGuideDensity {
     pub log_latent_density: Option<f64>,
     pub log_physical_jacobian: Option<f64>,
     pub log_physical_density: f64,
+    /// Complete conditional-density trace, present only for the hard-free law.
+    pub hard_free_line_density: Option<Value>,
+    /// An analytic support zero, never a substituted numerical underflow.
+    pub structural_zero: bool,
 }
 
 /// A single unconditional proposal; exterior points are ordinary outcomes.
@@ -33,11 +38,27 @@ pub struct PhysicalGuideDraw {
     pub density: PhysicalGuideDensity,
 }
 
+/// Generation only: scoring this world pose remains a separate operation.
+/// This avoids a discarded all-axis BVH traversal in the vessel normalizer.
+#[derive(Clone, Debug)]
+pub struct PhysicalGuidePoseDraw {
+    pub pose: Pose,
+    pub latent: [f64; 6],
+    pub latent_radius: f64,
+    pub gaussian_component: Option<usize>,
+    pub hard_free_line_draw: Option<Value>,
+}
+
+enum PhysicalGuideLaw {
+    Gaussian(ImportanceGuide),
+    HardFreeLine(ContactLineGuide),
+}
+
 /// Wraps the existing checked chart and full Gaussian-mixture implementation.
 /// Source capture metadata is retained for provenance, never used as a target.
 pub struct PhysicalLatentGuide {
     chart: Chart,
-    guide: ImportanceGuide,
+    guide: PhysicalGuideLaw,
     region_sha256: String,
     guide_sha256: String,
     shape_sha256: String,
@@ -62,6 +83,33 @@ impl PhysicalLatentGuide {
         region_raw: &[u8],
         guide_raw: &[u8],
         expected_shape_sha256: &str,
+    ) -> Result<Self> {
+        Self::from_bytes_inner(region_raw, guide_raw, expected_shape_sha256, None)
+    }
+
+    /// Geometry-aware constructor. The vessel capture is deliberately replaced
+    /// by the archived SOURCE capture before constructing the conditional law.
+    /// The tree must come from the shape bytes bound by expected_shape_sha256.
+    pub fn from_bytes_with_geometry(
+        region_raw: &[u8],
+        guide_raw: &[u8],
+        expected_shape_sha256: &str,
+        vessel_config: &DockingConfig,
+        tree: &SphereTree,
+    ) -> Result<Self> {
+        Self::from_bytes_inner(
+            region_raw,
+            guide_raw,
+            expected_shape_sha256,
+            Some((vessel_config, tree)),
+        )
+    }
+
+    fn from_bytes_inner(
+        region_raw: &[u8],
+        guide_raw: &[u8],
+        expected_shape_sha256: &str,
+        geometry: Option<(&DockingConfig, &SphereTree)>,
     ) -> Result<Self> {
         let region: Value = serde_json::from_slice(region_raw)?;
         ensure!(
@@ -117,7 +165,28 @@ impl PhysicalLatentGuide {
             fixed,
         )?;
         let region_sha256 = hash_bytes(region_raw);
-        let guide = ImportanceGuide::from_bytes(guide_raw, &region_sha256)?;
+        let guide_data: Value = serde_json::from_slice(guide_raw)?;
+        let guide = if guide_data["schema"] == "defensive-hard-free-line-guide-v1" {
+            let (vessel, tree) =
+                geometry.context("Hard-free physical guide requires bound geometry")?;
+            ensure!(
+                vessel.fixed_poses == physical_fixed_neighbors,
+                "Vessel and hard-free guide physical neighbors differ"
+            );
+            let mut source = vessel.clone();
+            source.capture_center = reference_capture_center;
+            source.capture_radius = reference_capture_radius;
+            PhysicalGuideLaw::HardFreeLine(ContactLineGuide::from_bytes(
+                guide_raw,
+                &region_sha256,
+                &chart,
+                0.,
+                &source,
+                tree,
+            )?)
+        } else {
+            PhysicalGuideLaw::Gaussian(ImportanceGuide::from_bytes(guide_raw, &region_sha256)?)
+        };
         Ok(Self {
             chart,
             guide,
@@ -141,10 +210,19 @@ impl PhysicalLatentGuide {
         &self.shape_sha256
     }
     pub fn uniform_probability(&self) -> f64 {
-        self.guide.alpha
+        self.base().alpha
     }
     pub fn gaussian_component_count(&self) -> usize {
-        self.guide.components.len()
+        self.base().components.len()
+    }
+    fn base(&self) -> &ImportanceGuide {
+        match &self.guide {
+            PhysicalGuideLaw::Gaussian(g) => g,
+            PhysicalGuideLaw::HardFreeLine(g) => &g.base,
+        }
+    }
+    pub fn is_hard_free_line(&self) -> bool {
+        matches!(self.guide, PhysicalGuideLaw::HardFreeLine(_))
     }
     pub fn physical_fixed_neighbors(&self) -> &[Pose] {
         &self.physical_fixed_neighbors
@@ -179,10 +257,26 @@ impl PhysicalLatentGuide {
         // Avoid squared-norm overflow for exterior coordinates.
         let inside = latent.iter().all(|v| v.abs() <= Self::REFERENCE_RADIUS)
             && latent.iter().map(|v| v * v).sum::<f64>() <= Self::REFERENCE_RADIUS.powi(2);
-        let log_q = self.guide.log_density(latent, inside, self.log_volume);
+        let (log_q, hard_free_line_density, structural_zero) = match &self.guide {
+            PhysicalGuideLaw::Gaussian(g) => (
+                g.log_density(latent, inside, self.log_volume),
+                None,
+                g.alpha == 1. && !inside,
+            ),
+            PhysicalGuideLaw::HardFreeLine(g) => {
+                let (q, detail, zero) = g.density_compact_checked(
+                    latent,
+                    inside,
+                    self.log_volume,
+                    &self.chart,
+                    Self::REFERENCE_RADIUS,
+                )?;
+                (q, Some(detail), zero)
+            }
+        };
         // A finite non-seam point has positive Gaussian density. If its log
         // density is beyond FP64 range, stop rather than declare it a zero.
-        let legitimate_zero = self.guide.alpha == 1. && !inside;
+        let legitimate_zero = structural_zero;
         ensure!(
             log_q.is_finite() || (legitimate_zero && log_q == f64::NEG_INFINITY),
             "Unrepresentable non-seam Gaussian guide log density; no finite band is censored"
@@ -198,6 +292,8 @@ impl PhysicalLatentGuide {
             log_latent_density: Some(log_q),
             log_physical_jacobian: Some(log_jacobian),
             log_physical_density: log_physical,
+            hard_free_line_density,
+            structural_zero,
         })
     }
 
@@ -232,6 +328,8 @@ impl PhysicalLatentGuide {
                 log_latent_density: None,
                 log_physical_jacobian: None,
                 log_physical_density: f64::NEG_INFINITY,
+                hard_free_line_density: None,
+                structural_zero: true,
             });
         }
         let latent = self.chart.encode(pose)?;
@@ -249,16 +347,36 @@ impl PhysicalLatentGuide {
     /// One draw from the original complete latent mixture. No physical checks,
     /// retries, or normalization by the probability of entering any domain.
     pub fn draw(&self, rng: &mut StdRng) -> Result<PhysicalGuideDraw> {
-        let (latent, latent_radius, gaussian_component) =
-            self.guide.draw(rng, Self::REFERENCE_RADIUS, 0., 1.)?;
-        let (pose, log_jacobian) = self.decode(latent)?;
-        let density = self.density_at_latent(latent, log_jacobian)?;
+        let value = self.draw_only(rng)?;
+        let (_, log_jacobian) = self.decode(value.latent)?;
+        let density = self.density_at_latent(value.latent, log_jacobian)?;
         Ok(PhysicalGuideDraw {
+            pose: value.pose,
+            latent: value.latent,
+            latent_radius: value.latent_radius,
+            gaussian_component: value.gaussian_component,
+            density,
+        })
+    }
+
+    pub fn draw_only(&self, rng: &mut StdRng) -> Result<PhysicalGuidePoseDraw> {
+        let (latent, latent_radius, gaussian_component, trace) = match &self.guide {
+            PhysicalGuideLaw::Gaussian(g) => {
+                let (u, r, c) = g.draw(rng, Self::REFERENCE_RADIUS, 0., 1.)?;
+                (u, r, c, None)
+            }
+            PhysicalGuideLaw::HardFreeLine(g) => {
+                let (u, r, c, _) = g.draw(rng, &self.chart, Self::REFERENCE_RADIUS, 0., 1.)?;
+                (u, r, c, Some(g.last_draw.borrow().clone()))
+            }
+        };
+        let (pose, _) = self.decode(latent)?;
+        Ok(PhysicalGuidePoseDraw {
             pose,
             latent,
             latent_radius,
             gaussian_component,
-            density,
+            hard_free_line_draw: trace,
         })
     }
 }
@@ -287,3 +405,7 @@ pub fn half_mixture_log_density(log_vessel: f64, log_latent_physical: f64) -> Re
 #[cfg(test)]
 #[path = "physical_guide_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "physical_hard_free_tests.rs"]
+mod hard_free_tests;

@@ -149,6 +149,11 @@ before designing another fixed confirmation. The pilot neither resolves older
 SMC discrepancies nor bounds the vessel remainder. Full-vessel and assembly
 decision gates remain closed; the finite-system verdict is unresolved.
 
+The follow-up [cooperative-contact inspection and frozen guide test](cooperative-contact-guide.md)
+archives the problematic competing-55 geometry. Four further covariance fits
+failed their retrospective recommendation checks and were inferior to a
+geometry-preserving allocation control. No additional physical pilot was launched.
+
 - [Frozen 92-component guide](../runs/contact-tail-expansion-20261001/expanded-guide.json)
 - [Model freeze before holdouts](../runs/contact-tail-expansion-20261001/model-freeze.json)
 - [Anchors, neighbors and covariance diagnostics](../runs/contact-tail-expansion-20261001/fit.json)

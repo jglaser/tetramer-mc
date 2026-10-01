@@ -100,6 +100,18 @@ All eight physical jobs and independent audits completed; no allocation was
 extended after seeing its results. Full-vessel and finite-system production
 remain behind their original gates.
 
+A further bounded preparation then fitted four components for the newly
+identified cooperative competing family using only the original training
+populations. It retained 50% uniform support and at least 90% of the preceding
+guide density everywhere. On the archived bank/protected holdouts, its targeted
+paired second-moment ratios were 0.418/0.548, while merely reallocating existing
+components achieved 0.195/0.320 (smaller is better). Those moment estimates had
+effective counts of only about five. The new geometry failed its prespecified
+recommendation gates; no additional physical draws were launched. This is a
+negative result for that guide expansion, with no thermodynamic implication.
+The [cooperative-contact report](cooperative-contact-guide.md) records the
+geometry, frozen densities, failed holdout checks and inert prospective commands.
+
 ## Validation and next decision
 
 The new kernels passed finite-state balance, ordered-pool normalization,

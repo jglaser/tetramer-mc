@@ -132,7 +132,10 @@ The [completed pilot report](../runs/contact-tail-pilot-review-v2-20261001/repor
 retains all failures: native-complement concentration checks and 14/34 material
 stratum comparisons still fail. Newly better-observed competing orthant 55
 needs further coverage. No automatic extension was run; the physical verdict
-and full-vessel gate remain unresolved.
+and full-vessel gate remain unresolved. A bounded
+[follow-up guide assessment](cooperative-contact-guide.md) archived the saved
+cooperative competing geometry, but new local covariance components failed to
+outperform simple allocation changes and did not justify another physical job.
 
 ## Bound summary identities
 

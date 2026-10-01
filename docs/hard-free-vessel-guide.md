@@ -93,6 +93,13 @@ including invalid zeros and both cloud records. Interval endpoints agree to
 1.4e-13 Å and the selected inverse CDF to 8.7e-15. The final receipt is
 `results/hard-free-vessel-validation-20261001/validation.json`.
 
+The [numerical-scale follow-up](../results/hard-free-vessel-validation-20261001/numerical-scale.md)
+separates component and complete-mixture errors. Its largest component-log
+difference is about 4.6e-5 at log density −80 million on a physically invalid
+pose. The complete mixture is unchanged there; its maximum log-density error
+over either primary reference is 1.03e-14. This follow-up reused the independently
+audited intervals and performed no new geometry, sampling or classification.
+
 This registration does not open the regional convergence, full-vessel production
 or assembly gates. The old 80-component vessel preparation cannot be reused by
 changing its frozen guide in place. A later campaign requires a new preparation,

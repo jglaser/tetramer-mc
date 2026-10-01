@@ -65,6 +65,13 @@ checks do not launch or authorize a protein full-vessel campaign. The cheaper
 indexed regional estimator cannot be reused unchanged outside its support;
 this extension therefore retains complete-mixture weighting.
 
+The completed-analysis [plot helper](../tools/plot_hard_free_line_physical.py)
+is prepared and passes two synthetic checks. It refuses unfinished campaigns,
+reads the bound summaries without reclassification, and displays independent
+population masses, importance ESS per CPU, free-energy intervals, regional
+quality gates and every failed material stratum. No plot of the unfinished
+protein comparison has been generated.
+
 ## Keep the two ensembles separate
 
 | Work | Physical parameters | What is measured |

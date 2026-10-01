@@ -40,8 +40,10 @@ The sections below preserve the earlier stages of this investigation.
 While the physical pilot runs, the [matching-SMC bridge](hard-free-line-smc-bridge.md)
 is frozen against all twenty historical populations in five controls. It will
 compare independent linear masses after the new complete analysis, preserving
-historical failures and unavailable hard-only stratum estimates. Six tests and
-a separate source review passed; no old trajectories or classifiers were replayed.
+historical failures and unavailable hard-only stratum estimates. Seven tests and
+source reviews passed; a second frozen preparation adds explicit bindings of
+the restricted controls' stratum implementation. No old trajectories or
+classifiers were replayed.
 
 The [retained-index alternative](hard-free-line-index-estimator.md) now has an
 independently reviewed derivation, six arithmetic/provenance tests and four

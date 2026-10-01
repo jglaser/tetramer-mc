@@ -82,5 +82,31 @@ class MatchingSMC(unittest.TestCase):
             p.write_text('{"changed":true}')
             with self.assertRaisesRegex(ValueError,'changed'):ledger.recheck()
 
+    def test_restricted_strata_source_definition_and_population_binding(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'common').mkdir()
+            p=root/'common/chart.py';p.write_text('reviewed edges and >=0 signs')
+            hashes={'chart.py':bridge.sha(p)}
+            plan=dict(schema='native-excluded-smc-fixed-control-v1',sources=hashes,
+                analysis=dict(class_order=['total',*bridge.RESTRICTED_CLASSES],strata=bridge.STRATA))
+            analysis=dict(schema=plan['schema'],complete=True);target=dict(strata=bridge.STRATA_DEFINITION)
+            with patch.object(bridge,'RESTRICTED_STRATA_SOURCES',hashes):
+                binding=bridge.restricted_definition(root,plan,analysis,target,bridge.Inputs())
+                bridge.restricted_population_strata_binding(dict(source_sha256=binding['source_sha256']),binding)
+                with self.assertRaisesRegex(ValueError,'population stratum'):
+                    bridge.restricted_population_strata_binding(dict(source_sha256={}),binding)
+                for key,value in [('schema','unknown'),('complete',False)]:
+                    with self.assertRaisesRegex(ValueError,'restricted summary'):
+                        bridge.restricted_definition(root,plan,dict(analysis,**{key:value}),target,bridge.Inputs())
+                bad=copy.deepcopy(plan);bad['analysis']['class_order'].reverse()
+                with self.assertRaisesRegex(ValueError,'class order'):
+                    bridge.restricted_definition(root,bad,analysis,target,bridge.Inputs())
+                bad=copy.deepcopy(target);bad['strata']['radial_edges'][1]=1.9
+                with self.assertRaisesRegex(ValueError,'stratum definitions'):
+                    bridge.restricted_definition(root,plan,analysis,bad,bridge.Inputs())
+                p.write_text('changed edges or signs')
+                with self.assertRaisesRegex(ValueError,'hash mismatch'):
+                    bridge.restricted_definition(root,plan,analysis,target,bridge.Inputs())
+
 
 if __name__=='__main__':unittest.main()

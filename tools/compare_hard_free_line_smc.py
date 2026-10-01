@@ -19,6 +19,14 @@ R5_SHA='76ea65088e302d6b6478ac033af9b67b7cf21cb7cea1f854f70cdcd6db0473ae'
 PARTITION_SHA='8620fc2932bd6583a7571e36b44c71eaf95bd8032720806be31cf5c5c10f49dd'
 RESTRICTED_CLASSES=('contact_no_native_entry','unbound_no_native_entry')
 CONTROLS=['unrestricted_broad','unrestricted_narrow','excluded_narrow','excluded_large','excluded_broad']
+# Reviewed archived implementation: Chart.bins uses norm edges 2/3, squared
+# angular-projection edges 4/9, right-side assignment and six >=0 sign bits.
+# Its covariance-derived angular_map and the restricted Context invocation are
+# bound too. No historical module or classifier is executed to check this.
+RESTRICTED_STRATA_SOURCES={
+    'analyze_native_excluded_smc.py':'8b74fa74385347af6801d55406e94dbdf3d3432dc0f6f25e3ba9ae4da3c41aae',
+    'analyze_r4_smc_control.py':'0196a0fb2e967e15d9da17a0c58951fe0df67cb7f1bc99712b00c0a947aedfb8',
+}
 
 
 class Inputs:
@@ -97,6 +105,27 @@ def restricted_rows(populations,kind,family=None,index=None):
 def summarize(rows,classes):return {k:mass_statistics([r[k] for r in rows]) for k in classes}
 
 
+def restricted_definition(root,plan,analysis,t,ledger):
+    require(plan['schema']==analysis['schema']=='native-excluded-smc-fixed-control-v1'
+        and analysis['complete'] is True,'Incomplete/unknown restricted summary')
+    require(plan['analysis']['class_order']==['total',*RESTRICTED_CLASSES]
+        and plan['analysis']['strata']==STRATA and t['strata']==STRATA_DEFINITION,
+        'Restricted class order or stratum definitions differ')
+    sources={}
+    for name,digest in RESTRICTED_STRATA_SOURCES.items():
+        require(plan['sources'].get(name)==digest,'Unreviewed restricted stratum implementation')
+        path=ledger.bind(Path(root)/'common'/name,digest);sources[str(path)]=digest
+    return dict(definition=copy.deepcopy(STRATA_DEFINITION),source_sha256=sources,
+        edge_assignment='right; zero sign positive',archived_source_executed=False)
+
+
+def restricted_population_strata_binding(population,binding):
+    for path,digest in binding['source_sha256'].items():
+        matches=[value for name,value in population['source_sha256'].items()
+            if Path(name).resolve()==Path(path).resolve()]
+        require(matches and all(value==digest for value in matches),'Restricted population stratum source differs')
+
+
 def freeze(out,campaign,repository):
     out,campaign,repository=map(lambda p:Path(p).resolve(),(out,campaign,repository));require(not out.exists(),'Fresh bridge preparation required')
     ledger=Inputs();t=target(campaign,ledger);runs=repository/'runs'
@@ -116,6 +145,8 @@ def freeze(out,campaign,repository):
     restricted=runs/'native-excluded-smc-control-20260924'
     status=ledger.json(restricted/'status.json');require(status['complete'] and status['phase']=='complete','Restricted SMC incomplete')
     plan=ledger.json(restricted/'plan.json',status['plan_sha256']);analysis=ledger.json(restricted/'analysis.json',status['analysis_sha256'])
+    strata_binding=restricted_definition(restricted,plan,analysis,t,ledger)
+    historical['restricted_strata_binding']=strata_binding
     physical=plan['physical_target']
     require(physical['shape_sha256']==SHAPE_SHA and physical['region_sha256']==REGION_SHA and physical['definition_sha256']==NATIVE_SHA
         and physical['target']=='Hcapture Hhard IR4 (1-Inative) exp(zC) d3t dHaar'
@@ -129,6 +160,7 @@ def freeze(out,campaign,repository):
         expected={j['id']:j for j in plan['jobs'] if j['arm']==name};populations=[]
         for jobid,j in expected.items():
             receipt=analysis['audits'][jobid];p=ledger.json(receipt['path'],receipt['sha256'])
+            restricted_population_strata_binding(p,strata_binding)
             require(p['complete'] and p['schema']=='native-excluded-smc-population-audit-v1' and p['id']==jobid and p['seed']==j['seed']
                 and p['initial_draws']==plan['allocation']['initial_draws_per_population'],'Restricted audit allocation/identity mismatch')
             require(p['native_definition']==dict(definition_sha256=NATIVE_SHA,compiled_sha256=physical['compiled_sha256'],
@@ -147,7 +179,7 @@ def freeze(out,campaign,repository):
     for name,path in sources.items():shutil.copy2(path,out/'source'/name)
     write(out/'historical.json',dict(target=t,controls=controls,historical_checks=historical,input_sha256=ledger.files,
         authentication_reused=True,raw_history_rehashed=False,raw_history_replayed=False,old_classifier_calls=0))
-    write(out/'plan.json',dict(schema='hard-free-line-smc-bridge-plan-v1',campaign=str(campaign),controls=CONTROLS,
+    write(out/'plan.json',dict(schema='hard-free-line-smc-bridge-plan-v2',campaign=str(campaign),controls=CONTROLS,
         fresh_arms=['baseline','conditioned'],comparison_kinds=['Qz','Q0'],strata=STRATA_DEFINITION,
         absolute_log_tolerance=.2,combined_linear_SE_multiplier=3.,material_stratum_fraction=.01,
         require_complete_current_comparison=True,missing_Q0_strata='Initial unresampled H/g stratum masses were not archived; no substitute estimator.',
@@ -184,6 +216,7 @@ def compare_control(control,importance):
 def run(preparation,out):
     preparation,out=Path(preparation).resolve(),Path(out).resolve();require(not out.exists(),'No repeated bridge output')
     verify_frozen(preparation);plan=read(preparation/'plan.json');historical=read(preparation/'historical.json')
+    require(plan['schema']=='hard-free-line-smc-bridge-plan-v2','Restricted stratum source binding required')
     require(sha(preparation/'historical.json')==plan['historical_sha256'] and plan['controls']==CONTROLS,'Historical selection changed')
     sources=local_dependencies([Path(__file__)])
     require({n:sha(p) for n,p in sources.items()}==plan['sources'],'Use frozen bridge source closure')

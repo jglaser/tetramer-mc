@@ -20,14 +20,16 @@ Identity checks require the original shape and R4 hashes, two-neighbor scaffold,
 
 The unrestricted inputs are the previously authenticated `broad-analysis/analysis.json` and `narrow-analysis/analysis.json` under `runs/smc-r4-controls-workflow-20260922`. The restricted inputs are the twelve saved `audits/*/population.json` reports bound by the completed status and aggregate analysis under `runs/native-excluded-smc-control-20260924`. The preparation checks these summary and input hashes, reuses their prior audit certificates, and does not reread multi-gigabyte SMC histories. All historical control failures remain explicitly stored, including broad/narrow sensitivity and the restricted broad-arm failure. No control is discarded or pooled with the new populations.
 
-The frozen preparation is `/vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-preparation-20261001`, plan SHA `5c7bd3d173bff7206c99979549dcb1961dccb125968a860465d8811149d4bb9a`. Six focused [tests passed](../results/hard-free-line-smc-bridge-validation-20261001/validation.json), covering linear averages and independent-population errors, zero/unobserved estimates, separate agreement criteria, normalizer-times-indicator conservation, unavailable Q0 strata, target mismatch and stale provenance. An additional [source review](../results/hard-free-line-smc-bridge-validation-20261001/root-review.json) checked the bridge and its reused estimators without replaying tests or physical histories.
+The operative frozen preparation is `/vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-preparation-v2-20261001`, plan SHA `e1f5351c05fef05d22cef87ae8ddc8cb87c93eeee12730386aa1ee6037114953`. Version 1 remains archived and unused. The additional review identified a missing explicit binding of the restricted controls' stratum implementation. Version 2 binds the two reviewed historical source files through the plan and every population receipt: radial thresholds 2/3, squared angular-projection thresholds 4/9, right-side edge assignment and nonnegative sign bits. It also checks the restricted summary schema, completion, class order and bin sizes. No historical module is executed, and no masses, comparison thresholds, populations or allocations changed.
+
+Seven focused tests pass, including rejection of changed bin definitions, source files, population bindings and incomplete summaries. The original six [test results](../results/hard-free-line-smc-bridge-validation-20261001/validation.json) and [source review](../results/hard-free-line-smc-bridge-validation-20261001/root-review.json) remain archived; the [version-2 receipt](../results/hard-free-line-smc-bridge-validation-v2-20261001/validation.json) records the additional checks. No physical histories or classifiers were replayed.
 
 After the current controller completes its physical runs, independent audits and once-only classifications, invoke the frozen helper once:
 
 ```bash
 /home/xvg/protein-nucleation/.venv/bin/python -B -E \
-  /vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-preparation-20261001/source/compare_hard_free_line_smc.py run \
-  --preparation /vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-preparation-20261001 \
+  /vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-preparation-v2-20261001/source/compare_hard_free_line_smc.py run \
+  --preparation /vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-preparation-v2-20261001 \
   --out /vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-20261001
 ```
 

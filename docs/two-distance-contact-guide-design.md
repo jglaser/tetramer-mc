@@ -1,8 +1,8 @@
 # Candidate: two contact distances and an azimuth
 
-**Unimplemented and unvalidated.** This is a normalized integration-guide
-construction to examine with passive geometry checks before considering new
-physical sampling. It changes all three translation coordinates at fixed
+**Implemented and validated; the fixed protein pilot did not improve efficiency.**
+This is a normalized integration guide to examine with passive geometry checks
+before considering new physical sampling. It changes all three translation coordinates at fixed
 orientation, addressing the fixed-x guide's frequent blocked lines. It does
 not resolve the failed contact-weight gates or establish assembly stability.
 
@@ -136,7 +136,7 @@ Use a fixed mixture p_φ=(1−b)/(2π)+b c(φ), with 0≤b<1. Replace 1/(2π)
 in f by this **complete** p_φ. It is normalized conditionally on every
 (a,r_1,r_2,k,p,w), so the angular-marginal argument is unchanged. The b=0
 control remains uniform azimuth. Stable half-angle/log-density evaluation and
-open-interval uniforms would need reference checks before implementation use.
+open-interval uniforms are covered by the reference checks below.
 
 ## What the saved geometry suggests
 
@@ -194,3 +194,43 @@ reported. Measure whole-union validity and joint-contact retention, not just
 the guaranteed selected-pair contacts. No allocation or launch is frozen by
 this design note. A favorable passive result would justify further validation;
 it would not itself establish physical contact weights or assembly.
+
+## Implementation and reference validation, 2026-10-01
+
+[The geometry primitive](../src/contact_distances.rs) uses offset-space polygon
+clipping and a stable Heron expression for the intersection-circle radius.
+[The guide](../src/latent_region/contact_distance.rs) obtains the angular
+marginal and conditional covariance from a reordered Cholesky factorization.
+It is available through `latent-region-normalizer --importance-guide`, preserving
+the older guide formats, and through the proposal-only `contact-distance-guide-audit`.
+The assembly kernels are unchanged.
+
+Seventeen release-profile Rust tests passed, including normalization, coordinate
+inversion, mixture densities, fallback and hard-sphere/depletion reference
+integrals. The independent Python reconstruction uses a Schur complement and
+polygon boundary intersections rather than the Rust factorizations and clipping.
+Its thirteen tests passed; it then audited 256 executable sphere draws and
+14 deterministic probes, including all 60 conditioned draws. Maximum full log
+density disagreement was 5.69e−14 and maximum log-Jacobian disagreement 8.89e−16.
+Tiny polygon areas around the fallback threshold have separate exact Decimal
+fixtures. See the [Rust receipt](../results/contact-distances-validation-20261001/README.md)
+and [cross-language receipt](../results/contact-distance-reference-validation-20261001/validation.json).
+
+The [completed protein pilot](contact-distance-passive-results.md) compares
+the unchanged baseline with uniform and localized azimuth, using 1,536 fresh
+draws and 618 archived queries. It generates no Poisson clouds and does not
+estimate physical contact masses. The full protocol retains every completed
+attempt, including hard-invalid and outside-domain zeros, and stops on errors
+without retries. Fatal execution errors invalidate the unfinished population;
+they are not converted into completed zero-weight samples.
+
+Localized azimuth produced 33 native poses against the baseline's 32, at
+1.77 times the proposal-only cost. Critical saved competing-contact density
+diagnostics also worsened. No physical campaign followed. The next
+[geometry-only feasibility check](contact-circle-feasibility.md) asks whether
+the saved circles contain enough hard-free angular space to justify exact
+sector conditioning; it is not yet a modified proposal.
+
+![Two distances and one azimuth](../results/contact-distance-guide-figure-20261001/contact-distance-guide.png)
+
+[Reproduce the schematic](../tools/plot_contact_distance_guide.py).

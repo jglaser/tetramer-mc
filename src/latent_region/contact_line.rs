@@ -538,6 +538,97 @@ pub struct AuditOptions {
     pub probes: Option<PathBuf>,
 }
 
+/// Share the diagnostic bookkeeping without changing either sampling law.
+enum DiagnosticGuide {
+    Line(ContactLineGuide),
+    Distances(super::contact_distance::ContactDistanceGuide),
+}
+impl DiagnosticGuide {
+    fn from_bytes(
+        raw: &[u8],
+        hash: &str,
+        chart: &Chart,
+        inner: f64,
+        cfg: &DockingConfig,
+        tree: &SphereTree,
+    ) -> Result<Self> {
+        let value: Value = serde_json::from_slice(raw)?;
+        match value["schema"].as_str() {
+            Some("defensive-contact-line-guide-v1") => Ok(Self::Line(
+                ContactLineGuide::from_bytes(raw, hash, chart, inner, cfg, tree)?,
+            )),
+            Some("defensive-contact-distance-guide-v1") => Ok(Self::Distances(
+                super::contact_distance::ContactDistanceGuide::from_bytes(
+                    raw, hash, chart, inner, cfg, tree,
+                )?,
+            )),
+            _ => anyhow::bail!("Unsupported contact audit guide"),
+        }
+    }
+    fn base(&self) -> &ImportanceGuide {
+        match self {
+            Self::Line(g) => &g.base,
+            Self::Distances(g) => &g.base,
+        }
+    }
+    fn widths(&self) -> &[f64] {
+        match self {
+            Self::Line(g) => &g.widths,
+            Self::Distances(g) => &g.widths,
+        }
+    }
+    fn contacts(&self) -> &[usize] {
+        match self {
+            Self::Line(g) => &g.contacts,
+            Self::Distances(g) => &g.contacts,
+        }
+    }
+    fn last_draw(&self) -> &RefCell<Value> {
+        match self {
+            Self::Line(g) => &g.last_draw,
+            Self::Distances(g) => &g.last_draw,
+        }
+    }
+    fn schema(&self) -> &'static str {
+        match self {
+            Self::Line(_) => "contact-line-guide-audit-v1",
+            Self::Distances(_) => "contact-distance-guide-audit-v1",
+        }
+    }
+    fn role(&self) -> &'static str {
+        match self {
+            Self::Line(_) => "contact-line-proposal-audit",
+            Self::Distances(_) => "contact-distance-proposal-audit",
+        }
+    }
+    fn draw(
+        &self,
+        rng: &mut StdRng,
+        chart: &Chart,
+        outer: f64,
+        inner: f64,
+        fraction: f64,
+    ) -> Result<([f64; 6], f64, Option<usize>, Option<bool>)> {
+        match self {
+            Self::Line(g) => g.draw(rng, chart, outer, inner, fraction),
+            Self::Distances(g) => g.draw(rng, chart, outer, inner, fraction),
+        }
+    }
+    fn density_details(
+        &self,
+        u: [f64; 6],
+        inside: bool,
+        volume: f64,
+        chart: &Chart,
+        outer: f64,
+    ) -> Result<(f64, Value)> {
+        match self {
+            Self::Line(g) => g.density_details(u, inside, volume, chart, outer),
+            Self::Distances(g) => g.density_details(u, inside, volume, chart, outer),
+        }
+    }
+}
+
 pub fn run_audit(options: AuditOptions) -> Result<Value> {
     use std::io::{BufRead, BufReader};
     ensure!(!options.out.exists(), "Audit output must be new");
@@ -589,7 +680,7 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
     );
     let chart = Chart::new(&region, &shape_hash, cfg.capture_radius, fixed)?;
     let tree = SphereTree::new(serde_json::from_slice(&shape_raw)?)?;
-    let guide = ContactLineGuide::from_bytes(
+    let guide = DiagnosticGuide::from_bytes(
         &guide_raw,
         &hash_bytes(&region_raw),
         &chart,
@@ -600,7 +691,7 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
     let log_volume = 3. * PI.ln() + 6. * radius.ln() - 6_f64.ln();
     let placed: Vec<_> = physical.iter().copied().map(Placed::new).collect();
     let inflated = guide
-        .widths
+        .widths()
         .iter()
         .map(|&width| {
             let mut shape = tree.shape.clone();
@@ -625,7 +716,7 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
     if let Some(bytes) = &probe_raw {
         fs::write(options.out.join("provenance/probes.jsonl"), bytes)?;
     }
-    let manifest = json!({"schema":"contact-line-guide-audit-v1","samples":options.samples,"seed":options.seed,
+    let manifest = json!({"schema":guide.schema(),"samples":options.samples,"seed":options.seed,
         "scope":"Proposal and saved-pose geometry/density only; no Poisson sampling, physical mass or native classification",
         "config_sha256":hash_bytes(&config_raw),"region_sha256":hash_bytes(&region_raw),
         "guide_sha256":hash_bytes(&guide_raw),"shape_sha256":shape_hash,
@@ -672,7 +763,7 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
             .iter()
             .map(|shape| {
                 guide
-                    .contacts
+                    .contacts()
                     .iter()
                     .map(|&i| shape.overlaps(&body, &placed[i]))
                     .collect::<Vec<_>>()
@@ -681,19 +772,19 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
         Ok((
             json!({"kind":kind,"id":id,"latent":u,"latent_radius":radial,"raw_coordinates":chart.coordinates(u),
             "pose":pose,"shell_valid":inside,"capture_valid":cfg.contains(pose),"hard_valid":hard_valid,
-            "log_proposal_density":log_density,"baseline_log_density":guide.base.log_density(u,inside,log_volume),
+            "log_proposal_density":log_density,"baseline_log_density":guide.base().log_density(u,inside,log_volume),
             "log_physical_jacobian":jacobian,"backmap_error":error,"width_contacts":contacts,
             "draw":draw,"density_details":details,"draw_cpu_seconds":draw_elapsed,"density_cpu_seconds":elapsed}),
             elapsed,
         ))
     };
     for index in 0..options.samples {
-        let mut rng = stream(options.seed, index, 0, "contact-line-proposal-audit");
+        let mut rng = stream(options.seed, index, 0, guide.role());
         let tick = cpu_seconds();
         let (u, _, component, _) = guide.draw(&mut rng, &chart, radius, 0., 1.)?;
         let elapsed = cpu_seconds() - tick;
         draw_cpu += elapsed;
-        let mut info = guide.last_draw.borrow().clone();
+        let mut info = guide.last_draw().borrow().clone();
         info["component"] = json!(component);
         conditional += u64::from(info["conditional"] == true);
         fallback += u64::from(info["fallback"] == true);

@@ -150,7 +150,11 @@ the physical assembly question is unresolved. The later
 conditional Gaussian sampling over sphere-union contact intervals. Its
 [protein proposal diagnostic](docs/contact-line-passive-results.md) validates
 the density but does not justify a new physical campaign; the assembly kernels
-and target are unchanged. The [finite-system design validator](docs/finite-assembly-contract.md)
+and target are unchanged. The [two-distance guide](docs/two-distance-contact-guide-design.md)
+then validated a full translation law at fixed orientation, but its
+[fixed protein pilot](docs/contact-distance-passive-results.md) also failed to
+improve native/competing proposal efficiency. These proposal results do not
+settle the physical model. The [finite-system design validator](docs/finite-assembly-contract.md)
 checks the separate N=12/N=24, initialization, model and equal-volume boundary
 comparisons without launching a campaign; unfilled preparations remain incomplete.
 The [matched starting geometries](docs/finite-assembly-starts.md) supply 48 validated

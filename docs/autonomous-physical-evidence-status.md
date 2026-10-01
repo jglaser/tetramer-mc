@@ -147,6 +147,24 @@ generated. Its outcome does not change any physical weight estimate, convergence
 gate, SMC discrepancy or finite-system conclusion. Additional direction
 diagnostics are likewise proposal geometry, not equilibrium sampling.
 
+The [two-distance translation guide](two-distance-contact-guide-design.md)
+subsequently passed 17 Rust reference tests, independent Python checks and
+all 15 jobs of its [fixed passive comparison](contact-distance-passive-results.md).
+It retained the Gaussian angular marginal while drawing two atomic surface
+distances and an azimuth. Localized azimuth removed geometric fallback, but
+whole-protein overlap remained common: only 21/122 conditioned draws survived.
+Across each full 512-draw arm, native proposal counts were 32 baseline versus
+33 localized, at 1.77 times the proposal-only CPU. Saved competing-tail
+second-moment diagnostics worsened. No physical weights were generated and no
+physical campaign followed. A separate [saved-circle geometry diagnostic](contact-circle-feasibility.md)
+tests whether exact hard-free angular sectors could improve this construction.
+It adds neither physical evidence nor an assembly kernel.
+That diagnostic has now [completed and passed its independent checks](contact-circle-feasibility-results.md):
+54/118 uniform and 57/122 localized circles have positive hard-free sectors,
+versus 4 and 21 valid original endpoints. Geometry took 2.29 ms per circle on
+average. A conditional azimuth proposal is feasible to investigate, but its
+full mixture cost, R4 retention and physical-weight efficiency remain untested.
+
 ## Bound summary identities
 
 | Artifact | SHA-256 |

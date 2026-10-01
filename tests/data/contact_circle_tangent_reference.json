@@ -1,0 +1,312 @@
+{
+  "schema": "contact-circle-tangent-reference-v1",
+  "method": "100-digit Decimal, exact binary64 inputs; Machin pi and convergent asin series near the appropriate boundary; no double-precision acos or clamping.",
+  "cases": [
+    {
+      "name": "integer_min_below",
+      "circle_radius": 1.0,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 0.9999999999999999,
+      "fp64_minimum_distance": 1.0,
+      "fp64_maximum_distance": 3.0,
+      "fp64_topology": "none",
+      "analytic_topology": "none",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185307179586,
+      "allowed_length_decimal": "6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234128"
+    },
+    {
+      "name": "integer_min_exact_fp64",
+      "circle_radius": 1.0,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 1.0,
+      "fp64_minimum_distance": 1.0,
+      "fp64_maximum_distance": 3.0,
+      "fp64_topology": "none",
+      "analytic_topology": "none",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185307179586,
+      "allowed_length_decimal": "6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234128"
+    },
+    {
+      "name": "integer_min_above",
+      "circle_radius": 1.0,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 1.0000000000000002,
+      "fp64_minimum_distance": 1.0,
+      "fp64_maximum_distance": 3.0,
+      "fp64_topology": "partial",
+      "analytic_topology": "partial",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185277377264,
+      "allowed_length_decimal": "6.283185277377264089229972336470909811329757211134384962689734477966249554871321212047348063269321545"
+    },
+    {
+      "name": "integer_max_below",
+      "circle_radius": 1.0,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 2.9999999999999996,
+      "fp64_minimum_distance": 1.0,
+      "fp64_maximum_distance": 3.0,
+      "fp64_topology": "partial",
+      "analytic_topology": "partial",
+      "classification_ambiguous": false,
+      "allowed_length": 7.300048299977715e-08,
+      "allowed_length_decimal": "7.300048299977714251047221596210718046064728555079804516320435093721525665449485628247152800806175496E-8"
+    },
+    {
+      "name": "integer_max_exact_fp64",
+      "circle_radius": 1.0,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 3.0,
+      "fp64_minimum_distance": 1.0,
+      "fp64_maximum_distance": 3.0,
+      "fp64_topology": "all_except_tangent_point",
+      "analytic_topology": "all_except_tangent_point",
+      "classification_ambiguous": false,
+      "allowed_length": 0.0,
+      "allowed_length_decimal": "0"
+    },
+    {
+      "name": "integer_max_above",
+      "circle_radius": 1.0,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 3.0000000000000004,
+      "fp64_minimum_distance": 1.0,
+      "fp64_maximum_distance": 3.0,
+      "fp64_topology": "all",
+      "analytic_topology": "all",
+      "classification_ambiguous": false,
+      "allowed_length": 0.0,
+      "allowed_length_decimal": "0"
+    },
+    {
+      "name": "dyadic_min_below",
+      "circle_radius": 1.25,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 0.7499999999999999,
+      "fp64_minimum_distance": 0.75,
+      "fp64_maximum_distance": 3.25,
+      "fp64_topology": "none",
+      "analytic_topology": "none",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185307179586,
+      "allowed_length_decimal": "6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234128"
+    },
+    {
+      "name": "dyadic_min_exact_fp64",
+      "circle_radius": 1.25,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 0.75,
+      "fp64_minimum_distance": 0.75,
+      "fp64_maximum_distance": 3.25,
+      "fp64_topology": "none",
+      "analytic_topology": "none",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185307179586,
+      "allowed_length_decimal": "6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234128"
+    },
+    {
+      "name": "dyadic_min_above",
+      "circle_radius": 1.25,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 0.7500000000000001,
+      "fp64_minimum_distance": 0.75,
+      "fp64_maximum_distance": 3.25,
+      "fp64_topology": "partial",
+      "analytic_topology": "partial",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185290856182,
+      "allowed_length_decimal": "6.283185290856182239143340845167406871715357382146776945470083311687409315604250227691242455177540349"
+    },
+    {
+      "name": "dyadic_max_below",
+      "circle_radius": 1.25,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 3.2499999999999996,
+      "fp64_minimum_distance": 0.75,
+      "fp64_maximum_distance": 3.25,
+      "fp64_topology": "partial",
+      "analytic_topology": "partial",
+      "classification_ambiguous": false,
+      "allowed_length": 6.795975119466412e-08,
+      "allowed_length_decimal": "6.795975119466412037851249015477126543798775052675586882881012057392324813804680325907141284129715576E-8"
+    },
+    {
+      "name": "dyadic_max_exact_fp64",
+      "circle_radius": 1.25,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 3.25,
+      "fp64_minimum_distance": 0.75,
+      "fp64_maximum_distance": 3.25,
+      "fp64_topology": "all_except_tangent_point",
+      "analytic_topology": "all_except_tangent_point",
+      "classification_ambiguous": false,
+      "allowed_length": 0.0,
+      "allowed_length_decimal": "0"
+    },
+    {
+      "name": "dyadic_max_above",
+      "circle_radius": 1.25,
+      "fixed_offset": [
+        2.0,
+        0.0,
+        0.0
+      ],
+      "radius_sum": 3.2500000000000004,
+      "fp64_minimum_distance": 0.75,
+      "fp64_maximum_distance": 3.25,
+      "fp64_topology": "all",
+      "analytic_topology": "all",
+      "classification_ambiguous": false,
+      "allowed_length": 0.0,
+      "allowed_length_decimal": "0"
+    },
+    {
+      "name": "oblique_min_below",
+      "circle_radius": 1.3,
+      "fixed_offset": [
+        2.1,
+        0.0,
+        0.4
+      ],
+      "radius_sum": 0.8944271909999159,
+      "fp64_minimum_distance": 0.894427190999916,
+      "fp64_maximum_distance": 3.4234485537247386,
+      "fp64_topology": "none",
+      "analytic_topology": "none",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185307179586,
+      "allowed_length_decimal": "6.283185307179586476925286766559005768394338798750211641949889184615632812572417997256069650684234128"
+    },
+    {
+      "name": "oblique_min_exact_fp64",
+      "circle_radius": 1.3,
+      "fixed_offset": [
+        2.1,
+        0.0,
+        0.4
+      ],
+      "radius_sum": 0.894427190999916,
+      "fp64_minimum_distance": 0.894427190999916,
+      "fp64_maximum_distance": 3.4234485537247386,
+      "fp64_topology": "none",
+      "analytic_topology": "partial",
+      "classification_ambiguous": true,
+      "allowed_length": 6.283185297171432,
+      "allowed_length_decimal": "6.283185297171431880992406434205625763483664161692720079965716799151018588392885879760670325682471227"
+    },
+    {
+      "name": "oblique_min_above",
+      "circle_radius": 1.3,
+      "fixed_offset": [
+        2.1,
+        0.0,
+        0.4
+      ],
+      "radius_sum": 0.8944271909999161,
+      "fp64_minimum_distance": 0.894427190999916,
+      "fp64_maximum_distance": 3.4234485537247386,
+      "fp64_topology": "partial",
+      "analytic_topology": "partial",
+      "classification_ambiguous": false,
+      "allowed_length": 6.283185287401918,
+      "allowed_length_decimal": "6.283185287401917941019971057698223767069733267511909448722461140228644355872066199685449620668747602"
+    },
+    {
+      "name": "oblique_max_below",
+      "circle_radius": 1.3,
+      "fixed_offset": [
+        2.1,
+        0.0,
+        0.4
+      ],
+      "radius_sum": 3.423448553724738,
+      "fp64_minimum_distance": 0.894427190999916,
+      "fp64_maximum_distance": 3.4234485537247386,
+      "fp64_topology": "partial",
+      "analytic_topology": "all",
+      "classification_ambiguous": true,
+      "allowed_length": 0.0,
+      "allowed_length_decimal": "0"
+    },
+    {
+      "name": "oblique_max_exact_fp64",
+      "circle_radius": 1.3,
+      "fixed_offset": [
+        2.1,
+        0.0,
+        0.4
+      ],
+      "radius_sum": 3.4234485537247386,
+      "fp64_minimum_distance": 0.894427190999916,
+      "fp64_maximum_distance": 3.4234485537247386,
+      "fp64_topology": "all_except_tangent_point",
+      "analytic_topology": "all",
+      "classification_ambiguous": true,
+      "allowed_length": 0.0,
+      "allowed_length_decimal": "0"
+    },
+    {
+      "name": "oblique_max_above",
+      "circle_radius": 1.3,
+      "fixed_offset": [
+        2.1,
+        0.0,
+        0.4
+      ],
+      "radius_sum": 3.423448553724739,
+      "fp64_minimum_distance": 0.894427190999916,
+      "fp64_maximum_distance": 3.4234485537247386,
+      "fp64_topology": "all",
+      "analytic_topology": "all",
+      "classification_ambiguous": false,
+      "allowed_length": 0.0,
+      "allowed_length_decimal": "0"
+    }
+  ]
+}

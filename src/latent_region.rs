@@ -26,11 +26,13 @@ use std::{
     time::Instant,
 };
 mod conditional_ray;
+mod contact_distance;
 pub mod contact_line;
 mod entry_shell;
 pub mod physical_guide;
 pub mod smc;
 use conditional_ray::ConditionalRayGuide;
+use contact_distance::ContactDistanceGuide;
 use contact_line::ContactLineGuide;
 use entry_shell::EntryShellGuide;
 
@@ -209,6 +211,7 @@ enum FrozenGuide {
     EntryShell(EntryShellGuide),
     ConditionalRay(ConditionalRayGuide),
     ContactLine(ContactLineGuide),
+    ContactDistance(ContactDistanceGuide),
 }
 impl FrozenGuide {
     fn from_bytes(
@@ -233,6 +236,9 @@ impl FrozenGuide {
             Some("defensive-contact-line-guide-v1") => Ok(Self::ContactLine(
                 ContactLineGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
             )),
+            Some("defensive-contact-distance-guide-v1") => Ok(Self::ContactDistance(
+                ContactDistanceGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
+            )),
             _ => anyhow::bail!("Unknown latent guide schema"),
         }
     }
@@ -242,6 +248,7 @@ impl FrozenGuide {
             Self::EntryShell(g) => g.alpha,
             Self::ConditionalRay(g) => g.alpha,
             Self::ContactLine(g) => g.base.alpha,
+            Self::ContactDistance(g) => g.base.alpha,
         }
     }
     fn len(&self) -> usize {
@@ -250,6 +257,7 @@ impl FrozenGuide {
             Self::EntryShell(g) => g.len(),
             Self::ConditionalRay(g) => g.len(),
             Self::ContactLine(g) => g.base.components.len(),
+            Self::ContactDistance(g) => g.base.components.len(),
         }
     }
     fn draw(
@@ -267,6 +275,7 @@ impl FrozenGuide {
             Self::EntryShell(g) => g.draw(rng, chart, outer).map(|(u, r, c)| (u, r, c, None)),
             Self::ConditionalRay(g) => g.draw(rng, chart, outer),
             Self::ContactLine(g) => g.draw(rng, chart, outer, inner, fraction),
+            Self::ContactDistance(g) => g.draw(rng, chart, outer, inner, fraction),
         }
     }
     fn log_density(
@@ -281,6 +290,9 @@ impl FrozenGuide {
             Self::Gaussian(g) => Ok(g.log_density(u, inside, volume)),
             Self::EntryShell(g) => Ok(g.log_density(u, inside, volume, chart, radius)),
             Self::ConditionalRay(g) => g.log_density(u, inside, volume, chart, radius),
+            Self::ContactDistance(g) => g
+                .density_details(u, inside, volume, chart, radius)
+                .map(|v| v.0),
             Self::ContactLine(g) => g
                 .density_details(u, inside, volume, chart, radius)
                 .map(|v| v.0),
@@ -785,6 +797,11 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             manifest["guide_schema"] = json!("defensive-contact-line-guide-v1");
             manifest["proposal_kind"] = json!("raw-translation-line-conditioned-Gaussian-mixture");
         }
+        if matches!(g, FrozenGuide::ContactDistance(_)) {
+            manifest["schema"] = json!("importance-latent-region-normalizer-v5");
+            manifest["guide_schema"] = json!("defensive-contact-distance-guide-v1");
+            manifest["proposal_kind"] = json!("two-distance-azimuth-conditioned-Gaussian-mixture");
+        }
         manifest["proposal_density_measure"] =
             json!("Lebesgue measure in the original six-dimensional whitened region chart");
         manifest["estimator"] = json!(
@@ -904,6 +921,8 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                     "conditional-ray"
                 } else if matches!(guide, Some(FrozenGuide::EntryShell(_))) {
                     "entry-shell"
+                } else if matches!(guide, Some(FrozenGuide::ContactDistance(_))) {
+                    "contact-distance"
                 } else if matches!(guide, Some(FrozenGuide::ContactLine(_))) {
                     "contact-line"
                 } else {
@@ -915,6 +934,9 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             row["proposal_component"] = json!(selected_component);
             if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
                 row["selected_ray_fallback"] = json!(selected_ray_fallback);
+            }
+            if let Some(FrozenGuide::ContactDistance(g)) = &guide {
+                row["contact_distance_draw"] = g.last_draw.borrow().clone();
             }
             if let Some(FrozenGuide::ContactLine(g)) = &guide {
                 row["contact_line_draw"] = g.last_draw.borrow().clone();

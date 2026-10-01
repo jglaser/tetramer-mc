@@ -1,0 +1,125 @@
+{
+  "schema": "contact-distance-polygon-reference-v1",
+  "method": "100-digit Decimal, exact binary64 upper endpoints and center distances; right-isosceles radius triangle area=max(hi1+hi2-D,0)^2/2.",
+  "cases": [
+    {
+      "name": "half_floor",
+      "bounds": [
+        [
+          2.0,
+          2.1
+        ],
+        [
+          2.0,
+          2.1
+        ]
+      ],
+      "distance": 4.19999999,
+      "area": 4.9999999392252905e-17,
+      "area_decimal": "4.9999999392252904754567698339293881500496790140641856226011441322043538093566894531250E-17",
+      "fallback_at_1e_16": true
+    },
+    {
+      "name": "twice_floor",
+      "bounds": [
+        [
+          2.0,
+          2.1
+        ],
+        [
+          2.0,
+          2.1
+        ]
+      ],
+      "distance": 4.19999998,
+      "area": 1.9999999756901162e-16,
+      "area_decimal": "1.99999997569011619018270793357175526001987160562567424904045765288174152374267578125000E-16",
+      "fallback_at_1e_16": false
+    },
+    {
+      "name": "near_floor_below_distance",
+      "bounds": [
+        [
+          2.0,
+          2.1
+        ],
+        [
+          2.0,
+          2.1
+        ]
+      ],
+      "distance": 4.199999985857864,
+      "area": 1.0000001028329656e-16,
+      "area_decimal": "1.00000010283296562557047706660573196688697635015063980290506151504814624786376953125000E-16",
+      "fallback_at_1e_16": false
+    },
+    {
+      "name": "near_floor_center",
+      "bounds": [
+        [
+          2.0,
+          2.1
+        ],
+        [
+          2.0,
+          2.1
+        ]
+      ],
+      "distance": 4.199999985857865,
+      "area": 9.999999772255664e-17,
+      "area_decimal": "9.9999997722556641688261113963524297124329772226691837033740739570930600166320800781250E-17",
+      "fallback_at_1e_16": true
+    },
+    {
+      "name": "near_floor_above_distance",
+      "bounds": [
+        [
+          2.0,
+          2.1
+        ],
+        [
+          2.0,
+          2.1
+        ]
+      ],
+      "distance": 4.199999985857866,
+      "area": 9.999998516181751e-17,
+      "area_decimal": "9.9999985161817509680379742278280809288527192224549366983410436660051345825195312500000E-17",
+      "fallback_at_1e_16": true
+    },
+    {
+      "name": "tangent",
+      "bounds": [
+        [
+          2.0,
+          2.1
+        ],
+        [
+          2.0,
+          2.1
+        ]
+      ],
+      "distance": 4.2,
+      "area": 0.0,
+      "area_decimal": "0",
+      "fallback_at_1e_16": true
+    },
+    {
+      "name": "beyond_tangent",
+      "bounds": [
+        [
+          2.0,
+          2.1
+        ],
+        [
+          2.0,
+          2.1
+        ]
+      ],
+      "distance": 4.200000000000001,
+      "area": 0.0,
+      "area_decimal": "0",
+      "fallback_at_1e_16": true
+    }
+  ]
+}

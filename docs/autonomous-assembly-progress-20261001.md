@@ -37,6 +37,20 @@ Protocol SHA-256:
 `1b788b08df239319ac69126627e891893b214c35204e337c95f4a89ede23c050`.
 The sections below preserve the earlier stages of this investigation.
 
+While the physical pilot runs, the [matching-SMC bridge](hard-free-line-smc-bridge.md)
+is frozen against all twenty historical populations in five controls. It will
+compare independent linear masses after the new complete analysis, preserving
+historical failures and unavailable hard-only stratum estimates. Six tests and
+a separate source review passed; no old trajectories or classifiers were replayed.
+
+The [retained-index alternative](hard-free-line-index-estimator.md) now has an
+independently reviewed derivation, six arithmetic/provenance tests and four
+additional Lean-checked identities. The complete 74-declaration axiom audit uses
+only standard Lean axioms. This estimator preserves the current draw law but
+could avoid the complete new-mixture density evaluation. Its retrospective
+variance/cost estimates are provisional; the running experiment still uses its
+original full-density weights. No physical convergence gate has been relaxed.
+
 ## Keep the two ensembles separate
 
 | Work | Physical parameters | What is measured |

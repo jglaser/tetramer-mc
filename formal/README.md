@@ -423,6 +423,16 @@ turn them into kernel-checked proofs of the Rust program.
 
 ## Trust boundary and sources
 
+`IndexedImportance.lean` adds four finite-index, pointwise algebraic bridges for
+the [retained-index guide](../docs/hard-free-line-index-estimator.md). The mean
+identity recovers the target after summing the old-mixture responsibilities.
+The two second-moment inequalities place the retained-index estimator between
+the complete conditioned mixture and the old mixture when every branch density
+increases on physical support. The intervening weighted-variance identity makes
+the cost of keeping the index explicit. These theorems require positive branch
+densities and do not prove geometric normalization, integral finiteness,
+unbiased Poisson code, coverage or runtime efficiency.
+
 `Audit.lean` prints transitive axiom dependencies for the main theorems. The
 successful audit contains only the standard Lean axioms `propext`,
 `Classical.choice`, and `Quot.sound`; no `sorryAx` or project-defined axiom

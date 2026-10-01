@@ -27,6 +27,10 @@ import ReversibleSampling
 #print axioms ReversibleSampling.normalized_importance_sampling
 #print axioms ReversibleSampling.unbiased_auxiliary_weight_marginal
 #print axioms ReversibleSampling.randomized_importance_sampling
+#print axioms ReversibleSampling.IndexedImportance.indexed_mean
+#print axioms ReversibleSampling.IndexedImportance.indexed_second_moment_le
+#print axioms ReversibleSampling.IndexedImportance.weighted_variance_identity
+#print axioms ReversibleSampling.IndexedImportance.full_mixture_second_moment_le
 #print axioms ReversibleSampling.poisson_pgf_hasSum
 #print axioms ReversibleSampling.poisson_pgf_lintegral
 #print axioms ReversibleSampling.poisson_depletion_mean

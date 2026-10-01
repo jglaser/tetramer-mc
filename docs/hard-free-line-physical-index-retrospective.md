@@ -103,6 +103,11 @@ estimate, a difference of 3.83 estimated paired population SE. Differences in
 the competing, old-R5-native and remaining-native regions are respectively
 −0.43, −0.18 and −1.55 paired SE. Four populations provide a limited variance
 estimate; the native-total discrepancy is a diagnostic flag, not an established
-bias or permission to replace the primary estimator. An independent check is
-needed. The original assessment and fresh population-size stage retain full
-mixture weights.
+bias or permission to replace the primary estimator. The
+[independent arithmetic review](hard-free-line-index-discrepancy-review.md)
+found no label/mass reconstruction error. Its paired-row uncertainty gives a
+1.55-SE difference and an approximate 95% interval including zero. The
+population differences have unusually small variance, while weighted tails
+also limit the row estimate. Both diagnostics remain reported; neither is
+selected after the fact as authoritative. The original assessment and fresh
+population-size stage retain full mixture weights.

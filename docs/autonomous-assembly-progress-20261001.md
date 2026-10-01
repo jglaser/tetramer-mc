@@ -81,10 +81,12 @@ variance/cost estimates remain provisional. The completed
 retains 85–89% of full-density importance ESS on the same draws and clouds.
 An index-only sampler would need to save roughly 11–15% of runtime to break
 even on these observed diagnostics. That saving is unmeasured. The indexed
-native-total estimate is also 1.80% lower, or 3.83 estimated paired population
-SE; this four-population discrepancy needs an independent check before relying
-on the cheaper estimator. The frozen physical assessment and next size stage
-retain their original full-density weights.
+native-total estimate is also 1.80% lower: 3.83 estimated paired population SE,
+but 1.55 paired-row SE. An [independent arithmetic review](hard-free-line-index-discrepancy-review.md)
+found no label/mass error and unusually small dispersion of the four population
+differences. Both uncertainty diagnostics and their weighted-tail limitations
+remain visible. The frozen physical assessment and next size stage retain
+their original full-density weights.
 
 The [full-vessel wrapper](hard-free-vessel-guide.md) now accepts this normalized
 guide while preserving its probability outside the source R4/capture domain.

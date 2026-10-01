@@ -124,6 +124,7 @@ impl ConditionalNormal {
 
 pub(super) struct ContactLineGuide {
     pub(super) base: ImportanceGuide,
+    hard_free_only: bool,
     axes: Vec<usize>,
     widths: Vec<f64>,
     beta: f64,
@@ -185,14 +186,27 @@ impl ContactLineGuide {
             "Contact-line guide currently requires a complete latent ball"
         );
         let mut data: Value = serde_json::from_slice(raw)?;
+        let hard_free_only = data["schema"] == "defensive-hard-free-line-guide-v1";
         ensure!(
-            data["schema"] == "defensive-contact-line-guide-v1",
+            hard_free_only || data["schema"] == "defensive-contact-line-guide-v1",
             "Wrong contact-line schema"
         );
         let axes: Vec<usize> = serde_json::from_value(data["raw_translation_axes"].clone())?;
-        let widths: Vec<f64> = serde_json::from_value(data["contact_widths_A"].clone())?;
-        let contacts: Vec<usize> =
-            serde_json::from_value(data["contact_neighbor_indices"].clone())?;
+        let (widths, contacts): (Vec<f64>, Vec<usize>) = if hard_free_only {
+            ensure!(
+                data.get("contact_widths_A").is_none()
+                    && data.get("contact_neighbor_indices").is_none(),
+                "Hard-free guide must not specify contact widths or neighbor labels"
+            );
+            // One set per axis. Zero is an internal sentinel only: no contact
+            // query or additional contact predicate is applied in this mode.
+            (vec![0.], Vec::new())
+        } else {
+            (
+                serde_json::from_value(data["contact_widths_A"].clone())?,
+                serde_json::from_value(data["contact_neighbor_indices"].clone())?,
+            )
+        };
         let beta = data["conditional_probability"]
             .as_f64()
             .context("Missing conditional probability")?;
@@ -206,16 +220,18 @@ impl ContactLineGuide {
             "Invalid/duplicate raw translation axes"
         );
         ensure!(
-            !widths.is_empty() && widths.iter().all(|w| w.is_finite() && *w > 0.),
+            hard_free_only
+                || (!widths.is_empty() && widths.iter().all(|w| w.is_finite() && *w > 0.)),
             "Invalid contact widths"
         );
         ensure!(
-            !contacts.is_empty()
-                && contacts.iter().all(|&i| i < cfg.fixed_poses.len())
-                && contacts
-                    .iter()
-                    .enumerate()
-                    .all(|(i, a)| !contacts[..i].contains(a)),
+            hard_free_only
+                || (!contacts.is_empty()
+                    && contacts.iter().all(|&i| i < cfg.fixed_poses.len())
+                    && contacts
+                        .iter()
+                        .enumerate()
+                        .all(|(i, a)| !contacts[..i].contains(a))),
             "Invalid contact-neighbor labels"
         );
         ensure!(
@@ -248,6 +264,7 @@ impl ContactLineGuide {
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
             base,
+            hard_free_only,
             axes,
             widths,
             beta,
@@ -326,6 +343,11 @@ impl ContactLineGuide {
                 "segment":segment,"core_counts":core.counts,"origin":origin,"direction":direction}),
             ));
         }
+        if self.hard_free_only {
+            let detail = json!({"axis":axis,"segment":segment,"core_counts":core.counts,
+                "origin":origin,"direction":direction,"hard_free_intervals":hard_free.intervals()});
+            return Ok((vec![hard_free], detail));
+        }
         let mut sets = Vec::new();
         let mut details = Vec::new();
         for &width in &self.widths {
@@ -388,47 +410,81 @@ impl ContactLineGuide {
             return Ok((base, json!({"conditioning_disabled":true})));
         }
         let x = chart.coordinates(u);
+        let gaussian_logs: Vec<_> = self
+            .base
+            .components
+            .iter()
+            .map(|c| {
+                let mut z = [0.; 6];
+                for k in 0..6 {
+                    z[k] = (u[k] - c.mean[k] - (0..k).map(|j| c.lower[k][j] * z[j]).sum::<f64>())
+                        / c.lower[k][k];
+                }
+                c.log_normalizer - 0.5 * z.iter().map(|a| a * a).sum::<f64>()
+            })
+            .collect();
+        let compose = |factors: &[f64], branches: f64| {
+            let mut result = if inside {
+                self.base.alpha.ln() - volume
+            } else {
+                f64::NEG_INFINITY
+            };
+            for (i, c) in self.base.components.iter().enumerate() {
+                let correction = (1. - self.beta) + self.beta * factors[i] / branches;
+                if correction > 0. {
+                    result = log_add(
+                        result,
+                        (1. - self.base.alpha).ln()
+                            + c.weight.ln()
+                            + gaussian_logs[i]
+                            + correction.ln(),
+                    );
+                }
+            }
+            result
+        };
         let mut factor = vec![0.; self.base.components.len()];
         let mut geometry = Vec::new();
         let mut fallback = 0;
         for (ai, &axis) in self.axes.iter().enumerate() {
-            let (sets, detail) = self.intervals(x, chart, outer, axis)?;
-            geometry.push(detail);
+            let geometry_start = cpu_seconds();
+            let (sets, mut detail) = self.intervals(x, chart, outer, axis)?;
+            let geometry_cpu = cpu_seconds() - geometry_start;
+            let mut axis_factors = vec![0.; self.base.components.len()];
+            let mut components = Vec::new();
             for (ci, normal) in self.conditionals[ai].iter().enumerate() {
                 let (mean, sigma) = normal.conditional(x);
                 for intervals in &sets {
                     let (_, mass) = Self::masses(intervals, mean, sigma)?;
-                    if mass <= self.minimum_mass {
-                        factor[ci] += 1.;
+                    let is_fallback = mass <= self.minimum_mass;
+                    let allowed = intervals.contains(x[axis]);
+                    let multiplier = if is_fallback {
                         fallback += 1;
-                    } else if intervals.contains(x[axis]) {
-                        factor[ci] += 1. / mass;
+                        1.
+                    } else if allowed {
+                        1. / mass
+                    } else {
+                        0.
+                    };
+                    factor[ci] += multiplier;
+                    axis_factors[ci] += multiplier;
+                    if self.hard_free_only {
+                        components.push(json!({"component":ci,"gaussian_log_density":gaussian_logs[ci],
+                            "conditional_mean":mean,"conditional_sigma":sigma,"conditional_mass":mass,
+                            "fallback":is_fallback,"query_coordinate_allowed":allowed}));
                     }
                 }
             }
+            if self.hard_free_only {
+                detail["hard_free_intervals"] = json!(sets[0].intervals());
+                detail["components"] = json!(components);
+                detail["axis_log_proposal_density"] = json!(compose(&axis_factors, 1.));
+                detail["geometry_cpu_seconds"] = json!(geometry_cpu);
+            }
+            geometry.push(detail);
         }
         let branches = (self.axes.len() * self.widths.len()) as f64;
-        let mut result = if inside {
-            self.base.alpha.ln() - volume
-        } else {
-            f64::NEG_INFINITY
-        };
-        for (i, c) in self.base.components.iter().enumerate() {
-            let mut z = [0.; 6];
-            for k in 0..6 {
-                z[k] = (u[k] - c.mean[k] - (0..k).map(|j| c.lower[k][j] * z[j]).sum::<f64>())
-                    / c.lower[k][k];
-            }
-            let correction = (1. - self.beta) + self.beta * factor[i] / branches;
-            if correction > 0. {
-                result = log_add(
-                    result,
-                    (1. - self.base.alpha).ln() + c.weight.ln() + c.log_normalizer
-                        - 0.5 * z.iter().map(|a| a * a).sum::<f64>()
-                        + correction.ln(),
-                );
-            }
-        }
+        let result = compose(&factor, branches);
         Ok((
             result,
             json!({"raw_coordinates":x,"axes":geometry,
@@ -447,6 +503,9 @@ impl ContactLineGuide {
     ) -> Result<([f64; 6], f64, Option<usize>, Option<bool>)> {
         let (original, radius, component) = self.base.draw(rng, outer, inner, fraction)?;
         *self.last_draw.borrow_mut() = json!({"conditional":false});
+        if self.hard_free_only {
+            self.last_draw.borrow_mut()["original_latent"] = json!(original);
+        }
         let Some(component) = component else {
             return Ok((original, radius, None, None));
         };
@@ -457,7 +516,7 @@ impl ContactLineGuide {
         let axis = self.axes[ai];
         let wi = rng.random_range(0..self.widths.len());
         let mut x = chart.coordinates(original);
-        let (sets, geometry) = self.intervals(x, chart, outer, axis)?;
+        let (sets, mut geometry) = self.intervals(x, chart, outer, axis)?;
         let intervals = &sets[wi];
         let (mean, sigma) = self.conditionals[ai][component].conditional(x);
         let (masses, total) = Self::masses(intervals, mean, sigma)?;
@@ -465,6 +524,14 @@ impl ContactLineGuide {
         *self.last_draw.borrow_mut() = json!({"conditional":true,"axis":axis,"width_index":wi,
             "width_A":self.widths[wi],"component":component,"conditional_mean":mean,"conditional_sigma":sigma,
             "conditional_mass":total,"fallback":fallback,"geometry":geometry});
+        if self.hard_free_only {
+            geometry["hard_free_intervals"] = json!(intervals.intervals());
+            let mut trace = self.last_draw.borrow_mut();
+            trace.as_object_mut().unwrap().remove("width_index");
+            trace.as_object_mut().unwrap().remove("width_A");
+            trace["original_latent"] = json!(original);
+            trace["geometry"] = geometry;
+        }
         if fallback {
             return Ok((original, radius, Some(component), Some(true)));
         }
@@ -510,6 +577,9 @@ impl ContactLineGuide {
         );
         {
             let mut trace = self.last_draw.borrow_mut();
+            if self.hard_free_only {
+                trace["uniform_interval_selection"] = json!(draw);
+            }
             trace["selected_interval"] = json!(interval);
             trace["selected_interval_mass"] = json!(mass);
             trace["uniform_within_interval"] = json!(within);
@@ -538,6 +608,33 @@ pub struct AuditOptions {
     pub probes: Option<PathBuf>,
 }
 
+fn audited_query<T>(
+    out: &Path,
+    journal: &mut File,
+    ordinal: u64,
+    kind: &str,
+    id: &Value,
+    work: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    writeln!(
+        journal,
+        "{}",
+        json!({"ordinal":ordinal,"kind":kind,"id":id,"state":"begin"})
+    )?;
+    journal.flush()?;
+    match work() {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            save(
+                &out.join("failure.json"),
+                &json!({"complete":false,"ordinal":ordinal,
+                "kind":kind,"id":id,"error":format!("{error:#}")}),
+            )?;
+            Err(error)
+        }
+    }
+}
+
 /// Share the diagnostic bookkeeping without changing either sampling law.
 enum DiagnosticGuide {
     Line(ContactLineGuide),
@@ -554,9 +651,11 @@ impl DiagnosticGuide {
     ) -> Result<Self> {
         let value: Value = serde_json::from_slice(raw)?;
         match value["schema"].as_str() {
-            Some("defensive-contact-line-guide-v1") => Ok(Self::Line(
-                ContactLineGuide::from_bytes(raw, hash, chart, inner, cfg, tree)?,
-            )),
+            Some("defensive-contact-line-guide-v1" | "defensive-hard-free-line-guide-v1") => {
+                Ok(Self::Line(ContactLineGuide::from_bytes(
+                    raw, hash, chart, inner, cfg, tree,
+                )?))
+            }
             Some("defensive-contact-distance-guide-v1") => Ok(Self::Distances(
                 super::contact_distance::ContactDistanceGuide::from_bytes(
                     raw, hash, chart, inner, cfg, tree,
@@ -591,12 +690,14 @@ impl DiagnosticGuide {
     }
     fn schema(&self) -> &'static str {
         match self {
+            Self::Line(g) if g.hard_free_only => "hard-free-line-guide-audit-v1",
             Self::Line(_) => "contact-line-guide-audit-v1",
             Self::Distances(_) => "contact-distance-guide-audit-v1",
         }
     }
     fn role(&self) -> &'static str {
         match self {
+            Self::Line(g) if g.hard_free_only => "hard-free-line-proposal-audit",
             Self::Line(_) => "contact-line-proposal-audit",
             Self::Distances(_) => "contact-distance-proposal-audit",
         }
@@ -630,7 +731,6 @@ impl DiagnosticGuide {
 }
 
 pub fn run_audit(options: AuditOptions) -> Result<Value> {
-    use std::io::{BufRead, BufReader};
     ensure!(!options.out.exists(), "Audit output must be new");
     let config_raw = fs::read(&options.config)?;
     let mut cfg: DockingConfig = serde_json::from_slice(&config_raw)?;
@@ -716,6 +816,18 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
     if let Some(bytes) = &probe_raw {
         fs::write(options.out.join("provenance/probes.jsonl"), bytes)?;
     }
+    let mut probe_items = Vec::<Value>::new();
+    let mut probe_ids = std::collections::BTreeSet::new();
+    if let Some(bytes) = &probe_raw {
+        for line in std::str::from_utf8(bytes)?.lines() {
+            let item: Value = serde_json::from_str(line)?;
+            ensure!(
+                !item["id"].is_null() && probe_ids.insert(item["id"].to_string()),
+                "Missing or duplicated saved query ID"
+            );
+            probe_items.push(item);
+        }
+    }
     let manifest = json!({"schema":guide.schema(),"samples":options.samples,"seed":options.seed,
         "scope":"Proposal and saved-pose geometry/density only; no Poisson sampling, physical mass or native classification",
         "config_sha256":hash_bytes(&config_raw),"region_sha256":hash_bytes(&region_raw),
@@ -725,6 +837,7 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
         "log_latent_ball_volume":log_volume,"latent_radius":radius,"physical_jobs":0});
     save(&options.out.join("manifest.json"), &manifest)?;
     let mut writer = BufWriter::new(File::create(options.out.join("samples.jsonl"))?);
+    let mut journal = File::create(options.out.join("attempts.jsonl"))?;
     let started = cpu_seconds();
     let mut draw_cpu = 0.;
     let mut density_cpu = 0.;
@@ -744,7 +857,10 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
         let (log_density, details) =
             guide.density_details(u, inside, log_volume, &chart, radius)?;
         let elapsed = cpu_seconds() - tick;
-        ensure!(log_density.is_finite(), "Nonfinite scored proposal density");
+        ensure!(
+            !log_density.is_nan() && log_density != f64::INFINITY,
+            "Invalid scored proposal density"
+        );
         let (pose, jacobian) = chart.decode(u);
         pose.validate()?;
         let backmap = chart.encode(pose)?;
@@ -779,16 +895,32 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
         ))
     };
     for index in 0..options.samples {
-        let mut rng = stream(options.seed, index, 0, guide.role());
-        let tick = cpu_seconds();
-        let (u, _, component, _) = guide.draw(&mut rng, &chart, radius, 0., 1.)?;
-        let elapsed = cpu_seconds() - tick;
+        let (row, cpu, elapsed) = audited_query(
+            &options.out,
+            &mut journal,
+            index,
+            "fresh",
+            &json!(index),
+            || {
+                let mut rng = stream(options.seed, index, 0, guide.role());
+                let tick = cpu_seconds();
+                let (u, _, component, _) = guide.draw(&mut rng, &chart, radius, 0., 1.)?;
+                let elapsed = cpu_seconds() - tick;
+                let mut info = guide.last_draw().borrow().clone();
+                info["component"] = json!(component);
+                let (row, cpu) = evaluate(u, "fresh", json!(index), info, elapsed)?;
+                ensure!(
+                    row["log_proposal_density"]
+                        .as_f64()
+                        .is_some_and(f64::is_finite),
+                    "Generated draw has zero or invalid proposal density"
+                );
+                Ok((row, cpu, elapsed))
+            },
+        )?;
         draw_cpu += elapsed;
-        let mut info = guide.last_draw().borrow().clone();
-        info["component"] = json!(component);
-        conditional += u64::from(info["conditional"] == true);
-        fallback += u64::from(info["fallback"] == true);
-        let (row, cpu) = evaluate(u, "fresh", json!(index), info, elapsed)?;
+        conditional += u64::from(row["draw"]["conditional"] == true);
+        fallback += u64::from(row["draw"]["fallback"] == true);
         density_cpu += cpu;
         nonzero += u64::from(
             row["hard_valid"] == true && row["shell_valid"] == true && row["capture_valid"] == true,
@@ -803,23 +935,35 @@ pub fn run_audit(options: AuditOptions) -> Result<Value> {
     let mut probe_writer = BufWriter::new(File::create(options.out.join("probes.jsonl"))?);
     let mut probes = 0;
     let probe_start = cpu_seconds();
-    if let Some(bytes) = probe_raw {
-        for line in BufReader::new(bytes.as_slice()).lines() {
-            let item: Value = serde_json::from_str(&line?)?;
-            let u: [f64; 6] = serde_json::from_value(item["latent"].clone())?;
-            let (row, _) = evaluate(u, "probe", item["id"].clone(), Value::Null, 0.)?;
-            serde_json::to_writer(&mut probe_writer, &row)?;
-            probe_writer.write_all(b"\n")?;
-            probe_writer.flush()?;
-            probes += 1;
-        }
+    for (index, item) in probe_items.iter().enumerate() {
+        let ordinal = options
+            .samples
+            .checked_add(index as u64)
+            .context("Audit ordinal overflow")?;
+        let (row, _) = audited_query(
+            &options.out,
+            &mut journal,
+            ordinal,
+            "probe",
+            &item["id"],
+            || {
+                let u: [f64; 6] = serde_json::from_value(item["latent"].clone())?;
+                ensure!(u.iter().all(|v| v.is_finite()), "Nonfinite saved query");
+                evaluate(u, "probe", item["id"].clone(), Value::Null, 0.)
+            },
+        )?;
+        serde_json::to_writer(&mut probe_writer, &row)?;
+        probe_writer.write_all(b"\n")?;
+        probe_writer.flush()?;
+        probes += 1;
     }
     probe_writer.flush()?;
     let summary = json!({"complete":true,"samples":options.samples,"probes":probes,"hard_capture_shell_valid":nonzero,
         "conditioned_draws":conditional,"fallback_draws":fallback,"maximum_backmap_error":maximum_backmap,
         "draw_cpu_seconds":draw_cpu,"density_cpu_seconds":density_cpu,"fresh_total_cpu_seconds":fresh_cpu,
         "probe_total_cpu_seconds":cpu_seconds()-probe_start,"manifest":manifest,
-        "samples_sha256":hash_file(&options.out.join("samples.jsonl"))?,"probes_sha256":hash_file(&options.out.join("probes.jsonl"))?});
+        "samples_sha256":hash_file(&options.out.join("samples.jsonl"))?,"probes_sha256":hash_file(&options.out.join("probes.jsonl"))?,
+        "attempts_sha256":hash_file(&options.out.join("attempts.jsonl"))?});
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
 }

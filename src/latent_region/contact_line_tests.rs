@@ -2,6 +2,8 @@
 //! are fixed here before execution; failures must not trigger sample extension.
 //! No Poisson clouds, protein production sampling or fitted test thresholds.
 use super::*;
+#[path = "hard_free_line_tests.rs"]
+mod hard_free;
 use crate::geometry::{Atom, Shape};
 use rand::SeedableRng;
 

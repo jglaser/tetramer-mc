@@ -1,6 +1,6 @@
-# Matching SMC comparison prepared
+# Matching SMC comparison
 
-The next comparison is frozen while the new [physical line-guide pilot](hard-free-line-physical-pilot.md) runs. It will compare that pilot's two fresh importance arms with all five matching historical SMC controls. **It has not yet been executed against the live physical results.** It generates no poses, clouds or native classifications and does not replay previous audits.
+The comparison was frozen before the new [physical line-guide pilot](hard-free-line-physical-pilot.md) completed and has now executed once. It compares the pilot's two fresh importance arms with all five matching historical SMC controls. It generated no poses, clouds or native classifications and replayed no previous audits. The [all-control review](hard-free-line-population-size-review.md) identifies the main discrepancy in native mass outside old R5; unrestricted broad SMC recovers only 0.216× the new conditioned estimate there. The complete result is `/vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-20261001/analysis.json`. Physical conclusions remain unresolved.
 
 The source summaries are sufficient for the requested physical-mass comparison:
 
@@ -24,7 +24,7 @@ The operative frozen preparation is `/vast/xvg/tetramer-mc-runs/hard-free-line-s
 
 Seven focused tests pass, including rejection of changed bin definitions, source files, population bindings and incomplete summaries. The original six [test results](../results/hard-free-line-smc-bridge-validation-20261001/validation.json) and [source review](../results/hard-free-line-smc-bridge-validation-20261001/root-review.json) remain archived; the [version-2 receipt](../results/hard-free-line-smc-bridge-validation-v2-20261001/validation.json) records the additional checks. No physical histories or classifiers were replayed.
 
-After the current controller completes its physical runs, independent audits and once-only classifications, invoke the frozen helper once:
+The following frozen command completed successfully. Its destination is now immutable; do not rerun it:
 
 ```bash
 /home/xvg/protein-nucleation/.venv/bin/python -B -E \
@@ -33,4 +33,4 @@ After the current controller completes its physical runs, independent audits and
   --out /vast/xvg/tetramer-mc-runs/hard-free-line-smc-bridge-20261001
 ```
 
-The helper refuses an incomplete campaign, changed target, changed source closure or existing output directory. Its result will retain the new regional convergence diagnostics alongside every historical comparison. Agreement would strengthen the matching conditional integrals; it would not close the full-vessel remainder or establish finite-system assembly stability.
+The helper refuses an incomplete campaign, changed target, changed source closure or existing output directory. Its result retains the new regional convergence diagnostics alongside every historical comparison. Agreement strengthens matching conditional integrals; it does not close the full-vessel remainder or establish finite-system assembly stability.

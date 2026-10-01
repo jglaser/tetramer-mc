@@ -22,14 +22,25 @@ independent reconstruction of 16,704 reference/control rows and attempted-draw
 failure checks. One test-helper mutation was corrected and recorded separately;
 the validated physical outputs were reused without rerunning them.
 
-The [fixed physical pilot](hard-free-line-physical-pilot.md) has completed all
-131,072 physical draws at the original 1.5 Å / 0.035 Å⁻³ conditions. It uses four
-fresh 16,384-draw populations per arm, two independent clouds per valid pose,
-and at most two physical workers. Independent audits are running; a single
-complete native/contact classification pass follows automatically. All original convergence gates,
-unconditional zeros and strata remain; neither full-vessel nor assembly
-production is enabled by this pilot. Earlier completed calculations remain
-retrospective evidence and are not rerun or pooled.
+The [fixed physical pilot](hard-free-line-physical-pilot.md) is complete:
+131,072 physical draws, all eight independent audits and one classification
+pass, at the original 1.5 Å / 0.035 Å⁻³ conditions. The conditioned guide improves
+importance ESS per sampler CPU by **1.63× for native mass, 1.11× for competing
+contacts and 2.05× for the native remainder outside old R5**. All four conditioned
+regional aggregate quality checks pass; all four between-proposal region-mass
+comparisons pass. Eight material strata still fail the absolute 0.2 log-mass
+criterion (all are within three combined population SE). The gate therefore
+remains closed. This is a physical integration improvement, not a demonstrated
+assembly-mixing speedup.
+
+Conditional native-minus-competing free energies are −18.6933 ± 0.1721 kBT for
+the baseline and −18.6950 ± 0.1237 kBT for conditioning (population-based 95%
+half-widths). These are fixed-scaffold R4 weights; they omit the full-vessel
+remainder and finite-system association entropy. The
+[complete report](../results/hard-free-line-physical-review-20261001/report.md)
+preserves all failed strata, individual population masses and original gates.
+
+![Completed regional physical comparison](../results/hard-free-line-physical-review-20261001/hard-free-line-physical.png)
 
 Live status:
 `/vast/xvg/tetramer-mc-runs/hard-free-line-physical-pilot-20261001/status.json`.
@@ -37,21 +48,30 @@ Protocol SHA-256:
 `1b788b08df239319ac69126627e891893b214c35204e337c95f4a89ede23c050`.
 The sections below preserve the earlier stages of this investigation.
 
-While the physical pilot runs, the [matching-SMC bridge](hard-free-line-smc-bridge.md)
-is frozen against all twenty historical populations in five controls. It will
-compare independent linear masses after the new complete analysis, preserving
-historical failures and unavailable hard-only stratum estimates. Seven tests and
-source reviews passed; a second frozen preparation adds explicit bindings of
-the restricted controls' stratum implementation. No old trajectories or
-classifiers were replayed.
+The [matching-SMC bridge](hard-free-line-smc-bridge.md) completed against all
+twenty historical populations in five controls. The broad unrestricted SMC
+estimate has only 0.216× the conditioned native-remainder mass, a difference of
+5.34 combined linear SE, while its old-R5 native mass agrees. Narrow unrestricted
+SMC agrees in total native mass but remains sensitive in that remainder.
+Restricted narrow and larger-population SMC agree on competing-contact mass;
+the broad restricted control remains discrepant. Every observed hard-only
+comparison passes. This localizes the mismatch to weighted coverage rather
+than establishing a measure/geometry mismatch. All historical failures remain;
+no trajectories or classifiers were replayed. The
+[independent review](hard-free-line-population-size-review.md) supports the
+next separately frozen population-size comparison with the same guide and binary.
 
 The [retained-index alternative](hard-free-line-index-estimator.md) now has an
 independently reviewed derivation, six arithmetic/provenance tests and four
 additional Lean-checked identities. The complete 74-declaration axiom audit uses
 only standard Lean axioms. This estimator preserves the current draw law but
 could avoid the complete new-mixture density evaluation. Its retrospective
-variance/cost estimates are provisional; the running experiment still uses its
-original full-density weights. No physical convergence gate has been relaxed.
+variance/cost estimates remain provisional. The completed
+[paired retrospective](../results/hard-free-line-physical-index-retrospective-20261001/report.md)
+retains 85–89% of full-density importance ESS on the same draws and clouds.
+An index-only sampler would need to save roughly 11–15% of runtime to break
+even on these observed diagnostics. That saving is unmeasured. The frozen
+physical assessment still uses its original full-density weights.
 
 The [full-vessel wrapper](hard-free-vessel-guide.md) now accepts this normalized
 guide while preserving its probability outside the source R4/capture domain.
@@ -65,12 +85,11 @@ checks do not launch or authorize a protein full-vessel campaign. The cheaper
 indexed regional estimator cannot be reused unchanged outside its support;
 this extension therefore retains complete-mixture weighting.
 
-The completed-analysis [plot helper](../tools/plot_hard_free_line_physical.py)
-is prepared and passes two synthetic checks. It refuses unfinished campaigns,
-reads the bound summaries without reclassification, and displays independent
-population masses, importance ESS per CPU, free-energy intervals, regional
-quality gates and every failed material stratum. No plot of the unfinished
-protein comparison has been generated.
+The [angular extension](hard-free-pose-line-guide.md) conditions any raw Cayley
+coordinate using quadratic sphere-overlap intervals. All 1,536 toy attempts
+passed independent reconstruction; six geometry, 22 shared-guide and eleven
+Python tests passed. It remains confined to the proposal-audit runner and is
+not part of these physical results or the population-size comparison.
 
 ## Keep the two ensembles separate
 

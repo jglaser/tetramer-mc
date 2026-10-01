@@ -68,7 +68,7 @@ Implementation: [controller](../tools/run_hard_free_line_physical_pilot.py),
 [independent physical audit](../tools/hard_free_line_physical_reference.py), and
 [single-pass contact analysis](../tools/analyze_hard_free_line_physical.py).
 
-## Started campaign
+## Completed campaign
 
 The prerequisite checks passed and the immutable controller passed preflight.
 The background campaign is
@@ -80,5 +80,15 @@ The exact executable SHA-256 is
 `752c5d7aa36249cb923ca0959b0872b4f96204101090ac1cfca4606732554c7b`.
 The [prerequisite receipt](../results/hard-free-line-physical-prerequisites-20261001/prerequisites.json)
 binds reference tests, independent audits, the fresh protein proposal comparison,
-and the five controller contract checks. No physical comparison result is
-claimed until the entire declared allocation and subsequent checks complete.
+and the five controller contract checks. All 131,072 draws, eight independent
+audits and the single classification pass have now completed. The comparison
+hash is `9377dbdaa02f0ad41b73b6062174193d32369799ca696073ccf179bced66b76d`.
+
+The [completed report and figure](../results/hard-free-line-physical-review-20261001/report.md)
+show 1.63× native and 2.05× native-remainder importance ESS per sampler CPU.
+The conditioned arm passes all four aggregate region-quality gates and the
+four between-proposal mass comparisons. Eight material strata still miss the
+absolute 0.2 log-mass criterion, despite passing three combined SE. No gate is
+relaxed: full-vessel and finite-system conclusions remain unresolved. A fresh
+population-size comparison is a separate stage, not an extension or pooling of
+this fixed pilot.

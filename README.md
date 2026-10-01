@@ -153,8 +153,14 @@ the density but does not justify a new physical campaign; the assembly kernels
 and target are unchanged. The [two-distance guide](docs/two-distance-contact-guide-design.md)
 then validated a full translation law at fixed orientation, but its
 [fixed protein pilot](docs/contact-distance-passive-results.md) also failed to
-improve native/competing proposal efficiency. These proposal results do not
-settle the physical model. The [finite-system design validator](docs/finite-assembly-contract.md)
+improve native/competing proposal efficiency. A subsequent
+[hard-free circle study](docs/contact-circle-feasibility-results.md) identifies
+geometrically feasible arcs, and the [normalized arc-density evaluator](docs/contact-arc-density.md)
+checks the complete proposal density and its cost before adding a sampling kernel.
+Its [completed saved-pose comparison](docs/contact-arc-score-results.md) finds
+insufficient improvement over the original Gaussian guide to justify its cost.
+These proposal results do not settle the physical model.
+The [finite-system design validator](docs/finite-assembly-contract.md)
 checks the separate N=12/N=24, initialization, model and equal-volume boundary
 comparisons without launching a campaign; unfilled preparations remain incomplete.
 The [matched starting geometries](docs/finite-assembly-starts.md) supply 48 validated

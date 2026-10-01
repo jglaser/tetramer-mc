@@ -33,6 +33,7 @@ pub mod physical_guide;
 pub mod smc;
 use conditional_ray::ConditionalRayGuide;
 use contact_distance::ContactDistanceGuide;
+pub use contact_distance::arc::{ContactArcAuditOptions, run_contact_arc_audit};
 use contact_line::ContactLineGuide;
 use entry_shell::EntryShellGuide;
 

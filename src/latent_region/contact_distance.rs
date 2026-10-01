@@ -5,6 +5,9 @@ use crate::contact_distances::{AzimuthParameters, ContactFrame, RadiusPolygon};
 use rand::distr::Open01;
 use std::cell::RefCell;
 
+#[path = "contact_arc.rs"]
+pub mod arc;
+
 struct AngularConditional {
     mean: [f64; 6],
     lower: [[f64; 6]; 6], // reordered: raw angle, then raw translation

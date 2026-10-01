@@ -10,8 +10,10 @@ at valid target poses. This construction has a stronger pointwise property.
 The repaired shape, fixed scaffold, radius 1.5 Å, activity 0.035 Å⁻³, frozen R4
 region, center-capture domain and full native classifier remain unchanged. The
 Gaussian guide is historically native-informed; this is not template-free
-contact discovery. Only the diagnostic executable accepts the new schema at
-this stage. The production normalizer dispatch and assembly kernels are unchanged.
+contact discovery. Following the saved-score audit, the production normalizer
+also accepts this schema through a separate v6 interface; see the
+[physical validation plan](hard-free-line-physical-pilot.md). Assembly kernels
+and the main production executable remain unchanged.
 
 ## Conditional law and target support
 

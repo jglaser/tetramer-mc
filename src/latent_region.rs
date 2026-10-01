@@ -212,6 +212,7 @@ enum FrozenGuide {
     EntryShell(EntryShellGuide),
     ConditionalRay(ConditionalRayGuide),
     ContactLine(ContactLineGuide),
+    HardFreeLine(ContactLineGuide),
     ContactDistance(ContactDistanceGuide),
 }
 impl FrozenGuide {
@@ -237,6 +238,9 @@ impl FrozenGuide {
             Some("defensive-contact-line-guide-v1") => Ok(Self::ContactLine(
                 ContactLineGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
             )),
+            Some("defensive-hard-free-line-guide-v1") => Ok(Self::HardFreeLine(
+                ContactLineGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
+            )),
             Some("defensive-contact-distance-guide-v1") => Ok(Self::ContactDistance(
                 ContactDistanceGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
             )),
@@ -248,7 +252,7 @@ impl FrozenGuide {
             Self::Gaussian(g) => g.alpha,
             Self::EntryShell(g) => g.alpha,
             Self::ConditionalRay(g) => g.alpha,
-            Self::ContactLine(g) => g.base.alpha,
+            Self::ContactLine(g) | Self::HardFreeLine(g) => g.base.alpha,
             Self::ContactDistance(g) => g.base.alpha,
         }
     }
@@ -257,7 +261,7 @@ impl FrozenGuide {
             Self::Gaussian(g) => g.components.len(),
             Self::EntryShell(g) => g.len(),
             Self::ConditionalRay(g) => g.len(),
-            Self::ContactLine(g) => g.base.components.len(),
+            Self::ContactLine(g) | Self::HardFreeLine(g) => g.base.components.len(),
             Self::ContactDistance(g) => g.base.components.len(),
         }
     }
@@ -275,7 +279,9 @@ impl FrozenGuide {
                 .map(|(u, r, c)| (u, r, c, None)),
             Self::EntryShell(g) => g.draw(rng, chart, outer).map(|(u, r, c)| (u, r, c, None)),
             Self::ConditionalRay(g) => g.draw(rng, chart, outer),
-            Self::ContactLine(g) => g.draw(rng, chart, outer, inner, fraction),
+            Self::ContactLine(g) | Self::HardFreeLine(g) => {
+                g.draw(rng, chart, outer, inner, fraction)
+            }
             Self::ContactDistance(g) => g.draw(rng, chart, outer, inner, fraction),
         }
     }
@@ -294,7 +300,7 @@ impl FrozenGuide {
             Self::ContactDistance(g) => g
                 .density_details(u, inside, volume, chart, radius)
                 .map(|v| v.0),
-            Self::ContactLine(g) => g
+            Self::ContactLine(g) | Self::HardFreeLine(g) => g
                 .density_details(u, inside, volume, chart, radius)
                 .map(|v| v.0),
         }
@@ -569,6 +575,31 @@ pub fn run_with_importance(options: LatentRegionOptions, guide: &Path) -> Result
     run_inner(options, Some(guide))
 }
 
+/// Persist an attempt before geometry or cloud evaluation. This is a no-retry
+/// journal, not a continuation/checkpoint format. Writes are unbuffered and
+/// flushed here; completion/error paths also sync the files.
+fn normalizer_attempt<T>(
+    out: &Path,
+    journal: &mut File,
+    draw: u64,
+    work: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    writeln!(journal, "{}", json!({"draw":draw,"state":"begin"}))?;
+    journal.flush()?;
+    match work() {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            journal.sync_data()?;
+            save(
+                &out.join("failure.json"),
+                &json!({"complete":false,"draw":draw,
+                "error":format!("{error:#}"),"retry_performed":false}),
+            )?;
+            Err(error)
+        }
+    }
+}
+
 fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<Value> {
     ensure!(
         options.samples > 0 && options.cloud_replicates > 0,
@@ -798,6 +829,15 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             manifest["guide_schema"] = json!("defensive-contact-line-guide-v1");
             manifest["proposal_kind"] = json!("raw-translation-line-conditioned-Gaussian-mixture");
         }
+        if matches!(g, FrozenGuide::HardFreeLine(_)) {
+            manifest["schema"] = json!("importance-latent-region-normalizer-v6");
+            manifest["guide_schema"] = json!("defensive-hard-free-line-guide-v1");
+            manifest["proposal_kind"] =
+                json!("raw-translation-hard-free-line-conditioned-Gaussian-mixture");
+            manifest["attempt_journal"] =
+                json!("attempts.jsonl; begin record before each draw; no retries");
+            manifest["resume_supported"] = json!(false);
+        }
         if matches!(g, FrozenGuide::ContactDistance(_)) {
             manifest["schema"] = json!("importance-latent-region-normalizer-v5");
             manifest["guide_schema"] = json!("defensive-contact-distance-guide-v1");
@@ -813,6 +853,7 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     let start = Instant::now();
     let cpu_start = cpu_seconds();
     let mut writer = BufWriter::new(File::create(options.out.join("samples.jsonl"))?);
+    let mut journal = File::create(options.out.join("attempts.jsonl"))?;
     let mut weighted = Moments::default();
     let mut hard = Moments::default();
     let mut capture_rejected = 0;
@@ -822,143 +863,171 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     let mut maximum_backmap_error = 0_f64;
     let mut raw_points = 0_u64;
     for draw in 0..options.samples {
-        let mut rng = stream(options.seed, draw, 0, "latent");
-        let (latent, radial, selected_component, selected_ray_fallback) = if let Some(g) = &guide {
-            g.draw(&mut rng, &chart, radius, inner_radius, shell_fraction)?
-        } else {
-            let (u, radial) = draw_uniform(&mut rng, radius, inner_radius, shell_fraction)?;
-            (u, radial, None, None)
-        };
-        // Preserve legacy uniform boundary arithmetic. The guide branch has an
-        // explicit target-shell indicator and never retries an exterior draw.
-        let shell_valid =
-            guide.is_none() || ((inner_radius == 0. || radial > inner_radius) && radial <= radius);
-        let log_proposal_density = if let Some(g) = &guide {
-            g.log_density(latent, shell_valid, log_volume, &chart, radius)?
-        } else {
-            -log_volume
-        };
-        ensure!(
-            log_proposal_density.is_finite(),
-            "Unrepresentable latent proposal density"
-        );
-        let (pose, log_jacobian) = chart.decode(latent);
-        pose.validate()?;
-        let backmap = chart.encode(pose)?;
-        let backmap_radius = backmap.iter().map(|x| x * x).sum::<f64>().sqrt();
-        let error = latent
-            .iter()
-            .zip(backmap)
-            .map(|(a, b)| (a - b).abs())
-            .fold(0_f64, f64::max);
-        maximum_backmap_error = maximum_backmap_error.max(error);
-        let inverse_scale = if guide.is_some() {
-            radial.max(radius)
-        } else {
-            radius
-        };
-        ensure!(
-            error <= 2e-7 * (1. + inverse_scale)
-                && (guide.is_some() || backmap_radius <= radius + 2e-7 * (1. + radius)),
-            "Chart inverse failed; stop instead of censoring a draw"
-        );
-        ensure!(log_jacobian.is_finite(), "Nonfinite physical Jacobian");
-        let q = metric.q(pose);
-        ensure!(q.is_finite(), "Invalid physical q");
-        let capture_valid = cfg.contains(pose);
-        let hard_valid = capture_valid && env.hard_valid(pose);
-        let region_valid = q_in_interval(
-            q,
-            minimum_q,
-            maximum_q,
-            minimum_q_inclusive,
-            maximum_q_inclusive,
-        );
-        capture_rejected += u64::from(!capture_valid);
-        hard_rejected += u64::from(capture_valid && !hard_valid);
-        region_rejected += u64::from(hard_valid && !region_valid);
-        shell_rejected += u64::from(!shell_valid);
-        let mut clouds = Vec::new();
-        let mut log_weight = None;
-        let mut log_hard_weight = None;
-        if hard_valid && region_valid && shell_valid {
-            let envelope = OverlapEnvelope::build(&env, pose, cfg.endpoint_gate)?;
-            let mut log_cloud_sum = f64::NEG_INFINITY;
-            for cloud in 0..options.cloud_replicates {
-                let w = overlap_weight::sample_with_envelope(
-                    &mut stream(options.seed, draw, cloud, "cloud"),
-                    &env,
-                    pose,
-                    lambda,
-                    cfg.reservoir_density,
-                    &envelope,
-                )?;
-                raw_points += w.raw_points;
-                log_cloud_sum = log_add(log_cloud_sum, w.log_weight);
-                clouds.push(w);
-            }
-            let h = if guide.is_some() {
-                log_jacobian - log_proposal_density
+        let outcome = normalizer_attempt(&options.out, &mut journal, draw, || -> Result<()> {
+            let mut rng = stream(options.seed, draw, 0, "latent");
+            let (latent, radial, selected_component, selected_ray_fallback) =
+                if let Some(g) = &guide {
+                    g.draw(&mut rng, &chart, radius, inner_radius, shell_fraction)?
+                } else {
+                    let (u, radial) = draw_uniform(&mut rng, radius, inner_radius, shell_fraction)?;
+                    (u, radial, None, None)
+                };
+            // Preserve legacy uniform boundary arithmetic. The guide branch has an
+            // explicit target-shell indicator and never retries an exterior draw.
+            let shell_valid = guide.is_none()
+                || ((inner_radius == 0. || radial > inner_radius) && radial <= radius);
+            let mut hard_free_line_density = None;
+            let log_proposal_density = if let Some(FrozenGuide::HardFreeLine(g)) = &guide {
+                let (density, detail) =
+                    g.density_compact(latent, shell_valid, log_volume, &chart, radius)?;
+                hard_free_line_density = Some(detail);
+                density
+            } else if let Some(g) = &guide {
+                g.log_density(latent, shell_valid, log_volume, &chart, radius)?
             } else {
-                log_volume + log_jacobian
+                -log_volume
             };
-            let w = h + log_cloud_sum - (options.cloud_replicates as f64).ln();
-            ensure!(h.is_finite() && w.is_finite(), "Invalid regional weight");
-            weighted.add(w);
-            hard.add(h);
-            log_weight = Some(w);
-            log_hard_weight = Some(h);
-        }
-        let mut row = json!({"draw":draw,"latent":latent,"latent_radius":radial,
+            ensure!(
+                log_proposal_density.is_finite(),
+                "Unrepresentable latent proposal density"
+            );
+            let (pose, log_jacobian) = chart.decode(latent);
+            pose.validate()?;
+            let backmap = chart.encode(pose)?;
+            let backmap_radius = backmap.iter().map(|x| x * x).sum::<f64>().sqrt();
+            let error = latent
+                .iter()
+                .zip(backmap)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0_f64, f64::max);
+            maximum_backmap_error = maximum_backmap_error.max(error);
+            let inverse_scale = if guide.is_some() {
+                radial.max(radius)
+            } else {
+                radius
+            };
+            ensure!(
+                error <= 2e-7 * (1. + inverse_scale)
+                    && (guide.is_some() || backmap_radius <= radius + 2e-7 * (1. + radius)),
+                "Chart inverse failed; stop instead of censoring a draw"
+            );
+            ensure!(log_jacobian.is_finite(), "Nonfinite physical Jacobian");
+            let q = metric.q(pose);
+            ensure!(q.is_finite(), "Invalid physical q");
+            let capture_valid = cfg.contains(pose);
+            let hard_valid = capture_valid && env.hard_valid(pose);
+            let region_valid = q_in_interval(
+                q,
+                minimum_q,
+                maximum_q,
+                minimum_q_inclusive,
+                maximum_q_inclusive,
+            );
+            capture_rejected += u64::from(!capture_valid);
+            hard_rejected += u64::from(capture_valid && !hard_valid);
+            region_rejected += u64::from(hard_valid && !region_valid);
+            shell_rejected += u64::from(!shell_valid);
+            let mut clouds = Vec::new();
+            let mut log_weight = None;
+            let mut log_hard_weight = None;
+            if hard_valid && region_valid && shell_valid {
+                let envelope = OverlapEnvelope::build(&env, pose, cfg.endpoint_gate)?;
+                let mut log_cloud_sum = f64::NEG_INFINITY;
+                for cloud in 0..options.cloud_replicates {
+                    let w = overlap_weight::sample_with_envelope(
+                        &mut stream(options.seed, draw, cloud, "cloud"),
+                        &env,
+                        pose,
+                        lambda,
+                        cfg.reservoir_density,
+                        &envelope,
+                    )
+                    .with_context(|| format!("Poisson cloud {cloud} for draw {draw}"))?;
+                    raw_points += w.raw_points;
+                    log_cloud_sum = log_add(log_cloud_sum, w.log_weight);
+                    clouds.push(w);
+                }
+                let h = if guide.is_some() {
+                    log_jacobian - log_proposal_density
+                } else {
+                    log_volume + log_jacobian
+                };
+                let w = h + log_cloud_sum - (options.cloud_replicates as f64).ln();
+                ensure!(h.is_finite() && w.is_finite(), "Invalid regional weight");
+                weighted.add(w);
+                hard.add(h);
+                log_weight = Some(w);
+                log_hard_weight = Some(h);
+            }
+            let mut row = json!({"draw":draw,"latent":latent,"latent_radius":radial,
             "pose":pose,"backmapped_latent":backmap,"backmapped_radius":backmap_radius,
             "log_physical_jacobian":log_jacobian,"physical_jacobian":log_jacobian.exp(),"q":q,
             "capture_valid":capture_valid,"hard_valid":hard_valid,"region_valid":region_valid,
             "log_importance_weight":log_weight,"log_hard_weight":log_hard_weight,"clouds":clouds});
-        if guide.is_some() {
-            row["shell_valid"] = json!(shell_valid);
-            row["log_proposal_density"] = json!(log_proposal_density);
-            row["proposal_branch"] = json!(if selected_component.is_some() {
-                if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
-                    "conditional-ray"
-                } else if matches!(guide, Some(FrozenGuide::EntryShell(_))) {
-                    "entry-shell"
-                } else if matches!(guide, Some(FrozenGuide::ContactDistance(_))) {
-                    "contact-distance"
-                } else if matches!(guide, Some(FrozenGuide::ContactLine(_))) {
-                    "contact-line"
+            if guide.is_some() {
+                row["shell_valid"] = json!(shell_valid);
+                row["log_proposal_density"] = json!(log_proposal_density);
+                row["proposal_branch"] = json!(if selected_component.is_some() {
+                    if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
+                        "conditional-ray"
+                    } else if matches!(guide, Some(FrozenGuide::EntryShell(_))) {
+                        "entry-shell"
+                    } else if matches!(guide, Some(FrozenGuide::ContactDistance(_))) {
+                        "contact-distance"
+                    } else if matches!(guide, Some(FrozenGuide::ContactLine(_))) {
+                        "contact-line"
+                    } else if matches!(guide, Some(FrozenGuide::HardFreeLine(_))) {
+                        "hard-free-line"
+                    } else {
+                        "gaussian"
+                    }
                 } else {
-                    "gaussian"
+                    "uniform-shell"
+                });
+                row["proposal_component"] = json!(selected_component);
+                if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
+                    row["selected_ray_fallback"] = json!(selected_ray_fallback);
                 }
-            } else {
-                "uniform-shell"
-            });
-            row["proposal_component"] = json!(selected_component);
-            if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
-                row["selected_ray_fallback"] = json!(selected_ray_fallback);
+                if let Some(FrozenGuide::ContactDistance(g)) = &guide {
+                    row["contact_distance_draw"] = g.last_draw.borrow().clone();
+                }
+                if let Some(FrozenGuide::ContactLine(g)) = &guide {
+                    row["contact_line_draw"] = g.last_draw.borrow().clone();
+                }
+                if let Some(FrozenGuide::HardFreeLine(g)) = &guide {
+                    row["hard_free_line_draw"] = g.last_draw.borrow().clone();
+                    row["hard_free_line_density"] = hard_free_line_density
+                        .context("Missing complete hard-free density trace")?;
+                }
             }
-            if let Some(FrozenGuide::ContactDistance(g)) = &guide {
-                row["contact_distance_draw"] = g.last_draw.borrow().clone();
-            }
-            if let Some(FrozenGuide::ContactLine(g)) = &guide {
-                row["contact_line_draw"] = g.last_draw.borrow().clone();
-            }
-        }
-        serde_json::to_writer(&mut writer, &row)?;
-        writer.write_all(b"\n")?;
-        if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
+            serde_json::to_writer(&mut writer, &row)?;
+            writer.write_all(b"\n")?;
+            // Preserve completed rows if a later attempt fails or is interrupted.
             writer.flush()?;
-            save(
-                &options.out.join("progress.json"),
-                &json!({"completed_draws":draw+1,"requested_draws":options.samples,
+            if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
+                writer.flush()?;
+                save(
+                    &options.out.join("progress.json"),
+                    &json!({"completed_draws":draw+1,"requested_draws":options.samples,
                 "nonzero":weighted.count,"sampler_cpu_seconds":cpu_seconds()-cpu_start,"complete":draw+1==options.samples}),
-            )?;
+                )?;
+            }
+            Ok(())
+        });
+        if let Err(error) = outcome {
+            writer.flush()?;
+            writer.get_ref().sync_data()?;
+            return Err(error);
         }
     }
     writer.flush()?;
+    writer.get_ref().sync_data()?;
+    journal.sync_data()?;
     let mut summary = json!({"complete":true,"samples":options.samples,"estimates":{"region":weighted.value(options.samples),"hard_region":hard.value(options.samples)},
         "capture_rejected":capture_rejected,"hard_rejected":hard_rejected,"region_rejected":region_rejected,
         "maximum_backmap_error":maximum_backmap_error,"raw_points":raw_points,
         "sampler_cpu_seconds":cpu_seconds()-cpu_start,"wall_seconds":start.elapsed().as_secs_f64(),"manifest":manifest});
+    summary["attempts_sha256"] = json!(hash_file(&options.out.join("attempts.jsonl"))?);
     if extended {
         summary["samples_sha256"] = json!(hash_file(&options.out.join("samples.jsonl"))?);
     }
@@ -983,6 +1052,36 @@ mod q_window_tests {
         assert!(q_in_interval(20., 1., None, true, true));
         assert!(!q_in_interval(f64::NAN, 1., None, true, true));
         assert!(!q_in_interval(f64::INFINITY, 1., None, true, true));
+    }
+}
+
+#[cfg(test)]
+mod normalizer_attempt_tests {
+    use super::*;
+    #[test]
+    fn failed_attempt_is_recorded_once_before_work_and_never_retried() -> Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("normalizer-failed-attempt-{}", std::process::id()));
+        fs::create_dir_all(&path)?;
+        let mut journal = File::create(path.join("attempts.jsonl"))?;
+        let mut calls = 0;
+        let result: Result<()> = normalizer_attempt(&path, &mut journal, 7, || {
+            calls += 1;
+            assert_eq!(
+                fs::read_to_string(path.join("attempts.jsonl"))?.trim(),
+                json!({"draw":7,"state":"begin"}).to_string()
+            );
+            anyhow::bail!("injected deterministic cloud failure")
+        });
+        assert!(result.is_err());
+        assert_eq!(calls, 1);
+        let failure: Value = serde_json::from_slice(&fs::read(path.join("failure.json"))?)?;
+        assert_eq!(failure["draw"], 7);
+        assert_eq!(failure["complete"], false);
+        assert_eq!(failure["retry_performed"], false);
+        assert!(!path.join("summary.json").exists());
+        fs::remove_dir_all(path)?;
+        Ok(())
     }
 }
 

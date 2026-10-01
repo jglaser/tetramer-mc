@@ -203,6 +203,31 @@ fn hard_free_disabled_limits_and_zero_density_outside_domain() {
 }
 
 #[test]
+fn hard_free_compact_trace_preserves_density_geometry_and_determinism() {
+    let c = chart(true);
+    let cfg = configuration();
+    for (alpha, beta) in [(0.5, 1.), (0.5, 0.), (1., 1.)] {
+        let g = guide(&hard_data(alpha, beta), &c, &cfg);
+        for u in [[0.; 6], [0.2, 0.4, -0.1, 0.1, 0., 0.], [9.; 6]] {
+            let inside = u.iter().map(|v| v * v).sum::<f64>() <= OUTER * OUTER;
+            let full = g.density_details(u, inside, log_volume(), &c, OUTER).unwrap();
+            let compact = g.density_compact(u, inside, log_volume(), &c, OUTER).unwrap();
+            assert_eq!(full.0, compact.0);
+            let mut expected = full.1;
+            if let Some(axes) = expected.get_mut("axes").and_then(Value::as_array_mut) {
+                for axis in axes {
+                    axis.as_object_mut().unwrap().remove("components");
+                    axis.as_object_mut().unwrap().remove("geometry_cpu_seconds");
+                }
+            }
+            assert_eq!(expected, compact.1);
+            assert_eq!(compact, g.density_compact(u, inside, log_volume(), &c, OUTER).unwrap());
+            assert_eq!(*g.last_draw.borrow(), Value::Null);
+        }
+    }
+}
+
+#[test]
 fn hard_free_query_journal_retains_failure_identity() {
     let path = std::env::temp_dir().join(format!(
         "hard-free-query-{}-{}",

@@ -6,6 +6,37 @@ It does not establish faster equilibrium mixing, template-free finite-system
 assembly, or instability of the model. Existing simulations were left running;
 the live production executable was not replaced.
 
+## Latest continuation: feasibility-only conditioning
+
+The [fresh line-guide comparison](hard-free-line-fresh-results.md) completed
+2,048 new protein proposals and independently reconstructed every output.
+Keeping the Gaussian measure and conditioning only on hard-free translation
+intervals increased native proposals from 66 to 153 per 1,024 attempts, and
+valid contacts from 211 to 329. Proposal-loop CPU increased 9.75-fold, so this
+does **not** yet establish a useful physical-sampling speedup. No Poisson clouds
+were generated in that geometry comparison.
+
+The [production integration](hard-free-line-production-integration.md) passed
+analytic sphere/depletion references, exact disabled-guide controls, complete
+independent reconstruction of 16,704 reference/control rows and attempted-draw
+failure checks. One test-helper mutation was corrected and recorded separately;
+the validated physical outputs were reused without rerunning them.
+
+The [fixed physical pilot](hard-free-line-physical-pilot.md) has now started at
+the original 1.5 Å / 0.035 Å⁻³ conditions. It uses four fresh 16,384-draw
+populations per arm, two independent clouds per valid pose, and at most two
+physical workers. Independent audits and a single complete native/contact
+classification pass follow automatically. All original convergence gates,
+unconditional zeros and strata remain; neither full-vessel nor assembly
+production is enabled by this pilot. Earlier completed calculations remain
+retrospective evidence and are not rerun or pooled.
+
+Live status:
+`/vast/xvg/tetramer-mc-runs/hard-free-line-physical-pilot-20261001/status.json`.
+Protocol SHA-256:
+`1b788b08df239319ac69126627e891893b214c35204e337c95f4a89ede23c050`.
+The sections below preserve the earlier stages of this investigation.
+
 ## Keep the two ensembles separate
 
 | Work | Physical parameters | What is measured |

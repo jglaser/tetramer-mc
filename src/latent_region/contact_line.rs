@@ -405,6 +405,31 @@ impl ContactLineGuide {
         chart: &Chart,
         outer: f64,
     ) -> Result<(f64, Value)> {
+        self.density_trace(u, inside, volume, chart, outer, true)
+    }
+
+    /// Production audit trace: retain every axis's exact interval union, but
+    /// omit per-component diagnostics and nondeterministic timing fields.
+    pub(super) fn density_compact(
+        &self,
+        u: [f64; 6],
+        inside: bool,
+        volume: f64,
+        chart: &Chart,
+        outer: f64,
+    ) -> Result<(f64, Value)> {
+        self.density_trace(u, inside, volume, chart, outer, false)
+    }
+
+    fn density_trace(
+        &self,
+        u: [f64; 6],
+        inside: bool,
+        volume: f64,
+        chart: &Chart,
+        outer: f64,
+        full_trace: bool,
+    ) -> Result<(f64, Value)> {
         let base = self.base.log_density(u, inside, volume);
         if self.beta == 0. || self.base.alpha == 1. {
             return Ok((base, json!({"conditioning_disabled":true})));
@@ -447,9 +472,9 @@ impl ContactLineGuide {
         let mut geometry = Vec::new();
         let mut fallback = 0;
         for (ai, &axis) in self.axes.iter().enumerate() {
-            let geometry_start = cpu_seconds();
+            let geometry_start = full_trace.then(cpu_seconds);
             let (sets, mut detail) = self.intervals(x, chart, outer, axis)?;
-            let geometry_cpu = cpu_seconds() - geometry_start;
+            let geometry_cpu = geometry_start.map(|start| cpu_seconds() - start);
             let mut axis_factors = vec![0.; self.base.components.len()];
             let mut components = Vec::new();
             for (ci, normal) in self.conditionals[ai].iter().enumerate() {
@@ -468,7 +493,7 @@ impl ContactLineGuide {
                     };
                     factor[ci] += multiplier;
                     axis_factors[ci] += multiplier;
-                    if self.hard_free_only {
+                    if self.hard_free_only && full_trace {
                         components.push(json!({"component":ci,"gaussian_log_density":gaussian_logs[ci],
                             "conditional_mean":mean,"conditional_sigma":sigma,"conditional_mass":mass,
                             "fallback":is_fallback,"query_coordinate_allowed":allowed}));
@@ -477,9 +502,11 @@ impl ContactLineGuide {
             }
             if self.hard_free_only {
                 detail["hard_free_intervals"] = json!(sets[0].intervals());
-                detail["components"] = json!(components);
                 detail["axis_log_proposal_density"] = json!(compose(&axis_factors, 1.));
-                detail["geometry_cpu_seconds"] = json!(geometry_cpu);
+                if full_trace {
+                    detail["components"] = json!(components);
+                    detail["geometry_cpu_seconds"] = json!(geometry_cpu.unwrap());
+                }
             }
             geometry.push(detail);
         }

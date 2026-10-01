@@ -4,6 +4,8 @@
 use super::*;
 #[path = "hard_free_line_tests.rs"]
 mod hard_free;
+#[path = "pose_line_tests.rs"]
+mod pose_line;
 use crate::geometry::{Atom, Shape};
 use rand::SeedableRng;
 

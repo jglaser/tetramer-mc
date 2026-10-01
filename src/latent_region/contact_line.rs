@@ -1,8 +1,8 @@
 //! Exact one-coordinate conditional Gaussian guides for cooperative contacts.
 //!
-//! Raw translation coordinates are used: changing a whitened latent coordinate
-//! would generally rotate the body. The other five raw coordinates retain their
-//! complete Gaussian marginal, including lines with no useful contact interval.
+//! Raw chart coordinates are used: changing a whitened latent coordinate would
+//! generally couple translation and rotation. The other five raw coordinates
+//! retain their complete Gaussian marginal, including empty-line fallbacks.
 use super::*;
 use crate::line_geometry::{Interval, IntervalSet, translation_intervals};
 use rand::distr::Open01;
@@ -125,6 +125,7 @@ impl ConditionalNormal {
 pub(super) struct ContactLineGuide {
     pub(super) base: ImportanceGuide,
     hard_free_only: bool,
+    pose_coordinates: bool,
     axes: Vec<usize>,
     widths: Vec<f64>,
     beta: f64,
@@ -186,12 +187,16 @@ impl ContactLineGuide {
             "Contact-line guide currently requires a complete latent ball"
         );
         let mut data: Value = serde_json::from_slice(raw)?;
-        let hard_free_only = data["schema"] == "defensive-hard-free-line-guide-v1";
+        let pose_coordinates = data["schema"] == "defensive-hard-free-pose-line-guide-v1";
+        let hard_free_only = pose_coordinates || data["schema"] == "defensive-hard-free-line-guide-v1";
         ensure!(
             hard_free_only || data["schema"] == "defensive-contact-line-guide-v1",
             "Wrong contact-line schema"
         );
-        let axes: Vec<usize> = serde_json::from_value(data["raw_translation_axes"].clone())?;
+        let axis_key = if pose_coordinates { "raw_pose_axes" } else { "raw_translation_axes" };
+        let other_key = if pose_coordinates { "raw_translation_axes" } else { "raw_pose_axes" };
+        ensure!(data.get(other_key).is_none(), "Ambiguous coordinate-axis fields");
+        let axes: Vec<usize> = serde_json::from_value(data[axis_key].clone())?;
         let (widths, contacts): (Vec<f64>, Vec<usize>) = if hard_free_only {
             ensure!(
                 data.get("contact_widths_A").is_none()
@@ -215,9 +220,9 @@ impl ContactLineGuide {
             .context("Missing conditional mass floor")?;
         ensure!(
             !axes.is_empty()
-                && axes.iter().all(|&a| a < 3)
+                && axes.iter().all(|&a| a < if pose_coordinates { 6 } else { 3 })
                 && axes.iter().enumerate().all(|(i, a)| !axes[..i].contains(a)),
-            "Invalid/duplicate raw translation axes"
+            "Invalid/duplicate raw chart axes"
         );
         ensure!(
             hard_free_only
@@ -245,6 +250,7 @@ impl ContactLineGuide {
         data["schema"] = json!("defensive-latent-shell-guide-v1");
         for key in [
             "raw_translation_axes",
+            "raw_pose_axes",
             "contact_widths_A",
             "contact_neighbor_indices",
             "conditional_probability",
@@ -265,6 +271,7 @@ impl ContactLineGuide {
         Ok(Self {
             base,
             hard_free_only,
+            pose_coordinates,
             axes,
             widths,
             beta,
@@ -305,6 +312,31 @@ impl ContactLineGuide {
         let Some(mut segment) = ball_chord(u0, du, outer) else {
             return Ok((empty(), json!({"axis":axis,"empty_reason":"no_R4_chord"})));
         };
+        if axis >= 3 {
+            // A raw Cayley coordinate rotates the body at a fixed center.
+            // Capture is therefore one Boolean, never a zero-direction chord.
+            let center = chart.fixed.apply(add(chart.anchor_position, [raw[0], raw[1], raw[2]]));
+            if norm(sub(center, self.capture_center)) > self.capture_radius {
+                return Ok((empty(), json!({"axis":axis,"empty_reason":"no_capture_at_fixed_center"})));
+            }
+            let family = crate::cayley_axis_geometry::CayleyAxis {
+                world_center: center,
+                chart_orientation: chart.fixed.orientation,
+                anchor_rotation: chart.anchor_rotation,
+                fixed_cayley: [raw[3] / chart.ell, raw[4] / chart.ell, raw[5] / chart.ell],
+                axis: axis - 3,
+                length_scale: chart.ell,
+            };
+            let core = crate::cayley_axis_geometry::cayley_axis_intervals(
+                &self.tree, &family, &self.tree, &self.fixed, segment,
+            )?;
+            let detail = json!({"axis":axis,"coordinate_kind":"raw-scaled-Cayley",
+                "segment":segment,"world_center":center,"fixed_cayley":family.fixed_cayley,
+                "length_scale":chart.ell,"core_counts":core.counts,
+                "hard_free_intervals":core.hard_free.intervals(),
+                "empty_reason":if core.hard_free.length() == 0. { Some("no_positive_hard_free_length") } else { None }});
+            return Ok((vec![core.hard_free], detail));
+        }
         let Some(capture) = ball_chord(
             sub(origin.position, self.capture_center),
             direction,
@@ -743,7 +775,7 @@ impl DiagnosticGuide {
     ) -> Result<Self> {
         let value: Value = serde_json::from_slice(raw)?;
         match value["schema"].as_str() {
-            Some("defensive-contact-line-guide-v1" | "defensive-hard-free-line-guide-v1") => {
+            Some("defensive-contact-line-guide-v1" | "defensive-hard-free-line-guide-v1" | "defensive-hard-free-pose-line-guide-v1") => {
                 Ok(Self::Line(ContactLineGuide::from_bytes(
                     raw, hash, chart, inner, cfg, tree,
                 )?))
@@ -782,6 +814,7 @@ impl DiagnosticGuide {
     }
     fn schema(&self) -> &'static str {
         match self {
+            Self::Line(g) if g.pose_coordinates => "hard-free-pose-line-guide-audit-v1",
             Self::Line(g) if g.hard_free_only => "hard-free-line-guide-audit-v1",
             Self::Line(_) => "contact-line-guide-audit-v1",
             Self::Distances(_) => "contact-distance-guide-audit-v1",
@@ -789,6 +822,7 @@ impl DiagnosticGuide {
     }
     fn role(&self) -> &'static str {
         match self {
+            Self::Line(g) if g.pose_coordinates => "hard-free-pose-line-proposal-audit",
             Self::Line(g) if g.hard_free_only => "hard-free-line-proposal-audit",
             Self::Line(_) => "contact-line-proposal-audit",
             Self::Distances(_) => "contact-distance-proposal-audit",

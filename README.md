@@ -145,7 +145,12 @@ The [conditional-ray reference](docs/conditional-ray-reference.md) implements th
 fixed 786,432-draw regional comparison before further full-vessel or finite-system
 assembly production. The [completed campaign](docs/conditional-ray-reference-results.md)
 fails its convergence gate, so those dependent production runs remain deferred;
-the physical assembly question is unresolved. The [finite-system design validator](docs/finite-assembly-contract.md)
+the physical assembly question is unresolved. The later
+[translation-line guide](docs/line-conditioned-gaussian-guide.md) adds exact
+conditional Gaussian sampling over sphere-union contact intervals. Its
+[protein proposal diagnostic](docs/contact-line-passive-results.md) validates
+the density but does not justify a new physical campaign; the assembly kernels
+and target are unchanged. The [finite-system design validator](docs/finite-assembly-contract.md)
 checks the separate N=12/N=24, initialization, model and equal-volume boundary
 comparisons without launching a campaign; unfilled preparations remain incomplete.
 The [matched starting geometries](docs/finite-assembly-starts.md) supply 48 validated

@@ -9,6 +9,7 @@ pub mod geometry;
 pub mod gca_overlap_diagnostic;
 pub mod initialization;
 pub mod latent_region;
+pub mod line_geometry;
 pub mod math;
 pub mod native_entry;
 pub mod native_region;

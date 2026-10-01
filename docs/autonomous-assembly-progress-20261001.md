@@ -112,6 +112,55 @@ negative result for that guide expansion, with no thermodynamic implication.
 The [cooperative-contact report](cooperative-contact-guide.md) records the
 geometry, frozen densities, failed holdout checks and inert prospective commands.
 
+### Exact translation conditioning: validated, but not yet efficient
+
+The next implementation conditions one raw translation coordinate on contact
+with both scaffold unions, subtracting all hard-overlap intervals. It retains
+the other five Gaussian coordinates and evaluates the complete normalized
+mixture, including empty-line fallback. Its 50% uniform / 25% original Gaussian /
+25% conditioned Gaussian law bounds the density below by half the old guide.
+The [derivation and numerical obligations](line-conditioned-gaussian-guide.md)
+make explicit why this is a normalized integration proposal and why it cannot
+fix missing orientations. The original center-capture domain, classifier and
+physical measure are unchanged; no assembly kernel was modified.
+
+Eight interval-geometry tests and nine guide reference tests passed. The latter
+also passed in the production release profile; 32 existing latent-region,
+physical-guide and SMC regression tests passed against that same executable
+(one fixture-writing helper remains intentionally ignored). Independent Python reconstruction
+then passed on all 512 fresh proposal draws and 284 archived probe queries in a
+separately frozen, one-worker diagnostic. It generated **no new Poisson clouds**.
+
+The fixed-x variant did not justify a physical campaign. Of 65 selected
+conditional branches, 34 had no hard-free line segment and 21 had no simultaneous
+contact interval at the selected width; only ten could be conditioned. There
+were no mass-floor fallbacks. Valid endpoints were 53/256 versus 61/256 for the
+baseline; simultaneous contacts within 0.1 Å were 15/256 in each arm. These small
+counts do not establish a difference, while proposal/geometry CPU increased
+3.45-fold. This timing excludes Poisson work and is not a physical-sampling
+speed ratio. The archived critical-tail second-moment estimates also disagree
+between their two original source arms and have very low effective counts.
+See the [passive results](contact-line-passive-results.md).
+
+This negative result identifies a restriction of the fixed line, not of the
+protein model. A separate deterministic inspection of all three raw translation
+axes reused 462 saved endpoints, without new draws or clouds. At 0.5 Å, 135 of
+the 256 baseline poses have a usable line on at least one axis, versus 88 on x.
+But uniformly choosing an axis does not select that union: on the 139 original
+Gaussian draws, averaged over the three widths, the usable conditional fraction
+changes only from 25.66% to 26.06%. Its concentrated archived weight diagnostics
+also show no reliable advantage. The
+[axis diagnostic](../results/contact-line-axes-20261001/analysis.json) therefore
+does not justify tripling geometric traversal work in another physical pilot.
+
+The next [candidate construction](two-distance-contact-guide-design.md) replaces
+all three translations using two chosen atomic contact distances and an azimuth,
+while retaining the Gaussian angular marginal. Its polygon area and Jacobian
+give a normalized density. A localized azimuth with a uniform component can
+retain useful covariance information. This remains a design, not an implemented
+or validated improvement; it first needs bounded passive reference and protein
+checks. No new physical campaign is justified by these diagnostics alone.
+
 ## Validation and next decision
 
 The new kernels passed finite-state balance, ordered-pool normalization,

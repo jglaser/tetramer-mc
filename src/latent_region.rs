@@ -26,10 +26,12 @@ use std::{
     time::Instant,
 };
 mod conditional_ray;
+pub mod contact_line;
+mod entry_shell;
 pub mod physical_guide;
 pub mod smc;
-mod entry_shell;
 use conditional_ray::ConditionalRayGuide;
+use contact_line::ContactLineGuide;
 use entry_shell::EntryShellGuide;
 
 /// A frozen guide changes only the latent proposal, never the physical region.
@@ -206,9 +208,17 @@ enum FrozenGuide {
     Gaussian(ImportanceGuide),
     EntryShell(EntryShellGuide),
     ConditionalRay(ConditionalRayGuide),
+    ContactLine(ContactLineGuide),
 }
 impl FrozenGuide {
-    fn from_bytes(raw: &[u8], region_hash: &str, chart: &Chart, inner: f64) -> Result<Self> {
+    fn from_bytes(
+        raw: &[u8],
+        region_hash: &str,
+        chart: &Chart,
+        inner: f64,
+        cfg: &DockingConfig,
+        tree: &SphereTree,
+    ) -> Result<Self> {
         let value: Value = serde_json::from_slice(raw)?;
         match value["schema"].as_str() {
             Some("defensive-latent-shell-guide-v1") => Ok(Self::Gaussian(
@@ -220,6 +230,9 @@ impl FrozenGuide {
             Some("defensive-conditional-ray-guide-v1") => Ok(Self::ConditionalRay(
                 ConditionalRayGuide::from_bytes(raw, region_hash, chart, inner)?,
             )),
+            Some("defensive-contact-line-guide-v1") => Ok(Self::ContactLine(
+                ContactLineGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
+            )),
             _ => anyhow::bail!("Unknown latent guide schema"),
         }
     }
@@ -228,6 +241,7 @@ impl FrozenGuide {
             Self::Gaussian(g) => g.alpha,
             Self::EntryShell(g) => g.alpha,
             Self::ConditionalRay(g) => g.alpha,
+            Self::ContactLine(g) => g.base.alpha,
         }
     }
     fn len(&self) -> usize {
@@ -235,6 +249,7 @@ impl FrozenGuide {
             Self::Gaussian(g) => g.components.len(),
             Self::EntryShell(g) => g.len(),
             Self::ConditionalRay(g) => g.len(),
+            Self::ContactLine(g) => g.base.components.len(),
         }
     }
     fn draw(
@@ -251,6 +266,7 @@ impl FrozenGuide {
                 .map(|(u, r, c)| (u, r, c, None)),
             Self::EntryShell(g) => g.draw(rng, chart, outer).map(|(u, r, c)| (u, r, c, None)),
             Self::ConditionalRay(g) => g.draw(rng, chart, outer),
+            Self::ContactLine(g) => g.draw(rng, chart, outer, inner, fraction),
         }
     }
     fn log_density(
@@ -265,6 +281,9 @@ impl FrozenGuide {
             Self::Gaussian(g) => Ok(g.log_density(u, inside, volume)),
             Self::EntryShell(g) => Ok(g.log_density(u, inside, volume, chart, radius)),
             Self::ConditionalRay(g) => g.log_density(u, inside, volume, chart, radius),
+            Self::ContactLine(g) => g
+                .density_details(u, inside, volume, chart, radius)
+                .map(|v| v.0),
         }
     }
 }
@@ -656,11 +675,20 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
         "Frozen region shape mismatch"
     );
     let chart = Chart::new(&region, &shape_hash, cfg.capture_radius, fixed)?;
+    let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
     let guide = guide_raw
         .as_ref()
-        .map(|raw| FrozenGuide::from_bytes(raw, &hash_bytes(&region_raw), &chart, inner_radius))
+        .map(|raw| {
+            FrozenGuide::from_bytes(
+                raw,
+                &hash_bytes(&region_raw),
+                &chart,
+                inner_radius,
+                &cfg,
+                &tree,
+            )
+        })
         .transpose()?;
-    let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
     let env = Environment {
         tree: &tree,
         fixed: physical_fixed.iter().copied().map(Placed::new).collect(),
@@ -751,6 +779,11 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             manifest["schema"] = json!("importance-latent-region-normalizer-v3");
             manifest["guide_schema"] = json!("defensive-conditional-ray-guide-v1");
             manifest["proposal_kind"] = json!("conditional-ray-interval-mixture");
+        }
+        if matches!(g, FrozenGuide::ContactLine(_)) {
+            manifest["schema"] = json!("importance-latent-region-normalizer-v4");
+            manifest["guide_schema"] = json!("defensive-contact-line-guide-v1");
+            manifest["proposal_kind"] = json!("raw-translation-line-conditioned-Gaussian-mixture");
         }
         manifest["proposal_density_measure"] =
             json!("Lebesgue measure in the original six-dimensional whitened region chart");
@@ -871,6 +904,8 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                     "conditional-ray"
                 } else if matches!(guide, Some(FrozenGuide::EntryShell(_))) {
                     "entry-shell"
+                } else if matches!(guide, Some(FrozenGuide::ContactLine(_))) {
+                    "contact-line"
                 } else {
                     "gaussian"
                 }
@@ -880,6 +915,9 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             row["proposal_component"] = json!(selected_component);
             if matches!(guide, Some(FrozenGuide::ConditionalRay(_))) {
                 row["selected_ray_fallback"] = json!(selected_ray_fallback);
+            }
+            if let Some(FrozenGuide::ContactLine(g)) = &guide {
+                row["contact_line_draw"] = g.last_draw.borrow().clone();
             }
         }
         serde_json::to_writer(&mut writer, &row)?;

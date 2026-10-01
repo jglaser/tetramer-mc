@@ -78,6 +78,15 @@ pub struct SphereTree {
     pub bound: f64,
 }
 
+/// Read-only body-frame BVH node used by exact line-interval queries.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SphereTreeNode {
+    pub center: Vec3,
+    pub radius: f64,
+    pub children: Option<(usize, usize)>,
+    pub atom: Option<usize>,
+}
+
 /// Last exit from the union of atomic hard-core intervals on t=s*direction,
 /// s>=0, for a rotated copy against an identical copy at the origin.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -121,6 +130,17 @@ impl Ord for RadialNodePair {
 }
 
 impl SphereTree {
+    /// The root is node zero. No mutable access to bounds or topology is exposed.
+    pub(crate) fn line_node(&self, index: usize) -> SphereTreeNode {
+        let n = &self.nodes[index];
+        SphereTreeNode {
+            center: n.center,
+            radius: n.radius,
+            children: n.children,
+            atom: n.atom,
+        }
+    }
+
     pub fn new(shape: Shape) -> Result<Self> {
         ensure!(!shape.atoms.is_empty(), "empty rigid shape");
         ensure!(

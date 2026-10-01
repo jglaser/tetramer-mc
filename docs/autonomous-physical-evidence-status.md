@@ -137,6 +137,16 @@ and full-vessel gate remain unresolved. A bounded
 cooperative competing geometry, but new local covariance components failed to
 outperform simple allocation changes and did not justify another physical job.
 
+The subsequent [conditional-line guide](line-conditioned-gaussian-guide.md)
+passed normalization, analytic sphere/depletion and independent protein-density
+checks, but its [fixed passive pilot](contact-line-passive-results.md) did not
+show a useful contact-generation gain: 55 of 65 attempts to use the conditional
+branch fell back to the original Gaussian. All 512 new draws were proposal-only;
+the 284 additional queries reused archived poses and no Poisson clouds were
+generated. Its outcome does not change any physical weight estimate, convergence
+gate, SMC discrepancy or finite-system conclusion. Additional direction
+diagnostics are likewise proposal geometry, not equilibrium sampling.
+
 ## Bound summary identities
 
 | Artifact | SHA-256 |

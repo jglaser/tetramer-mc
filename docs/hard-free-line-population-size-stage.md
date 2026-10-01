@@ -68,7 +68,22 @@ status, and leaves full-vessel and assembly gates closed. The result is a
 population-size sensitivity check, not an independent coverage guarantee or
 evidence of finite-system assembly or instability.
 
-## Commands after review
+## Executed commands and live status
+
+The stage was frozen and launched after fourteen controller/comparison tests
+and an independent source review passed. The
+[validation receipt](../results/hard-free-line-population-size-controller-validation-20261001/validation.json)
+binds the source and test logs. The physical binary remains the archived
+`752c5d7aa36249cb923ca0959b0872b4f96204101090ac1cfca4606732554c7b` executable;
+all 54 reused Python dependencies match the pilot archive.
+
+Live directory:
+`/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`.
+Protocol SHA-256:
+`cbcf1400a38365f2fa24585110da389b64174fc7e3a563e26cf1618a161c588e`.
+Controller PID: 541958. Startup verified two running physical workers and six
+preexisting user simulations. Read `status.json` for subsequent progress.
+The following commands document the launch; **do not rerun a started stage**.
 
 Freezing performs only copying and validation:
 
@@ -87,4 +102,6 @@ python -B /vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001/com
   --expected-protocol-sha256 PRINTED_HASH
 ```
 
-No actual campaign was frozen or launched while implementing these changes.
+The controller was launched detached with output in `controller.log` and its
+launch record in `launch.json`. No job is restarted when a status poll expires.
+Physical and assembly conclusions remain unresolved while this stage runs.

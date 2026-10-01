@@ -89,3 +89,20 @@ python tools/report_hard_free_line_physical_index.py \
 
 The output directory must be fresh. The tool never starts physical jobs,
 replays classifiers, or changes the completed campaign.
+
+## Completed comparison
+
+The [saved result](../results/hard-free-line-physical-index-retrospective-20261001/report.md)
+uses all 131,072 attempted draws and their existing cloud pairs. The beta=0
+control is exactly unchanged. In the conditioned arm, indexed importance ESS
+is 85–89% of the full-density value across the four decision regions. Index-only
+CPU savings remain unmeasured.
+
+The indexed native-total estimate is 1.80024% lower than the full-density
+estimate, a difference of 3.83 estimated paired population SE. Differences in
+the competing, old-R5-native and remaining-native regions are respectively
+−0.43, −0.18 and −1.55 paired SE. Four populations provide a limited variance
+estimate; the native-total discrepancy is a diagnostic flag, not an established
+bias or permission to replace the primary estimator. An independent check is
+needed. The original assessment and fresh population-size stage retain full
+mixture weights.

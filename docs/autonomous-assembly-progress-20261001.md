@@ -61,6 +61,16 @@ no trajectories or classifiers were replayed. The
 [independent review](hard-free-line-population-size-review.md) supports the
 next separately frozen population-size comparison with the same guide and binary.
 
+That [larger stage](hard-free-line-population-size-stage.md) is now running at
+`/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`: four fresh
+65,536-draw populations per arm, 524,288 attempted draws in total. Protocol hash:
+`cbcf1400a38365f2fa24585110da389b64174fc7e3a563e26cf1618a161c588e`.
+Controller PID 541958 started two physical workers after checking the six
+existing user simulations. Fourteen controller/comparison tests and an
+independent source review passed. It will audit and classify every new draw,
+then compare independent linear population means between stages; no pilot
+populations are pooled into the new estimates.
+
 The [retained-index alternative](hard-free-line-index-estimator.md) now has an
 independently reviewed derivation, six arithmetic/provenance tests and four
 additional Lean-checked identities. The complete 74-declaration axiom audit uses
@@ -70,8 +80,11 @@ variance/cost estimates remain provisional. The completed
 [paired retrospective](../results/hard-free-line-physical-index-retrospective-20261001/report.md)
 retains 85–89% of full-density importance ESS on the same draws and clouds.
 An index-only sampler would need to save roughly 11–15% of runtime to break
-even on these observed diagnostics. That saving is unmeasured. The frozen
-physical assessment still uses its original full-density weights.
+even on these observed diagnostics. That saving is unmeasured. The indexed
+native-total estimate is also 1.80% lower, or 3.83 estimated paired population
+SE; this four-population discrepancy needs an independent check before relying
+on the cheaper estimator. The frozen physical assessment and next size stage
+retain their original full-density weights.
 
 The [full-vessel wrapper](hard-free-vessel-guide.md) now accepts this normalized
 guide while preserving its probability outside the source R4/capture domain.

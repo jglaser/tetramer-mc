@@ -135,3 +135,41 @@ fn incremental_graph_matches_full_geometry_after_rigid_dimer_move() -> Result<()
     assert!(a.internal_equal(&b, &[0, 1]));
     Ok(())
 }
+
+#[test]
+fn singleton_channels_are_constant_through_attachment_and_detachment() {
+    let cfg = ClusterPhaseConfig {
+        singleton_rate: 0.3,
+        dimer_rate: 0.,
+        trimer_rate: 0.,
+        ..ClusterPhaseConfig::default()
+    };
+    assert!(cfg.enabled());
+    let disconnected = ContactGraph {
+        adjacency: vec![vec![false; 3]; 3],
+    };
+    let connected = ContactGraph {
+        adjacency: (0..3).map(|i| (0..3).map(|j| i != j).collect()).collect(),
+    };
+    let a = disconnected.channels(&cfg);
+    let b = connected.channels(&cfg);
+    assert_eq!(a.len(), 3);
+    assert_eq!(
+        serde_json::to_value(&a).unwrap(),
+        serde_json::to_value(&b).unwrap()
+    );
+    for (i, channel) in a.iter().enumerate() {
+        assert_eq!(channel.members, vec![i]);
+        assert_eq!(channel.rate, 0.3);
+    }
+    for rate in [-1., f64::NAN, f64::INFINITY] {
+        assert!(
+            ClusterPhaseConfig {
+                singleton_rate: rate,
+                ..cfg.clone()
+            }
+            .validate()
+            .is_err()
+        );
+    }
+}

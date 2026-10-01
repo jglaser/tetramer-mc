@@ -22,6 +22,15 @@ use std::collections::BTreeSet;
 #[serde(default, deny_unknown_fields)]
 pub struct ClusterPhaseConfig {
     pub duration: f64,
+    /// Constant channel rate per body, independent of external contacts. Zero
+    /// preserves the historical dimer/trimer channel order and random stream.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub singleton_rate: f64,
+    /// Optional target-only independent singleton redraw, conditioned on hard
+    /// validity for at most this many complete mixture draws. None preserves
+    /// the existing correlated transport and its random stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub singleton_independent_max_trials: Option<usize>,
     pub dimer_rate: f64,
     pub trimer_rate: f64,
     pub transport_probability: f64,
@@ -33,11 +42,15 @@ pub struct ClusterPhaseConfig {
     /// joint member/anchor mixture of `DockingProposal::propose_members`.
     #[serde(skip_serializing_if = "TransportCharts::is_handle")]
     pub transport_charts: TransportCharts,
-    /// Member charts only: primary spectator anchor plus its nearest spectators,
-    /// `anchor_count` in total. The pool is fixed by spectators alone; primary
-    /// selection is uniform unless `anchor_contact_uniform_probability` is set.
+    /// Member charts only: number of retained spectator anchors. The default
+    /// nearest pool is fixed by spectator poses and its primary label. Optional
+    /// contact-weighted pools correct the complete ordered selection law.
     #[serde(skip_serializing_if = "is_one")]
     pub anchor_count: usize,
+    /// Retain a contact-weighted ordered pool and correct its joint selection
+    /// probability, or use the historical nearest-spectator pool.
+    #[serde(skip_serializing_if = "AnchorPoolSelection::is_nearest")]
+    pub anchor_pool_selection: AnchorPoolSelection,
     /// Members only: defensive uniform fraction of primary-anchor selection.
     /// The remaining probability is proportional to boundary contact edges.
     /// None preserves the original uniformly anchored mixture and RNG order.
@@ -60,6 +73,24 @@ impl TransportCharts {
         *self == Self::Handle
     }
 }
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AnchorPoolSelection {
+    #[default]
+    Nearest,
+    ContactWithoutReplacement,
+}
+impl AnchorPoolSelection {
+    fn is_nearest(&self) -> bool {
+        *self == Self::Nearest
+    }
+}
+fn is_zero(v: &f64) -> bool {
+    *v == 0.
+}
+fn is_zero_count(v: &u64) -> bool {
+    *v == 0
+}
 fn is_one(v: &usize) -> bool {
     *v == 1
 }
@@ -67,6 +98,8 @@ impl Default for ClusterPhaseConfig {
     fn default() -> Self {
         Self {
             duration: 0.01,
+            singleton_rate: 0.,
+            singleton_independent_max_trials: None,
             dimer_rate: 1.,
             trimer_rate: 0.25,
             transport_probability: 0.5,
@@ -75,6 +108,7 @@ impl Default for ClusterPhaseConfig {
             local_small_angle_std_degrees: 1.,
             transport_charts: TransportCharts::Handle,
             anchor_count: 1,
+            anchor_pool_selection: AnchorPoolSelection::Nearest,
             anchor_contact_uniform_probability: None,
             oligomer: None,
         }
@@ -84,6 +118,7 @@ impl ClusterPhaseConfig {
     pub fn validate(&self) -> Result<()> {
         for v in [
             self.duration,
+            self.singleton_rate,
             self.dimer_rate,
             self.trimer_rate,
             self.local_translation_std_a,
@@ -117,6 +152,13 @@ impl ClusterPhaseConfig {
                 "anchor contact uniform probability must be in (0, 1]"
             );
         }
+        if self.anchor_pool_selection == AnchorPoolSelection::ContactWithoutReplacement {
+            ensure!(
+                self.transport_charts == TransportCharts::Members
+                    && self.anchor_contact_uniform_probability.is_some(),
+                "contact pool selection requires member charts and a defensive anchor probability"
+            );
+        }
         if let Some(oligomer) = &self.oligomer {
             ensure!(
                 self.transport_charts == TransportCharts::Members,
@@ -124,10 +166,23 @@ impl ClusterPhaseConfig {
             );
             oligomer.validate()?;
         }
+        if let Some(cap) = self.singleton_independent_max_trials {
+            ensure!(cap > 0, "independent singleton trial cap must be positive");
+            ensure!(
+                self.singleton_rate > 0. && self.dimer_rate == 0. && self.trimer_rate == 0.,
+                "independent redraw control requires singleton-only channels"
+            );
+            ensure!(
+                self.transport_charts == TransportCharts::Members
+                    && self.anchor_contact_uniform_probability.is_some(),
+                "independent singleton redraw requires member charts and defensive contact anchors"
+            );
+        }
         Ok(())
     }
     pub fn enabled(&self) -> bool {
-        self.duration > 0. && (self.dimer_rate > 0. || self.trimer_rate > 0.)
+        self.duration > 0.
+            && (self.singleton_rate > 0. || self.dimer_rate > 0. || self.trimer_rate > 0.)
     }
 }
 
@@ -135,6 +190,14 @@ impl ClusterPhaseConfig {
 pub struct ClusterPhaseCounts {
     pub phases: u64,
     pub events: u64,
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub singleton_events: u64,
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub independent_raw_trials: u64,
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub independent_cap_exhaustions: u64,
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub independent_valid_candidates: u64,
     pub dimer_events: u64,
     pub trimer_events: u64,
     pub local_events: u64,
@@ -163,6 +226,10 @@ macro_rules! fields {
             $b,
             phases,
             events,
+            singleton_events,
+            independent_raw_trials,
+            independent_cap_exhaustions,
+            independent_valid_candidates,
             dimer_events,
             trimer_events,
             local_events,
@@ -321,6 +388,80 @@ impl ContactGraph {
             })
             .collect())
     }
+    /// Next ordered anchor, excluding already retained spectators. The contact
+    /// term is renormalized over the remainder; if no remaining contacts exist,
+    /// every remaining spectator has equal probability. An empty retained list
+    /// follows the historical primary law bit for bit.
+    pub fn remaining_anchor_probabilities(
+        &self,
+        members: &[usize],
+        retained: &[usize],
+        epsilon: f64,
+    ) -> Result<Vec<f64>> {
+        let primary = self.anchor_probabilities(members, epsilon)?;
+        if retained.is_empty() {
+            return Ok(primary);
+        }
+        let n = self.adjacency.len();
+        let mut excluded = vec![false; n];
+        for &i in members {
+            excluded[i] = true;
+        }
+        for &i in retained {
+            ensure!(i < n && !excluded[i], "invalid retained anchor pool");
+            excluded[i] = true;
+        }
+        let remaining = n - members.len() - retained.len();
+        ensure!(remaining > 0, "no remaining external anchor");
+        let contacts: Vec<usize> = (0..n)
+            .map(|a| {
+                if excluded[a] {
+                    0
+                } else {
+                    members.iter().filter(|&&i| self.adjacency[i][a]).count()
+                }
+            })
+            .collect();
+        let total: usize = contacts.iter().sum();
+        let uniform = if total == 0 { 1. } else { epsilon } / remaining as f64;
+        ensure!(uniform > 0., "unrepresentable defensive pool probability");
+        Ok((0..n)
+            .map(|a| {
+                if excluded[a] {
+                    0.
+                } else if total == 0 {
+                    uniform
+                } else {
+                    uniform + (1. - epsilon) * (contacts[a] as f64 / total as f64)
+                }
+            })
+            .collect())
+    }
+    /// Joint probability of the SAME ordered tuple at either endpoint. Do not
+    /// redraw, sort, or substitute a new pool when evaluating the reverse law.
+    pub fn anchor_pool_log_probability(
+        &self,
+        members: &[usize],
+        pool: &[usize],
+        epsilon: f64,
+    ) -> Result<f64> {
+        ensure!(!pool.is_empty(), "empty retained anchor pool");
+        let mut log_probability = 0.;
+        for (j, &a) in pool.iter().enumerate() {
+            let probabilities =
+                self.remaining_anchor_probabilities(members, &pool[..j], epsilon)?;
+            ensure!(
+                a < probabilities.len() && probabilities[a] > 0.,
+                "invalid retained anchor label"
+            );
+            log_probability += probabilities[a].ln();
+        }
+        ensure!(
+            log_probability.is_finite(),
+            "nonfinite retained-pool probability"
+        );
+        Ok(log_probability)
+    }
     pub fn build(exclusion: &SphereTree, poses: &[Pose]) -> Self {
         let mut g = Self {
             adjacency: vec![vec![false; poses.len()]; poses.len()],
@@ -348,10 +489,18 @@ impl ContactGraph {
         }
         g
     }
-    /// Unique labeled connected triples; triangles are counted once.
+    /// Singletons have constant per-label rates regardless of contacts; pairs
+    /// and unique connected triples depend only on carried internal geometry.
+    /// No singleton filtering by isolation or number of neighbors is allowed.
     pub fn channels(&self, cfg: &ClusterPhaseConfig) -> Vec<Channel> {
         let mut out = Vec::new();
         let n = self.adjacency.len();
+        if cfg.singleton_rate > 0. {
+            out.extend((0..n).map(|i| Channel {
+                members: vec![i],
+                rate: cfg.singleton_rate,
+            }));
+        }
         if cfg.dimer_rate > 0. {
             for i in 0..n {
                 for j in i + 1..n {
@@ -433,6 +582,44 @@ pub fn anchor_pool(
         .chain(rest.into_iter().map(|(_, i)| i))
         .take(count)
         .collect())
+}
+
+/// Continue a separately sampled historical primary anchor. Every new label is
+/// drawn once, without replacement, and retained as proposal auxiliary state.
+pub fn contact_anchor_pool(
+    rng: &mut StdRng,
+    graph: &ContactGraph,
+    members: &[usize],
+    primary: usize,
+    count: usize,
+    epsilon: f64,
+) -> Result<Vec<usize>> {
+    ensure!(count > 0, "anchor pool count must be positive");
+    graph.anchor_pool_log_probability(members, &[primary], epsilon)?;
+    let count = count.min(graph.adjacency.len() - members.len());
+    let mut pool = vec![primary];
+    while pool.len() < count {
+        let probabilities = graph.remaining_anchor_probabilities(members, &pool, epsilon)?;
+        let mut draw = rng.random::<f64>() * probabilities.iter().sum::<f64>();
+        let mut chosen = None;
+        for (a, &p) in probabilities.iter().enumerate().filter(|(_, p)| **p > 0.) {
+            chosen = Some(a);
+            if draw < p {
+                break;
+            }
+            draw -= p;
+        }
+        pool.push(chosen.context("empty remaining anchor law")?);
+    }
+    Ok(pool)
+}
+
+struct AnchorSelection {
+    primary: usize,
+    primary_forward: f64,
+    epsilon: f64,
+    /// None keeps legacy trace fields and arithmetic unchanged.
+    retained_pool: Option<(Vec<usize>, f64)>,
 }
 
 /// None means no event inside the remaining fixed horizon. Rejecting events
@@ -534,9 +721,13 @@ impl<'a> ClusterPhase<'a> {
         members: &[usize],
         handle_position: usize,
         anchors: &[Pose],
+        record: bool,
     ) -> Result<(Option<Pose>, Value)> {
         let proposal = self.proposal.as_ref().unwrap();
         let member_poses: Vec<_> = members.iter().map(|&i| poses[i]).collect();
+        if let Some(cap) = self.config.singleton_independent_max_trials {
+            return self.conditioned_singleton_proposal(rng, poses, members, anchors, cap, record);
+        }
         let Some(settings) = &self.config.oligomer else {
             return proposal.propose_members_learned(rng, &member_poses, handle_position, anchors);
         };
@@ -554,6 +745,109 @@ impl<'a> ClusterPhase<'a> {
             settings,
         )?;
         mixture.propose(rng, &member_poses, handle_position)
+    }
+
+    /// Independent complete-mixture rejection sampling, with one retained
+    /// spectator context and finite-cap self-loop. The common success
+    /// normalizer cancels; no source chart or correlated map is retried.
+    fn conditioned_singleton_proposal(
+        &self,
+        rng: &mut StdRng,
+        poses: &[Pose],
+        members: &[usize],
+        anchors: &[Pose],
+        cap: usize,
+        record: bool,
+    ) -> Result<(Option<Pose>, Value)> {
+        ensure!(
+            members.len() == 1 && cap > 0,
+            "invalid conditioned singleton context"
+        );
+        let proposal = self.proposal.as_ref().unwrap();
+        let old = [poses[members[0]]];
+        let spectators: Vec<_> = poses
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != members[0])
+            .map(|(_, p)| *p)
+            .collect();
+        let placed: Vec<_> = spectators.iter().map(|&p| Placed::new(p)).collect();
+        let mixture = self
+            .config
+            .oligomer
+            .as_ref()
+            .map(|settings| {
+                OligomerMixture::build(
+                    proposal,
+                    self.tree,
+                    self.wall,
+                    &old,
+                    &spectators,
+                    anchors,
+                    settings,
+                )
+            })
+            .transpose()?;
+        let density = |p: Pose| -> Result<f64> {
+            match &mixture {
+                Some(m) => Ok(m.log_density(&[p])),
+                None => proposal.members_log_density(&[p], anchors),
+            }
+        };
+        let old_log = density(old[0])?;
+        let mut info = json!({"branch":"independent_conditioned",
+            "charts":if mixture.is_some(){"oligomer"}else{"members"},
+            "max_trials":cap,"raw_trial_count":0,"cap_exhausted":false,
+            "full_old_log_density":old_log});
+        if let Some(m) = &mixture {
+            info["oligomer"] = json!({"fused_components":m.fused.len(),
+                "fit_candidates":m.fit_candidates(),"hard_checks":m.hard_checks(),
+                "build_seconds":m.build_seconds});
+        }
+        if record {
+            info["raw_trials"] = json!([]);
+        }
+        if !old_log.is_finite() {
+            info["null_reason"] = json!("Nonfinite independent source density; no retries");
+            return Ok((None, info));
+        }
+        for trial in 1..=cap {
+            let (candidate, mut raw) = match &mixture {
+                Some(m) => m.draw_singleton_independent(rng)?,
+                None => proposal.draw_singleton_independent(rng, anchors)?,
+            };
+            let hard = candidate.is_some_and(|p| {
+                self.wall.contains(p) && {
+                    let body = Placed::new(p);
+                    !placed.iter().any(|s| self.tree.overlaps(&body, s))
+                }
+            });
+            raw["trial"] = json!(trial);
+            raw["candidate"] = json!(candidate);
+            raw["hard_valid"] = json!(hard);
+            info["raw_trial_count"] = json!(trial);
+            if record {
+                info["raw_trials"].as_array_mut().unwrap().push(raw.clone());
+            }
+            if !hard {
+                continue;
+            }
+            let p = candidate.unwrap();
+            let new_log = density(p)?;
+            info["full_new_log_density"] = json!(new_log);
+            info["target_label"] = raw["target_label"].clone();
+            info["target_latent"] = raw["target_latent"].clone();
+            if !new_log.is_finite() || !(old_log - new_log).is_finite() {
+                info["null_reason"] = json!("Nonfinite independent endpoint density; no retries");
+                return Ok((None, info));
+            }
+            info["map_log_reverse_forward"] = json!(old_log - new_log);
+            info["log_reverse_forward"] = json!(old_log - new_log);
+            return Ok((Some(p), info));
+        }
+        info["cap_exhausted"] = json!(true);
+        info["null_reason"] = json!("Independent hard-conditioning trial cap exhausted");
+        Ok((None, info))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -610,10 +904,11 @@ impl<'a> ClusterPhase<'a> {
             let old_member_poses: Vec<_> = members.iter().map(|&i| poses[i]).collect();
             let transport = proposal_rng.random::<f64>() < self.config.transport_probability;
             counts.events += 1;
-            if members.len() == 2 {
-                counts.dimer_events += 1;
-            } else {
-                counts.trimer_events += 1;
+            match members.len() {
+                1 => counts.singleton_events += 1,
+                2 => counts.dimer_events += 1,
+                3 => counts.trimer_events += 1,
+                _ => unreachable!("unsupported cluster channel size"),
             }
             if transport {
                 counts.transport_events += 1;
@@ -623,7 +918,7 @@ impl<'a> ClusterPhase<'a> {
             let mut info = json!({"branch":"local_rigid","log_reverse_forward":0.});
             // Retain the sampled primary label for its exact reverse law.
             // This selection is separate from the invariant internal-subset clock.
-            let mut anchor_selection: Option<(usize, f64, f64)> = None;
+            let mut anchor_selection: Option<AnchorSelection> = None;
             let candidate = if transport {
                 let spectator_indices: Vec<_> =
                     (0..poses.len()).filter(|i| !members.contains(i)).collect();
@@ -652,7 +947,29 @@ impl<'a> ClusterPhase<'a> {
                             draw -= probabilities[a];
                         }
                         let forward = probabilities[primary];
-                        let pool = anchor_pool(poses, members, primary, self.config.anchor_count)?;
+                        let pool = match self.config.anchor_pool_selection {
+                            AnchorPoolSelection::Nearest => {
+                                anchor_pool(poses, members, primary, self.config.anchor_count)?
+                            }
+                            AnchorPoolSelection::ContactWithoutReplacement => contact_anchor_pool(
+                                proposal_rng,
+                                &graph,
+                                members,
+                                primary,
+                                self.config.anchor_count,
+                                epsilon,
+                            )?,
+                        };
+                        let retained_pool = if self.config.anchor_pool_selection
+                            == AnchorPoolSelection::ContactWithoutReplacement
+                        {
+                            Some((
+                                pool.clone(),
+                                graph.anchor_pool_log_probability(members, &pool, epsilon)?,
+                            ))
+                        } else {
+                            None
+                        };
                         let anchors: Vec<_> = pool.iter().map(|&i| poses[i]).collect();
                         let position = members.iter().position(|&i| i == handle).unwrap();
                         let (p, mut trace) = self.learned_member_proposal(
@@ -661,17 +978,29 @@ impl<'a> ClusterPhase<'a> {
                             members,
                             position,
                             &anchors,
+                            record,
                         )?;
                         trace["primary_anchor"] = json!(primary);
                         trace["anchor_pool"] = json!(pool);
                         trace["anchor_forward_probability"] = json!(forward);
                         trace["anchor_reverse_probability"] = Value::Null;
                         trace["anchor_log_reverse_forward"] = Value::Null;
+                        if let Some((_, log_forward)) = &retained_pool {
+                            trace["anchor_pool_selection"] =
+                                json!(self.config.anchor_pool_selection);
+                            trace["pool_forward_log_probability"] = json!(log_forward);
+                            trace["pool_reverse_log_probability"] = Value::Null;
+                        }
                         trace["map_log_reverse_forward"] = trace["log_reverse_forward"].clone();
                         // The complete correction exists only after evaluating
                         // the reverse primary probability at a valid endpoint.
                         trace["log_reverse_forward"] = Value::Null;
-                        anchor_selection = Some((primary, forward, epsilon));
+                        anchor_selection = Some(AnchorSelection {
+                            primary,
+                            primary_forward: forward,
+                            epsilon,
+                            retained_pool,
+                        });
                         info = trace;
                         p
                     }
@@ -694,6 +1023,7 @@ impl<'a> ClusterPhase<'a> {
                             members,
                             position,
                             &anchors,
+                            record,
                         )?
                     };
                     trace["anchor_pool"] = json!(pool);
@@ -726,6 +1056,13 @@ impl<'a> ClusterPhase<'a> {
                     orientation: quaternion(matmul(cayley(c), rotation(poses[handle].orientation))),
                 })
             };
+            if info["branch"] == "independent_conditioned" {
+                counts.independent_raw_trials += info["raw_trial_count"]
+                    .as_u64()
+                    .context("missing independent raw-trial count")?;
+                counts.independent_cap_exhaustions += u64::from(info["cap_exhausted"] == true);
+                counts.independent_valid_candidates += u64::from(candidate.is_some());
+            }
             let mut hard_valid = false;
             let mut accepted = false;
             let mut physical_accepted = false;
@@ -750,6 +1087,10 @@ impl<'a> ClusterPhase<'a> {
                     RigidSubset::new(self.tree, poses, members, handle, new_handle, self.rd)?;
                 proposed_member_poses = Some(trial.proposed_poses().to_vec());
                 hard_valid = trial.hard_valid(Some(self.wall), [0.; 3]);
+                ensure!(
+                    info["branch"] != "independent_conditioned" || hard_valid,
+                    "conditioned candidate disagrees with production hard predicate"
+                );
                 if hard_valid {
                     counts.hard_valid += 1;
                     let mut next = poses.clone();
@@ -767,17 +1108,31 @@ impl<'a> ClusterPhase<'a> {
                             == internal_key(trial.proposed_poses()).0;
                     }
                     if internal_equal && offsets_preserved {
-                        if let Some((primary, forward, epsilon)) = anchor_selection {
+                        if let Some(selection) = &anchor_selection {
+                            let AnchorSelection {
+                                primary,
+                                primary_forward: forward,
+                                epsilon,
+                                retained_pool,
+                            } = selection;
                             let reverse =
-                                next_graph.anchor_probabilities(members, epsilon)?[primary];
+                                next_graph.anchor_probabilities(members, *epsilon)?[*primary];
                             ensure!(
                                 forward.is_finite()
-                                    && forward > 0.
+                                    && *forward > 0.
                                     && reverse.is_finite()
                                     && reverse > 0.,
                                 "invalid forward/reverse primary-anchor probability"
                             );
-                            let anchor_correction = reverse.ln() - forward.ln();
+                            let anchor_correction = if let Some((pool, log_forward)) = retained_pool
+                            {
+                                let log_reverse = next_graph
+                                    .anchor_pool_log_probability(members, pool, *epsilon)?;
+                                info["pool_reverse_log_probability"] = json!(log_reverse);
+                                log_reverse - log_forward
+                            } else {
+                                reverse.ln() - forward.ln()
+                            };
                             correction += anchor_correction;
                             ensure!(correction.is_finite(), "nonfinite total cluster correction");
                             info["anchor_reverse_probability"] = json!(reverse);

@@ -7,3 +7,4 @@ import ReversibleSampling.CountGate
 import ReversibleSampling.ConditionalPoisson
 import ReversibleSampling.ClusterRates
 import ReversibleSampling.ClusterMeasureRates
+import ReversibleSampling.CappedIndependent

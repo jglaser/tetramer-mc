@@ -584,6 +584,30 @@ impl DockingProposal {
             .collect()
     }
 
+    /// Passive source-coverage diagnostic in a specified virtual branch.
+    /// Reciprocal branches use the same inversion as the production map.
+    /// Failure at a Cayley seam is reported, never silently resampled.
+    pub fn source_chart_coordinates(
+        &self,
+        branch: usize,
+        pose: Pose,
+        anchor: Pose,
+    ) -> Result<[f64; 6]> {
+        let label = self
+            .branches
+            .get(branch)
+            .context("Invalid virtual source chart")?;
+        let relative = anchor_relative(anchor, pose);
+        self.map.encode(
+            branch,
+            if label.inverted {
+                invert_relative_pose(relative)
+            } else {
+                relative
+            },
+        )
+    }
+
     /// Learned member-chart density of a rigid subset, excluding the uniform
     /// branch. Right-multiplication by a fixed internal offset preserves
     /// translation volume times Haar measure, so each term is a normalized
@@ -617,6 +641,47 @@ impl DockingProposal {
             Some(p),
             json!({"branch":"uniform","charts":"members","log_reverse_forward":0.}),
         ))
+    }
+
+    /// One target-only draw from the normalized singleton/anchor mixture.
+    /// No source pose, posterior label, inverse trace or conditioning is used.
+    /// The caller may condition this entire mixture on invariant hard geometry,
+    /// redrawing both labels and latent noise after each failed raw draw.
+    pub fn draw_singleton_independent(
+        &self,
+        rng: &mut StdRng,
+        pool: &[Pose],
+    ) -> Result<(Option<Pose>, Value)> {
+        ensure!(
+            self.method == DockingMethod::PosteriorInvolution
+                && !self.model.is_periodic()
+                && !pool.is_empty(),
+            "independent singleton draws need a nonperiodic member model and anchors"
+        );
+        let anchor = rng.random_range(0..pool.len());
+        let branch = draw_log_category(rng, &self.log_component_weights)?
+            .context("No independent destination component")?;
+        let latent: [f64; 6] = std::array::from_fn(|_| StandardNormal.sample(rng));
+        let mut trace = json!({"target_label":{"kind":"single","member":0,"anchor":anchor,"branch":branch},"target_latent":latent});
+        let decoded = self.map.decode(branch, latent).and_then(|mut y| {
+            if self.branches[branch].inverted {
+                y = invert_relative_pose(y);
+            }
+            let a = pool[anchor];
+            let p = Pose {
+                position: add(a.position, matvec(rotation(a.orientation), y.position)),
+                orientation: quaternion(matmul(rotation(a.orientation), rotation(y.orientation))),
+            };
+            p.validate()?;
+            Ok(p)
+        });
+        match decoded {
+            Ok(p) => Ok((Some(p), trace)),
+            Err(error) => {
+                trace["null_reason"] = json!(error.to_string());
+                Ok((None, trace))
+            }
+        }
     }
 
     /// Posterior-source involution over joint (member, anchor, branch) charts.

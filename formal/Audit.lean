@@ -1,5 +1,11 @@
 import ReversibleSampling
 
+#print axioms ReversibleSampling.CappedIndependent.capped_mass_identity
+#print axioms ReversibleSampling.CappedIndependent.capped_mass_bounds
+#print axioms ReversibleSampling.CappedIndependent.empty_success_set
+#print axioms ReversibleSampling.CappedIndependent.shared_factor_accepted_flow
+#print axioms ReversibleSampling.CappedIndependent.shared_factor_preserves_balance
+
 /-! Kernel-checked dependency audit; these should use only Lean's standard logical axioms. -/
 
 #print axioms ReversibleSampling.complete_markov

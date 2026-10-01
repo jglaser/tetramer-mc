@@ -11,7 +11,9 @@ use rand_distr::{Distribution, StandardNormal};
 use serde_json::json;
 use std::f64::consts::PI;
 use tetramer_mc::{
-    cluster_phase::{ClusterPhase, ClusterPhaseConfig, ClusterPhaseCounts, TransportCharts},
+    cluster_phase::{
+        AnchorPoolSelection, ClusterPhase, ClusterPhaseConfig, ClusterPhaseCounts, TransportCharts,
+    },
     depletion::GateOptions,
     docking::{DockingMethod, DockingProposal},
     geometry::{Atom, Shape, SphereTree},
@@ -208,7 +210,7 @@ fn run_chain(
 fn run_chain_with_anchor(
     tree: &SphereTree,
     wall: &Container,
-    mut poses: Vec<Pose>,
+    poses: Vec<Pose>,
     seed: u64,
     learned: bool,
     charts: TransportCharts,
@@ -229,24 +231,105 @@ fn run_chain_with_anchor(
 fn run_chain_full(
     tree: &SphereTree,
     wall: &Container,
-    mut poses: Vec<Pose>,
+    poses: Vec<Pose>,
     seed: u64,
     learned: bool,
     charts: TransportCharts,
     anchor_contact_uniform_probability: Option<f64>,
     oligomer: Option<OligomerConfig>,
 ) -> Chain {
+    run_chain_with_rates(
+        tree,
+        wall,
+        poses,
+        seed,
+        learned,
+        charts,
+        anchor_contact_uniform_probability,
+        oligomer,
+        [0., 4., 1.],
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn run_chain_with_rates(
+    tree: &SphereTree,
+    wall: &Container,
+    poses: Vec<Pose>,
+    seed: u64,
+    learned: bool,
+    charts: TransportCharts,
+    anchor_contact_uniform_probability: Option<f64>,
+    oligomer: Option<OligomerConfig>,
+    rates: [f64; 3],
+) -> Chain {
+    run_chain_with_pool(
+        tree,
+        wall,
+        poses,
+        seed,
+        learned,
+        charts,
+        anchor_contact_uniform_probability,
+        oligomer,
+        rates,
+        AnchorPoolSelection::Nearest,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn run_chain_with_pool(
+    tree: &SphereTree,
+    wall: &Container,
+    poses: Vec<Pose>,
+    seed: u64,
+    learned: bool,
+    charts: TransportCharts,
+    anchor_contact_uniform_probability: Option<f64>,
+    oligomer: Option<OligomerConfig>,
+    rates: [f64; 3],
+    anchor_pool_selection: AnchorPoolSelection,
+) -> Chain {
+    run_chain_with_pool_and_independent(
+        tree,
+        wall,
+        poses,
+        seed,
+        learned,
+        charts,
+        anchor_contact_uniform_probability,
+        oligomer,
+        rates,
+        anchor_pool_selection,
+        None,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn run_chain_with_pool_and_independent(
+    tree: &SphereTree,
+    wall: &Container,
+    mut poses: Vec<Pose>,
+    seed: u64,
+    learned: bool,
+    charts: TransportCharts,
+    anchor_contact_uniform_probability: Option<f64>,
+    oligomer: Option<OligomerConfig>,
+    rates: [f64; 3],
+    anchor_pool_selection: AnchorPoolSelection,
+    singleton_independent_max_trials: Option<usize>,
+) -> Chain {
     let fused_charts = oligomer.is_some();
     let bodies = poses.len();
     let cfg = ClusterPhaseConfig {
         duration: 0.5,
-        dimer_rate: 4.,
-        trimer_rate: 1.,
+        singleton_rate: rates[0],
+        singleton_independent_max_trials,
+        dimer_rate: rates[1],
+        trimer_rate: rates[2],
         transport_probability: if learned { 0.7 } else { 0. },
         local_translation_std_a: 0.5,
         local_small_angle_std_degrees: 20.,
         transport_charts: charts,
         anchor_count: 2,
+        anchor_pool_selection,
         anchor_contact_uniform_probability,
         oligomer,
         ..ClusterPhaseConfig::default()
@@ -323,12 +406,16 @@ fn run_chain_full(
         }
         if sweep >= burn {
             for row in &records {
-                if row["kind"] == "cluster_event" && row["proposal"]["branch"] == "involution" {
+                if row["kind"] == "cluster_event"
+                    && (row["proposal"]["branch"] == "involution"
+                        || row["proposal"]["branch"] == "independent_conditioned")
+                {
                     if fused_charts {
                         assert_eq!(row["proposal"]["charts"], "oligomer");
                         let o = &row["proposal"]["oligomer"];
                         let fused = o["source_label"]["kind"] == "fused"
-                            || o["target_label"]["kind"] == "fused";
+                            || o["target_label"]["kind"] == "fused"
+                            || row["proposal"]["target_label"]["kind"] == "fused";
                         fused_proposals += u64::from(fused);
                         accepted_fused += u64::from(fused && row["accepted"] == true);
                     } else if charts == TransportCharts::Members {
@@ -353,7 +440,19 @@ fn run_chain_full(
                             let qy = row["proposal"]["anchor_reverse_probability"]
                                 .as_f64()
                                 .unwrap();
-                            assert!((ac - (qy.ln() - qx.ln())).abs() < 1e-12);
+                            let expected = if anchor_pool_selection
+                                == AnchorPoolSelection::ContactWithoutReplacement
+                            {
+                                row["proposal"]["pool_reverse_log_probability"]
+                                    .as_f64()
+                                    .unwrap()
+                                    - row["proposal"]["pool_forward_log_probability"]
+                                        .as_f64()
+                                        .unwrap()
+                            } else {
+                                qy.ln() - qx.ln()
+                            };
+                            assert!((ac - expected).abs() < 1e-12);
                             let map = row["proposal"]["map_log_reverse_forward"].as_f64().unwrap();
                             let total = row["proposal"]["log_reverse_forward"].as_f64().unwrap();
                             assert!((map + ac - total).abs() < 1e-12);
@@ -727,6 +826,181 @@ fn oligomer_chart_cluster_phase_matches_independent_four_sphere_equilibrium() {
                 reference.mean[k],
                 reference.se[k]
             );
+        }
+    }
+}
+
+/// Same analytic depletion reference, exercising singleton fusion with two
+/// spectators. Old and new contacting-anchor probabilities are unequal in
+/// some accepted events. Orientations must remain Haar despite anisotropic q.
+#[test]
+fn singleton_two_neighbor_phase_matches_independent_sphere_equilibrium() {
+    let tree = SphereTree::new(Shape {
+        name: "analytic sphere".into(),
+        volume: 4. * PI / 3.,
+        atoms: vec![Atom {
+            center: [0.; 3],
+            radius: 1.,
+        }],
+    })
+    .unwrap();
+    let wall = Container::new(WALL, &tree).unwrap();
+    let reference = reference(250_000, 3);
+    assert!(reference.ess > 60_000.);
+    let side = 2.05;
+    let r = side / 3.0_f64.sqrt();
+    let preparations = [
+        vec![
+            pose([-1.8, -1.1, 0.]),
+            pose([1.8, -1.1, 0.]),
+            pose([0., 2., 0.]),
+        ],
+        vec![
+            pose([r, 0., 0.]),
+            pose([-r / 2., side / 2., 0.]),
+            pose([-r / 2., -side / 2., 0.]),
+        ],
+    ];
+    let chains: Vec<_> = preparations
+        .into_iter()
+        .enumerate()
+        .map(|(i, poses)| {
+            run_chain_with_rates(
+                &tree,
+                &wall,
+                poses,
+                860001 + i as u64,
+                true,
+                TransportCharts::Members,
+                Some(0.2),
+                Some(OligomerConfig {
+                    max_mismatch: 40.,
+                    pair_angle_degrees: 120.,
+                    ..OligomerConfig::default()
+                }),
+                [1., 0., 0.],
+            )
+        })
+        .collect();
+    eprintln!("singleton_sphere_reference: {reference:?}");
+    for (i, c) in chains.iter().enumerate() {
+        eprintln!("singleton_chain_{i}: {c:?}");
+        assert_eq!(c.cluster.events, c.cluster.singleton_events);
+        assert_eq!(c.cluster.dimer_events + c.cluster.trimer_events, 0);
+        assert!(
+            c.fused_proposals > 100 && c.accepted_fused > 20,
+            "must accept fused singleton proposals: {c:?}"
+        );
+        assert!(c.accepted_anchor_corrected_involutions > 20);
+        assert!(c.cluster.accepted_attachments > 100 && c.cluster.accepted_detachments > 100);
+        for k in 0..OBS {
+            let tolerance = 5. * (c.se[k].powi(2) + reference.se[k].powi(2)).sqrt() + 0.002;
+            assert!(
+                (c.mean[k] - reference.mean[k]).abs() < tolerance,
+                "chain {i}, observable {k}: {} +/- {} vs {} +/- {}",
+                c.mean[k],
+                c.se[k],
+                reference.mean[k],
+                reference.se[k]
+            );
+            let between = 5. * (chains[0].se[k].powi(2) + chains[1].se[k].powi(2)).sqrt() + 0.002;
+            assert!((chains[0].mean[k] - chains[1].mean[k]).abs() < between);
+        }
+    }
+}
+
+/// Four bodies give each singleton three candidate spectators, so selecting
+/// two exercises a genuinely nontrivial second-anchor probability.
+#[test]
+fn contact_pool_singleton_matches_independent_four_sphere_equilibrium() {
+    check_contact_pool_singleton_equilibrium(None)
+}
+
+/// New full composition: capped independent redraw, fused labels, a
+/// nontrivial second contact-weighted anchor and the exact Poisson bath.
+#[test]
+fn capped_independent_fused_contact_pool_matches_four_sphere_equilibrium() {
+    check_contact_pool_singleton_equilibrium(Some(8))
+}
+
+fn check_contact_pool_singleton_equilibrium(cap: Option<usize>) {
+    let tree = SphereTree::new(Shape {
+        name: "analytic sphere".into(),
+        volume: 4. * PI / 3.,
+        atoms: vec![Atom {
+            center: [0.; 3],
+            radius: 1.,
+        }],
+    })
+    .unwrap();
+    let wall = Container::new(WALL, &tree).unwrap();
+    let reference = reference(1_000_000, 4);
+    assert!(reference.valid > 100_000 && reference.ess > 80_000.);
+    let preparations = [
+        vec![
+            pose([-1.8, -1.1, 0.]),
+            pose([1.8, -1.1, 0.]),
+            pose([0., 2., 0.]),
+            pose([0., 0., 2.2]),
+        ],
+        vec![
+            pose([0., 0., 0.]),
+            pose([2.05, 0., 0.]),
+            pose([0., 2.05, 0.]),
+            pose([0., 0., 2.05]),
+        ],
+    ];
+    let chains: Vec<_> = preparations
+        .into_iter()
+        .enumerate()
+        .map(|(i, poses)| {
+            run_chain_with_pool_and_independent(
+                &tree,
+                &wall,
+                poses,
+                if cap.is_some() {
+                    890001 + i as u64
+                } else {
+                    870001 + i as u64
+                },
+                true,
+                TransportCharts::Members,
+                Some(0.2),
+                Some(OligomerConfig {
+                    max_mismatch: 40.,
+                    pair_angle_degrees: 120.,
+                    ..OligomerConfig::default()
+                }),
+                [1., 0., 0.],
+                AnchorPoolSelection::ContactWithoutReplacement,
+                cap,
+            )
+        })
+        .collect();
+    eprintln!("contact_pool_sphere_reference: {reference:?}");
+    for (i, c) in chains.iter().enumerate() {
+        eprintln!("contact_pool_chain_{i}: {c:?}");
+        assert_eq!(c.cluster.events, c.cluster.singleton_events);
+        if cap.is_some() {
+            assert!(c.cluster.independent_raw_trials > c.cluster.independent_valid_candidates);
+            assert!(c.cluster.independent_valid_candidates > 1000);
+            assert!(c.cluster.independent_cap_exhaustions > 0);
+        }
+        assert!(c.fused_proposals > 100 && c.accepted_fused > 20);
+        assert!(c.accepted_anchor_corrected_involutions > 20);
+        assert!(c.cluster.accepted_attachments > 100 && c.cluster.accepted_detachments > 100);
+        for k in 0..OBS {
+            let tolerance = 5. * (c.se[k].powi(2) + reference.se[k].powi(2)).sqrt() + 0.002;
+            assert!(
+                (c.mean[k] - reference.mean[k]).abs() < tolerance,
+                "chain {i}, observable {k}: {} +/- {} vs {} +/- {}",
+                c.mean[k],
+                c.se[k],
+                reference.mean[k],
+                reference.se[k]
+            );
+            let between = 5. * (chains[0].se[k].powi(2) + chains[1].se[k].powi(2)).sqrt() + 0.002;
+            assert!((chains[0].mean[k] - chains[1].mean[k]).abs() < between);
         }
     }
 }

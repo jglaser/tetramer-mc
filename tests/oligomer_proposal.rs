@@ -417,3 +417,53 @@ fn correlated_oligomer_map_preserves_the_oligomer_mixture() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn singleton_fuses_distinct_neighbors_and_has_exact_reverse() -> Result<()> {
+    let (tree, wall) = small_sphere();
+    let p = proposal(true, 0.6)?;
+    let mut rng = StdRng::seed_from_u64(20261002);
+    let (map, inverted, _) = p.member_chart_parts();
+    let mean = |b| {
+        let y = map.decode(b, [0.; 6]).unwrap();
+        if inverted[b] {
+            invert_relative_pose(y)
+        } else {
+            y
+        }
+    };
+    let g = random_pose(&mut rng, 3.);
+    let anchors = vec![
+        compose(g, invert_relative_pose(mean(0))),
+        compose(g, invert_relative_pose(mean(inverted.len() - 1))),
+    ];
+    let members = vec![g];
+    let x = OligomerMixture::build(&p, &tree, &wall, &members, &anchors, &anchors, &loose())?;
+    let nb = inverted.len();
+    let partner = 2 * nb - 1;
+    let exact = x
+        .fused
+        .iter()
+        .position(|f| f.first == 0 && f.second == partner)
+        .expect("same member, distinct anchors must fuse");
+    assert!(x.fused[exact].mismatch < 1e-8);
+    assert!(same_pose(x.fused[exact].center, g, 1e-6));
+    let singles = x.label_count() - x.fused.len();
+    for target in 0..x.label_count() {
+        let source = singles + exact;
+        let forward = x.apply(&members, 0, source, target, noise(&mut rng))?;
+        let moved = vec![forward.handle];
+        let y = OligomerMixture::build(&p, &tree, &wall, &moved, &anchors, &anchors, &loose())?;
+        assert_eq!(x.key(), y.key());
+        assert_same_catalogue(&x, &y, &[members.clone(), moved.clone()]);
+        assert!(
+            (forward.log_reverse_forward - (x.log_density(&members) - y.log_density(&moved))).abs()
+                < 1e-9
+        );
+        assert!((forward.expanded_log_reverse_forward - forward.log_reverse_forward).abs() < 1e-9);
+        let reverse = y.apply(&moved, 0, target, source, forward.step.inverse_trace.noise)?;
+        assert!(same_pose(reverse.handle, g, 1e-8));
+        assert!((reverse.log_reverse_forward + forward.log_reverse_forward).abs() < 1e-8);
+    }
+    Ok(())
+}

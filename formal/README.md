@@ -346,6 +346,24 @@ restrictions, auxiliary laws and many-body depletion), finite bounded rates,
 RNG laws, and floating-point execution. In particular, cancelling the subset
 rate does not cancel the physical Metropolis correction.
 
+## Bounded independent hard-conditioned draws
+
+`ReversibleSampling/CappedIndependent.lean` checks the algebraic bridge used by
+the optional independent redraw control. For success probability `z` and trial
+cap `T`, the renewal factor `B_T` satisfies `z B_T + (1-z)^T = 1`, including
+`z=0`. Candidate mass lies in `[0,1]` for a valid probability. The shared-factor
+accepted-flow theorem proves that multiplying both directed proposal masses by
+the same unknown `B_T` leaves the ordinary MH ratio sufficient. It also covers a
+zero factor and applies to a previously balanced Poisson accepted flow.
+
+The context includes the retained ordered anchor pool, fixed spectators and
+catalogue. Its selection probabilities remain inside the directed masses;
+they do not cancel in general. Normalization of the pose guide, independent
+complete-mixture draws, identical hard-valid domains at both endpoints and the
+exact stopping rule are implementation obligations. The existing rejection
+completion theorem applies once accepted-flow symmetry and the row-mass bound
+are supplied. This bridge does not formalize the Rust retry loop itself.
+
 ## Pinned environment and reproducible check
 
 - Lean `v4.24.0`, compiler commit

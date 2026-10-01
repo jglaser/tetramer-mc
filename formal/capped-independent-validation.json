@@ -1,0 +1,27 @@
+{
+  "complete": true,
+  "checked_at_utc": "2026-10-01T18:06:55.366492+00:00",
+  "scope": "Exact retry mass and shared accepted-flow factor algebra; implementation obligations remain explicit",
+  "build_exit_code": 0,
+  "audit_exit_code": 0,
+  "main_axiom_audits": 70,
+  "new_axiom_audits": 5,
+  "allowed_axioms": [
+    "propext",
+    "Classical.choice",
+    "Quot.sound"
+  ],
+  "commands": [
+    "ELAN_HOME=\"$PWD/.elan\" .elan/bin/lake build",
+    "ELAN_HOME=\"$PWD/.elan\" .elan/bin/lake env lean Audit.lean"
+  ],
+  "sha256": {
+    "ReversibleSampling/CappedIndependent.lean": "3f524a987f62d1738ee37e1c2bfd1285c76b98f6244105fec40ca56c921c0caa",
+    "ReversibleSampling.lean": "97535a939e139a60d30afd3e70f0478e0e2b4ff4da6ddd422a2481fce85f35cc",
+    "Audit.lean": "67b7fcc94de4b52cf60f6011afb83bd4ca83d6f991299675a1e316b8436e5db3",
+    "lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434",
+    "lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "capped-independent-audit.txt": "2bcff85584d2cce3eaa52bfe9c207db3dbb79d100373061d0567ff4c44a9f286"
+  }
+}

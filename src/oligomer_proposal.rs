@@ -567,6 +567,42 @@ impl<'p> OligomerMixture<'p> {
         log_sum(&self.label_logs(members[0]))
     }
 
+    /// Read-only coverage diagnostic using precisely the production chart,
+    /// including member offset, anchor, reciprocal inversion or fused chart.
+    pub fn source_chart_coordinates(&self, label: usize, g0: Pose) -> Result<Vec6> {
+        ensure!(label < self.label_count(), "Invalid oligomer source label");
+        let (map, chart) = self.chart(label);
+        map.encode(chart, self.to_chart(label, g0))
+    }
+
+    /// Target-only independent draw from this complete fused/unfused mixture.
+    /// Restricted to a singleton so there is no source-dependent carry or
+    /// internal-offset guard inside a caller's hard-conditioning loop.
+    pub fn draw_singleton_independent(&self, rng: &mut StdRng) -> Result<(Option<Pose>, Value)> {
+        ensure!(
+            self.offsets.len() == 1,
+            "independent mixture draws require a singleton"
+        );
+        let target = draw_log_category(rng, &self.log_weights)?
+            .context("No independent destination component")?;
+        let latent: Vec6 = std::array::from_fn(|_| StandardNormal.sample(rng));
+        let mut trace =
+            json!({"target":target,"target_label":self.describe(target),"target_latent":latent});
+        let (map, chart) = self.chart(target);
+        let decoded = map.decode(chart, latent).and_then(|y| {
+            let p = self.chart_to_g0(target, y);
+            p.validate()?;
+            Ok(p)
+        });
+        match decoded {
+            Ok(p) => Ok((Some(p), trace)),
+            Err(error) => {
+                trace["null_reason"] = json!(error.to_string());
+                Ok((None, trace))
+            }
+        }
+    }
+
     /// Posterior source label, independent destination label and noise.
     pub fn propose(
         &self,

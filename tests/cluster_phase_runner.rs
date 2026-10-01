@@ -96,14 +96,20 @@ fn scrub(v: &mut Value) {
 }
 #[test]
 fn phase_retains_attempts_bias_and_exact_restart_and_replay() -> Result<()> {
-    check_restart_and_replay(false)
+    check_restart_and_replay(false, false)
 }
 #[test]
 fn contact_anchor_phase_retains_bias_restart_and_independent_log_reconstruction() -> Result<()> {
-    check_restart_and_replay(true)
+    check_restart_and_replay(true, false)
 }
-fn check_restart_and_replay(contact_anchors: bool) -> Result<()> {
-    let mut f = Fixture::new(if contact_anchors {
+#[test]
+fn contact_pool_retains_bias_restart_and_independent_log_reconstruction() -> Result<()> {
+    check_restart_and_replay(true, true)
+}
+fn check_restart_and_replay(contact_anchors: bool, contact_pool: bool) -> Result<()> {
+    let mut f = Fixture::new(if contact_pool {
+        "contact-pool-restart"
+    } else if contact_anchors {
         "contact-restart"
     } else {
         "restart"
@@ -112,6 +118,10 @@ fn check_restart_and_replay(contact_anchors: bool) -> Result<()> {
         f.config["cluster_phase"]["transport_charts"] = json!("members");
         f.config["cluster_phase"]["anchor_count"] = json!(2);
         f.config["cluster_phase"]["anchor_contact_uniform_probability"] = json!(0.2);
+    }
+    if contact_pool {
+        f.config["cluster_phase"]["anchor_pool_selection"] = json!("contact_without_replacement");
+        f.config["cluster_phase"]["singleton_rate"] = json!(1.);
     }
     f.config["assembly_bias"] = json!({"values":[0.,0.2,0.4,0.6]});
     let summary = f.run("full", 120, None)?;
@@ -200,10 +210,10 @@ fn check_restart_and_replay(contact_anchors: bool) -> Result<()> {
                     if let Some(primary) = info["primary_anchor"].as_u64() {
                         // Reconstruct from center distances, independently of
                         // ContactGraph::anchor_probabilities and graph updates.
-                        let probability = |state: &[Pose]| {
+                        let probability = |state: &[Pose], excluded: &[usize], selected: usize| {
                             let contacts: Vec<usize> = (0..state.len())
                                 .map(|j| {
-                                    if ids.contains(&j) {
+                                    if ids.contains(&j) || excluded.contains(&j) {
                                         0
                                     } else {
                                         ids.iter()
@@ -216,14 +226,14 @@ fn check_restart_and_replay(contact_anchors: bool) -> Result<()> {
                                 })
                                 .collect();
                             let total: usize = contacts.iter().sum();
-                            let m = (state.len() - ids.len()) as f64;
+                            let m = (state.len() - ids.len() - excluded.len()) as f64;
                             if total == 0 {
                                 1. / m
                             } else {
-                                0.2 / m + 0.8 * contacts[primary as usize] as f64 / total as f64
+                                0.2 / m + 0.8 * contacts[selected] as f64 / total as f64
                             }
                         };
-                        let qx = probability(&poses);
+                        let qx = probability(&poses, &[], primary as usize);
                         assert!(
                             (qx - info["anchor_forward_probability"].as_f64().unwrap()).abs()
                                 < 1e-12
@@ -236,12 +246,36 @@ fn check_restart_and_replay(contact_anchors: bool) -> Result<()> {
                             {
                                 proposed[i] = serde_json::from_value(p.clone())?;
                             }
-                            let qy = probability(&proposed);
+                            let qy = probability(&proposed, &[], primary as usize);
                             assert!(
                                 (qy - info["anchor_reverse_probability"].as_f64().unwrap()).abs()
                                     < 1e-12
                             );
-                            let correction = qy.ln() - qx.ln();
+                            let correction = if contact_pool {
+                                let pool: Vec<usize> =
+                                    serde_json::from_value(info["anchor_pool"].clone())?;
+                                let joint = |state: &[Pose]| {
+                                    pool.iter()
+                                        .enumerate()
+                                        .map(|(j, &a)| probability(state, &pool[..j], a).ln())
+                                        .sum::<f64>()
+                                };
+                                let fx = joint(&poses);
+                                let fy = joint(&proposed);
+                                assert!(
+                                    (fx - info["pool_forward_log_probability"].as_f64().unwrap())
+                                        .abs()
+                                        < 1e-12
+                                );
+                                assert!(
+                                    (fy - info["pool_reverse_log_probability"].as_f64().unwrap())
+                                        .abs()
+                                        < 1e-12
+                                );
+                                fy - fx
+                            } else {
+                                qy.ln() - qx.ln()
+                            };
                             anchor_corrected += usize::from(correction.abs() > 1e-8);
                             assert!(
                                 (correction - info["anchor_log_reverse_forward"].as_f64().unwrap())
@@ -401,5 +435,116 @@ fn contact_anchor_parameter_and_chart_guards_are_explicit() -> Result<()> {
         c["cluster_phase"]["transport_charts"] = json!("members");
         serde_json::from_value::<Config>(c)?.validate()?;
     }
+    Ok(())
+}
+
+#[test]
+fn zero_singleton_rate_preserves_rng_serialization_and_old_counters() -> Result<()> {
+    use tetramer_mc::cluster_phase::ClusterPhaseCounts;
+    let mut f = Fixture::new("singleton-disabled")?;
+    f.run("implicit-zero", 30, None)?;
+    f.config["cluster_phase"]["singleton_rate"] = json!(0.);
+    f.run("explicit-zero", 30, None)?;
+    let mut a_checkpoint = f.read("implicit-zero", "checkpoint.json")?;
+    let mut b_checkpoint = f.read("explicit-zero", "checkpoint.json")?;
+    // The raw input files deliberately differ. Their provenance hashes must
+    // differ; all physical state, counters and continuation streams agree.
+    assert_ne!(a_checkpoint["config_sha256"], b_checkpoint["config_sha256"]);
+    a_checkpoint
+        .as_object_mut()
+        .unwrap()
+        .remove("config_sha256");
+    b_checkpoint
+        .as_object_mut()
+        .unwrap()
+        .remove("config_sha256");
+    assert_eq!(a_checkpoint, b_checkpoint);
+    let parsed: Config = serde_json::from_value(f.config.clone())?;
+    assert!(
+        serde_json::to_value(parsed)?["cluster_phase"]
+            .get("singleton_rate")
+            .is_none()
+    );
+    let mut a = f.rows("implicit-zero", "moves.jsonl")?;
+    let mut b = f.rows("explicit-zero", "moves.jsonl")?;
+    for r in a.iter_mut().chain(&mut b) {
+        scrub(r);
+    }
+    assert_eq!(a, b);
+    let serialized = serde_json::to_value(ClusterPhaseCounts::default())?;
+    assert!(serialized.get("singleton_events").is_none());
+    let old: ClusterPhaseCounts = serde_json::from_value(serialized.clone())?;
+    assert_eq!(old.singleton_events, 0);
+    assert_eq!(serde_json::to_value(old)?, serialized);
+    f.config["fixed_body_indices"] = json!([0]);
+    assert!(
+        serde_json::from_value::<Config>(f.config.clone())?
+            .validate()
+            .is_err(),
+        "all-mobile scope must not silently move a fixed body"
+    );
+    Ok(())
+}
+
+#[test]
+fn singleton_two_neighbor_fusion_preserves_restart_and_anchor_correction() -> Result<()> {
+    let mut f = Fixture::new("singleton-fused")?;
+    let c = &mut f.config["cluster_phase"];
+    c["singleton_rate"] = json!(1.);
+    c["dimer_rate"] = json!(0.);
+    c["trimer_rate"] = json!(0.);
+    c["duration"] = json!(0.5);
+    c["transport_probability"] = json!(1.);
+    c["transport_charts"] = json!("members");
+    c["anchor_count"] = json!(2);
+    c["anchor_contact_uniform_probability"] = json!(0.2);
+    c["oligomer"] = json!({"max_mismatch":40.,"pair_angle_degrees":180.});
+    f.config["assembly_bias"] = json!({"values":[0.,0.2,0.4,0.6]});
+    f.run("full", 160, None)?;
+    f.run("part", 63, None)?;
+    f.run("resumed", 160, Some("part"))?;
+    assert_eq!(
+        f.read("full", "checkpoint.json")?,
+        f.read("resumed", "checkpoint.json")?
+    );
+    let rows = f.rows("full", "moves.jsonl")?;
+    let mut suffix: Vec<_> = rows
+        .iter()
+        .filter(|r| r["sweep"].as_u64().unwrap() > 63)
+        .cloned()
+        .collect();
+    let mut resumed = f.rows("resumed", "moves.jsonl")?;
+    for r in suffix.iter_mut().chain(&mut resumed) {
+        scrub(r);
+    }
+    assert_eq!(suffix, resumed);
+    let (mut events, mut fused, mut accepted_fused, mut corrected) = (0, 0, 0, 0);
+    for row in rows.iter().filter(|r| r["kind"] == "cluster_event") {
+        events += 1;
+        assert_eq!(row["members"].as_array().unwrap().len(), 1);
+        assert_eq!(row["selected_rate"], 1.);
+        assert_eq!(row["total_rate"], 4.);
+        assert_eq!(row["selection_log_correction"], 0.);
+        let info = &row["proposal"];
+        if info["charts"] == "oligomer" {
+            let o = &info["oligomer"];
+            let fused_move =
+                o["source_label"]["kind"] == "fused" || o["target_label"]["kind"] == "fused";
+            fused += usize::from(fused_move);
+            accepted_fused += usize::from(fused_move && row["accepted"] == true);
+        }
+        if let Some(ac) = info["anchor_log_reverse_forward"].as_f64() {
+            let forward = info["anchor_forward_probability"].as_f64().unwrap();
+            let reverse = info["anchor_reverse_probability"].as_f64().unwrap();
+            assert!((ac - (reverse.ln() - forward.ln())).abs() < 1e-12);
+            let map = info["map_log_reverse_forward"].as_f64().unwrap();
+            assert!((map + ac - info["log_reverse_forward"].as_f64().unwrap()).abs() < 1e-12);
+            corrected += usize::from(ac.abs() > 1e-8);
+        }
+    }
+    assert!(
+        events > 200 && fused > 20 && accepted_fused > 0 && corrected > 0,
+        "events={events}, fused={fused}, accepted_fused={accepted_fused}, corrected={corrected}"
+    );
     Ok(())
 }

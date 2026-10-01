@@ -103,7 +103,7 @@ Lf(X)=\sum_S\lambda_S(X)\left[\int f(Y)K_S(X,dY)-f(X)\right].
 For finite `N`, a state-independent rate bound is
 
 \[
-M=\kappa_2\binom{N}{2}+\kappa_3\binom{N}{3}.
+M=\kappa_1 N+\kappa_2\binom{N}{2}+\kappa_3\binom{N}{3}.
 \]
 
 When `M > 0`, the uniformized kernel is
@@ -154,6 +154,16 @@ subset-selection clock.
 These values are a starting point for tests, not a tuned recommendation. Expected attempt count is approximately `duration * Lambda` over a slowly changing state, rather than a prescribed number per phase. Doubling every rate is equivalent to doubling the duration for this isolated phase. Separate size rates control the relative rate of dimers and trimers, while the local/transport mixture controls how a selected subset is moved.
 
 The implemented initial scope is spherical boundaries and frozen proposal models. A local-only rigid branch can operate without an atlas. The phase runs after the ordinary single-body move, GCA, and center-shift schedules and before any auxiliary refresh. It uses separate named streams and archives configuration, clock diagnostics and all attempted events when move logging is enabled; checkpoint continuation is deterministic. Assembly bias corrects each elementary subset move with the existing instantaneous cluster-size observable. Cluster bias counts live under `counts.cluster_phase` (`physical_accepted`, `bias_rejected`, `accepted`), separately from the original `counts.assembly_bias` per-kernel counters. Unsupported periodic and adaptive-model combinations fail validation. The portable configuration is [spherical-cluster-phase.json](../examples/spherical-cluster-phase.json), with a command in the [example guide](../examples/README.md#experimental-dimertrimer-transport-phase).
+
+Optional `singleton_rate` adds a constant-rate channel for every individual
+body. It defaults to zero and preserves the old channel order and random
+stream when disabled. With member charts, two anchors and `oligomer: {}`, the
+same fusion construction can guide a single body against two neighbors. The
+singleton rate does not depend on isolation, contact count or native registry;
+the bound above includes its contribution `kappa_1 * N`. See the
+[singleton contact control](singleton-contact-control.md) for its balance,
+validation and matched comparison. These channels supplement the ordinary
+single-body schedule rather than replacing it.
 
 Spherical GCA, center shifts, and this phase can complement each other. GCA retains its own valid collective law; this phase can move an internally chosen small subset independently of the much larger physical aggregate to which it currently belongs. No native label is needed for recruitment, though a native-informed frozen atlas remains a distinct proposal control.
 

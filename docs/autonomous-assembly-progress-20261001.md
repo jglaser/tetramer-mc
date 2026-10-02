@@ -157,8 +157,20 @@ processes at most 64 full traces at a time and retains geometry labels for the
 later native partition. Twelve deterministic tests pass. Its reductions reuse
 the 16,640 already audited reference draws and reproduce all six region/variance
 summaries within 5.60×10⁻¹⁵ scaled difference, without repeating geometry,
-density scoring, sampling or native classification. Full-vessel baseline and
-native-partition integration remain outstanding; no production gate has opened.
+density scoring, sampling or native classification. Baseline support now also
+passes independent auditing. Three 128-draw logging controls reproduce the
+archived baseline, Gaussian and hard-free sample streams byte for byte while
+adding complete attempt journals; the old executable was not rerun.
+
+The once-only native/pocket partition is implemented and tested for both
+streaming audit formats. It preserves every attempted denominator, explicit
+outside-pocket native/contact/unbound contributions and all fixed regional
+strata. Six deterministic tests pass, including source-support boundaries and
+failure preservation. No protein native classifier or physical reference was
+replayed. The larger and sensitivity campaigns have finished all physical draws
+and remain in independent auditing. A new full-vessel campaign and stage
+comparison remain to be prepared after the regional evidence is assessed;
+no production gate has opened.
 
 The [angular extension](hard-free-pose-line-guide.md) conditions any raw Cayley
 coordinate using quadratic sphere-overlap intervals. All 1,536 toy attempts

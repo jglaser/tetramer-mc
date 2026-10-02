@@ -65,9 +65,9 @@ repeated. The result is
 This validates the batching and reductions. It does not certify random-stream
 independence, exact thinning/envelope construction, floating-point execution or
 missing-mode coverage. The regional convergence and full-vessel production
-gates remain closed. A schema-4 baseline adapter and native/pocket partition
-integration were initially outstanding; baseline support is now available as
-described below. Native/pocket partition integration remains outstanding.
+gates remain closed. The baseline and native/pocket adapters are now available
+as described below. A new frozen protein campaign and its stage comparison are
+still required; the historical 80-component preparation remains unchanged.
 
 ## Baseline arm and matched logging
 
@@ -100,3 +100,60 @@ SHA-256 `5ebc7599e2bfe457da0aa46ccf99ab0fc789eb21b604b5fcc31226036bf979d6`,
 with embedded source bundle
 `0d012425681497200a3d60967c5fd9a652e6e4e5fc0b79ba5d2d9b8053128859`.
 The running assembly executable is unchanged.
+
+## Once-only native and pocket partition
+
+[`partition_vessel_streaming.py`](../tools/partition_vessel_streaming.py) consumes
+either completed streaming audit. It authenticates the saved geometry, all
+attempted rows, the completion journal, the frozen native observer and all four
+reporting regions. Each hard-valid pose receives one complete native-classifier
+call. Core, wall and exclusion-contact searches are reused, not repeated.
+
+Its exhaustive primary partition is native entry, contact without native entry,
+and unbound without native entry. It reports each contribution inside/outside
+the source R4 support and inside/outside the Boolean union of the four measured
+pockets. A pose in several pockets is counted once in their union. Native entry
+without exclusion contact remains an explicit anomaly rather than being silently
+removed or relabeled.
+
+The old R5 intersection retains its original capture, closed radius ≤5 and
+strict original registration q>1. Within source R4, native mass splits into this
+intersection and its remainder. Radial edges 0/2/3/4, squared angular-projection
+edges 0/4/9/16, and all 64 sign orthants remain fixed. Every stratum uses the
+original full-vessel attempted-draw denominator; empty strata remain visible.
+Stratum fractions must use their regional parent, not the native mass of the
+whole vessel. The chart-ball-only labels in the geometry audit are deliberately
+distinct from full source support, which also includes the old capture predicate.
+
+No density, Jacobian or extra target indicator is introduced. The complete
+native definition is bound to the same shape, scaffold, bath and registration
+metric, while allowing the intentional difference between source-region and
+vessel capture radii. All labels are saved incrementally, including invalid
+draws. Failure leaves prior records and a failed status; fresh-output enforcement
+prevents an accidental retry into the same output. This is not crash continuation.
+
+Six deterministic tests cover exhaustive partitions, both audit schemas,
+unconditional zero accounting, preserved total weights, contact-query reuse,
+old-support boundaries, changed-input rejection and failure preservation. The
+synthetic observer tests bookkeeping only; it is not a protein native oracle.
+The initial guided fixture incorrectly changed source capture while retaining
+old density traces. The unchanged density check rejected it; restoring the
+original guided capture made the test pass. No physical reference was rerun.
+
+```bash
+/home/xvg/protein-nucleation/.venv/bin/python -B \
+  tools/partition_vessel_streaming.py \
+  --audit /absolute/completed/audit/analysis.json \
+  --native-definition /absolute/frozen/native/definition.json \
+  --current-R4 /absolute/frozen/current_R4.json \
+  --old-native-R4 /absolute/frozen/old_native_R4.json \
+  --old-alternative-R5 /absolute/frozen/old_alternative_R5.json \
+  --old-alternative-R32 /absolute/frozen/old_alternative_R32.json \
+  --out /absolute/fresh/partition
+```
+
+The new schema is `full-vessel-streaming-native-partition-v1`. It preserves
+global masses under `estimates`, source-R4 contributions under
+`regional_estimates`, and all predeclared bins under `strata`. The previous stage
+aggregator is not automatically compatible with this schema. A new preparation
+must freeze the adapter and the updated stage accounting before protein sampling.

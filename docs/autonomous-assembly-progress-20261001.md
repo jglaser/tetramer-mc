@@ -178,6 +178,13 @@ the geometric inclusion needed to compare regional and full-vessel R4 masses,
 without new sampling. It does not establish statistical convergence or certify
 floating-point execution.
 
+The [new full-vessel preparation](hard-free-streaming-vessel-stage.md) freezes
+the requested four-population 65,536- and 262,144-draw stages for both arms.
+It uses the current 92-component guide and λ/z=128 in both arms, retaining the
+original target and explicit full-domain coverage. Preparation and eight new
+allocation/statistics tests pass. No vessel protein jobs have started; regional
+audits are still live, and an authenticated loader/dispatcher remains required.
+
 The [angular extension](hard-free-pose-line-guide.md) conditions any raw Cayley
 coordinate using quadratic sphere-overlap intervals. All 1,536 toy attempts
 passed independent reconstruction; six geometry, 22 shared-guide and eleven

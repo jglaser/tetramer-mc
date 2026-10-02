@@ -14,12 +14,16 @@ half-width), and importance ESS/CPU improves 1.68–1.88×. Two material strata
 still disagree between proposals and eleven fail the size comparison. Together
 with the earlier sensitivity failures, these leave the convergence gate closed.
 A [fresh four-population SMC bridge control](hard-free-protein-smc-control.md)
-is running to investigate the historical missing native-remainder mass.
-Its [contact analysis](hard-free-protein-smc-analysis.md) is frozen and queued
-behind all four successful independent audits. Seven estimator/accounting tests
-and three dependency-watcher checks pass. The analysis will compare terminal
-normalizer-times-indicator masses and retain all failed strata; no physical
-SMC result is available yet.
+has completed physical sampling. Two independent audits passed and two stopped
+on narrow-interval density discrepancies; the queued contact analysis correctly
+did not start. A [saved-data diagnosis](smc-density-conditioning-diagnosis.md)
+reproduces both failures and isolates geometric roundoff amplified by small
+conditional Normal masses. High-precision endpoint and mass checks support that
+diagnosis. The optional supplemental audit passed 25 focused tests and all 128
+saved diagnostic poses; its two full saved-data audits are now running, with
+the previous successful audits reused. The original failed receipts remain
+intact. No SMC region-weight result is available yet, and all earlier
+convergence failures remain.
 
 The [larger-stage variance decomposition](hard-free-line-population-size-noise.md)
 now reuses the saved moments for all failed strata. The worst baseline competing

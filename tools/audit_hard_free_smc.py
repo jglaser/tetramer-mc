@@ -11,6 +11,7 @@ for _name in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
     os.environ[_name] = '1'
 import argparse
 from collections import OrderedDict
+from dataclasses import replace
 import json
 import math
 from pathlib import Path
@@ -22,6 +23,7 @@ import analyze_r4_smc_control as old
 from physical_hard_free_line_vessel import PhysicalHardFreeLineGuide, audit_trace
 from hard_free_line_physical_reference import audit_draw
 from analyze_mobile_native_pocket import local_sources
+from conditioned_density_audit import audit_conditioned_density, SCHEMA as CONDITIONING_SCHEMA
 
 require, close, read, sha = old.require, old.close, old.read, old.sha
 SCHEMA = 'latent-region-smc-hard-free-initial-guide-v1'
@@ -88,7 +90,7 @@ def validate_generation_branch(component, inside, trace, guide):
 
 class Proposal:
     """Old audit interface, with bounded memoization of deterministic results."""
-    def __init__(self, region, guide, config, shape, region_hash, shape_hash):
+    def __init__(self, region, guide, config, shape, region_hash, shape_hash, *, conditioned_density=False):
         self.current = old.Chart(region)
         self.guide = PhysicalHardFreeLineGuide(region, guide, config, shape,
             region_sha256=region_hash, expected_shape_sha256=shape_hash)
@@ -99,6 +101,10 @@ class Proposal:
         self.maximum_interval_error = 0.
         self.maximum_inverse_CDF_error = 0.
         self.analytic_sphere_cloud_bounds_checked = 0
+        self.conditioned_density = conditioned_density
+        self.certified_log_g = {}
+        self.conditioning_queries = 0
+        self.conditioning_maxima = {}
 
     def details(self, pose):
         key = old.pose_key(pose)
@@ -122,12 +128,33 @@ class Proposal:
 
     def evaluate(self, pose):
         current, density, _, _ = self.details(pose)
+        if self.conditioned_density:
+            require(old.pose_key(pose) in self.certified_log_g,
+                'SMC history requested a density without its complete numerical audit')
+            return current, None, self.certified_log_g[old.pose_key(pose)]
         return current, None, density.log_physical_density
 
     def check_density_record(self, pose, record):
-        current, expected, _, _ = self.details(pose)
+        current, expected, _, hard = self.details(pose)
         require(record['structural_zero'] is False and record['in_reference_ball'] == current['inside'],
             'Density support certificate differs')
+        if self.conditioned_density:
+            checked = audit_conditioned_density(record, expected, self.guide)
+            self.conditioning_queries += 1
+            for key, value in checked['maxima'].items():
+                self.conditioning_maxima[key] = max(self.conditioning_maxima.get(key, 0.), value)
+            self.maximum_interval_error = max(self.maximum_interval_error,
+                checked['maxima']['interval_endpoint_error'])
+            actual_law = replace(expected,
+                log_latent_density=checked['log_latent_density_saved_intervals'],
+                log_physical_density=checked['log_physical_density_saved_intervals'])
+            if hard:
+                key = old.pose_key(pose)
+                if key in self.certified_log_g:
+                    close(self.certified_log_g[key], actual_law.log_physical_density,
+                        'Duplicate pose has inconsistent certified density')
+                self.certified_log_g[key] = actual_law.log_physical_density
+            return actual_law
         require(np.max(abs(np.asarray(record['latent'])-expected.latent)) < 2e-8,
             'Density latent coordinates differ')
         for key in ('log_latent_density', 'log_physical_jacobian', 'log_physical_density'):
@@ -143,7 +170,20 @@ class Proposal:
         require(hard and current['inside'], 'Retained particle is hard invalid')
         require(np.max(abs(np.asarray(particle['latent'])-current['latent'])) < 2e-8,
             'Cached particle coordinates differ')
-        close(cache['log_g'], density.log_physical_density, 'Retained density cache differs')
+        if self.conditioned_density:
+            require(old.pose_key(particle['pose']) in self.certified_log_g,
+                'Retained density lacks its complete numerical audit')
+            reference = self.certified_log_g[old.pose_key(particle['pose'])]
+        else:
+            reference = density.log_physical_density
+        close(cache['log_g'], reference, 'Retained density cache differs')
+
+    def retain_certificates(self, particles):
+        """After history checks, only current endpoints can enter the next stage."""
+        if self.conditioned_density:
+            keys = {old.pose_key(p['pose']) for p in particles}
+            require(keys <= self.certified_log_g.keys(), 'Missing retained numerical certificate')
+            self.certified_log_g = {key:self.certified_log_g[key] for key in keys}
 
     def check_sphere_cloud_bounds(self, pose, clouds, delta_activity):
         """Independent exact lens bound for the one-sphere/one-neighbor limit."""
@@ -160,7 +200,16 @@ class Proposal:
             self.analytic_sphere_cloud_bounds_checked += 1
 
 
-def audit(directory, binary):
+def audit(directory, binary, *, conditioned_density=False):
+    context = dict(directory=str(directory), phase='provenance')
+    try:
+        return _audit(directory, binary, conditioned_density=conditioned_density, context=context)
+    except Exception as error:
+        error.add_note('Saved SMC audit context: '+json.dumps(context, sort_keys=True))
+        raise
+
+
+def _audit(directory, binary, *, conditioned_density, context):
     require(sys.flags.optimize == 0, 'Assertions must remain enabled')
     root = Path(directory).resolve(); ledger = old.Ledger(); started = time.process_time()
     for p in local_sources(__file__).values(): ledger.bind(p)
@@ -204,7 +253,8 @@ def audit(directory, binary):
         minimum_conditional_mass=guide['minimum_conditional_mass'],
         gaussian_component_count=len(guide['gaussian_components'])).items():
         require(binding[key] == expected, 'Manifest guide parameters differ: '+key)
-    proposal = Proposal(region, guide, config, shape, manifest['region_sha256'], manifest['shape_sha256'])
+    proposal = Proposal(region, guide, config, shape, manifest['region_sha256'], manifest['shape_sha256'],
+        conditioned_density=conditioned_density)
     initial_path = ledger.bind(root/'initialization.jsonl', summary['initialization_sha256'])
     stages_path = ledger.bind(root/'stages.jsonl', summary['stages_sha256'])
     attempts_path = ledger.bind(root/'attempts.jsonl', summary['attempts_sha256'])
@@ -215,11 +265,12 @@ def audit(directory, binary):
         attempt_count += 1
     initial = {}; n = 0; branch = {}
     for i, row in enumerate(old.jsonlines(initial_path)):
+        context.update(phase='initialization', draw=i)
         attempted(dict(phase='initialization', draw=i))
         require(row['draw'] == i and i < opts['initial_draws'], 'Lost or reordered initial attempt')
         n += 1
         current, density, capture, hard = proposal.details(row['pose'])
-        proposal.check_density_record(row['pose'], row['guide_density'])
+        density = proposal.check_density_record(row['pose'], row['guide_density'])
         close(row['log_physical_proposal_density'], density.log_physical_density, 'Initial q/J differs')
         close(row['log_proposal_density'], density.log_latent_density, 'Initial latent q differs')
         close(row['log_physical_jacobian'], current['log_jacobian'], 'Initial Jacobian differs')
@@ -254,6 +305,7 @@ def audit(directory, binary):
     require(n == opts['initial_draws'] == summary['initial_draws'] and len(initial) == summary['initial_hits'],
         'Initial attempted denominator or successful count differs')
     stages = iter(old.jsonlines(stages_path)); first = next(stages)
+    context.clear(); context.update(directory=str(root), phase='initial_resampling', stage=0)
     require(first['stage'] == 0, 'Missing initial resampling stage')
     if not initial:
         validate_zero_summary(summary, first, n)
@@ -276,8 +328,10 @@ def audit(directory, binary):
                 'Initial particle lineage differs')
             proposal.check_cache(p)
         old.verify_ancestry(particles, first['ancestry'])
+        proposal.retain_certificates(particles)
         completed = 0
         for j, stage in enumerate(stages, 1):
+            context.update(phase='annealing', stage=j)
             require(j < len(opts['schedule']), 'Unexpected extra annealing stage')
             for i in range(opts['population']):
                 attempted(dict(phase='potential', stage=j, particle=i))
@@ -291,11 +345,14 @@ def audit(directory, binary):
                     event = events.get((i, sweep))
                     if event is not None and event['accepted']: retained = event['proposed_pose']
             for event in stage['mutation_density_records']:
+                context.update(phase='mutation_density', particle=event['particle'], sweep=event['sweep'])
                 proposal.check_density_record(event['proposed_pose'], event['proposed_guide_density'])
                 require(proposal.details(event['proposed_pose'])[3], 'Recorded valid mutation overlaps a core')
+            context.update(phase='accepted_history')
             log_z, _ = old.audit_stage(stage, particles, proposal, config, opts, j, log_z)
             for p in stage['particles']: proposal.check_cache(p)
             particles = stage['particles']; completed = j
+            proposal.retain_certificates(particles)
         require(completed == len(opts['schedule'])-1 and not summary['zero_estimate'], 'Missing annealing stages')
         validate_positive_summary(summary, log_z, len(initial))
         require(summary['terminal_particles'] == particles, 'Summary lost rejected/retained endpoint')
@@ -310,6 +367,11 @@ def audit(directory, binary):
         guide_evaluations=proposal.evaluations, maximum_interval_error=proposal.maximum_interval_error,
         maximum_inverse_CDF_error=proposal.maximum_inverse_CDF_error,
         analytic_sphere_cloud_bounds_checked=proposal.analytic_sphere_cloud_bounds_checked,
+        density_audit_mode='split_conditioned' if conditioned_density else 'strict_independent_geometry',
+        conditioned_density_audit=dict(schema=CONDITIONING_SCHEMA, queries=proposal.conditioning_queries,
+            maxima=proposal.conditioning_maxima, certificates_retained=len(proposal.certified_log_g),
+            scope='Same-saved-interval arithmetic plus independent geometry and conditioning envelope; '
+                'not a global real-arithmetic or normalization-error certificate.') if conditioned_density else None,
         input_sha256=ledger.files, audit_cpu_seconds=time.process_time()-started,
         new_pose_draws=0, new_Poisson_clouds=0, new_classifier_calls=0,
         scope='Independent full guide geometry/density and hard checks, incremental PGF arithmetic, '
@@ -326,9 +388,11 @@ if __name__ == '__main__':
     p.add_argument('--directory', type=Path, required=True)
     p.add_argument('--binary', type=Path, required=True)
     p.add_argument('--out', type=Path, required=True)
+    p.add_argument('--conditioned-density-audit', action='store_true',
+        help='Separately audit interval geometry, same-input density arithmetic and bounded conditioning')
     args = p.parse_args()
     require(not args.out.exists(), 'Refuse to overwrite completed audit')
-    result = audit(args.directory, args.binary)
+    result = audit(args.directory, args.binary, conditioned_density=args.conditioned_density_audit)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with args.out.open('x') as stream: json.dump(result, stream, indent=2, allow_nan=False)
     print(json.dumps(dict(complete=result['complete'], initial_draws=result['initial_draws'])))

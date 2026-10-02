@@ -87,8 +87,15 @@ The exact command and observed prelaunch capacity are retained in `launch.json`.
 The [seven-test receipt](../results/hard-free-protein-smc-controller-validation-20261002/validation.json)
 binds the controller source used for preparation.
 
-The [contact-analysis preparation](hard-free-protein-smc-analysis.md) is now
+The [contact-analysis preparation](hard-free-protein-smc-analysis.md) was
 frozen separately and queued behind successful completion of all four audits.
 It preserves the predeclared stage profile, complete native classifier and
 whole-population estimator. The queued analysis starts no physical jobs and
 does not change this execution or its guide.
+
+All four physical populations have now completed. Audits r00 and r01 passed;
+r02 and r03 failed during initialization-density reconstruction. The controller
+and queued analysis are terminal, with their failures retained. The
+[numerical diagnosis](smc-density-conditioning-diagnosis.md) identifies
+thin-interval conditioning and records independent high-precision checks.
+The physical runs will not be repeated to repair an audit discrepancy.

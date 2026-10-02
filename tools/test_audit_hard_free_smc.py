@@ -2,6 +2,7 @@
 import copy
 import math
 import unittest
+from unittest.mock import patch
 import numpy as np
 import audit_hard_free_smc as audit
 from test_physical_hard_free_line_vessel import setup, trace, independent_pose, REGION, SHAPE
@@ -93,6 +94,50 @@ class GuidedSmcAuditTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'analytic sphere lens'):
                 proposal.check_sphere_cloud_bounds(pose,[cloud],.1)
         proposal.check_sphere_cloud_bounds(pose,[dict(lower_volume=0.,upper_volume=0.)],0.)
+
+    def test_split_mode_requires_certificates_and_prunes_only_after_history(self):
+        value, region, guide, config, shape, lower = setup()
+        config['capture_radius'] = region['capture_radius']
+        proposal = audit.Proposal(region,guide,config,shape,REGION,SHAPE,conditioned_density=True)
+        pose,_ = independent_pose([3.,0.,0.,0.,0.,0.],region,lower)
+        current,density,_,hard = proposal.details(pose)
+        self.assertTrue(hard)
+        with self.assertRaisesRegex(ValueError,'without its complete numerical audit'):
+            proposal.evaluate(pose)
+        record = dict(latent=density.latent,in_reference_ball=density.in_reference_ball,
+            structural_zero=False,log_latent_density=density.log_latent_density,
+            log_physical_jacobian=density.log_physical_jacobian,
+            log_physical_density=density.log_physical_density,hard_free_line_density=trace(value,density))
+        checked = proposal.check_density_record(pose,record)
+        self.assertAlmostEqual(proposal.evaluate(pose)[2],checked.log_physical_density,places=12)
+        self.assertEqual(proposal.conditioning_queries,1)
+        with patch.object(proposal,'details',return_value=(dict(current,inside=False),density,True,True)):
+            with self.assertRaisesRegex(ValueError,'Density support certificate differs'):
+                proposal.check_density_record(pose,record)
+        particle = dict(pose=pose,latent=current['latent'].tolist(),
+            guide_density_cache=dict(pose=copy.deepcopy(pose),log_g=density.log_physical_density))
+        proposal.cache.clear()  # Recomputed geometry does not lose the checked scalar.
+        proposal.check_cache(particle)
+        proposal.retain_certificates([particle,particle])
+        self.assertEqual(len(proposal.certified_log_g),1)
+        key = audit.old.pose_key(pose)
+        proposal.certified_log_g[key] += .001
+        with self.assertRaisesRegex(ValueError,'Duplicate pose has inconsistent certified density'):
+            proposal.check_density_record(pose,record)
+        proposal.certified_log_g[key] = checked.log_physical_density
+        bad = copy.deepcopy(particle);bad['guide_density_cache']['log_g'] += .001
+        with self.assertRaisesRegex(ValueError,'Retained density cache differs'): proposal.check_cache(bad)
+        proposal.retain_certificates([])
+        with self.assertRaisesRegex(ValueError,'lacks its complete numerical audit'):proposal.check_cache(particle)
+
+    def test_failure_context_is_retained_without_changing_exception(self):
+        def fail(*args,context,**kwargs):
+            context.update(phase='initialization',draw=17)
+            raise ValueError('diagnostic failure')
+        with patch.object(audit,'_audit',side_effect=fail):
+            with self.assertRaisesRegex(ValueError,'diagnostic failure') as raised:
+                audit.audit('unused','unused')
+        self.assertIn('"draw": 17',raised.exception.__notes__[0])
 
 
 if __name__ == '__main__': unittest.main()

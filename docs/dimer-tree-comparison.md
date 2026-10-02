@@ -5,7 +5,12 @@ path improves estimated threshold-contact ESS per CPU by **1.98×** for the
 involutive proposal and **3.21×** for the defensive independent redraw in this
 two-sphere control. Each individual 95% contact-occupancy interval includes the
 analytic reference, with residual uncertainty detailed below.
-This is a measured reference-system improvement, not a protein assembly result.
+These are provisional reference-system efficiency estimates, not a protein
+assembly result. A later, separately allocated
+[one-step stationarity control](dimer-one-step-stationarity.md) rejects the
+defensive/world combination's primary contact-change test (family-adjusted
+p=0.007979). Its cause remains unresolved; passing arithmetic audits and the
+individual trajectory intervals do not override that flag.
 
 ![Sphere occupancy and contact-sampling efficiency](assets/dimer-tree-equilibrium-comparison.png)
 
@@ -79,9 +84,11 @@ of initialization agreement.
 
 The protein saved-state probe separately predicts much lower point cost for
 these paths but exposes severe source-tail penalties in the historical blind
-atlas. The defensive redraw is a controlled way to address that latter issue;
-its usefulness for native protein poses is still unmeasured. See the
-[protein cost/coverage report](dimer-tree-protein-cost-probe.md). Physical protein
+atlas. See the [protein cost/coverage report](dimer-tree-protein-cost-probe.md).
+The subsequent [4,608-draw destination screen](dimer-destination-probe.md)
+confirms that the defensive redraw improves source coverage, but most of its
+hard-valid destinations lose all contacts. Its physical-sampling benefit remains
+unmeasured. Physical protein
 benchmarks and finite-system conclusions remain behind the original regional
 weight and coverage checks.
 

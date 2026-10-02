@@ -6,6 +6,34 @@ It does not establish faster equilibrium mixing, template-free finite-system
 assembly, or instability of the model. Existing simulations were left running;
 the live production executable was not replaced.
 
+The latest [dimer destination screen](dimer-destination-probe.md) completed
+4,608 frozen proposals across eight saved environments, three atlases and three
+proposal laws. All 841,701 independent audit checks passed. The uniform defensive
+component repairs source-tail penalties mainly by proposing contact loss:
+153 of its 246 hard-valid endpoints have no exclusion contacts. The blind
+512-slot learned-only product produced zero hard-valid destinations in 512
+attempts; the native-informed control produced 34, including 22 with both
+intended tree contacts. This is a conditional feasibility comparison, not an
+equilibrium weight or assembly result. A capped joint feasibility-conditioned
+redraw is the next candidate; it has not been implemented or promoted.
+
+The separately frozen [independent-source sphere control](dimer-one-step-stationarity.md)
+completed 327,680 one-step trials. One of five primary stationarity tests
+**rejects**: defensive independent redraw with the world Poisson bath has 1,554
+contact gains versus 1,382 losses (family-adjusted p=0.007979). All attempted
+rows pass arithmetic/provenance reconstruction, but that does not override the
+statistical flag. Analytic acceptance applied to the same saved proposals also
+gives a positive contact change, so the exploratory comparison does not isolate
+a bath-specific fault. No allocation was extended and no production kernel was
+changed. The earlier sphere ESS/CPU gains remain provisional estimates.
+
+As of 2026-10-02 22:05 UTC, the two saved-data SMC audits and their guarded
+analysis watcher remain live. Five user growth jobs remain live; the
+native-informed `cluster-oligomer-seed8-free256-z004` job completed its planned
+100,000 sweeps at 20:58 UTC. That completion alone supplies no new classified
+native-contact result. The production binary hash remains
+`94c987694af7cc347fdf076ff121425464329b35ae76c80b9e0415592410010a`.
+
 The fixed **786,432-draw contact campaign is now complete**. In the
 [larger stage](hard-free-line-population-size-results.md), every aggregate
 proposal and population-size mass comparison passes. The guided conditional

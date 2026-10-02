@@ -1,0 +1,70 @@
+{
+  "analysis_sha256": "fb3a2d8d09d7e7afd858787039362530490a0cbe211f6b373b09f39c2652d6e2",
+  "config_sha256": "0bde358181834b1848b2b6dbebe84d1b7747bb9faeb6d7a0ac5ce79b3b018237",
+  "definition": "hard-valid endpoint and exclusion edges root-child plus root-anchor; no native classifier or physical acceptance",
+  "arms": [
+    {
+      "atlas": "blind_memory_allslot64",
+      "law": "tree",
+      "attempts": 512,
+      "hard_valid": 86,
+      "hard_valid_both_tree_contacts": 1
+    },
+    {
+      "atlas": "blind_memory_allslot64",
+      "law": "independent_learned",
+      "attempts": 512,
+      "hard_valid": 64,
+      "hard_valid_both_tree_contacts": 11
+    },
+    {
+      "atlas": "blind_memory_allslot64",
+      "law": "defensive",
+      "attempts": 512,
+      "hard_valid": 110,
+      "hard_valid_both_tree_contacts": 0
+    },
+    {
+      "atlas": "blind_fft512slots",
+      "law": "tree",
+      "attempts": 512,
+      "hard_valid": 13,
+      "hard_valid_both_tree_contacts": 2
+    },
+    {
+      "atlas": "blind_fft512slots",
+      "law": "independent_learned",
+      "attempts": 512,
+      "hard_valid": 0,
+      "hard_valid_both_tree_contacts": 0
+    },
+    {
+      "atlas": "blind_fft512slots",
+      "law": "defensive",
+      "attempts": 512,
+      "hard_valid": 51,
+      "hard_valid_both_tree_contacts": 1
+    },
+    {
+      "atlas": "native_informed178",
+      "law": "tree",
+      "attempts": 512,
+      "hard_valid": 32,
+      "hard_valid_both_tree_contacts": 23
+    },
+    {
+      "atlas": "native_informed178",
+      "law": "independent_learned",
+      "attempts": 512,
+      "hard_valid": 34,
+      "hard_valid_both_tree_contacts": 22
+    },
+    {
+      "atlas": "native_informed178",
+      "law": "defensive",
+      "attempts": 512,
+      "hard_valid": 85,
+      "hard_valid_both_tree_contacts": 8
+    }
+  ]
+}

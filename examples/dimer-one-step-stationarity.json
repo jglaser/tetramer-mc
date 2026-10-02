@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "core_radius": 0.2,
+  "exclusion_radius": 1.0,
+  "activity": 1.5,
+  "auxiliary_intensity": 24.0,
+  "root_radius": 2.0,
+  "min_separation": 0.4,
+  "max_separation": 2.5,
+  "rho": 0.7,
+  "uniform_probability": 0.5,
+  "uniform_half_width": 2.5,
+  "gate": {
+    "max_cells": 255,
+    "max_depth": 5,
+    "min_width": 0.0
+  },
+  "draws_per_population": 16384,
+  "analysis_protocol": "iid-paired-contact-bonferroni5-v1",
+  "populations": [
+    {
+      "id": "tree-analytic-r00",
+      "proposal_kind": "tree",
+      "arm": "analytic",
+      "seed": 610026000
+    },
+    {
+      "id": "tree-analytic-r01",
+      "proposal_kind": "tree",
+      "arm": "analytic",
+      "seed": 610026001
+    },
+    {
+      "id": "tree-analytic-r02",
+      "proposal_kind": "tree",
+      "arm": "analytic",
+      "seed": 610026002
+    },
+    {
+      "id": "tree-analytic-r03",
+      "proposal_kind": "tree",
+      "arm": "analytic",
+      "seed": 610026003
+    },
+    {
+      "id": "tree-poisson-r00",
+      "proposal_kind": "tree",
+      "arm": "poisson",
+      "seed": 610026100
+    },
+    {
+      "id": "tree-poisson-r01",
+      "proposal_kind": "tree",
+      "arm": "poisson",
+      "seed": 610026101
+    },
+    {
+      "id": "tree-poisson-r02",
+      "proposal_kind": "tree",
+      "arm": "poisson",
+      "seed": 610026102
+    },
+    {
+      "id": "tree-poisson-r03",
+      "proposal_kind": "tree",
+      "arm": "poisson",
+      "seed": 610026103
+    },
+    {
+      "id": "tree-singleton_path-r00",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "seed": 610026200
+    },
+    {
+      "id": "tree-singleton_path-r01",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "seed": 610026201
+    },
+    {
+      "id": "tree-singleton_path-r02",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "seed": 610026202
+    },
+    {
+      "id": "tree-singleton_path-r03",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "seed": 610026203
+    },
+    {
+      "id": "defensive_independent-poisson-r00",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610026300
+    },
+    {
+      "id": "defensive_independent-poisson-r01",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610026301
+    },
+    {
+      "id": "defensive_independent-poisson-r02",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610026302
+    },
+    {
+      "id": "defensive_independent-poisson-r03",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610026303
+    },
+    {
+      "id": "defensive_independent-singleton_path-r00",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "seed": 610026400
+    },
+    {
+      "id": "defensive_independent-singleton_path-r01",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "seed": 610026401
+    },
+    {
+      "id": "defensive_independent-singleton_path-r02",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "seed": 610026402
+    },
+    {
+      "id": "defensive_independent-singleton_path-r03",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "seed": 610026403
+    }
+  ]
+}

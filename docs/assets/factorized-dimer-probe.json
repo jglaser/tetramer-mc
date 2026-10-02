@@ -1,0 +1,42 @@
+{
+  "source": "/home/xvg/tetramer-mc/results/factorized-dimer-probe-20261002/analysis.json",
+  "source_sha256": "3facf648519de1e32433c0d1514f66b47716bc65400c804b87414bba22e9a450",
+  "atlases": [
+    "blind_memory_allslot64",
+    "blind_fft512slots",
+    "native_informed178"
+  ],
+  "values": {
+    "candidate_count/whole_joint": [
+      169,
+      85,
+      206
+    ],
+    "candidate_count/factorized": [
+      174,
+      159,
+      178
+    ],
+    "candidates_with_external_contacts/whole_joint": [
+      31,
+      10,
+      52
+    ],
+    "candidates_with_external_contacts/factorized": [
+      33,
+      26,
+      56
+    ],
+    "external_per_cpu/whole_joint": [
+      27.688141142353828,
+      0.706124477126167,
+      27.306066815504437
+    ],
+    "external_per_cpu/factorized": [
+      66.66250342498837,
+      25.240761454398886,
+      95.55340652910554
+    ]
+  },
+  "scope": "Passive candidate throughput, not physical sampling efficiency."
+}

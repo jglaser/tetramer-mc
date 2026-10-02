@@ -32,8 +32,19 @@ geometry-aware conditioning of the draws rather than another blind center
 search. The [factorized implementation](factorized-dimer-implementation.md)
 now prefilters the independent root and internal edges, with fixed-context
 normalizers that cancel. Eight new Rust tests, exact rational finite-state
-checks and eleven focused Lean scalar theorems pass. It remains separate from
-physical and production sampling; a frozen passive comparison is being prepared.
+checks and eleven focused Lean scalar theorems pass. Its
+[frozen passive comparison](factorized-dimer-probe.md) completed all 1,536 trials
+and passed 2,122,664 independent checks. At equal maximum 64-edge budgets,
+whole-joint → staged feasible candidate counts were 169 → 174 for blind memory,
+85 → 159 for blind FFT and 206 → 178 for the native-informed control, each out
+of 256 attempts. Staged sampling used fewer edges and improved feasible
+candidates per proposal CPU by 2.33×, 25.72× and 2.81×, respectively. The timings
+combine geometric factorization with deferred density scoring and exclude bath
+cost. Candidates with any external exclusion contact numbered 31 → 33,
+10 → 26 and 52 → 56; these are not native-registry measurements. A separate
+physical replay of all saved trials is pending, with no new pose search.
+Physical acceptance, contact ESS, equilibrium assembly and the original
+thermodynamic goal remain unresolved; production sampling is unchanged.
 
 The separately frozen [independent-source sphere control](dimer-one-step-stationarity.md)
 completed 327,680 one-step trials. One of five primary stationarity tests

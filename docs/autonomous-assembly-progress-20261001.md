@@ -21,6 +21,14 @@ and three dependency-watcher checks pass. The analysis will compare terminal
 normalizer-times-indicator masses and retain all failed strata; no physical
 SMC result is available yet.
 
+The [larger-stage variance decomposition](hard-free-line-population-size-noise.md)
+now reuses the saved moments for all failed strata. The worst baseline competing
+bin has importance ESS 3.8 and a single draw carrying 49.5% of its mass, while
+only 1.6% of its observed row variance is attributed to cloud noise. Native bin
+55 instead has substantially larger row-moment than four-population SE. These
+diagnostics favor pose coverage and uncertainty calibration; the running SMC
+allocation and all convergence failures remain unchanged.
+
 ## Latest continuation: feasibility-only conditioning
 
 The [fresh line-guide comparison](hard-free-line-fresh-results.md) completed

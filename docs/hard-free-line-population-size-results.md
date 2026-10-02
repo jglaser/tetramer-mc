@@ -83,6 +83,12 @@ using the validated normalized hard-free guide. It tests the specific
 intermediate-population bottleneck hypothesis. Even agreement will not waive
 the failed strata, establish full-vessel coverage or decide assembly.
 
+A [saved-moment variance diagnostic](hard-free-line-population-size-noise.md)
+finds concentrated pose weights in the worst competing-contact bins and a
+separate uncertainty-calibration issue in native bin 55. It favors improving
+pose coverage and independent-population assessment over increasing Poisson
+intensity alone. No gate is changed and no extra physical draws are launched.
+
 ## Provenance
 
 Campaign: `/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`.

@@ -109,3 +109,36 @@ This command requires all eight populations, audits and partitions of the
 selected stage to have completed. The future execution preparation must freeze
 this reader and its new source files before dispatch. It cannot be used to
 analyze unfinished populations or to authorize launching them.
+
+## Analytic bound for the unbound remainder
+
+For an unbound pose the relative ideal-depletion weight is exactly one. With
+normalized SO(3) Haar measure, its integral cannot exceed the accessible center
+volume. This includes the unbound contribution outside every measured pocket.
+
+For body-frame atom centers c_a and radii r_a, the atomic wall implies
+
+\[
+\|t-c_{\mathrm{wall}}\|
+\le R_{\mathrm{wall}}-\overline r+\|\overline c\|.
+\]
+
+This follows by averaging the atomic containment inequalities and applying
+convexity of the norm. It requires no convexity of the sphere-union particle.
+Intersecting with the center-capture domain bounds the volume by the smaller
+of their enclosing-ball volumes, even if their centers differ.
+
+[`bound_vessel_unbound_mass.py`](../tools/bound_vessel_unbound_mass.py) evaluates
+this bound using exact rational input arithmetic, outward norm bounds and
+π<22/7. For the frozen vessel, **Q_unbound ≤45,654,774.77 Å³**, corresponding to a
+display log bound of **17.636619**. The exact rational bound is stored in
+`results/streaming-vessel-stage-validation-20261002/unbound-mass-bound.json`.
+It is 53.55% of the looser capture-only volume bound. The decimal/log values are
+for display; the rational artifact is the upper bound.
+
+Two tests cover centered and offset spheres, a nonconvex unequal-radius union,
+capture intersections and an empty-domain case. No poses or point clouds were
+drawn. This does not bound adsorbed competing contacts or provide a rigorous
+lower confidence bound on native weight. It therefore does not decide assembly.
+As with the R4 inclusion certificate, floating-point execution is separate from
+this exact-real geometric statement.

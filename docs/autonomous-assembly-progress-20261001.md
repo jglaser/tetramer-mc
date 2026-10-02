@@ -101,7 +101,7 @@ scenario, not a measured SMC result. The current evidence does not justify
 launching it before the cheaper fixed controls finish.
 
 That [larger stage](hard-free-line-population-size-stage.md) has finished physical
-sampling and is independently auditing all populations at
+sampling and all eight independent audits, and is classifying the new poses at
 `/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`: four fresh
 65,536-draw populations per arm, 524,288 attempted draws in total. Protocol hash:
 `cbcf1400a38365f2fa24585110da389b64174fc7e3a563e26cf1618a161c588e`.
@@ -112,13 +112,19 @@ then compare independent linear population means between stages; no pilot
 populations are pooled into the new estimates.
 
 The separate [probability/intensity controls](hard-free-line-sensitivity-stage.md)
-are now running: four 16,384-draw populations at α=0.2/λ128 and four at α=0.5/λ64,
+have completed: four 16,384-draw populations at α=0.2/λ128 and four at α=0.5/λ64,
 each compared with the completed conditioned pilot. They preserve the same
 components and physical target. Twenty-two tests and the additional α=0.2
 analytic sphere references with full independent geometry audits pass.
-The new controller is PID 611099 at
+The completed controller was PID 611099 at
 `/vast/xvg/tetramer-mc-runs/hard-free-line-sensitivity-20261001`, protocol hash
 `100fdb3b68b2a1bfdf9de6fdce61a7759894d0818f7affa6a9b9e7d0ba977cc6`.
+The [completed result](hard-free-line-sensitivity-results.md) fails the fixed
+sensitivity gates despite agreement of all regional Qz masses and native–competing
+contrasts. It retains one hard-volume discrepancy, two λ64 native weight-tail
+failures and all 11 unstable material strata. α=.2 improves importance efficiency
+only 3–10%; λ64 increases the observed cloud share of native variance and lowers
+native importance efficiency. The primary α=.5/λ128 setting remains unchanged.
 The comparison includes the native–competing free-energy contrast itself,
 since separate mass checks can miss opposite shifts. No new physical jobs
 were launched while the eight-job limit was occupied.
@@ -167,8 +173,8 @@ streaming audit formats. It preserves every attempted denominator, explicit
 outside-pocket native/contact/unbound contributions and all fixed regional
 strata. Six deterministic tests pass, including source-support boundaries and
 failure preservation. No protein native classifier or physical reference was
-replayed. The larger and sensitivity campaigns have finished all physical draws
-and remain in independent auditing. A new full-vessel campaign and stage
+replayed. The larger campaign has passed all audits and is classifying its new
+poses; the sensitivity campaign is complete with unresolved failures. A new full-vessel campaign and stage
 comparison remain to be prepared after the regional evidence is assessed;
 no production gate has opened.
 
@@ -183,7 +189,7 @@ the requested four-population 65,536- and 262,144-draw stages for both arms.
 It uses the current 92-component guide and λ/z=128 in both arms, retaining the
 original target and explicit full-domain coverage. Preparation and eight new
 allocation/statistics tests pass. No vessel protein jobs have started; regional
-audits are still live. The authenticated completed-stage reader now passes three
+classification is still live. The authenticated completed-stage reader now passes three
 additional lineage/manifest controls and preserves all saved statistics without
 geometry or native-classifier replay. The bounded dispatcher remains required.
 

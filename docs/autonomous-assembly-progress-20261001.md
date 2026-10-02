@@ -61,6 +61,18 @@ no trajectories or classifiers were replayed. The
 [independent review](hard-free-line-population-size-review.md) supports the
 next separately frozen population-size comparison with the same guide and binary.
 
+The [saved-data bridge diagnostic](smc-bridge-bottleneck.md) identifies a
+candidate mechanism: under the old SMC bridge, the conditioned estimate of
+the remaining-native fraction falls from 8.85% to roughly 0.619%, then rises
+to 47.05%. Both IID arms show the dip but fail concentration checks near its
+minimum; its depth is not resolved. Using each frozen IID proposal as the
+initial bridge law removes the observed dip: the conditioned alternative
+stays between 29.09% and 51.17%, and every sampled stage passes aggregate
+checks for the four nonempty decision regions. Endpoint weights are identical
+by construction. This is an exploratory SMC design diagnostic, not independent
+physical confirmation or a measured speedup. It adds no poses, clouds or
+classifications and does not open the full-vessel or assembly gates.
+
 That [larger stage](hard-free-line-population-size-stage.md) is now running at
 `/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`: four fresh
 65,536-draw populations per arm, 524,288 attempted draws in total. Protocol hash:

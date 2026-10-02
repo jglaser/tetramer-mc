@@ -1,10 +1,13 @@
 # Independent contact analysis for the new SMC bridge
 
-The [running protein SMC control](hard-free-protein-smc-control.md) now has a
-frozen follow-up analysis. It will start only after all four physical jobs and
-all four independent full geometry/density audits finish successfully. It does
-not inspect unfinished contact weights, refit the guide or change the sampling
-allocation.
+The [protein SMC control](hard-free-protein-smc-control.md) has completed all
+four physical jobs. Its original frozen follow-up analysis did not start:
+two independent audits passed and two stopped on narrow-interval numerical
+discrepancies. The [supplemental audit](smc-density-conditioning-diagnosis.md)
+is checking the two saved populations without rerunning physical sampling.
+Classification still requires complete authenticated audits for all four
+populations. It does not inspect unfinished contact weights, refit the guide
+or change the sampling allocation.
 
 [`analyze_hard_free_protein_smc.py`](../tools/analyze_hard_free_protein_smc.py)
 reuses the audited stage histories and the complete frozen native-entry
@@ -43,7 +46,7 @@ properties of the guide-dependent annealing path; intermediate masses from the
 old and new bridges are not estimates of a common physical distribution.
 
 Only ancestors retained at stage zero receive initial native labels in this
-analysis. All unconditional initialization attempts already have complete
+analysis. All unconditional initialization attempts must first have complete
 independent implementation audits, but this calculation does not reclassify
 every rejected or unselected initial draw. It therefore does not report a new
 initial hard-only Q0 integral or substitute the initial Hg normalizer for one.
@@ -81,3 +84,34 @@ analysis or watcher. Completion will produce `analysis.json` under the analysis
 preparation directory, including every population, comparison and failed
 material stratum. Full-vessel and assembly gates remain closed regardless of
 whether this conditional control agrees with its references.
+
+The original watcher is now terminal with prerequisite failure; the original
+analysis preparation remains unclaimed. A separately frozen recovery may
+authenticate successful r00/r01 receipts together with the two supplemental
+r02/r03 receipts. It must retain the original failed status and logs rather than
+rewrite them as successful audits. The recovery preparation binds the original
+plan, byte-identical context/reference data and unchanged classifier/estimator
+function bodies. All shared statistical dependencies must also match; only
+authentication and its tests may change. This preserves the predeclared
+statistical comparison while repairing the numerical-audit prerequisite.
+
+The recovery is now frozen at
+`results/hard-free-protein-smc-recovered-analysis-preparation-20261002`, plan
+SHA-256 `be3bfe21b1c39bbccb3ea61228cffa4d8abebde2318e41dec26f1e1ca5a99a4a`.
+All 25 estimator/authentication tests pass both in the repository and from that
+frozen source copy. The seven classification/estimation function bodies match
+the original preparation exactly at the parsed syntax-tree level; shared source
+dependencies and the three context/reference files also retain their hashes.
+This is a source-preservation check, not a new physical convergence result.
+
+Its one-shot watcher is PID **974733**, birth token **187179829**, started
+2026-10-02 at approximately 18:56:40 UTC. Dispatch directory:
+`results/hard-free-protein-smc-recovered-analysis-dispatch-20261002`, plan
+SHA-256 `b37c89fe784204d3715d2429ed0bdc0079e5da6e9ac558c83e73e38a705c3a39`.
+The watcher passed success, prerequisite-failure, missing-controller and
+wrong-terminal-phase controls. It follows the exact supplemental controller
+handle, starts at most one two-worker analysis, and performs no physical
+sampling, audit retries or allocation changes. Runtime authentication requires
+all original raw physical bytes, the frozen supplemental sources, complete
+attempt counters and successful receipts. At launch both supplemental workers
+were still running; no SMC region classifications or mass comparisons had run.

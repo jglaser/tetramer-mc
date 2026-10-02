@@ -25,6 +25,15 @@ the previous successful audits reused. The original failed receipts remain
 intact. No SMC region-weight result is available yet, and all earlier
 convergence failures remain.
 
+A separately frozen [analysis recovery](hard-free-protein-smc-analysis.md)
+now waits for those two supplemental audits. Its classifier, estimator and
+reference inputs are unchanged; 25 focused tests pass from the frozen source.
+The original failed campaign and watcher remain intact. The new watcher
+(PID 974733, launched 2026-10-02 at 18:56 UTC) can start one two-worker analysis
+only after complete authentication. It launches no physical jobs and does not
+open any convergence gate. All six existing user growth simulations were present
+at its capacity check and were left untouched.
+
 The [larger-stage variance decomposition](hard-free-line-population-size-noise.md)
 now reuses the saved moments for all failed strata. The worst baseline competing
 bin has importance ESS 3.8 and a single draw carrying 49.5% of its mass, while

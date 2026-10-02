@@ -59,6 +59,19 @@ def iid_arm(pops,seed_base):
 
 
 class ContactAnalysisTests(unittest.TestCase):
+    def test_statistical_code_binding_ignores_authentication_but_rejects_estimator_changes(self):
+        with tempfile.TemporaryDirectory() as name:
+            a,b = Path(name)/'a.py',Path(name)/'b.py'
+            functions = '\n'.join('def '+key+'():\n    return 3\n' for key in analysis.STATISTICAL_FUNCTIONS)
+            a.write_text(functions+'\ndef authenticate():\n    return False\n')
+            b.write_text(functions+'\ndef authenticate():\n    return True\n')
+            self.assertEqual(analysis.statistical_code(a),analysis.statistical_code(b))
+            b.write_text(functions.replace('def compare():\n    return 3','def compare():\n    return 4'))
+            self.assertNotEqual(analysis.statistical_code(a),analysis.statistical_code(b))
+            b.write_text(functions.replace('def compare():','def omitted_compare():'))
+            with self.assertRaisesRegex(ValueError,'Incomplete statistical implementation'):
+                analysis.statistical_code(b)
+
     def test_multiplicity_joint_normalizer_and_replenished_family_counts(self):
         stages,summary=fixture();observer=Observer();stream=io.StringIO()
         result=analysis.profile_stages(iter(stages),summary,observer,stream,[0,1]);t=result['terminal']

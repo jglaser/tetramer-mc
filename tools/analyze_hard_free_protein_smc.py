@@ -9,6 +9,7 @@ import os
 for _key in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS','RAYON_NUM_THREADS'):
     os.environ[_key] = '1'
 import argparse
+import ast
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import copy
 import gzip
@@ -22,6 +23,7 @@ import sys
 import time
 import analyze_r4_smc_control as old
 import run_hard_free_protein_smc as control
+import authenticate_smc_supplemental_audits as supplemental
 from compare_r4_smc_importance import importance_rows, smc_rows, validate_strata, STRATA_DEFINITION
 from run_native_excluded_smc_campaign import mass_statistics, mass_comparison
 from prepare_shoulder_docking_benchmark import local_dependencies
@@ -31,6 +33,18 @@ SCOPE = ('Independent whole-population fixed-R4 SMC masses, with rejected/retain
     'and completed zero populations included. No descendant IID error or contact-mixing ESS. '
     'Intermediate profiles refer to this guide-dependent bridge, not physical equilibrium. '
     'All completed IID convergence failures remain; no full-vessel or assembly conclusion.')
+RECOVERY_SCHEMA = 'hard-free-protein-smc-recovered-analysis-preparation-v1'
+STATISTICAL_FUNCTIONS = ('stage_rows','profile_stages','classify_population','smc_view',
+    'summarize_rows','compare_rows','compare')
+
+
+def statistical_code(path):
+    """Bind the unchanged classification/estimator code across authentication repair."""
+    tree = ast.parse(Path(path).read_text())
+    functions = {node.name:ast.dump(node,include_attributes=False) for node in tree.body
+        if isinstance(node,ast.FunctionDef) and node.name in STATISTICAL_FUNCTIONS}
+    require(set(functions) == set(STATISTICAL_FUNCTIONS),'Incomplete statistical implementation')
+    return functions
 
 
 def prepare(campaign, campaign_sha, out):
@@ -90,13 +104,66 @@ def prepare(campaign, campaign_sha, out):
 def validate_preparation(out, expected):
     ledger = old.Ledger(); plan = read(ledger.bind(out/'plan.json',expected)); files = ledger.frozen(out)
     require(files == dict(plan['files_sha256'],**{'plan.json':expected}), 'Analysis freeze catalog differs')
-    require(plan['schema'] == 'hard-free-protein-smc-analysis-preparation-v1'
+    require(plan['schema'] in ('hard-free-protein-smc-analysis-preparation-v1',RECOVERY_SCHEMA)
         and plan['workers'] == 2 and plan['analysis'] == control.ANALYSIS
         and not plan['full_vessel_gate_open'] and not plan['assembly_gate_open'], 'Analysis allocation/scope differs')
     for path,digest in plan['external_required_sha256'].items(): ledger.bind(path,digest)
     require(control.runtime() == plan['runtime'],'Analysis runtime changed')
     physical = control.validate(Path(plan['campaign']),plan['campaign_plan_sha256'])
+    if plan['schema'] == RECOVERY_SCHEMA:
+        previous = Path(plan['original_analysis_preparation'])
+        original,_,old_ledger = validate_preparation(previous,plan['original_analysis_plan_sha256'])
+        require(original['schema'] == 'hard-free-protein-smc-analysis-preparation-v1',
+            'Recovery must preserve the original statistical preparation')
+        require(not(previous/'status.json').exists() and not(previous/'analysis.json').exists(),
+            'Cannot reclassify an already claimed original analysis')
+        for key in ('campaign','campaign_plan_sha256','analysis','workers','native_definition_sha256','runtime','scope'):
+            require(plan[key] == original[key],'Recovery changed statistical design: '+key)
+        for name in ('context.json','historical.json','iid.json'):
+            require(sha(out/name) == sha(previous/name),'Recovery changed frozen analysis/reference data: '+name)
+        require(statistical_code(out/'source'/Path(__file__).name)
+            == statistical_code(previous/'source'/Path(__file__).name),'Recovery changed classification or estimation')
+        for name,digest in original['files_sha256'].items():
+            if name.startswith('source/') and name in plan['files_sha256'] and Path(name).name not in (
+                'analyze_hard_free_protein_smc.py','test_analyze_hard_free_protein_smc.py'):
+                require(plan['files_sha256'][name] == digest,'Recovery changed shared statistical dependency: '+name)
+        for path,digest in old_ledger.files.items():ledger.bind(path,digest)
+        supplemental.validate_plan(Path(plan['supplemental_audits']),plan['supplemental_plan_sha256'],
+            Path(plan['campaign']),physical,ledger)
     return plan,physical,ledger
+
+
+def prepare_recovery(previous, previous_sha, supplement, supplement_sha, out):
+    previous,supplement,out = [Path(p).resolve() for p in (previous,supplement,out)]
+    require(not out.exists(),'Fresh recovered analysis preparation required')
+    original,physical,ledger = validate_preparation(previous,previous_sha)
+    require(original['schema'] == 'hard-free-protein-smc-analysis-preparation-v1'
+        and not(previous/'status.json').exists() and not(previous/'analysis.json').exists(),
+        'Only an unclaimed original analysis may acquire supplemental authentication')
+    supplemental.validate_plan(supplement,supplement_sha,Path(original['campaign']),physical,ledger)
+    require(statistical_code(__file__) == statistical_code(previous/'source'/Path(__file__).name),
+        'Statistical functions changed since the original preparation')
+    sources = local_dependencies([Path(__file__),Path(__file__).with_name('test_analyze_hard_free_protein_smc.py'),
+        Path(__file__).with_name('test_authenticate_smc_supplemental_audits.py')])
+    for name,path in sources.items():
+        old_name = 'source/'+name
+        if old_name in original['files_sha256'] and name not in (
+            'analyze_hard_free_protein_smc.py','test_analyze_hard_free_protein_smc.py'):
+            require(sha(path) == original['files_sha256'][old_name],'Changed shared statistical dependency: '+name)
+    (out/'source').mkdir(parents=True)
+    for name,path in sources.items():shutil.copy2(path,out/'source'/name)
+    for name in ('context.json','historical.json','iid.json'):shutil.copy2(previous/name,out/name)
+    ledger.recheck()
+    plan = dict(original,schema=RECOVERY_SCHEMA,original_analysis_preparation=str(previous),
+        original_analysis_plan_sha256=previous_sha,supplemental_audits=str(supplement),
+        supplemental_plan_sha256=supplement_sha,preparation_input_sha256=ledger.files,
+        recovery_scope='Authentication only. Original failed audit receipts retained; frozen statistical design, '
+            'classifiers, references and estimator code unchanged. No repeated classification or physical sampling.',
+        files_sha256={str(f.relative_to(out)):sha(f) for f in sorted(out.rglob('*')) if f.is_file()})
+    write(out/'plan.json',plan)
+    write(out/'freeze.json',dict(files=dict(plan['files_sha256'],**{'plan.json':sha(out/'plan.json')})))
+    validate_preparation(out,sha(out/'plan.json'))
+    return dict(prepared=True,launched=False,analysis_plan_sha256=sha(out/'plan.json'))
 
 
 def require_audited_status(state, expected):
@@ -219,12 +286,17 @@ def run(out,expected):
         if path and 'source/'+Path(path).name in plan['files_sha256']:
             require(Path(path).resolve() == out/'source'/Path(path).name,'Unfrozen analysis import')
     campaign = Path(plan['campaign']); state = read(ledger.bind(campaign/'status.json'))
-    require_audited_status(state,plan['campaign_plan_sha256'])
+    if plan['schema'] != RECOVERY_SCHEMA:
+        require_audited_status(state,plan['campaign_plan_sha256'])
     require(not (out/'status.json').exists(),'No retry/reclassification of a claimed analysis')
     counts = control.capacity()
     require(not counts['private_pid_namespace'] and counts['workers'] <= 29,'Host capacity unavailable for two classifiers and controller')
     # Authentication reuses receipts; it never executes a previous density audit.
-    receipts = {job['id']:control.check_output(campaign,physical,job,True) for job in physical['jobs']}
+    if plan['schema'] == RECOVERY_SCHEMA:
+        receipts = supplemental.authenticate(Path(plan['supplemental_audits']),plan['supplemental_plan_sha256'],
+            campaign,physical,ledger)
+    else:
+        receipts = {job['id']:control.check_output(campaign,physical,job,True) for job in physical['jobs']}
     status = dict(complete=False,phase='classification',plan_sha256=expected,pid=os.getpid(),jobs=[],started=time.time())
     with (out/'status.json').open('x') as stream:json.dump(status,stream)
     def snapshot():
@@ -260,6 +332,13 @@ def run(out,expected):
         result.update(schema='hard-free-protein-smc-contact-analysis-v1',complete=True,populations=populations,
             input_sha256=ledger.files,analysis_plan_sha256=expected,campaign_plan_sha256=plan['campaign_plan_sha256'],
             native_definition_sha256=plan['native_definition_sha256'])
+        if plan['schema'] == RECOVERY_SCHEMA:
+            result['audit_recovery'] = dict(supplemental_audits=plan['supplemental_audits'],
+                supplemental_plan_sha256=plan['supplemental_plan_sha256'],
+                original_analysis_plan_sha256=plan['original_analysis_plan_sha256'],
+                reused_audits=['r00','r01'],supplemental_audits_for=['r02','r03'],
+                original_failures_retained=True,statistical_design_changed=False,
+                scope=plan['recovery_scope'])
         write(out/'analysis.json',result)
         status.update(complete=True,phase='complete',finished=time.time(),analysis_sha256=sha(out/'analysis.json'));snapshot()
     except BaseException as error:
@@ -270,9 +349,15 @@ def run(out,expected):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__); sub = parser.add_subparsers(dest='action',required=True)
     f = sub.add_parser('freeze'); f.add_argument('--campaign',type=Path,required=True); f.add_argument('--campaign-plan-sha256',required=True); f.add_argument('--out',type=Path,required=True)
+    recovery = sub.add_parser('freeze-recovery')
+    recovery.add_argument('--previous',type=Path,required=True);recovery.add_argument('--previous-plan-sha256',required=True)
+    recovery.add_argument('--supplemental-audits',type=Path,required=True);recovery.add_argument('--supplemental-plan-sha256',required=True)
+    recovery.add_argument('--out',type=Path,required=True)
     for action in ('validate','run'):
         p = sub.add_parser(action);p.add_argument('--out',type=Path,required=True);p.add_argument('--expected-plan-sha256',required=True)
     args = parser.parse_args()
-    value = prepare(args.campaign,args.campaign_plan_sha256,args.out) if args.action == 'freeze' else (
-        validate_preparation(args.out.resolve(),args.expected_plan_sha256)[0] if args.action == 'validate' else run(args.out,args.expected_plan_sha256))
+    if args.action == 'freeze':value = prepare(args.campaign,args.campaign_plan_sha256,args.out)
+    elif args.action == 'freeze-recovery':value = prepare_recovery(args.previous,args.previous_plan_sha256,
+        args.supplemental_audits,args.supplemental_plan_sha256,args.out)
+    else:value = validate_preparation(args.out.resolve(),args.expected_plan_sha256)[0] if args.action == 'validate' else run(args.out,args.expected_plan_sha256)
     print(json.dumps({k:value[k] for k in ('prepared','launched','analysis_plan_sha256','phase') if k in value}))

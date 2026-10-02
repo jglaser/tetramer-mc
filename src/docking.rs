@@ -211,10 +211,11 @@ pub struct DockingCheckpoint {
 }
 
 /// Frozen atlas controls with a separately labeled uniform branch for transport.
+/// Every map-based draw and learned density uses the map's prepared factors.
+/// `Mixture` remains a separate, internally consistent direct-model control.
 pub struct DockingProposal {
     model: FrozenRelativePoseProposal,
     map: FixedBasinInvolution,
-    components: Vec<FrozenRelativePoseProposal>,
     branches: Vec<RelativePoseBranch>,
     log_component_weights: Vec<f64>,
     method: DockingMethod,
@@ -255,31 +256,12 @@ impl DockingProposal {
                 });
             }
         }
-        let map = FixedBasinInvolution::new(
-            parameters.clone(),
-            model.angular_length(),
-            correlation,
-            pairs,
-        )?;
-        let components = parameters
-            .into_iter()
-            .map(|mut p| {
-                p.weight = 1.;
-                FrozenRelativePoseProposal::from_components_open(
-                    vec![p],
-                    model.angular_length(),
-                    model.box_lengths(),
-                    model.uniform_weight(),
-                    model.shape_sha256(),
-                    model.shape_sha256(),
-                )
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let map =
+            FixedBasinInvolution::new(parameters, model.angular_length(), correlation, pairs)?;
         Ok(Self {
             cube: model.box_lengths(),
             model,
             map,
-            components,
             branches,
             log_component_weights: weights.iter().map(|w| w.ln()).collect(),
             method,
@@ -318,12 +300,27 @@ impl DockingProposal {
         Ok(step)
     }
     fn component_log_density(&self, index: usize, relative: Pose) -> Result<f64> {
-        let pose = if self.branches[index].inverted {
+        relative.validate()?;
+        let branch = self.branches.get(index).context("Invalid virtual chart")?;
+        let pose = if branch.inverted {
             invert_relative_pose(relative)
         } else {
             relative
         };
-        self.components[index].relative_log_density(pose.position, rotation(pose.orientation))
+        // The actual generator factors C_eff once in FixedBasinInvolution.
+        // Refactoring C_eff here, or scoring the original model factor, creates
+        // a different law for ill-conditioned covariances. Pose inversion has
+        // unit absolute Jacobian in translation volume times normalized Haar.
+        Ok(self.map.log_density(index, pose))
+    }
+    fn learned_relative_log_density(&self, relative: Pose) -> Result<f64> {
+        let logs = self
+            .log_component_weights
+            .iter()
+            .enumerate()
+            .map(|(index, weight)| Ok(weight + self.component_log_density(index, relative)?))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(log_sum(&logs))
     }
     pub fn propose(
         &self,
@@ -340,6 +337,8 @@ impl DockingProposal {
             ensure!(index < fixed.len(), "Proposal anchor index out of range");
         }
         if self.method == DockingMethod::Mixture {
+            // This baseline draws and scores with the direct model's original
+            // factor, so it does not share the map's exported/refactored law.
             let centered = |p: Pose| Pose {
                 position: sub(p.position, self.center),
                 orientation: p.orientation,
@@ -484,12 +483,8 @@ impl DockingProposal {
         proposed.validate()?;
         let source = self.component_log_density(trace.source, relative)?;
         let target = self.component_log_density(trace.target, step.pose)?;
-        let full_old = self
-            .model
-            .relative_log_density(relative.position, rotation(relative.orientation))?;
-        let full_new = self
-            .model
-            .relative_log_density(step.pose.position, rotation(step.pose.orientation))?;
+        let full_old = self.learned_relative_log_density(relative)?;
+        let full_new = self.learned_relative_log_density(step.pose)?;
         let mut label_correction = None;
         let mut source_probability = None;
         let mut inverse_source_probability = None;

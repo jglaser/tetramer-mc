@@ -3,6 +3,7 @@
 //! Proposal density, hard geometry, and physical acceptance are separate layers.
 //! No crystallographic registry or fit objective appears in physical acceptance.
 pub mod assembly_bias;
+pub mod capped_dimer;
 pub mod cayley_axis_geometry;
 pub mod circle_geometry;
 pub mod contact_distances;

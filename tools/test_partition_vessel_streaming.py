@@ -2,6 +2,7 @@
 import copy
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -13,12 +14,14 @@ from test_audit_vessel_baseline_streaming import fixture
 from test_audit_hard_free_vessel_streaming import complete_fixture
 
 
-def prepared(root, guided_arm=False):
+def prepared(root, guided_arm=False, binary_path=None, native_directory='native'):
     population = root/'population'
     if guided_arm:
         binary = complete_fixture(population); region_path = population/'provenance/latent-region.json'
     else:
         binary, region_path = fixture(population)
+    if binary_path is not None:
+        shutil.copy2(binary,binary_path); binary = binary_path
     config = part.read(population/'config.json'); manifest = part.read(population/'manifest.json')
     region = part.read(region_path)
     region.update(activity=config['reservoir_density'], depletant_radius=config['depletant_radius'],
@@ -33,6 +36,8 @@ def prepared(root, guided_arm=False):
             minimum_original_q=q, minimum_original_q_inclusive=q == 0.)
         if name == 'old_native_R4': value['maximum_original_q'] = 1.
         path = root/(name+'.json'); part.write(path, value); paths[name] = path
+    summary = part.read(population/'summary.json'); summary['sampler_cpu_seconds'] = 1.
+    part.write(population/'summary.json',summary)
     if guided_arm:
         guide_path = population/'provenance/latent-guide.json'; guide = part.read(guide_path)
         guide['region_sha256'] = part.sha(region_path); part.write(guide_path, guide)
@@ -44,7 +49,7 @@ def prepared(root, guided_arm=False):
         guided.audit(population, root/'audit', binary, 2)
     else:
         baseline.audit(population, root/'audit', binary, paths['current_R4'], 2)
-    native_root = root/'native'; inputs = native_root/'inputs'; (inputs/'source').mkdir(parents=True)
+    native_root = root/native_directory; inputs = native_root/'inputs'; (inputs/'source').mkdir(parents=True)
     # This deliberately simple frozen observer tests orchestration only.
     runtime = inputs/'source/native_contact_regions.py'
     runtime.write_text('import json\nfrom pathlib import Path\n'

@@ -183,7 +183,9 @@ the requested four-population 65,536- and 262,144-draw stages for both arms.
 It uses the current 92-component guide and λ/z=128 in both arms, retaining the
 original target and explicit full-domain coverage. Preparation and eight new
 allocation/statistics tests pass. No vessel protein jobs have started; regional
-audits are still live, and an authenticated loader/dispatcher remains required.
+audits are still live. The authenticated completed-stage reader now passes three
+additional lineage/manifest controls and preserves all saved statistics without
+geometry or native-classifier replay. The bounded dispatcher remains required.
 
 The [angular extension](hard-free-pose-line-guide.md) conditions any raw Cayley
 coordinate using quadratic sphere-overlap intervals. All 1,536 toy attempts

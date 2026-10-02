@@ -70,5 +70,42 @@ Five deterministic mass-table tests cover exhaustive sums and bins, unconditiona
 zeros, linear rather than logarithmic SE comparisons, covariance cancellation,
 independent streams, separate stages and the regional materiality denominator.
 This module is arithmetic only: it does not authenticate file provenance.
-An authenticated loader and a reviewed bounded dispatcher are still needed
-before this preparation can run. `dispatch_ready` therefore remains false.
+An authenticated loader is now available as described below. A reviewed bounded
+dispatcher and the outstanding regional evidence are still needed before this
+preparation can run. `dispatch_ready` therefore remains false.
+
+## Authenticated completed-stage reader
+
+[`analyze_streaming_vessel_stage.py`](../tools/analyze_streaming_vessel_stage.py)
+requires the preparation hash explicitly. It checks the exact executed proposal,
+shape, wall, cloud law, journal and binary; audit/partition completion hashes;
+all four frozen pocket definitions; complete native-observer inputs; and each
+archived source closure. Shared statistical code must match the preparation's
+frozen version. It reduces the already saved sufficient statistics without
+repeating geometry, native classification or prior-stage calculations.
+
+The output includes both full-domain and regional estimates, all original
+strata, whole-population uncertainty, sampler/audit/classification CPU costs and
+importance ESS per sampler CPU. This ESS is not an autocorrelation-based contact
+mixing time. The reader sets no physical-stability or unseen-mode certificate.
+
+Three deterministic tests cover both streaming formats, completed artifact
+lineage, corrupt/missing input rejection and the protein manifest contract.
+The successful lineage controls use the seven-pose sphere fixture with its
+synthetic native observer; protein-specific constants are tested separately,
+not falsely attributed to those toy poses. No new physical reference jobs run.
+
+The eventual invocation is:
+
+```bash
+/home/xvg/protein-nucleation/.venv/bin/python -B \
+  tools/analyze_streaming_vessel_stage.py \
+  --preparation /vast/xvg/tetramer-mc-runs/hard-free-vessel-preparation-20261002 \
+  --preparation-sha256 5a449d483f6791d288e46ef814ae61ad3105d189d527f5e6142f75792a863fec \
+  --stage standard --out /absolute/fresh/standard-comparison
+```
+
+This command requires all eight populations, audits and partitions of the
+selected stage to have completed. The future execution preparation must freeze
+this reader and its new source files before dispatch. It cannot be used to
+analyze unfinished populations or to authorize launching them.

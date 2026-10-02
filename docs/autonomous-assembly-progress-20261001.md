@@ -29,9 +29,11 @@ problem: 2,042 of 2,048 FFT branch centers are core-valid, with median clearance
 479 of their actual Gaussian draws collided. The problem in those rows arises
 away from feasible centers, not from choosing colliding centers. This supports
 geometry-aware conditioning of the draws rather than another blind center
-search. The [factorized conditioning design](factorized-dimer-conditioning.md)
-can prefilter the independent root and internal edges, with fixed-context
-normalizers that cancel; it remains unimplemented and unbenchmarked.
+search. The [factorized implementation](factorized-dimer-implementation.md)
+now prefilters the independent root and internal edges, with fixed-context
+normalizers that cancel. Eight new Rust tests, exact rational finite-state
+checks and eleven focused Lean scalar theorems pass. It remains separate from
+physical and production sampling; a frozen passive comparison is being prepared.
 
 The separately frozen [independent-source sphere control](dimer-one-step-stationarity.md)
 completed 327,680 one-step trials. One of five primary stationarity tests
@@ -94,8 +96,10 @@ in both directions at the selected poses and costs 3.20 times the translation
 geometry alone. These purposive queries do not establish a physical efficiency
 gain, so no angular physical campaign follows. The
 [streaming vessel schedule](hard-free-streaming-vessel-stage.md) is now specified
-and tested, but remains inert; both scientific prerequisites and the documented
-exterior-density audit issue still need resolution before dispatch.
+and tested, but remains inert. The [optional exterior-density audit](full-vessel-conditioned-audit.md)
+passes 45 focused tests and all 16,640 saved sphere-reference rows, without new
+physical draws. A future execution closure must explicitly bind this extension;
+the frozen preparation and scientific prerequisites remain unchanged.
 
 A separate [joint dimer proposal](dimer-tree-proposal.md) now maps both its
 docking pose and its internal pair pose before one physical decision. Existing

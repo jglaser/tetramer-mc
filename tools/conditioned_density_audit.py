@@ -98,6 +98,8 @@ def _compose(recon, gaussian_logs, uniform, factors):
     require(np.isfinite(correction).all() and np.all(correction >= 0),
             'Invalid mixture correction')
     active = correction > 0
+    require(np.isfinite(gaussian_logs[active]).all(),
+            'Unrepresentable positive Gaussian component; not a structural zero')
     return float(np.logaddexp(uniform, math.log1p(-recon.alpha)
                  + logsumexp(gaussian_logs[active]+np.log(correction[active]))))
 
@@ -144,7 +146,7 @@ def _enclosure(low, high, values, label):
     return max(0., width)
 
 
-def audit_conditioned_density(record, expected, guide):
+def audit_conditioned_density(record, expected, guide, *, full_vessel=False):
     """Audit one already-reconstructed pose; return separate q values and maxima.
 
     ``record`` must be the complete Rust guide_density object, not a bare trace.
@@ -159,6 +161,7 @@ def audit_conditioned_density(record, expected, guide):
     for key in ['structural_zero', 'in_reference_ball']:
         require(type(record[key]) is bool and record[key] == getattr(expected, key),
                 'Density support certificate differs: '+key)
+    require(type(full_vessel) is bool, 'Invalid audit-domain option')
     maxima = dict(same_input_log_error=0., coordinate_log_error=0., interval_endpoint_error=0.,
                   independent_geometry_log_difference=0., log_envelope_width=0.,
                   latent_coordinate_error=0., raw_coordinate_error=0., jacobian_error=0.)
@@ -179,7 +182,13 @@ def audit_conditioned_density(record, expected, guide):
     u = _vector(expected.latent, (6,), 'Invalid independently reconstructed coordinates')
     saved_u = _vector(record['latent'], (6,), 'Invalid saved coordinates')
     maxima['latent_coordinate_error'] = float(np.max(abs(u-saved_u)))
-    require(maxima['latent_coordinate_error'] < LOG_ATOL, 'Density latent coordinates differ')
+    if full_vessel:
+        # Match the existing all-pose vessel coordinate check. The strict
+        # density/J checks below still reject amplified coordinate errors.
+        require(np.allclose(saved_u, u, rtol=2e-11, atol=LOG_ATOL),
+                'Density latent coordinates differ')
+    else:
+        require(maxima['latent_coordinate_error'] < LOG_ATOL, 'Density latent coordinates differ')
     require(_inside(recon, u) == expected.in_reference_ball
             and _inside(recon, saved_u) == expected.in_reference_ball, 'Latent ball support differs')
     maxima['jacobian_error'] = _log_error(record['log_physical_jacobian'], expected.log_physical_jacobian,
@@ -211,8 +220,15 @@ def audit_conditioned_density(record, expected, guide):
     normal.close(trace_raw, raw, 'Density raw coordinates differ')
     normal.close(trace_raw, saved_raw, 'Saved-input raw coordinates differ')
     maxima['raw_coordinate_error'] = float(max(np.max(abs(trace_raw-raw)), np.max(abs(trace_raw-saved_raw))))
-    g = _vector(recon.gaussian_logs(u), (len(recon.weights),), 'Invalid Gaussian density')
-    saved_g = _vector(recon.gaussian_logs(saved_u), g.shape, 'Invalid saved-input Gaussian density')
+    def gaussian_vector(coordinates, label):
+        values = np.asarray(recon.gaussian_logs(coordinates), dtype=float)
+        allowed = np.isfinite(values) | (np.isneginf(values) if full_vessel else False)
+        require(values.shape == (len(recon.weights),) and allowed.all(), label)
+        # Negative infinity is permitted only for an inactive component.
+        # Every _compose call checks the actual active set independently.
+        return values
+    g = gaussian_vector(u, 'Invalid Gaussian density')
+    saved_g = gaussian_vector(saved_u, 'Invalid saved-input Gaussian density')
     uniform = _uniform(recon, expected.in_reference_ball)
     baseline = float(np.logaddexp(uniform, math.log1p(-recon.alpha)+logsumexp(g)))
     _log_error(trace['baseline_log_density'], baseline, 'Baseline density differs')

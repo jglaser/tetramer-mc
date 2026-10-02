@@ -67,8 +67,9 @@ class BatchChecks:
     maxima = ('maximum_log_density_error', 'maximum_interval_endpoint_error', 'maximum_inverse_CDF_error')
     fixed = ('source_capture', 'vessel_capture', 'scope')
 
-    def __init__(self):
+    def __init__(self, *, conditioned_density_audit=False):
         self.density = None
+        self.conditioned_density_audit = conditioned_density_audit
         self.generation_count = 0
         self.primitive = Counter()
         self.batches = self.peak_rows = 0
@@ -79,9 +80,15 @@ class BatchChecks:
         # and nested metadata untouched, and never modify the saved records.
         adapted = [dict(row, draw=i) for i, row in enumerate(rows)]
         local = dict(manifest, samples=len(rows))
-        density = reference.check_rows(config, local, adapted, vessel, guide)
-        require(set(density) == set(self.sums+self.maxima+self.fixed+('outer_branches',)),
+        options={'conditioned_density_audit':True} if self.conditioned_density_audit else {}
+        density = reference.check_rows(config, local, adapted, vessel, guide, **options)
+        extra=('conditioned_density_audit',) if self.conditioned_density_audit else ()
+        require(set(density) == set(self.sums+self.maxima+self.fixed+('outer_branches',)+extra),
                 'Unhandled density audit field')
+        if self.conditioned_density_audit:
+            require(set(density['conditioned_density_audit'])==
+                    {'schema','complete','checked_attempts','maxima','scope','domain'},
+                    'Unhandled supplemental density field')
         if self.density is None:
             self.density = dict(density, outer_branches=dict(density['outer_branches']))
         else:
@@ -89,6 +96,14 @@ class BatchChecks:
             for key in self.sums: self.density[key] += density[key]
             for key in self.maxima: self.density[key] = max(self.density[key], density[key])
             self.density['outer_branches'] = dict(Counter(self.density['outer_branches'])+Counter(density['outer_branches']))
+            if self.conditioned_density_audit:
+                old,new=self.density['conditioned_density_audit'],density['conditioned_density_audit']
+                require(set(old)==set(new) and set(old['maxima'])==set(new['maxima']),
+                        'Unhandled supplemental density field')
+                require(all(old[k]==new[k] for k in ('schema','complete','scope','domain')),
+                        'Supplemental audit context changed')
+                old['checked_attempts']+=new['checked_attempts']
+                for key,value in new['maxima'].items():old['maxima'][key]=max(old['maxima'][key],value)
         generation = reference.vessel_reference.check_generation_metadata(config, local, adapted, vessel)
         self.generation_count += generation['checked_vessel_generation_rows']
         summary = dict(samples=len(rows), **row_counts(rows))
@@ -105,6 +120,9 @@ class BatchChecks:
                 'Outer branch accounting lost attempts')
         require(self.generation_count == self.density['outer_branches'].get('vessel', 0),
                 'Lost vessel generation checks')
+        if self.conditioned_density_audit:
+            require(self.density['conditioned_density_audit']['checked_attempts']==manifest['samples'],
+                    'Incomplete supplemental audit denominator')
 
 
 class WallOracle:
@@ -173,7 +191,7 @@ def memberships(row, geometry):
                 unbound=valid and not geometry['exclusion_contact'])
 
 
-def audit(directory, out, binary, batch_size=64):
+def audit(directory, out, binary, batch_size=64, *, conditioned_density_audit=False):
     require(sys.flags.optimize == 0, 'Independent checks require unoptimized Python')
     require(type(batch_size) is int and 1 <= batch_size <= 1024, 'Batch size must be between 1 and 1024')
     root, out, binary = (Path(p).resolve() for p in (directory, out, binary))
@@ -221,7 +239,8 @@ def audit(directory, out, binary, batch_size=64):
     vessel = reference.vessel_reference.VesselDensity(config, manifest, read(root/'provenance/model.json'), bundle)
     wall = WallOracle(config, manifest, shape, read(bundle))
     contact = reference.vessel_reference.PrunedExclusionContact(shape, config['fixed_poses'], config['depletant_radius'])
-    checks = BatchChecks(); reducers = {name: RegionMoments(manifest['samples']) for name in CLASSES}
+    checks = BatchChecks(conditioned_density_audit=conditioned_density_audit)
+    reducers = {name: RegionMoments(manifest['samples']) for name in CLASSES}
     processed = near = 0
     out.mkdir(parents=True)
     def status(phase, **extra):
@@ -286,6 +305,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('directory', 'out', 'binary'): parser.add_argument('--'+name, type=Path, required=True)
     parser.add_argument('--batch-size', type=int, default=64)
+    parser.add_argument('--conditioned-density-audit', action='store_true')
     args = parser.parse_args()
-    result = audit(args.directory, args.out, args.binary, args.batch_size)
+    result = audit(args.directory, args.out, args.binary, args.batch_size,
+                   conditioned_density_audit=args.conditioned_density_audit)
     print(json.dumps(dict(complete=result['complete'], samples=result['manifest']['samples'], batching=result['batching'])))

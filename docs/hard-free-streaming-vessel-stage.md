@@ -106,25 +106,22 @@ The frozen vessel auditor still uses the strict single-axis density comparison
 in `physical_hard_free_line_vessel.audit_trace`. The
 [SMC conditioning diagnosis](smc-density-conditioning-diagnosis.md) shows that
 this comparison can fail on narrow intervals even when interval endpoints and
-same-input density arithmetic agree. Its supplemental helper is not yet a
-validated drop-in replacement for the full vessel.
+same-input density arithmetic agree. At that preparation's freeze, its
+supplemental helper had not been validated for the full vessel.
 
 The vessel permits exact exterior support zeros, positive fallback tails and
-the exact Cayley seam. Its scorer requires finite Gaussian logs only for active
-components; the supplemental helper currently requires all such logs to be
-finite and uses an absolute latent-coordinate tolerance. An optional extension
-would need separate checks for inactive negative-infinite logs, large
-near-seam coordinates and exact-seam zero handling. The existing sphere fixtures
-cover exterior/fallback/invalid cases, but the 128 completed narrow-interval
-witnesses all lie inside R4 and do not cover these additional cases.
+the exact Cayley seam. A subsequent [optional extension](full-vessel-conditioned-audit.md)
+now handles these cases, verifies saved-law q/J before the unchanged outer
+mixture and weight checks, and keeps independently rebuilt geometry for
+generation checks. It passed 45 focused tests and all 16,640 saved sphere-reference
+draws without new sampling. The streaming reducer explicitly aggregates its
+additional attempted counts and numerical maxima.
 
-Any later extension must verify saved-law q/J before passing it to the unchanged
-outer-mixture and weight checks, preserve the independently rebuilt geometry
-for generation checks, and retain every invalid zero. It must not replace the
-physical importance denominator by an independently reconstructed geometry law.
-The streaming batch reducer must explicitly aggregate the additional checks.
-No tolerance, source file, job command or gate in the frozen vessel preparation
-has been changed; completed references remain reusable.
+This capability is opt-in. The frozen preparation still pins the earlier
+strict auditor; no tolerance, archived source, job command or scientific gate
+in that preparation has changed. A future execution closure must bind the new
+source and option explicitly. The numerical checks do not certify exact-real
+geometry or unseen protein poses, and the scientific prerequisites remain.
 
 ## Authenticated completed-stage reader
 

@@ -10,7 +10,7 @@ import os
 for _key in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS'):os.environ[_key]='1'
 import argparse
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
@@ -130,22 +130,45 @@ def audit_trace(actual,density,guide):
     return maximum
 
 
-def check_rows(config,manifest,rows,vessel,guide):
+def check_rows(config,manifest,rows,vessel,guide, *, conditioned_density_audit=False):
     require(manifest['schema']==6 and manifest['outer_mixture_schema']==SCHEMA
         and manifest['latent_guide_schema']=='defensive-hard-free-line-guide-v1','Wrong vessel hard-free schema')
     # The frozen outer-law/weight auditor accepts a density evaluator object;
     # its qphysical, mixture, no-extra-J and unconditional-zero checks apply as is.
     evaluated=guide.evaluate_many([r['pose'] for r in rows])
+    scored=evaluated
+    supplemental=None
+    if conditioned_density_audit:
+        from conditioned_density_audit import audit_conditioned_density, SCHEMA as AUDIT_SCHEMA, SCOPE
+        scored=[]
+        supplemental=dict(schema=AUDIT_SCHEMA,complete=True,checked_attempts=0,maxima={},
+                          scope=SCOPE,domain='full-vessel; exterior support and exact seam retained')
+        for row,density in zip(rows,evaluated):
+            # The Rust vessel stores qphysical alongside (not inside) its
+            # latent-density trace. Preserve the saved interval law as q.
+            record=dict(row['latent_density'],log_physical_density=row['log_latent_physical_density'])
+            result=audit_conditioned_density(record,density,guide,full_vessel=True)
+            require(result['complete'],'Incomplete supplemental density check')
+            q=result['log_latent_density_saved_intervals']
+            physical=result['log_physical_density_saved_intervals']
+            scored.append(replace(density,log_latent_density=q,
+                log_physical_density=-math.inf if physical is None else physical))
+            supplemental['checked_attempts']+=1
+            for key,value in result['maxima'].items():
+                supplemental['maxima'][key]=max(supplemental['maxima'].get(key,0.),value)
     class Cached:
         def evaluate_many(self,poses):
-            require(poses==[r['pose'] for r in rows],'Unexpected cached-density request');return evaluated
+            require(poses==[r['pose'] for r in rows],'Unexpected cached-density request');return scored
     result=vessel_reference.check_rows(config,manifest,rows,vessel,Cached())
     intervals=0.;inverse=0.;zeros=0;seams=0;outside_source=0
     for row,density in zip(rows,evaluated):
         record=row['latent_density']
         require(type(record['structural_zero']) is bool and record['structural_zero']==density.structural_zero,'Structural-zero certificate differs')
         zeros+=density.structural_zero;seams+=density.latent is None
-        intervals=max(intervals,audit_trace(record['hard_free_line_density'],density,guide))
+        if conditioned_density_audit:
+            intervals=supplemental['maxima']['interval_endpoint_error']
+        else:
+            intervals=max(intervals,audit_trace(record['hard_free_line_density'],density,guide))
         source_inside=math.dist(row['pose']['position'],guide.region['capture_center'])<=guide.region['capture_radius']
         outside_source+=bool(row['hard_valid'] and not source_inside)
         if row['outer_branch']=='latent':
@@ -160,10 +183,11 @@ def check_rows(config,manifest,rows,vessel,guide):
         maximum_interval_endpoint_error=intervals,maximum_inverse_CDF_error=inverse,
         source_capture=copy.deepcopy(guide.region['capture_radius']),vessel_capture=config['capture_radius'],
         scope='Every world pose scored under the complete normalized full-R6 guide and original vessel law. Source capture controls conditional intervals only. qphysical=qlatent/J exactly once; outer .5 mixture keeps full vessel support. Structural zeros are certified by support, never exp(logq) underflow.')
+    if supplemental is not None:result['conditioned_density_audit']=supplemental
     return result
 
 
-def audit(directory):
+def audit(directory, *, conditioned_density_audit=False):
     require(sys.flags.optimize==0,'Frozen reference checks require assertions enabled')
     root=Path(directory).resolve();started=time.process_time();ledger=Ledger()
     for p in local_sources(__file__).values():ledger.bind(p)
@@ -194,7 +218,8 @@ def audit(directory):
     source=manifest['latent_source_capture']
     require(source['center']==guide.region['capture_center'] and source['radius']==guide.region['capture_radius'],'Changed source capture')
     vessel=vessel_reference.VesselDensity(config,manifest,read(root/'provenance/model.json'),root/'provenance/source-bundle.json')
-    density_check=check_rows(config,manifest,rows,vessel,guide)
+    density_check=check_rows(config,manifest,rows,vessel,guide,
+                             conditioned_density_audit=conditioned_density_audit)
     generation=vessel_reference.check_generation_metadata(config,manifest,rows,vessel)
     primitive=vessel_reference.check_cloud_envelopes_and_counts(manifest,summary,rows)
     wall=audit_wall_domain(root,dict(manifest,schema=4),rows,summary)
@@ -229,7 +254,8 @@ def audit(directory):
 
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--directory',type=Path,required=True);p.add_argument('--out',type=Path,required=True);args=p.parse_args()
-    require(not args.out.exists(),'Fresh output required');result=audit(args.directory);args.out.parent.mkdir(parents=True,exist_ok=True)
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--directory',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
+    p.add_argument('--conditioned-density-audit',action='store_true');args=p.parse_args()
+    require(not args.out.exists(),'Fresh output required');result=audit(args.directory,conditioned_density_audit=args.conditioned_density_audit);args.out.parent.mkdir(parents=True,exist_ok=True)
     with args.out.open('x') as stream:stream.write(json.dumps(result,indent=2,allow_nan=False)+'\n')
     print(args.out)

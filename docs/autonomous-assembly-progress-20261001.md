@@ -152,6 +152,14 @@ checks do not launch or authorize a protein full-vessel campaign. The cheaper
 indexed regional estimator cannot be reused unchanged outside its support;
 this extension therefore retains complete-mixture weighting.
 
+The new [full-vessel streaming audit](hard-free-vessel-streaming-audit.md)
+processes at most 64 full traces at a time and retains geometry labels for the
+later native partition. Twelve deterministic tests pass. Its reductions reuse
+the 16,640 already audited reference draws and reproduce all six region/variance
+summaries within 5.60×10⁻¹⁵ scaled difference, without repeating geometry,
+density scoring, sampling or native classification. Full-vessel baseline and
+native-partition integration remain outstanding; no production gate has opened.
+
 The [angular extension](hard-free-pose-line-guide.md) conditions any raw Cayley
 coordinate using quadratic sphere-overlap intervals. All 1,536 toy attempts
 passed independent reconstruction; six geometry, 22 shared-guide and eleven

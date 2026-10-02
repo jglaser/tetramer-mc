@@ -106,3 +106,8 @@ changing its frozen guide in place. A later campaign requires a new preparation,
 matching regional evidence, independent full-vessel auditing and explicit
 outside-pocket contribution checks. The finite-system assembly verdict remains
 unresolved.
+
+The optional [streaming audit](hard-free-vessel-streaming-audit.md) now bounds
+the number of live reconstruction traces and writes reusable geometry labels.
+It preserves the complete density/weight checks and all-attempt reductions;
+it is not a new sampling law or a full-vessel production launch.

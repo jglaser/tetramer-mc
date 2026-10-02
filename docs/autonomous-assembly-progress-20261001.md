@@ -34,6 +34,25 @@ only after complete authentication. It launches no physical jobs and does not
 open any convergence gate. All six existing user growth simulations were present
 at its capacity check and were left untouched.
 
+The [eight saved angular queries](protein-angular-saved-probe.md) have completed
+their independent geometry/density audit. Adding angular axes changes densities
+in both directions at the selected poses and costs 3.20 times the translation
+geometry alone. These purposive queries do not establish a physical efficiency
+gain, so no angular physical campaign follows. The
+[streaming vessel schedule](hard-free-streaming-vessel-stage.md) is now specified
+and tested, but remains inert; both scientific prerequisites and the documented
+exterior-density audit issue still need resolution before dispatch.
+
+A separate [joint dimer proposal](dimer-tree-proposal.md) now maps both its
+docking pose and its internal pair pose before one physical decision. Existing
+rigid oligomer moves cannot make that joint change. The accompanying general
+depletion gate accounts for changes in the selected union's own exclusion
+volume, which the rigid gate correctly cancels only for rigid moves. Thirteen
+focused tests pass, including the 12-dimensional coordinate Jacobian and
+analytic isolated-sphere accepted-flow balance. Both remain separate from the
+production kernels. Their sampling benefit is unmeasured; a combined equilibrium
+control is the next implementation check, not evidence for or against assembly.
+
 The [larger-stage variance decomposition](hard-free-line-population-size-noise.md)
 now reuses the saved moments for all failed strata. The worst baseline competing
 bin has importance ESS 3.8 and a single draw carrying 49.5% of its mass, while

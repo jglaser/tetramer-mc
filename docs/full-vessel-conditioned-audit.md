@@ -42,6 +42,16 @@ arithmetic/geometry check while the default strict comparison still rejects.
 The synthetic streaming fixture is explicitly an inert binary/hash fixture,
 not a physical simulation.
 
+A [separate five-test supplement](../tools/test_full_vessel_conditioned_extremes.py)
+also passes: it checks mixed finite-active/negative-infinite-inactive Gaussian
+components, rejects activation of an unrepresentable component even when the
+total mixture remains finite, and exercises actual enabled-conditioner Gaussian
+tails close to the chart seam. Coordinate perturbations that pass the coordinate
+tolerance but fail density sensitivity, Jacobian tampering and active log
+overflow are rejected. These tests use the unchanged frozen auditor sources;
+their [receipt](../results/full-vessel-conditioned-audit-20261002/extreme-tests/validation.json)
+is separate from the original 45 tests and saved-data audits.
+
 The optional auditor then checked all **16,640 saved Rust-generated sphere
 draws** from the existing vessel references, without rerunning a sampler:
 

@@ -81,6 +81,22 @@ are frozen but unlaunched; neither actual SMC improvement nor legacy stream
 parity is established yet. All new build work uses the isolated validation
 target, leaving the live assembly executable unchanged.
 
+The accompanying [pair-flow theorem](../formal/ReversibleSampling/PairFlowPoisson.lean)
+now covers singular translation-only and rotation-only proposals without
+inventing a six-dimensional proposal density. Four new Lean results build and
+pass the focused axiom audit with unchanged dependencies. Concrete Gaussian/Haar
+symmetry, geometry, thinning and floating-point execution remain obligations.
+The exact-reference executor is frozen separately and enforces one physical
+child at a time, independent auditing, capacity checks and no retries.
+
+A prospective protein SMC test is deferred until these references and the fixed
+IID controls finish. No smaller matching historical control was found. A strict
+four-population broad-mutation comparison would retain M=262,144 initial draws,
+N=2,048, 128 stages and four mutations per stage; independent full-guide auditing
+could cost tens to over a hundred CPU-hours. That cost estimate is a planning
+scenario, not a measured SMC result. The current evidence does not justify
+launching it before the cheaper fixed controls finish.
+
 That [larger stage](hard-free-line-population-size-stage.md) is now running at
 `/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`: four fresh
 65,536-draw populations per arm, 524,288 attempted draws in total. Protocol hash:

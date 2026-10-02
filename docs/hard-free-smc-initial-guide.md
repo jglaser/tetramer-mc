@@ -61,10 +61,20 @@ absolute noisy partition-function estimates. At β=1 the proposal-density
 correction vanishes, and at zero activity the density corrections still
 transform \(Hg\) into the hard-volume target.
 
-The existing Lean balance results apply at the algebraic accepted-flow level;
-this extension does not add a formal theorem for the complete SMC program.
-Geometry predicates, normalized guide construction, thinning, independent
-random streams and floating-point execution remain implementation obligations.
+The new [Lean pair-flow bridge](../formal/ReversibleSampling/PairFlowPoisson.lean)
+handles an S-finite reference measure and an actual proposal pair measure
+\(\mu(dx)Q(x,dy)\) that is invariant under swapping its endpoints. This avoids
+assuming a six-dimensional proposal density: a translation-only move retains
+orientation through a Dirac measure, and a rotation-only move retains position.
+The concrete Poisson theorem applies with base density \(Hg^{1-\beta}\) and
+activity \(\beta z\). Four new results compile and use only the standard Lean
+axioms, as recorded in the
+[focused audit](../formal/pair-flow-poisson-validation.json).
+
+The concrete Gaussian/Haar proposal symmetry, normalized guide construction,
+geometry predicates, thinning, independent random streams and floating-point
+execution remain implementation obligations. This is not a formal theorem for
+the complete SMC program or its convergence.
 
 ## Interface and records
 
@@ -131,3 +141,18 @@ Preparation starts no jobs. References must pass independent audits before
 new protein SMC work. Existing protein campaigns and the production assembly
 binary remain unchanged. Finite-system assembly and instability remain
 unresolved.
+
+The separate one-worker executor is
+[`run_hard_free_smc_reference.py`](../tools/run_hard_free_smc_reference.py).
+Its execution closure is frozen in
+`results/hard-free-smc-reference-execution-20261001`, plan SHA-256
+`ab75c171a2fdc052193a1fc9881e3729e6e666c698f6d0aab252d1e41649be95`.
+Nine synthetic tests check unconditional zero populations, linear population
+uncertainty, exact same-stream controls, receipt tampering, capacity limits,
+failure draining and one-shot claims. Each guided job receives one independent
+audit before another physical job starts. The executor checks the host process
+namespace, refuses unavailable capacity, and neither waits for capacity nor
+retries a failed job. It retains all six predeclared analytic comparisons even
+when a statistical reference check fails. Its declared software tolerance is
+six times the population standard error plus 10⁻⁶; it does not replace the
+tighter protein convergence gate.

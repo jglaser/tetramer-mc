@@ -6,6 +6,16 @@ It does not establish faster equilibrium mixing, template-free finite-system
 assembly, or instability of the model. Existing simulations were left running;
 the live production executable was not replaced.
 
+The fixed **786,432-draw contact campaign is now complete**. In the
+[larger stage](hard-free-line-population-size-results.md), every aggregate
+proposal and population-size mass comparison passes. The guided conditional
+native/competing contrast is −18.7204 ± 0.0494 kBT (population-based 95%
+half-width), and importance ESS/CPU improves 1.68–1.88×. Two material strata
+still disagree between proposals and eleven fail the size comparison. Together
+with the earlier sensitivity failures, these leave the convergence gate closed.
+A [fresh four-population SMC bridge control](hard-free-protein-smc-control.md)
+is running to investigate the historical missing native-remainder mass.
+
 ## Latest continuation: feasibility-only conditioning
 
 The [fresh line-guide comparison](hard-free-line-fresh-results.md) completed
@@ -92,23 +102,25 @@ symmetry, geometry, thinning and floating-point execution remain obligations.
 The exact-reference executor is frozen separately and enforces one physical
 child at a time, independent auditing, capacity checks and no retries.
 
-A prospective protein SMC test is deferred until these references and the fixed
-IID controls finish. No smaller matching historical control was found. A strict
-four-population broad-mutation comparison would retain M=262,144 initial draws,
-N=2,048, 128 stages and four mutations per stage; independent full-guide auditing
-could cost tens to over a hundred CPU-hours. That cost estimate is a planning
-scenario, not a measured SMC result. The current evidence does not justify
-launching it before the cheaper fixed controls finish.
+The new [protein SMC control](hard-free-protein-smc-control.md) launched after
+the references and fixed IID controls completed. It retains M=262,144 initial
+draws, N=2,048, 128 stages and four mutations per stage. Independent full-guide
+auditing could cost tens to over a hundred CPU-hours; that estimate is a
+planning scenario, not a measured SMC result. The normalized initial/intermediate
+density changes; the broad local steps, endpoint and allocation remain fixed.
+The frozen controller passes seven tests and enforces two physical/four audit
+workers under the global limits. Controller PID 667281 runs at
+`/vast/xvg/tetramer-mc-runs/hard-free-protein-smc-control-20261002`.
 
-That [larger stage](hard-free-line-population-size-stage.md) has finished physical
-sampling and all eight independent audits, and is classifying the new poses at
+The [larger stage](hard-free-line-population-size-stage.md) completed physical
+sampling, all eight independent audits and once-only classification at
 `/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`: four fresh
 65,536-draw populations per arm, 524,288 attempted draws in total. Protocol hash:
 `cbcf1400a38365f2fa24585110da389b64174fc7e3a563e26cf1618a161c588e`.
 Controller PID 541958 started two physical workers after checking the six
 existing user simulations. Fourteen controller/comparison tests and an
-independent source review passed. It will audit and classify every new draw,
-then compare independent linear population means between stages; no pilot
+independent source review passed. Every new draw was audited and classified,
+then independent linear population means were compared between stages; no pilot
 populations are pooled into the new estimates.
 
 The separate [probability/intensity controls](hard-free-line-sensitivity-stage.md)
@@ -188,8 +200,8 @@ The [new full-vessel preparation](hard-free-streaming-vessel-stage.md) freezes
 the requested four-population 65,536- and 262,144-draw stages for both arms.
 It uses the current 92-component guide and λ/z=128 in both arms, retaining the
 original target and explicit full-domain coverage. Preparation and eight new
-allocation/statistics tests pass. No vessel protein jobs have started; regional
-classification is still live. The authenticated completed-stage reader now passes three
+allocation/statistics tests pass. No vessel protein jobs have started; the
+completed regional campaign still fails convergence checks. The authenticated completed-stage reader now passes three
 additional lineage/manifest controls and preserves all saved statistics without
 geometry or native-classifier replay. The bounded dispatcher remains required.
 

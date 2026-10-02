@@ -1,5 +1,11 @@
 # Fixed population-size sensitivity stage
 
+**Completed:** all sampling, independent audits and classification finished.
+See the [results](hard-free-line-population-size-results.md). Aggregate masses
+agree, but the fixed convergence gate fails material-stratum checks; no
+full-vessel or assembly conclusion follows. The launch notes below are a record
+of the existing campaign, not instructions to repeat it.
+
 This stage adds four fresh 65,536-draw populations per arm: **524,288 new
 unconditional draws**, compared separately with the completed four-by-16,384
 pilot. The schema is `hard-free-line-physical-population-size-v1`; the old

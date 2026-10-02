@@ -80,9 +80,10 @@ these two controls. Neither explains the historical broad-SMC estimate of only
 coverage and its bridge, but does not independently demonstrate that a modified
 SMC run resolves the discrepancy.
 
-The separately frozen larger-population stage is still undergoing independent
-audit/classification. It must be assessed without pooling or waiving these
-failures before deciding the next measurement.
+The separately frozen [larger-population stage](hard-free-line-population-size-results.md)
+has completed. Aggregate masses agree, while material-stratum failures remain.
+Its populations are not pooled with these controls and none of these failures
+is waived. A fresh independent SMC bridge control is the next measurement.
 
 ## Provenance
 

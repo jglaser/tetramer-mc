@@ -1,0 +1,4 @@
+'ReversibleSampling.accepted_flow_pair_measure' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.pair_flow_accepted_flow_symmetric' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.pair_flow_count_gate_correct' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.pair_flow_conditional_poisson_correct' depends on axioms: [propext, Classical.choice, Quot.sound]

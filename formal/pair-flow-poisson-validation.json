@@ -1,0 +1,92 @@
+{
+  "schema": "symmetric-pair-flow-poisson-validation-v1",
+  "complete": true,
+  "checked_at_utc": "2026-10-02T01:16:29.263944+00:00",
+  "lean": "4.24.0",
+  "mathlib_commit": "f897ebcf72cd16f89ab4577d0c826cd14afaafc7",
+  "dependency_pins_unchanged_from_HEAD": true,
+  "checks": [
+    {
+      "command": [
+        ".elan/bin/lake",
+        "env",
+        "lean",
+        "ReversibleSampling/PairFlowPoisson.lean"
+      ],
+      "exit_code": 0,
+      "log": "pair-flow-poisson-attempt1.log"
+    },
+    {
+      "command": [
+        ".elan/bin/lake",
+        "build",
+        "ReversibleSampling.PairFlowPoisson"
+      ],
+      "exit_code": 0,
+      "log": "pair-flow-poisson-build.log"
+    },
+    {
+      "command": [
+        ".elan/bin/lake",
+        "env",
+        "lean",
+        "PairFlowAudit.lean"
+      ],
+      "exit_code": 0,
+      "log": "pair-flow-poisson-audit.txt"
+    }
+  ],
+  "environment": {
+    "ELAN_HOME": "/home/xvg/tetramer-mc/formal/.elan"
+  },
+  "theorems_axiom_audited": 4,
+  "axioms": {
+    "ReversibleSampling.accepted_flow_pair_measure": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.pair_flow_accepted_flow_symmetric": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.pair_flow_count_gate_correct": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.pair_flow_conditional_poisson_correct": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ]
+  },
+  "source_sha256": {
+    "Audit.lean": "6e3e8e9b0c3570165c633dcf2bf7070b1f0b64b25923f821f35580f5515ae00b",
+    "PairFlowAudit.lean": "48a8a5c5650e56d085a36d07a26d70b6d359fddb7da03106285dd2a2cf63ed53",
+    "ReversibleSampling.lean": "813beab724dbcee20b894f4097d3d454f007eaf9a44330aceee47796039284df",
+    "ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "ReversibleSampling/CappedIndependent.lean": "3f524a987f62d1738ee37e1c2bfd1285c76b98f6244105fec40ca56c921c0caa",
+    "ReversibleSampling/ClusterMeasureRates.lean": "0b2fc9774dffc53c701a166a28423b0c88cead3cd2c92549322d58b96b44d596",
+    "ReversibleSampling/ClusterRates.lean": "cc40d15570edd30cb8dff91d067b5f4e44c58ba039ccad8e16dfa236747662bd",
+    "ReversibleSampling/ConditionalPoisson.lean": "8945b49e5a6c5d8f8e673b1dea1dd9cc4bd7ba86e3d2b1b39bfb56f4cff004c5",
+    "ReversibleSampling/CountGate.lean": "7ea576a144c76c5d9b4b6a4c5ceeb137ffce9c4ed09d296084992c8ef764131a",
+    "ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "ReversibleSampling/IndexedImportance.lean": "b45e426d3cfcebf958a42b8821bfa699b84c2b1213ecb49e5236580cb61164ac",
+    "ReversibleSampling/Involution.lean": "273743e9925a32ffc0dd3ebb612900c5c43c6c5d8048e9e6685cb163c628b7cb",
+    "ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "ReversibleSampling/PairFlowPoisson.lean": "247cc12297fc9bd2d678573185a313a9f00d10b48192516b77b47948df6bda19",
+    "ReversibleSampling/Poisson.lean": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2",
+    "README.md": "d7a81e66f2efef8856e2e6964a751f3d7c1989def44c7e33f0eb0f437c508d29",
+    "lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434",
+    "lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5"
+  },
+  "log_sha256": {
+    "pair-flow-poisson-attempt1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "pair-flow-poisson-build.log": "3e4eb57bd2e5c151aedc3931956e8f7e80cf5ee5ba217b5d9bae14e0c5a9c0e4",
+    "pair-flow-poisson-audit.txt": "bed8ae24fe2aea282092b31c7b78cdf173a21f4fc65d1b6edf084e557a3e72f8"
+  },
+  "scope": "S-finite reference measure, explicit swap-invariant actual proposal pair measure; no reference finiteness or proposal density. Weighted acceptance symmetry, normalized auxiliary count gate, and concrete gained/lost Poisson gate completed to a Markov reversible invariant kernel. New four-theorem audit only; prior theorem suite not rerun. No concrete Gaussian/Haar symmetry, branch mixing, geometric rejection/thinning, Rust/float correctness, SMC normalizer convergence or mixing proof. No physical jobs."
+}

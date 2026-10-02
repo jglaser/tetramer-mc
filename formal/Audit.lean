@@ -51,6 +51,12 @@ import ReversibleSampling
 #print axioms ReversibleSampling.poissonGateAcceptance_zero_changes
 #print axioms ReversibleSampling.conditional_poisson_zero_activity_correct
 
+/-! Singular-proposal count gate through an explicitly symmetric reference pair flow. -/
+#print axioms ReversibleSampling.accepted_flow_pair_measure
+#print axioms ReversibleSampling.pair_flow_accepted_flow_symmetric
+#print axioms ReversibleSampling.pair_flow_count_gate_correct
+#print axioms ReversibleSampling.pair_flow_conditional_poisson_correct
+
 /-! Internal-geometry subset rate / fixed-duration finite-state bridge. -/
 #print axioms ReversibleSampling.ClusterRates.weighted_rate_reversible
 #print axioms ReversibleSampling.ClusterRates.descriptor_rate_equal

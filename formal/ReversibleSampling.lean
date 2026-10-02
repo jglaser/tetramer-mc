@@ -6,6 +6,7 @@ import ReversibleSampling.IndexedImportance
 import ReversibleSampling.Poisson
 import ReversibleSampling.CountGate
 import ReversibleSampling.ConditionalPoisson
+import ReversibleSampling.PairFlowPoisson
 import ReversibleSampling.ClusterRates
 import ReversibleSampling.ClusterMeasureRates
 import ReversibleSampling.CappedIndependent

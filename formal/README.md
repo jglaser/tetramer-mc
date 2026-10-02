@@ -364,6 +364,54 @@ exact stopping rule are implementation obligations. The existing rejection
 completion theorem applies once accepted-flow symmetry and the row-mass bound
 are supplied. This bridge does not formalize the Rust retry loop itself.
 
+## Singular local proposals and the Poisson gate
+
+`PairFlowPoisson.lean` removes the common proposal-density requirement for a
+reference-symmetric kernel. Write `rho = μ ⊗ₘ Q` and explicitly assume
+`rho.map Prod.swap = rho`. For measurable finite `p` and measurable acceptance,
+`pair_flow_accepted_flow_symmetric` proves that
+
+\[
+p(x)\alpha(x,y)=p(y)\alpha(y,x)
+\]
+
+gives symmetric accepted flow relative to `μ.withDensity p`. This argument
+integrates against the actual proposal pair measure; it never replaces a Dirac
+coordinate with a six-dimensional density. The reference measure is **s-finite**,
+which suffices for composition-product integration. Finiteness is not assumed.
+The separate existing `reversible_pair_flow_swap` lemma assumes a finite
+reference measure and cannot be applied unchanged to unrestricted Lebesgue ×
+Haar measure.
+
+`pair_flow_count_gate_correct` combines this bridge with the existing scalar
+count identity, using the constant `q=1` only in that scalar expression.
+`pair_flow_conditional_poisson_correct` then proves the completed gained/lost
+Poisson kernel Markov, reversible and invariant, including zero changed volumes
+and hard-zero base densities, for strictly positive `λ`. No assertion
+`Q(x,dy)=μ(dy)` is introduced.
+
+For guided SMC the intended substitution is
+`base(x)=H(x) g(x)^(1-beta)` and activity `beta*z`, where `g=q_guide/J` is the
+complete density in physical measure. Between valid poses the executable log
+ratio is `(1-beta)*(log g(new)-log g(old)) + (gained-lost)*log1p(beta*z/λ)`.
+At zero activity the guide correction still applies; at `beta=1` it vanishes.
+Positive defensive support on the target domain and the correct physical
+Jacobian remain obligations of the proposal implementation.
+
+Translation-only and rotation-only local kernels are singular in full pose
+space. Their reference symmetry follows mathematically from even Gaussian
+translation increments, inverse-symmetric Cayley rotation increments and Haar
+invariance, with state-independent mixture weights. **These concrete facts
+have not been instantiated in Lean.** Neither have the mixture construction,
+geometric rejection boundary, gained-minus-lost volume identity, exact Poisson
+thinning, RNG independence or floating-point execution. The new theorem closes
+the abstract singular-kernel gap, not the entire code-to-proof gap, and proves
+neither SMC normalizer convergence nor mixing efficiency.
+
+The focused check is `lake build ReversibleSampling.PairFlowPoisson` followed
+by `lake env lean PairFlowAudit.lean`. Its four-theorem axiom and source receipt
+is `pair-flow-poisson-validation.json`; prior validation receipts are retained.
+
 ## Pinned environment and reproducible check
 
 - Lean `v4.24.0`, compiler commit
@@ -395,7 +443,8 @@ ELAN_HOME="$PWD/.elan" .elan/bin/lake env lean Audit.lean
 
 `python3 check.py` runs both checks, verifies that every printed axiom list is
 within the standard trusted set, and writes commands, outputs, and source
-SHA-256 hashes to `validation.json`. The current audit contains 65 theorems.
+SHA-256 hashes to `validation.json`. That receipt records its checked theorem
+count; focused additions retain separate receipts until the next full check.
 `validation-before-poisson-20260921.json` preserves the preceding successful
 19-theorem record. No physical campaign is rerun by this check.
 
@@ -412,6 +461,11 @@ disk use; these settings affect downloads, not proof checking.
 | `poisson_importance_sampling` | [`latent_region`](../src/latent_region.rs), [`conditional_ray`](../src/latent_region/conditional_ray.rs) | The implemented full proposal density must be normalized with complete support; the chart/Haar Jacobian and every unconditional zero must be correct. Two independent cloud weights are averaged in linear weight space. |
 | `poisson_gate_term_correction`, `conditional_poisson_metropolis_correct` | [`depletion::sample_with_envelope`](../src/depletion.rs), physical acceptance in [`simulation`](../src/simulation.rs) | Lost points must have intensity λ+z and gained points λ, with the gained-minus-lost overlap-volume identity. The base/proposal correction must match the selected kernel. |
 | Existing involution and completed-flow theorems | Frozen chart transport and [`spherical`](../src/spherical.rs) kernels | Concrete augmented maps, reference-measure preservation and singular-kernel auxiliary count laws require their own instantiation. The common-density count theorem does not establish this automatically. |
+
+The singular local mutation bridge is `pair_flow_conditional_poisson_correct`,
+with reference pair-flow symmetry as an explicit assumption. Its implementation
+obligations include the Gaussian/Cayley/Haar argument and fixed mixture weights
+described above, as well as the existing count-law obligations.
 
 The gained and lost counts are independent because they are thinnings of a
 Poisson process into disjoint gained/lost regions, assuming correct geometric

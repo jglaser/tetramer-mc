@@ -11,6 +11,7 @@ pub mod defensive_dimer_proposal;
 pub mod depletion;
 pub mod dimer_tree_proposal;
 pub mod docking;
+pub mod factorized_dimer;
 pub mod flexible_subset;
 pub mod geometry;
 pub mod gca_overlap_diagnostic;

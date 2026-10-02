@@ -1,0 +1,12 @@
+import ReversibleSampling.FactorizedIndependent
+#print axioms ReversibleSampling.FactorizedIndependent.edgeFactor_nonnegative
+#print axioms ReversibleSampling.FactorizedIndependent.jointMass_bounds
+#print axioms ReversibleSampling.FactorizedIndependent.endpointFactor_nonnegative
+#print axioms ReversibleSampling.FactorizedIndependent.factorized_mass_identity
+#print axioms ReversibleSampling.FactorizedIndependent.factorized_mass_bounds
+#print axioms ReversibleSampling.FactorizedIndependent.zero_root_cap
+#print axioms ReversibleSampling.FactorizedIndependent.zero_child_cap
+#print axioms ReversibleSampling.FactorizedIndependent.zero_joint_cap
+#print axioms ReversibleSampling.FactorizedIndependent.zero_final_mass
+#print axioms ReversibleSampling.FactorizedIndependent.factorized_accepted_flow
+#print axioms ReversibleSampling.FactorizedIndependent.factorized_preserves_balance

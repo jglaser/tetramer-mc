@@ -1,0 +1,47 @@
+{
+  "allowed_axioms": [
+    "Classical.choice",
+    "Quot.sound",
+    "propext"
+  ],
+  "artifact_sha256": {
+    "results/factorized-dimer-balance-20261002/finite-tests.log": "055599edbe731cef16aa0077d429f9b12664db13ffc12c5fed7daa0f5c87abd7",
+    "results/factorized-dimer-balance-20261002/finite-validation.json": "62ca13fb511f68577b64b8fcb4ea758862ec04f685e824dfe8d7eae8917f8270",
+    "results/factorized-dimer-balance-20261002/lean-final-axioms.log": "28bdb156bff67146186bb94d018a2691f3f798b4ade8f723f3f71bab61659e98",
+    "results/factorized-dimer-balance-20261002/lean-final-build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "audit_exit_code": 0,
+  "build_exit_code": 0,
+  "checked_at_utc": "2026-10-02T23:07:48.431418+00:00",
+  "commands": [
+    "ELAN_HOME=\"$PWD/.elan\" .elan/bin/lake env lean -j2 -o .lake/build/lib/lean/ReversibleSampling/FactorizedIndependent.olean ReversibleSampling/FactorizedIndependent.lean",
+    "ELAN_HOME=\"$PWD/.elan\" .elan/bin/lake env lean -j2 FactorizedIndependentAudit.lean"
+  ],
+  "complete": true,
+  "dependency_pins_unchanged": true,
+  "lean_threads": 2,
+  "schema": "factorized-independent-lean-validation-v1",
+  "scope": "Scalar composition and shared accepted-flow factors only; finite enumeration is separate. No SE(3), geometry, RNG or Rust implementation theorem.",
+  "sha256": {
+    "FactorizedIndependentAudit.lean": "72c6e83ada2edeb336b27f0957a0fd61f8ae7dd4b2c4236ccd23c94f740d9126",
+    "ReversibleSampling/CappedIndependent.lean": "3f524a987f62d1738ee37e1c2bfd1285c76b98f6244105fec40ca56c921c0caa",
+    "ReversibleSampling/FactorizedIndependent.lean": "9de1df81a71eb3ef461e2baba9e41c5decbde5b22936901aee3da3ad098f82fa",
+    "lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434"
+  },
+  "theorem_axiom_audits": 11,
+  "theorems": [
+    "ReversibleSampling.FactorizedIndependent.edgeFactor_nonnegative",
+    "ReversibleSampling.FactorizedIndependent.jointMass_bounds",
+    "ReversibleSampling.FactorizedIndependent.endpointFactor_nonnegative",
+    "ReversibleSampling.FactorizedIndependent.factorized_mass_identity",
+    "ReversibleSampling.FactorizedIndependent.factorized_mass_bounds",
+    "ReversibleSampling.FactorizedIndependent.zero_root_cap",
+    "ReversibleSampling.FactorizedIndependent.zero_child_cap",
+    "ReversibleSampling.FactorizedIndependent.zero_joint_cap",
+    "ReversibleSampling.FactorizedIndependent.zero_final_mass",
+    "ReversibleSampling.FactorizedIndependent.factorized_accepted_flow",
+    "ReversibleSampling.FactorizedIndependent.factorized_preserves_balance"
+  ]
+}

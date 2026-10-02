@@ -279,6 +279,17 @@ impl<'a> DefensiveDimerProposal<'a> {
         }
     }
 
+    /// Draw one complete independent edge without scoring either endpoint.
+    ///
+    /// This is exactly the edge drawer used by `propose`, including its branch
+    /// coin and null trace. `old_relative_pose` is recorded metadata only; a
+    /// caller must validate its source before consuming RNG. Geometric retries
+    /// must redraw this WHOLE mixture, never retain a failed component label.
+    /// A numerical null is not a geometric rejection and must remain visible.
+    pub fn draw_edge(&self, rng: &mut StdRng, old_relative_pose: Pose) -> DefensiveDimerEdge {
+        self.draw(rng, old_relative_pose)
+    }
+
     pub fn propose(
         &self,
         rng: &mut StdRng,

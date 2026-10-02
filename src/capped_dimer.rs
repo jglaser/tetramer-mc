@@ -45,6 +45,30 @@ pub struct DimerFeasibility {
     pub wall_valid: [bool; 2],
     pub internal_exclusion_contact: bool,
 }
+
+/// One body against the immutable spectator snapshot and atomic wall.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct FixedBodyFeasibility {
+    pub spectator_core_collisions: Vec<usize>,
+    pub wall_valid: bool,
+}
+impl FixedBodyFeasibility {
+    pub fn hard_valid(&self) -> bool {
+        self.spectator_core_collisions.is_empty() && self.wall_valid
+    }
+}
+
+/// Isolated internal pair in the root's identity frame; no wall or spectators.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct InternalDimerFeasibility {
+    pub internal_core_overlap: bool,
+    pub internal_exclusion_contact: bool,
+}
+impl InternalDimerFeasibility {
+    pub fn feasible(&self) -> bool {
+        !self.internal_core_overlap && self.internal_exclusion_contact
+    }
+}
 impl DimerFeasibility {
     pub fn hard_valid(&self) -> bool {
         !self.internal_core_overlap
@@ -127,6 +151,46 @@ impl<'a> FixedDimerContext<'a> {
     }
     pub fn members(&self) -> [usize; 2] {
         self.members
+    }
+
+    /// Root prefilter for an independently decoded world pose. Both selected
+    /// labels are excluded from the fixed spectators, exactly as in `evaluate`.
+    pub fn evaluate_fixed_body(&self, pose: Pose) -> Result<FixedBodyFeasibility> {
+        Self::check_arithmetic(pose, self.exclusion.bound)?;
+        let wall_pose = Pose {
+            position: sub(pose.position, self.wall_center),
+            ..pose
+        };
+        if self.wall.is_some() {
+            Self::check_arithmetic(wall_pose, self.core.bound)?;
+        }
+        let placed = Placed::new(pose);
+        Ok(FixedBodyFeasibility {
+            spectator_core_collisions: self
+                .spectators
+                .iter()
+                .filter_map(|(label, p)| self.core.overlaps(&placed, p).then_some(*label))
+                .collect(),
+            wall_valid: self
+                .wall
+                .as_ref()
+                .is_none_or(|wall| wall.contains(wall_pose)),
+        })
+    }
+
+    /// Independent internal-edge prefilter. Frame round-trip/endpoint predicate
+    /// agreement is the caller's responsibility; no tolerance changes geometry.
+    pub fn evaluate_internal_relative(&self, relative: Pose) -> Result<InternalDimerFeasibility> {
+        Self::check_arithmetic(relative, self.exclusion.bound)?;
+        let root = Placed::new(Pose {
+            position: [0.; 3],
+            orientation: [1., 0., 0., 0.],
+        });
+        let child = Placed::new(relative);
+        Ok(InternalDimerFeasibility {
+            internal_core_overlap: self.core.overlaps(&root, &child),
+            internal_exclusion_contact: self.exclusion.overlaps(&root, &child),
+        })
     }
     /// Evaluate every recorded hard predicate, even after a collision is found.
     pub fn evaluate(&self, members: [Pose; 2]) -> Result<DimerFeasibility> {

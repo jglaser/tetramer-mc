@@ -74,6 +74,58 @@ An authenticated loader is now available as described below. A reviewed bounded
 dispatcher and the outstanding regional evidence are still needed before this
 preparation can run. `dispatch_ready` therefore remains false.
 
+[`streaming_vessel_execution_plan.py`](../tools/streaming_vessel_execution_plan.py)
+now supplies a pure scheduling adapter for that future dispatcher. It preserves
+all 16 frozen physical, audit and partition commands and destinations. Each
+stage contains eight physical jobs, eight audits, eight partitions and one
+authenticated stage-reader call, in that order. The declared worker limits are
+8 physical, 4 audit and 32 overall; both predeclared stages remain separate.
+The reader entry point is pinned under a future workflow's `common/` directory
+by its source hash, and its command includes the explicit preparation hash.
+
+This adapter has no launch entry point or gate authority and writes no files.
+It checks the existing preparation contract and exact schedule, but does not
+authenticate the declared hashes or assess scientific evidence. Deterministic
+tests cover unchanged commands, independent populations, stage completeness,
+budgets, source/hash pins and absence of file or process side effects. A future
+dispatcher must freeze and authenticate the reader's source closure, apply the
+regional prerequisites, check global live-worker capacity and drain started
+children on failure. The frozen preparation remains unchanged and inert.
+
+Two execution details remain explicit: log parent directories must be created
+only after the execution claim and prerequisite checks, leaving fresh child
+output directories absent; live-worker accounting must recognize Python jobs
+under `/vast` as well as repository paths. The existing
+`prepare_hard_free_line_sensitivity_reference.capacity` function handles those
+paths and rejects a private PID namespace. Declared group limits alone cannot
+enforce the global limit alongside other simulations.
+
+### Numerical readiness of the vessel audit
+
+The frozen vessel auditor still uses the strict single-axis density comparison
+in `physical_hard_free_line_vessel.audit_trace`. The
+[SMC conditioning diagnosis](smc-density-conditioning-diagnosis.md) shows that
+this comparison can fail on narrow intervals even when interval endpoints and
+same-input density arithmetic agree. Its supplemental helper is not yet a
+validated drop-in replacement for the full vessel.
+
+The vessel permits exact exterior support zeros, positive fallback tails and
+the exact Cayley seam. Its scorer requires finite Gaussian logs only for active
+components; the supplemental helper currently requires all such logs to be
+finite and uses an absolute latent-coordinate tolerance. An optional extension
+would need separate checks for inactive negative-infinite logs, large
+near-seam coordinates and exact-seam zero handling. The existing sphere fixtures
+cover exterior/fallback/invalid cases, but the 128 completed narrow-interval
+witnesses all lie inside R4 and do not cover these additional cases.
+
+Any later extension must verify saved-law q/J before passing it to the unchanged
+outer-mixture and weight checks, preserve the independently rebuilt geometry
+for generation checks, and retain every invalid zero. It must not replace the
+physical importance denominator by an independently reconstructed geometry law.
+The streaming batch reducer must explicitly aggregate the additional checks.
+No tolerance, source file, job command or gate in the frozen vessel preparation
+has been changed; completed references remain reusable.
+
 ## Authenticated completed-stage reader
 
 [`analyze_streaming_vessel_stage.py`](../tools/analyze_streaming_vessel_stage.py)

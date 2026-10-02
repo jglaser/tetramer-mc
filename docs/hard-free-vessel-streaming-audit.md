@@ -157,3 +157,33 @@ global masses under `estimates`, source-R4 contributions under
 `regional_estimates`, and all predeclared bins under `strata`. The previous stage
 aggregator is not automatically compatible with this schema. A new preparation
 must freeze the adapter and the updated stage accounting before protein sampling.
+
+## Domain inclusion before regional comparisons
+
+[`certify_vessel_region_containment.py`](../tools/certify_vessel_region_containment.py)
+provides a sufficient geometric inclusion test, without pose sampling. If a
+chart has whitened radius R, translation mean m and covariance block Σtt, then
+every atomic point lies at most
+
+\[
+\|m-c_{\rm wall}\| + R\sqrt{\operatorname{tr}\Sigma_{tt}}
+ + \max_a(\|c_a\|+r_a)
+\]
+
+from the wall center. The trace gives a conservative bound on translation extent
+even when translation and rotation are correlated. Proper rotations preserve
+the body-radius bound. The implementation uses exact-rational quaternion
+rotation and positive-definiteness checks, plus outward rational square-root
+enclosures. It binds the shape to the frozen chart hash.
+
+For the existing repaired shape and full R4 chart, the outer atomic-radius bound
+is **184.365560 Å**, below the planned **223.326177 Å** wall radius by at least
+**38.960616 Å**. The entire chart also fits within the vessel's 273 Å center
+capture. Thus the wall does not delete part of the regional integral in the
+exact-real model. The certificate is
+`results/vessel-native-partition-validation-20261002/current-r4-containment.json`.
+Two tests cover rational enclosures, normalized quaternion rotations,
+translation–rotation covariance, sphere unions and inconclusive smaller walls.
+This certificate treats stored JSON decimals as exact real inputs; it does not
+certify floating-point execution. Failing the conservative bound would leave
+containment unresolved, not prove that the wall clips the region.

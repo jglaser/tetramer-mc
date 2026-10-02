@@ -172,6 +172,12 @@ and remain in independent auditing. A new full-vessel campaign and stage
 comparison remain to be prepared after the regional evidence is assessed;
 no production gate has opened.
 
+A deterministic exact-rational domain bound places the entire R4 chart and
+every atom sphere at least 38.96 Å inside the planned vessel wall. This validates
+the geometric inclusion needed to compare regional and full-vessel R4 masses,
+without new sampling. It does not establish statistical convergence or certify
+floating-point execution.
+
 The [angular extension](hard-free-pose-line-guide.md) conditions any raw Cayley
 coordinate using quadratic sphere-overlap intervals. All 1,536 toy attempts
 passed independent reconstruction; six geometry, 22 shared-guide and eleven

@@ -132,6 +132,12 @@ The positive one-step flag has the opposite sign from the earlier evolving-chain
 pooled contact deficit. Neither is discarded, and neither establishes the sign
 or existence of a persistent bias by itself. There is no allocation extension.
 
+A later, separately frozen [matched control](dimer-matched-stationarity.md)
+uses 524,288 fresh source/proposal pairs with shared analytic/world/path endpoint
+comparisons. None of its five primary tests rejects, and it finds no bath-specific
+contrast. This failure is retained as the original outcome; the new allocation
+is an independent diagnosis, not a replacement or extension.
+
 The first frozen analysis encountered a **report serialization failure**, after
 its row checks and statistics had returned: a SciPy p-value comparison produced
 a NumPy boolean unsupported by JSON. Its log and partial output remain intact.

@@ -1,0 +1,13 @@
+{
+  "inputs": {
+    "results/dimer-mean-clearance-20261002/execution/queries.jsonl": "89f320d5ada106505fd02bee240ad406d30e88099d95013f3f99cdd4244748bd",
+    "results/dimer-mean-clearance-20261002/execution/analysis.json": "1079c4945ca4543e0ce7a73a4d9e18ebb667fae575381d2950e8b6ff029ee9e7",
+    "results/dimer-mean-clearance-20261002/postprocess.json": "a901cf19468b9a3246dd23b73831f624526651a9e8c797e76c2f23a78020fa73",
+    "results/dimer-mean-clearance-20261002/saved-draw-center-join.jsonl": "6ffff15c83b3d31ec382ef4ae6f72bd93ebc79dd6702bb8650abcb53926725d2"
+  },
+  "joined_draws": 512,
+  "center_clashes": 0,
+  "sampled_internal_clashes": 479,
+  "left_measure": "Unweighted virtual branch centers, not mixture sample mass.",
+  "right_measure": "Same512 saved branch labels at center and after Gaussian draw; no physical acceptance."
+}

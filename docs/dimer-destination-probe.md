@@ -182,6 +182,12 @@ would further restrict the source set and cannot silently create an attachment
 kernel from sources outside that set. Configuration-dependent pair and anchor
 selection remains a separate production obligation.
 
+Subsequent work [implemented the capped joint channel](capped-dimer-conditioning.md)
+and [tested its protein destinations](capped-dimer-probe.md). A separate
+[all-center audit](dimer-mean-clearance.md) shows that every one of the 479
+saved blind FFT internal collisions arose from a component with a feasible
+center. These later results do not change this frozen screen or its allocation.
+
 The [one-step sphere control](dimer-one-step-stationarity.md) also retains a
 predeclared stationarity rejection for the defensive/world-bath combination.
 That unresolved validation flag and the original contact-weight convergence

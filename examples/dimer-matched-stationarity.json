@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "core_radius": 0.2,
+  "exclusion_radius": 1.0,
+  "activity": 1.5,
+  "auxiliary_intensity": 24.0,
+  "root_radius": 2.0,
+  "min_separation": 0.4,
+  "max_separation": 2.5,
+  "rho": 0.7,
+  "uniform_probability": 0.5,
+  "uniform_half_width": 2.5,
+  "gate": {
+    "max_cells": 255,
+    "max_depth": 5,
+    "min_width": 0.0
+  },
+  "draws_per_population": 65536,
+  "analysis_protocol": "matched-defensive-bath-bonferroni5-v1",
+  "populations": [
+    {
+      "id": "matched-r00",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027000
+    },
+    {
+      "id": "matched-r01",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027001
+    },
+    {
+      "id": "matched-r02",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027002
+    },
+    {
+      "id": "matched-r03",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027003
+    },
+    {
+      "id": "matched-r04",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027004
+    },
+    {
+      "id": "matched-r05",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027005
+    },
+    {
+      "id": "matched-r06",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027006
+    },
+    {
+      "id": "matched-r07",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "seed": 610027007
+    }
+  ]
+}

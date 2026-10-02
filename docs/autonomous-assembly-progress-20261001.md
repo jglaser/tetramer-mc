@@ -14,8 +14,24 @@ component repairs source-tail penalties mainly by proposing contact loss:
 512-slot learned-only product produced zero hard-valid destinations in 512
 attempts; the native-informed control produced 34, including 22 with both
 intended tree contacts. This is a conditional feasibility comparison, not an
-equilibrium weight or assembly result. A capped joint feasibility-conditioned
-redraw is the next candidate; it has not been implemented or promoted.
+equilibrium weight or assembly result. The subsequent
+[capped joint kernel](capped-dimer-conditioning.md) is now implemented and
+tested. Its [frozen protein screen](capped-dimer-probe.md) passed 1,692,219 independent checks on 2,304
+outer attempts and 22,227 raw trials. At cap 32, the blind memory, FFT and native
+atlases respectively proposed 176, 66 and 208 feasible dimers per 256 attempts;
+only 21, 1 and 39 also had both intended exclusion contacts. No physical bath,
+acceptance or native classification was performed. More candidates per outer
+step are an expected retry effect, not evidence of faster equilibrium mixing.
+
+A [deterministic center audit](dimer-mean-clearance.md) narrows the geometric
+problem: 2,042 of 2,048 FFT branch centers are core-valid, with median clearance
+0.043864 Å. All 512 previously sampled internal-pose branches had valid centers;
+479 of their actual Gaussian draws collided. The problem in those rows arises
+away from feasible centers, not from choosing colliding centers. This supports
+geometry-aware conditioning of the draws rather than another blind center
+search. The [factorized conditioning design](factorized-dimer-conditioning.md)
+can prefilter the independent root and internal edges, with fixed-context
+normalizers that cancel; it remains unimplemented and unbenchmarked.
 
 The separately frozen [independent-source sphere control](dimer-one-step-stationarity.md)
 completed 327,680 one-step trials. One of five primary stationarity tests
@@ -27,7 +43,17 @@ gives a positive contact change, so the exploratory comparison does not isolate
 a bath-specific fault. No allocation was extended and no production kernel was
 changed. The earlier sphere ESS/CPU gains remain provisional estimates.
 
-As of 2026-10-02 22:05 UTC, the two saved-data SMC audits and their guarded
+The fresh [matched reference control](dimer-matched-stationarity.md) then
+completed 524,288 independent source/proposal pairs with three acceptance
+decisions each. All five predeclared tests are consistent with zero drift. The
+world-minus-analytic contact contrast is 0.0000782 ± 0.0002029 (one SE), with
+no source-family flags. The earlier rejection is preserved; the larger control
+does not reproduce it or identify a bath-specific effect, and does not rule out
+arbitrarily small errors. All-row generation, density, geometry and MH audits
+passed. The prepared-factor scoring correction is separate: the toy's identity
+factors already agreed, so that correction does not explain the earlier flag.
+
+As of 2026-10-02 22:51 UTC, the two saved-data SMC audits and their guarded
 analysis watcher remain live. Five user growth jobs remain live; the
 native-informed `cluster-oligomer-seed8-free256-z004` job completed its planned
 100,000 sweeps at 20:58 UTC. That completion alone supplies no new classified

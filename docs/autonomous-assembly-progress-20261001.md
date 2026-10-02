@@ -76,10 +76,13 @@ classifications and does not open the full-vessel or assembly gates.
 An [optional SMC initial-guide mode](hard-free-smc-initial-guide.md) now
 implements that path with complete physical q/J, deterministic density
 caching and fresh auxiliary clouds. Five Rust tests, six independent-auditor
-tests and three reference-preparation tests pass. The sphere/Haar references
-are frozen but unlaunched; neither actual SMC improvement nor legacy stream
-parity is established yet. All new build work uses the isolated validation
-target, leaving the live assembly executable unchanged.
+tests and three reference-preparation tests pass. The eleven sphere/Haar
+references have now completed: all six analytic mass checks, ten independent
+guided-law audits, the empty-target test and the same-stream uniform control
+pass. The largest analytic discrepancy is 2.89 population SE, within the frozen
+software tolerance. Actual protein SMC improvement remains unmeasured. All new
+build work uses the isolated validation target, leaving the live assembly
+executable unchanged.
 
 The accompanying [pair-flow theorem](../formal/ReversibleSampling/PairFlowPoisson.lean)
 now covers singular translation-only and rotation-only proposals without
@@ -97,7 +100,8 @@ could cost tens to over a hundred CPU-hours. That cost estimate is a planning
 scenario, not a measured SMC result. The current evidence does not justify
 launching it before the cheaper fixed controls finish.
 
-That [larger stage](hard-free-line-population-size-stage.md) is now running at
+That [larger stage](hard-free-line-population-size-stage.md) has finished physical
+sampling and is independently auditing all populations at
 `/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`: four fresh
 65,536-draw populations per arm, 524,288 attempted draws in total. Protocol hash:
 `cbcf1400a38365f2fa24585110da389b64174fc7e3a563e26cf1618a161c588e`.
@@ -108,14 +112,16 @@ then compare independent linear population means between stages; no pilot
 populations are pooled into the new estimates.
 
 The separate [probability/intensity controls](hard-free-line-sensitivity-stage.md)
-are implemented and awaiting physical capacity: four 16,384-draw populations
-at α=0.2/λ128 and four at α=0.5/λ64, each compared with the completed conditioned
-pilot. They preserve the same components and physical target. Twenty-two new
-tests passed. The additional α=0.2 analytic sphere references are prepared;
-protein controls cannot be frozen until those references and their independent
-geometry audits pass. The comparison includes the native–competing free-energy
-contrast itself, since separate mass checks can miss opposite shifts. No new
-physical jobs were launched while the eight-job limit was occupied.
+are now running: four 16,384-draw populations at α=0.2/λ128 and four at α=0.5/λ64,
+each compared with the completed conditioned pilot. They preserve the same
+components and physical target. Twenty-two tests and the additional α=0.2
+analytic sphere references with full independent geometry audits pass.
+The new controller is PID 611099 at
+`/vast/xvg/tetramer-mc-runs/hard-free-line-sensitivity-20261001`, protocol hash
+`100fdb3b68b2a1bfdf9de6fdce61a7759894d0818f7affa6a9b9e7d0ba977cc6`.
+The comparison includes the native–competing free-energy contrast itself,
+since separate mass checks can miss opposite shifts. No new physical jobs
+were launched while the eight-job limit was occupied.
 
 The [retained-index alternative](hard-free-line-index-estimator.md) now has an
 independently reviewed derivation, six arithmetic/provenance tests and four

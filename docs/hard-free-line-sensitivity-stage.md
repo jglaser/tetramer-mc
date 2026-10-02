@@ -105,10 +105,22 @@ The sphere-reference inputs are frozen in
 `results/hard-free-line-sensitivity-reference-preparation-v2-20261001`, allocation
 SHA-256 `e531a10572722785ecdfb61e618024cfbf8e8e5bda344727a30b038130a14b99`.
 Seeds 610016211 and 610016212 were checked against 30,294 declarations.
-No new physical reference or protein-control job has started, and no successful
-reference receipt exists yet. The live population-size stage retains the two
-available physical slots alongside six existing user assembly jobs. Its first
-two populations have completed; no unfinished weights were used for this design.
+Both new sphere jobs and their independent full-geometry audits are complete:
+16,384 unconditional attempts, including exterior and hard-invalid zeros.
+All six hard-volume, depletion and latent-normalization checks pass the frozen
+reference tolerances. The successful prerequisite receipt is
+`results/hard-free-line-sensitivity-reference-preparation-v2-20261001/prerequisites.json`,
+SHA-256 `a73436c569f380c17fdee4d41d45ca605fa0e144bf56e050f1662231b26b5473`.
+
+The protein controls are separately frozen at
+`/vast/xvg/tetramer-mc-runs/hard-free-line-sensitivity-20261001`, protocol SHA-256
+`100fdb3b68b2a1bfdf9de6fdce61a7759894d0818f7affa6a9b9e7d0ba977cc6`.
+Controller PID 611099 has started the two physical workers after checking host
+capacity. All eight new populations will be audited and classified before the
+fixed comparison is evaluated. The population-size stage has finished all
+524,288 physical draws and is independently auditing them. No unfinished
+protein weights were used to choose this allocation. The six user assembly
+simulations remain running; the production executable is unchanged.
 
 V2 supersedes the retained, unlaunched v1 preparation. It pins the Python,
 NumPy and SciPy runtime, rejects an optimized Python parent, and explicitly

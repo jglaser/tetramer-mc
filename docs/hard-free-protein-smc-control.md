@@ -86,3 +86,9 @@ claimed execution. All six preexisting user simulations were preserved.
 The exact command and observed prelaunch capacity are retained in `launch.json`.
 The [seven-test receipt](../results/hard-free-protein-smc-controller-validation-20261002/validation.json)
 binds the controller source used for preparation.
+
+The [contact-analysis preparation](hard-free-protein-smc-analysis.md) is now
+frozen separately and queued behind successful completion of all four audits.
+It preserves the predeclared stage profile, complete native classifier and
+whole-population estimator. The queued analysis starts no physical jobs and
+does not change this execution or its guide.

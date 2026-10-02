@@ -15,6 +15,11 @@ still disagree between proposals and eleven fail the size comparison. Together
 with the earlier sensitivity failures, these leave the convergence gate closed.
 A [fresh four-population SMC bridge control](hard-free-protein-smc-control.md)
 is running to investigate the historical missing native-remainder mass.
+Its [contact analysis](hard-free-protein-smc-analysis.md) is frozen and queued
+behind all four successful independent audits. Seven estimator/accounting tests
+and three dependency-watcher checks pass. The analysis will compare terminal
+normalizer-times-indicator masses and retain all failed strata; no physical
+SMC result is available yet.
 
 ## Latest continuation: feasibility-only conditioning
 

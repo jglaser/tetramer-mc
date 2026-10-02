@@ -66,4 +66,37 @@ This validates the batching and reductions. It does not certify random-stream
 independence, exact thinning/envelope construction, floating-point execution or
 missing-mode coverage. The regional convergence and full-vessel production
 gates remain closed. A schema-4 baseline adapter and native/pocket partition
-integration are still needed for the planned protein comparison.
+integration were initially outstanding; baseline support is now available as
+described below. Native/pocket partition integration remains outstanding.
+
+## Baseline arm and matched logging
+
+[`audit_vessel_baseline_streaming.py`](../tools/audit_vessel_baseline_streaming.py)
+applies the same batching, wall/core/contact predicates and streaming moments
+to schema 4. It accepts `--region` solely as a reporting chart, without loading
+or evaluating a regional proposal guide. Changing this chart or its capture
+radius cannot change the baseline density or weights. Its geometry output
+omits the guide-specific `latent_zero` label.
+
+All full-wall Rust normalizers now record the attempted-draw journal, completion
+hashes and handled failures. Full-wall sample records are flushed per draw;
+plain non-wall normalizers keep their previous behavior. There is no change to
+proposal or random-stream code and no restart/power-loss recovery claim.
+
+The frozen logging comparison in
+`results/normalizer-wall-journal-parity-20261002` completed three new 128-draw
+controls using intentional same-seed replay of the updated executable. The
+old executable was not rerun. Baseline, Gaussian-guide and hard-free sample
+files are each byte-identical to their archived counterparts, including every
+pose, invalid zero, density, weight and auxiliary count. The new journals and
+summary hashes also pass. This is a compatibility check, not three additional
+independent physical estimates.
+
+The new baseline control then passed one complete independent audit of all
+128 attempts with batch size 32. Three deterministic tests check reporting-chart
+independence, missing journals/mismatched shapes, and rejection of an extra
+weight factor while preserving earlier records. The isolated executable is
+SHA-256 `5ebc7599e2bfe457da0aa46ccf99ab0fc789eb21b604b5fcc31226036bf979d6`,
+with embedded source bundle
+`0d012425681497200a3d60967c5fd9a652e6e4e5fc0b79ba5d2d9b8053128859`.
+The running assembly executable is unchanged.

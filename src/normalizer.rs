@@ -438,10 +438,14 @@ fn run_impl(
             manifest["latent_source_capture"]["conditions_guide"] = json!(true);
             manifest["latent_density_trace"] =
                 json!("complete all-axis intervals, scored once at the world pose");
-            manifest["attempt_journal"] =
-                json!("attempts.jsonl; begin before each attempt; no retries");
-            manifest["resume_supported"] = json!(false);
         }
+    }
+    // All full-wall arms retain the same attempted-draw accounting. This is
+    // observation only: no extra draw, proposal, or acceptance branch is added.
+    let record_attempts = wall.is_some();
+    if record_attempts {
+        manifest["attempt_journal"] = json!("attempts.jsonl; begin before each attempt; no retries");
+        manifest["resume_supported"] = json!(false);
     }
     save(&options.out.join("manifest.json"), &manifest)?;
     let start = Instant::now();
@@ -450,7 +454,7 @@ fn run_impl(
     let hard_free_line = latent_guide
         .as_ref()
         .is_some_and(PhysicalLatentGuide::is_hard_free_line);
-    let mut journal = if hard_free_line {
+    let mut journal = if record_attempts {
         Some(File::create(options.out.join("attempts.jsonl"))?)
     } else {
         None
@@ -677,7 +681,7 @@ fn run_impl(
             }
             serde_json::to_writer(&mut writer, &row)?;
             writer.write_all(b"\n")?;
-            if hard_free_line {
+            if record_attempts {
                 writer.flush()?;
             }
             if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
@@ -721,7 +725,7 @@ fn run_impl(
     if wall.is_some() {
         summary["wall_rejected"] = json!(wall_rejected);
     }
-    if hard_free_line {
+    if record_attempts {
         summary["attempts_sha256"] = json!(hash_file(&options.out.join("attempts.jsonl"))?);
         summary["samples_sha256"] = json!(hash_file(&options.out.join("samples.jsonl"))?);
     }

@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "core_radius": 0.2,
+  "exclusion_radius": 1.0,
+  "activity": 1.5,
+  "auxiliary_intensity": 24.0,
+  "root_radius": 2.0,
+  "min_separation": 0.4,
+  "max_separation": 2.5,
+  "rho": 0.7,
+  "gate": {
+    "max_cells": 255,
+    "max_depth": 5,
+    "min_width": 0.0
+  },
+  "burn_in": 2048,
+  "production_steps": 16384,
+  "chains": [
+    {
+      "id": "analytic-contact-r00",
+      "arm": "analytic",
+      "initialization": "contact",
+      "seed": 610024000
+    },
+    {
+      "id": "analytic-contact-r01",
+      "arm": "analytic",
+      "initialization": "contact",
+      "seed": 610024001
+    },
+    {
+      "id": "analytic-dispersed-r00",
+      "arm": "analytic",
+      "initialization": "dispersed",
+      "seed": 610024010
+    },
+    {
+      "id": "analytic-dispersed-r01",
+      "arm": "analytic",
+      "initialization": "dispersed",
+      "seed": 610024011
+    },
+    {
+      "id": "poisson-contact-r00",
+      "arm": "poisson",
+      "initialization": "contact",
+      "seed": 610024100
+    },
+    {
+      "id": "poisson-contact-r01",
+      "arm": "poisson",
+      "initialization": "contact",
+      "seed": 610024101
+    },
+    {
+      "id": "poisson-dispersed-r00",
+      "arm": "poisson",
+      "initialization": "dispersed",
+      "seed": 610024110
+    },
+    {
+      "id": "poisson-dispersed-r01",
+      "arm": "poisson",
+      "initialization": "dispersed",
+      "seed": 610024111
+    }
+  ]
+}

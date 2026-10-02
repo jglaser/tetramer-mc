@@ -1,0 +1,106 @@
+{
+  "schema": 1,
+  "core_radius": 0.2,
+  "exclusion_radius": 1.0,
+  "activity": 1.5,
+  "auxiliary_intensity": 24.0,
+  "root_radius": 2.0,
+  "min_separation": 0.4,
+  "max_separation": 2.5,
+  "rho": 0.7,
+  "gate": {
+    "max_cells": 255,
+    "max_depth": 5,
+    "min_width": 0.0
+  },
+  "burn_in": 2048,
+  "production_steps": 16384,
+  "chains": [
+    {
+      "id": "tree-singleton_path-contact-r00",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "initialization": "contact",
+      "seed": 610025000
+    },
+    {
+      "id": "tree-singleton_path-contact-r01",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "initialization": "contact",
+      "seed": 610025001
+    },
+    {
+      "id": "tree-singleton_path-dispersed-r00",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "initialization": "dispersed",
+      "seed": 610025010
+    },
+    {
+      "id": "tree-singleton_path-dispersed-r01",
+      "proposal_kind": "tree",
+      "arm": "singleton_path",
+      "initialization": "dispersed",
+      "seed": 610025011
+    },
+    {
+      "id": "defensive_independent-poisson-contact-r00",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "initialization": "contact",
+      "seed": 610025100
+    },
+    {
+      "id": "defensive_independent-poisson-contact-r01",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "initialization": "contact",
+      "seed": 610025101
+    },
+    {
+      "id": "defensive_independent-poisson-dispersed-r00",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "initialization": "dispersed",
+      "seed": 610025110
+    },
+    {
+      "id": "defensive_independent-poisson-dispersed-r01",
+      "proposal_kind": "defensive_independent",
+      "arm": "poisson",
+      "initialization": "dispersed",
+      "seed": 610025111
+    },
+    {
+      "id": "defensive_independent-singleton_path-contact-r00",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "initialization": "contact",
+      "seed": 610025200
+    },
+    {
+      "id": "defensive_independent-singleton_path-contact-r01",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "initialization": "contact",
+      "seed": 610025201
+    },
+    {
+      "id": "defensive_independent-singleton_path-dispersed-r00",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "initialization": "dispersed",
+      "seed": 610025210
+    },
+    {
+      "id": "defensive_independent-singleton_path-dispersed-r01",
+      "proposal_kind": "defensive_independent",
+      "arm": "singleton_path",
+      "initialization": "dispersed",
+      "seed": 610025211
+    }
+  ],
+  "uniform_probability": 0.5,
+  "uniform_half_width": 2.5
+}

@@ -6,6 +6,7 @@ pub mod assembly_bias;
 pub mod cayley_axis_geometry;
 pub mod circle_geometry;
 pub mod contact_distances;
+pub mod defensive_dimer_proposal;
 pub mod depletion;
 pub mod dimer_tree_proposal;
 pub mod docking;
@@ -23,6 +24,7 @@ pub mod overlap_weight;
 pub mod proposal;
 pub mod rj;
 pub mod simulation;
+pub mod singleton_path;
 pub mod spherical;
 pub mod trajectory;
 

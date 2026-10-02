@@ -132,6 +132,24 @@ body-frame gate for large displacements. Correctness and that cost need separate
 tests; the coordinate construction alone establishes neither acceptance gains
 nor faster equilibrium sampling.
 
+There is also an intrinsic noise penalty, separate from the cover's raw point
+cost. Conditional on fixed forward/reverse proposal traces, let R be the exact
+physical times proposal ratio and V_delta=|G|+|L| the actual changed solvent
+volume. Cauchy--Schwarz on the accepted auxiliary flow gives
+
+\[
+\mathbb E[\alpha_{X\to Y}]
+\leq \min\{1,\sqrt R\,
+\exp[-\tfrac12(\sqrt{\lambda+z}-\sqrt\lambda)^2 V_\delta]\}.
+\]
+
+The exponential is the Hellinger affinity of the two conditional Poisson
+laws: the gained-region intensities exchange lambda and lambda+z, as do the
+lost-region intensities. This bound involves the **changed volume**, not the
+possibly much larger bounding cover. A large cover alone cannot establish poor
+acceptance. Nevertheless, relocating entire exclusion bodies in world
+coordinates can introduce auxiliary disagreement unrelated to contact changes.
+
 The existing Lean results
 [`poisson_depletion_count_factor`](../formal/ReversibleSampling/ConditionalPoisson.lean)
 and [`pair_flow_conditional_poisson_correct`](../formal/ReversibleSampling/PairFlowPoisson.lean)
@@ -142,16 +160,28 @@ implemented joint proposal with the theorem's pair flow, measurable union
 geometry, complete covers, exact thinning and floating-point execution remain
 separate obligations. The prior checked theorem receipts are reused.
 
-One possible later cost optimization is to reshape the dimer at its old root
-and then carry the new internal geometry rigidly to the new root. A reverse
-order coin makes the reverse path visit the same intermediate geometry. Use a
-general world-coordinate gate on the reshaping leg and the existing co-moving
-gate on the rigid leg, with independently sampled auxiliary clouds and one
-final acceptance decision. The positive bath factors at the intermediate
-configuration telescope; it need not satisfy hard-core constraints, which are
-checked at physical endpoints. Reversal must exchange the actual legs and
-their auxiliary traces, not just the coin. This is a design option, not an
-implemented optimization or established speedup.
+One simpler cost optimization is to use the existing co-moving **single-body**
+gate twice. With fixed endpoints X=(r,c,E), Y=(r',c',E), a fair order coin chooses
+the intermediate M=(r',c,E) or M=(r,c',E). Build M by copying endpoint poses,
+without composing or reconstructing them. Root-first X to M to Y reverses as
+child-first Y to M to X; the reverse uses the same intermediate and exchanges
+the two cloud records. At each leg the other selected tetramer is a spectator.
+
+The two positive bath ratios telescope through W(M). M may violate hard cores
+or the protein-only wall; it is used only for bath algebra. There must be no
+intermediate physical acceptance or hard rejection. Sum the two independently
+sampled single-body gate factors and the original joint proposal correction,
+then make **one** decision after checking the physical endpoint. The fair
+endpoint-independent order coin cancels in the reverse ratio. Adaptive order
+selection would require its own correction.
+
+This construction reuses each single-body gate's cancellation of its own
+constant excluded volume. It is a different auxiliary coupling from the direct
+world-space gate. Two traversals and a poorly placed intermediate can still
+cost more or increase count noise. The path is now implemented separately in
+[`singleton_path.rs`](../src/singleton_path.rs); the
+[matched sphere comparison](dimer-tree-comparison.md) measures its cost and
+equilibrium diagnostics. It is not connected to production assembly kernels.
 
 ## Integration and validation boundary
 
@@ -204,3 +234,10 @@ contact changes, then contact-environment ESS per CPU and initialization
 agreement. It must compare frozen geometry-only and native-informed atlases
 without native-label filtering. No proposal-only result, short trajectory or
 fixed-scaffold integral decides finite-system native assembly.
+
+The first [combined equilibrium reference](dimer-tree-equilibrium-control.md)
+has now completed 147,456 sphere attempts with independent row reconstruction.
+Both contact occupancies agree with the analytic reference and the Poisson arm
+completes 2,835 roundtrips. Four moment diagnostics exceed three between-stream
+SE and remain flagged; they are within 2.8 batch SE. No protein efficiency or
+assembly claim follows from this control.

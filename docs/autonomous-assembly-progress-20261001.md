@@ -50,8 +50,28 @@ depletion gate accounts for changes in the selected union's own exclusion
 volume, which the rigid gate correctly cancels only for rigid moves. Thirteen
 focused tests pass, including the 12-dimensional coordinate Jacobian and
 analytic isolated-sphere accepted-flow balance. Both remain separate from the
-production kernels. Their sampling benefit is unmeasured; a combined equilibrium
-control is the next implementation check, not evidence for or against assembly.
+production kernels. A [combined sphere reference](dimer-tree-equilibrium-control.md)
+has now completed 147,456 attempts and independent density/decision audits. The
+Poisson arm completes 2,835 roundtrips across the d=1 threshold; these are not
+full dissociation events. Its contact-occupancy interval includes the analytic
+reference. Four monitored moments exceed three between-stream
+SE (all within 2.8 batch SE); those flags remain. Protein sampling benefit is
+unmeasured, and this reference does not decide assembly.
+
+The subsequent [matched sphere comparison](dimer-tree-comparison.md) implements
+the two-singleton auxiliary path and a separate full defensive-mixture redraw.
+It reuses the earlier reference and adds 221,184 independently audited attempts.
+The path improves estimated threshold-contact ESS/CPU by 1.98x for the original
+involutive proposal and 3.21x for the defensive redraw. Each contact-occupancy
+interval includes the analytic reference; one new moment flag and all earlier
+flags remain. Exploratory pooling shows an approximately 2.3-SE occupancy
+deficit, and some initial-preparation differences approach 2 SE. These speed
+ratios are point estimates, not a complete convergence certificate.
+A [32-attempt protein geometry probe](dimer-tree-protein-cost-probe.md) predicts
+17--22x fewer raw candidate points for the path at its saved endpoints, but also
+finds a severe Gaussian source-tail penalty in the historical blind atlas. It
+generates no clouds or physical acceptances. The new kernels remain standalone,
+and neither this cost screen nor the sphere gains establish protein assembly.
 
 The [larger-stage variance decomposition](hard-free-line-population-size-noise.md)
 now reuses the saved moments for all failed strata. The worst baseline competing

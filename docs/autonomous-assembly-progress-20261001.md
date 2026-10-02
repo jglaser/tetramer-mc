@@ -71,6 +71,16 @@ independent source review passed. It will audit and classify every new draw,
 then compare independent linear population means between stages; no pilot
 populations are pooled into the new estimates.
 
+The separate [probability/intensity controls](hard-free-line-sensitivity-stage.md)
+are implemented and awaiting physical capacity: four 16,384-draw populations
+at α=0.2/λ128 and four at α=0.5/λ64, each compared with the completed conditioned
+pilot. They preserve the same components and physical target. Twenty-two new
+tests passed. The additional α=0.2 analytic sphere references are prepared;
+protein controls cannot be frozen until those references and their independent
+geometry audits pass. The comparison includes the native–competing free-energy
+contrast itself, since separate mass checks can miss opposite shifts. No new
+physical jobs were launched while the eight-job limit was occupied.
+
 The [retained-index alternative](hard-free-line-index-estimator.md) now has an
 independently reviewed derivation, six arithmetic/provenance tests and four
 additional Lean-checked identities. The complete 74-declaration axiom audit uses

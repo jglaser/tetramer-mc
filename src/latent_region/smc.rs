@@ -3,6 +3,7 @@
 //!
 //! This is a separate estimator, not continuation of any independent-draw run.
 //! See docs/smc-r4-control.md for the unnormalized-measure identity and limits.
+use super::physical_guide::{PhysicalGuideDensity, PhysicalLatentGuide};
 use super::{Chart, Metric, draw_uniform, log_add};
 use crate::{
     depletion,
@@ -23,7 +24,7 @@ use std::{
     f64::consts::PI,
     fs::{self, File},
     io::{BufWriter, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::Instant,
 };
 
@@ -71,6 +72,101 @@ struct Particle {
     /// Certified membership of the retained pose; absent in the unrestricted law.
     #[serde(skip_serializing_if = "Option::is_none")]
     native_membership: Option<Value>,
+    /// Deterministic normalized physical density only; no auxiliary noise is cached.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    guide_density_cache: Option<GuideDensityCache>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GuideDensityCache {
+    pose: Pose,
+    log_g: f64,
+}
+
+fn retained_guide_density(particle: &Particle) -> Result<f64> {
+    let cache = particle
+        .guide_density_cache
+        .as_ref()
+        .context("Missing guided SMC density cache")?;
+    ensure!(
+        cache.pose == particle.pose && cache.log_g.is_finite(),
+        "Guided SMC density cache lost its pose binding or finite support"
+    );
+    Ok(cache.log_g)
+}
+
+fn guide_density_record(d: &PhysicalGuideDensity) -> Value {
+    json!({"latent":d.latent,"in_reference_ball":d.in_reference_ball,
+        "log_latent_density":d.log_latent_density,
+        "log_physical_jacobian":d.log_physical_jacobian,
+        "log_physical_density":d.log_physical_density,
+        "structural_zero":d.structural_zero,"hard_free_line_density":d.hard_free_line_density})
+}
+
+/// New-mode only: flush the attempted identity before any geometry or RNG work.
+struct AttemptJournal {
+    writer: BufWriter<File>,
+    last_attempt: Option<Value>,
+}
+impl AttemptJournal {
+    fn create(path: &Path) -> Result<Self> {
+        Ok(Self {
+            writer: BufWriter::new(File::options().write(true).create_new(true).open(path)?),
+            last_attempt: None,
+        })
+    }
+    fn begin(&mut self, mut event: Value) -> Result<()> {
+        event["state"] = json!("begin");
+        jsonline(&mut self.writer, &event)?;
+        self.writer.flush()?;
+        self.last_attempt = Some(event);
+        Ok(())
+    }
+}
+
+fn begin_attempt(journal: &mut Option<AttemptJournal>, event: Value) -> Result<()> {
+    if let Some(journal) = journal {
+        journal.begin(event)?;
+    }
+    Ok(())
+}
+
+fn validate_initial_guide_options(options: &SmcOptions, spec: &Value) -> Result<()> {
+    ensure!(
+        options.bridge == SmcBridge::ProposalDensity
+            && options.initial_reference_region.is_none()
+            && options.initial_current_probability == 1.
+            && options.exclude_native_entry.is_none(),
+        "Initial guide requires proposal-density bridge, no reference mixture, no native exclusion, and current probability one"
+    );
+    ensure!(
+        spec["schema"] == "defensive-hard-free-line-guide-v1"
+            && spec["raw_translation_axes"] == json!([0, 1, 2]),
+        "Initial guide requires the validated translation-only hard-free schema and all three raw axes"
+    );
+    ensure!(
+        spec["defensive_uniform_shell_probability"]
+            .as_f64()
+            .is_some_and(|a| a.is_finite() && a > 0. && a <= 1.),
+        "Initial guide requires positive uniform defensive support"
+    );
+    Ok(())
+}
+
+fn mutation_density_correction(bridge: SmcBridge, beta: f64, old: f64, new: f64) -> f64 {
+    if bridge == SmcBridge::ProposalDensity {
+        (1. - beta) * (new - old)
+    } else {
+        0.
+    }
+}
+
+fn incremental_density_correction(bridge: SmcBridge, delta_beta: f64, log_g: f64) -> f64 {
+    if bridge == SmcBridge::ProposalDensity {
+        -delta_beta * log_g
+    } else {
+        0.
+    }
 }
 
 #[derive(Default, Serialize)]
@@ -275,6 +371,8 @@ fn mutate(
     reference: Option<&(Chart, f64, f64)>,
     log_volume: f64,
     native: Option<&dyn NativeConstraint>,
+    guide: Option<&PhysicalLatentGuide>,
+    journal: &mut Option<AttemptJournal>,
 ) -> Result<(MutationCounts, Vec<Value>, Vec<Value>)> {
     let mut counts = MutationCounts::default();
     let mut density_records = Vec::new();
@@ -295,15 +393,24 @@ fn mutate(
         if let Some(predicate) = native {
             retained_membership(particle, predicate)?;
         }
-        let mut log_g = proposal_log_density(
-            chart,
-            reference,
-            options.initial_current_probability,
-            log_volume,
-            particle.pose,
-        )?;
+        let mut log_g = if guide.is_some() {
+            retained_guide_density(particle)?
+        } else {
+            proposal_log_density(
+                chart,
+                reference,
+                options.initial_current_probability,
+                log_volume,
+                particle.pose,
+            )?
+        };
         ensure!(log_g.is_finite(), "Retained SMC pose lost proposal support");
         for sweep in 0..options.sweeps_per_stage {
+            begin_attempt(
+                journal,
+                json!({"phase":"mutation","stage":stage,
+                "particle":index,"sweep":sweep,"old_pose":particle.pose}),
+            )?;
             counts.attempted += 1;
             let new = docking::local(
                 &mut stream(options.seed, stage, index, sweep, "local-proposal"),
@@ -355,28 +462,33 @@ fn mutate(
             )?;
             counts.raw_points += gate.raw_points;
             ensure!(gate.log_weight.is_finite(), "Nonfinite mutation gate");
-            let new_log_g = proposal_log_density(
-                chart,
-                reference,
-                options.initial_current_probability,
-                log_volume,
-                new,
-            )?;
-            ensure!(new_log_g.is_finite(), "SMC candidate lost proposal support");
-            let correction = if options.bridge == SmcBridge::ProposalDensity {
-                (1. - beta) * (new_log_g - log_g)
+            let proposed_guide_density = guide.map(|g| g.evaluate(new)).transpose()?;
+            let new_log_g = if let Some(density) = &proposed_guide_density {
+                density.log_physical_density
             } else {
-                0.
+                proposal_log_density(
+                    chart,
+                    reference,
+                    options.initial_current_probability,
+                    log_volume,
+                    new,
+                )?
             };
+            ensure!(new_log_g.is_finite(), "SMC candidate lost proposal support");
+            let correction = mutation_density_correction(options.bridge, beta, log_g, new_log_g);
             let log_acceptance = (correction + gate.log_weight).min(0.);
             let log_uniform = stream(options.seed, stage, index, sweep, "mutation-accept")
                 .random::<f64>()
                 .ln();
             let accepted = log_uniform < log_acceptance;
             if options.bridge == SmcBridge::ProposalDensity || native.is_some() {
-                density_records.push(json!({"particle":index,"sweep":sweep,"old_pose":particle.pose,"proposed_pose":new,
+                let mut record = json!({"particle":index,"sweep":sweep,"old_pose":particle.pose,"proposed_pose":new,
                     "log_g_old":log_g,"log_g_new":new_log_g,"beta":beta,"deterministic_log_correction":correction,
-                    "gate":gate,"log_acceptance":log_acceptance,"log_uniform":log_uniform,"accepted":accepted}));
+                    "gate":gate,"log_acceptance":log_acceptance,"log_uniform":log_uniform,"accepted":accepted});
+                if let Some(density) = &proposed_guide_density {
+                    record["proposed_guide_density"] = guide_density_record(density);
+                }
+                density_records.push(record);
             }
             if native.is_some() {
                 native_records.push(json!({"particle":index,"sweep":sweep,
@@ -394,6 +506,12 @@ fn mutate(
                 particle.pose = new;
                 particle.latent = latent;
                 particle.native_membership = candidate_membership;
+                if guide.is_some() {
+                    particle.guide_density_cache = Some(GuideDensityCache {
+                        pose: new,
+                        log_g: new_log_g,
+                    });
+                }
                 counts.accepted += 1;
             } else {
                 counts.gate_rejected += 1;
@@ -406,18 +524,39 @@ fn mutate(
 pub fn run(options: SmcOptions) -> Result<Value> {
     #[cfg(test)]
     {
-        run_impl(options, None)
+        run_impl(options, None, None)
     }
     #[cfg(not(test))]
     {
-        run_impl(options)
+        run_impl(options, None)
+    }
+}
+
+/// A distinct frozen, normalized hard-free initial law; the terminal target is unchanged.
+pub fn run_with_initial_guide(options: SmcOptions, path: &Path) -> Result<Value> {
+    #[cfg(test)]
+    {
+        run_impl(options, Some(path), None)
+    }
+    #[cfg(not(test))]
+    {
+        run_impl(options, Some(path))
     }
 }
 
 fn run_impl(
     options: SmcOptions,
+    initial_guide_path: Option<&Path>,
     #[cfg(test)] test_constraint: Option<&dyn NativeConstraint>,
 ) -> Result<Value> {
+    let initial_guide_raw = initial_guide_path.map(fs::read).transpose()?;
+    let initial_guide_spec: Option<Value> = initial_guide_raw
+        .as_ref()
+        .map(|bytes| serde_json::from_slice(bytes))
+        .transpose()?;
+    if let Some(spec) = &initial_guide_spec {
+        validate_initial_guide_options(&options, spec)?;
+    }
     let alpha = options.initial_current_probability;
     ensure!(
         alpha.is_finite()
@@ -540,12 +679,20 @@ fn run_impl(
         native.or(test_constraint)
     };
     let restricted = native.is_some();
-    let manifest_schema = if restricted {
+    ensure!(
+        initial_guide_path.is_none() || !restricted,
+        "Guided SMC does not support a restricted native target"
+    );
+    let manifest_schema = if initial_guide_path.is_some() {
+        "latent-region-smc-hard-free-initial-guide-v1"
+    } else if restricted {
         "latent-region-smc-native-excluded-v1"
     } else {
         "latent-region-smc-v1"
     };
-    let summary_schema = if restricted {
+    let summary_schema = if initial_guide_path.is_some() {
+        "latent-region-smc-hard-free-initial-guide-summary-v1"
+    } else if restricted {
         "latent-region-smc-native-excluded-summary-v1"
     } else {
         "latent-region-smc-summary-v1"
@@ -586,6 +733,18 @@ fn run_impl(
         })
         .transpose()?;
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
+    let initial_guide = initial_guide_raw
+        .as_ref()
+        .map(|bytes| {
+            PhysicalLatentGuide::from_bytes_with_geometry(
+                &region_raw,
+                bytes,
+                &shape_hash,
+                &cfg,
+                &tree,
+            )
+        })
+        .transpose()?;
     let env = Environment {
         tree: &tree,
         fixed: physical_fixed.iter().copied().map(Placed::new).collect(),
@@ -631,6 +790,9 @@ fn run_impl(
             bytes,
         )?;
     }
+    if let Some(bytes) = &initial_guide_raw {
+        fs::write(options.out.join("provenance/initial-guide.json"), bytes)?;
+    }
     let log_volume = 3. * PI.ln() + 6. * RADIUS.ln() - 6_f64.ln();
     let mut manifest = json!({"schema":manifest_schema, "options":options,
         "config_sha256":hash_bytes(&config_raw), "region_sha256":hash_bytes(&region_raw), "shape_sha256":shape_hash,
@@ -650,6 +812,28 @@ fn run_impl(
         "terminal_estimator":"Zhat * mean_N(f(terminal_pose)); report fixed-region indicators with the unchanged independent complete classifier",
         "worker_count":1, "log_latent_ball_volume":log_volume,
         "scope":"Separate fixed-budget conditional normalizer. No protein convergence claim, automatic extension, classifier change, or existing Lean SMC theorem."});
+    if let Some(guide) = &initial_guide {
+        let spec = initial_guide_spec
+            .as_ref()
+            .context("Missing initial guide specification")?;
+        manifest["initial_guide"] = json!({"path":initial_guide_path,"sha256":guide.guide_sha256(),
+            "schema":spec["schema"],"region_sha256":guide.region_sha256(),"shape_sha256":guide.shape_sha256(),
+            "uniform_probability":guide.uniform_probability(),"conditional_probability":spec["conditional_probability"],
+            "raw_translation_axes":spec["raw_translation_axes"],"minimum_conditional_mass":spec["minimum_conditional_mass"],
+            "gaussian_component_count":guide.gaussian_component_count(),"density_measure":PhysicalLatentGuide::DENSITY_MEASURE});
+        manifest["initialization"] = json!(
+            "M unconditional full-R6 frozen hard-free guide draws, including exterior/fallback draws; a=H_current, invalid attempts are zeros, never refilled"
+        );
+        manifest["initial_density"] = json!(
+            "g_physical(x)=q_guide(u(x))/J(u(x)); complete normalized mixture including exterior Gaussian mass and fallbacks, exactly one Jacobian"
+        );
+        manifest["attempt_journal"] = json!(
+            "attempts.jsonl: flushed begin records for each initialization draw, incremental potential, and mutation; no retries or continuation"
+        );
+        manifest["density_cache"] = json!(
+            "Deterministic complete physical density bound to exact pose, cloned during resampling and updated only on accepted mutation; no auxiliary count/noise cache"
+        );
+    }
     if let Some(predicate) = native {
         manifest["native_exclusion"] = predicate.binding();
         manifest["target"] = json!(
@@ -676,6 +860,11 @@ fn run_impl(
     let start = Instant::now();
     let cpu_start = cpu_seconds();
     let mut completed_stage = 0usize;
+    let mut journal = if initial_guide.is_some() {
+        Some(AttemptJournal::create(&options.out.join("attempts.jsonl"))?)
+    } else {
+        None
+    };
     let result = (|| -> Result<Value> {
         save(
             &options.out.join("status.json"),
@@ -689,18 +878,38 @@ fn run_impl(
         let mut initial_native_rejected = 0usize;
         let mut initial_geometric_hits = 0usize;
         for draw in 0..options.initial_draws {
+            begin_attempt(&mut journal, json!({"phase":"initialization","draw":draw}))?;
             let mut rng = stream(options.seed, 0, draw, 0, "initial-pose");
-            let from_current = alpha == 1. || rng.random::<f64>() < alpha;
+            let generated_guide_draw = initial_guide
+                .as_ref()
+                .map(|g| g.draw_only(&mut rng))
+                .transpose()?;
+            let from_current =
+                initial_guide.is_some() || alpha == 1. || rng.random::<f64>() < alpha;
             let (selected_chart, selected_radius, _) = if from_current {
                 (&chart, RADIUS, log_volume)
             } else {
                 let (c, r, v) = reference.as_ref().context("Missing initial reference")?;
                 (c, *r, *v)
             };
-            let (selected_latent, _) = draw_uniform(&mut rng, selected_radius, 0., 1.)?;
-            let (pose, selected_log_jacobian) = selected_chart.decode(selected_latent);
+            let selected_latent = if let Some(drawn) = &generated_guide_draw {
+                drawn.latent
+            } else {
+                draw_uniform(&mut rng, selected_radius, 0., 1.)?.0
+            };
+            let (pose, selected_log_jacobian) = if let Some(guide) = &initial_guide {
+                guide.decode(selected_latent)?
+            } else {
+                selected_chart.decode(selected_latent)
+            };
             pose.validate()?;
-            let latent = if from_current {
+            let guide_density = initial_guide
+                .as_ref()
+                .map(|g| g.evaluate(pose))
+                .transpose()?;
+            let latent = if let Some(density) = &guide_density {
+                density.latent
+            } else if from_current {
                 Some(selected_latent)
             } else {
                 encode_if_off_seam(&chart, pose)?
@@ -733,6 +942,9 @@ fn run_impl(
                             - reference_log_jacobian.context("Missing reference Jacobian")?,
                     );
                 }
+            }
+            if let Some(density) = &guide_density {
+                log_density = density.log_physical_density;
             }
             ensure!(
                 selected_log_jacobian.is_finite()
@@ -772,6 +984,19 @@ fn run_impl(
                 "log_proposal_density":if alpha==1. {Some(-log_volume)} else {None},
                 "log_physical_proposal_density":log_density,"log_physical_jacobian":log_jacobian,
                 "capture_valid":capture_valid,"hard_valid":hard_valid,"log_hard_weight":log_hard_weight,"log_initial_weight":log_weight});
+            if let Some(drawn) = &generated_guide_draw {
+                let density = guide_density
+                    .as_ref()
+                    .context("Missing generated guide density")?;
+                initial_record["selected_initial_chart"] = json!("initial-guide");
+                initial_record["proposal_component"] = json!(drawn.gaussian_component);
+                initial_record["hard_free_line_draw"] = json!(drawn.hard_free_line_draw);
+                initial_record["initial_guide_draw"] = json!({"pose":drawn.pose,"latent":drawn.latent,
+                    "latent_radius":drawn.latent_radius,"gaussian_component":drawn.gaussian_component,
+                    "log_physical_jacobian":selected_log_jacobian,"hard_free_line_draw":drawn.hard_free_line_draw});
+                initial_record["guide_density"] = guide_density_record(density);
+                initial_record["log_proposal_density"] = json!(density.log_latent_density);
+            }
             if restricted {
                 initial_record["target_valid"] = json!(target_valid);
                 initial_record["native_evaluated"] = json!(membership.is_some());
@@ -779,12 +1004,19 @@ fn run_impl(
                 initial_record["log_target_hard_weight"] = json!(log_target_hard_weight);
             }
             jsonline(&mut initial_file, &initial_record)?;
+            if initial_guide.is_some() {
+                initial_file.flush()?;
+            }
             if let Some(weight) = log_weight {
                 initial.push(Particle {
                     pose,
                     latent: latent.context("Valid target missing chart coordinates")?,
                     initial_ancestor: draw,
                     native_membership: membership,
+                    guide_density_cache: initial_guide.as_ref().map(|_| GuideDensityCache {
+                        pose,
+                        log_g: log_density,
+                    }),
                 });
                 initial_logs.push(weight);
             }
@@ -838,6 +1070,10 @@ fn run_impl(
             let mut logs = Vec::with_capacity(options.population);
             let mut potential_rows = Vec::with_capacity(options.population);
             for (index, particle) in particles.iter().enumerate() {
+                begin_attempt(
+                    &mut journal,
+                    json!({"phase":"potential","stage":stage,"particle":index}),
+                )?;
                 if let Some(predicate) = native {
                     retained_membership(particle, predicate)?;
                 }
@@ -867,22 +1103,23 @@ fn run_impl(
                 }
                 let cloud_logs: Vec<_> = clouds.iter().map(|c| c.log_weight).collect();
                 let (_, cloud_log_sum, _) = scaled_weights(&cloud_logs)?;
-                let log_g = proposal_log_density(
-                    &chart,
-                    reference.as_ref(),
-                    alpha,
-                    log_volume,
-                    particle.pose,
-                )?;
+                let log_g = if initial_guide.is_some() {
+                    retained_guide_density(particle)?
+                } else {
+                    proposal_log_density(
+                        &chart,
+                        reference.as_ref(),
+                        alpha,
+                        log_volume,
+                        particle.pose,
+                    )?
+                };
                 ensure!(
                     log_g.is_finite(),
                     "Potential pose lost frozen proposal support"
                 );
-                let density_correction = if options.bridge == SmcBridge::ProposalDensity {
-                    -delta_beta * log_g
-                } else {
-                    0.
-                };
+                let density_correction =
+                    incremental_density_correction(options.bridge, delta_beta, log_g);
                 let log_weight =
                     cloud_log_sum - (options.cloud_replicates as f64).ln() + density_correction;
                 logs.push(log_weight);
@@ -913,6 +1150,8 @@ fn run_impl(
                 reference.as_ref(),
                 log_volume,
                 native,
+                initial_guide.as_ref(),
+                &mut journal,
             )?;
             let mut stage_record = json!({"stage":stage,"beta":beta,"delta_beta":delta_beta,"activity":activity,"previous_activity":previous_activity,
                 "delta_activity":delta,"incremental_lambda":lambda,"log_Z_increment":increment,"log_Z":log_z,
@@ -948,6 +1187,10 @@ fn run_impl(
     })();
     match result {
         Ok(mut summary) => {
+            if let Some(journal) = &mut journal {
+                journal.writer.flush()?;
+                summary["attempts_sha256"] = json!(hash_file(&options.out.join("attempts.jsonl"))?);
+            }
             summary["manifest_sha256"] = json!(hash_file(&options.out.join("manifest.json"))?);
             summary["initialization_sha256"] =
                 json!(hash_file(&options.out.join("initialization.jsonl"))?);
@@ -963,6 +1206,16 @@ fn run_impl(
             Ok(summary)
         }
         Err(error) => {
+            if let Some(journal) = &mut journal {
+                journal.writer.flush()?;
+                save(
+                    &options.out.join("failure.json"),
+                    &json!({"complete":false,
+                    "completed_stage":completed_stage,"last_attempt":journal.last_attempt,
+                    "error":format!("{error:#}"),"retry_performed":false,
+                    "attempts_sha256":hash_file(&options.out.join("attempts.jsonl"))?}),
+                )?;
+            }
             save(
                 &options.out.join("status.json"),
                 &json!({"complete":false,"phase":"failed","completed_stage":completed_stage,"error":format!("{error:#}")}),
@@ -975,6 +1228,172 @@ fn run_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hard_free_smc_cache_is_pose_bound_and_cloned_without_noise() -> Result<()> {
+        let pose = Pose {
+            position: [1., 2., 3.],
+            orientation: [1., 0., 0., 0.],
+        };
+        let particle = Particle {
+            pose,
+            latent: [0.; 6],
+            initial_ancestor: 17,
+            native_membership: None,
+            guide_density_cache: Some(GuideDensityCache { pose, log_g: -12.3 }),
+        };
+        assert_eq!(retained_guide_density(&particle)?, -12.3);
+        let mut descendant = particle.clone();
+        descendant.pose.position[0] += 0.1;
+        assert!(retained_guide_density(&descendant).is_err());
+        descendant.guide_density_cache = Some(GuideDensityCache {
+            pose: descendant.pose,
+            log_g: -11.,
+        });
+        assert_eq!(retained_guide_density(&descendant)?, -11.);
+        assert_eq!(retained_guide_density(&particle)?, -12.3);
+        descendant.guide_density_cache.as_mut().unwrap().log_g = f64::NAN;
+        assert!(retained_guide_density(&descendant).is_err());
+        descendant.guide_density_cache = None;
+        assert!(retained_guide_density(&descendant).is_err());
+        assert!(
+            serde_json::to_value(descendant)?
+                .get("guide_density_cache")
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn hard_free_smc_bridge_telescopes_including_zero_activity() {
+        let schedule = [0., 0.125, 0.5, 0.75, 1.];
+        for log_g in [-27.4, 0.7] {
+            let total: f64 = schedule
+                .windows(2)
+                .map(|b| {
+                    incremental_density_correction(SmcBridge::ProposalDensity, b[1] - b[0], log_g)
+                })
+                .sum();
+            near(total, -log_g); // H*g at beta zero becomes H at beta one even when z=0.
+            assert_eq!(
+                mutation_density_correction(SmcBridge::ProposalDensity, 1., log_g, 12.),
+                0.
+            );
+            near(
+                mutation_density_correction(SmcBridge::ProposalDensity, 0., log_g, 12.),
+                12. - log_g,
+            );
+            assert_eq!(
+                incremental_density_correction(SmcBridge::PhysicalActivity, 0.4, log_g),
+                0.
+            );
+            assert_eq!(
+                mutation_density_correction(SmcBridge::PhysicalActivity, 0.4, log_g, 12.),
+                0.
+            );
+        }
+    }
+
+    // Sum the actual two Poisson count laws, rather than substituting their
+    // mean ratio. Forward gained~Pois(lambda*A), lost~Pois((lambda+a)*B).
+    // The reverse swaps A/B. The deterministic g factor belongs inside min(1,R).
+    #[test]
+    fn hard_free_smc_nonuniform_bridge_poisson_gate_has_balanced_flow() {
+        fn pmf(mean: f64) -> Vec<f64> {
+            let mut p = vec![(-mean).exp()];
+            for k in 1..80 {
+                p.push(p[k - 1] * mean / k as f64);
+            }
+            p
+        }
+        fn acceptance(a: f64, b: f64, lambda: f64, activity: f64, correction: f64) -> f64 {
+            let gain = pmf(lambda * a);
+            let loss = pmf((lambda + activity) * b);
+            let coefficient = (activity / lambda).ln_1p();
+            let mut result = 0.;
+            for (k, pk) in gain.iter().enumerate() {
+                for (l, pl) in loss.iter().enumerate() {
+                    result += pk
+                        * pl
+                        * (correction + coefficient * (k as f64 - l as f64))
+                            .min(0.)
+                            .exp();
+                }
+            }
+            result
+        }
+        for (a, b) in [(0., 0.), (0., 0.7), (0.4, 0.), (0.4, 0.7)] {
+            for beta in [0., 0.25, 1.] {
+                let activity = beta * 0.6;
+                let correction =
+                    mutation_density_correction(SmcBridge::ProposalDensity, beta, -2., -0.3);
+                let forward = acceptance(a, b, 1.2, activity, correction);
+                let reverse = acceptance(b, a, 1.2, activity, -correction);
+                let target_ratio = (correction + activity * (a - b)).exp();
+                assert!((forward - target_ratio * reverse).abs() < 2e-13);
+            }
+        }
+    }
+
+    #[test]
+    fn hard_free_smc_attempt_journal_flushes_without_consuming_rng() -> Result<()> {
+        let root = synthetic_fixture("journal")?;
+        let path = root.0.join("attempts.jsonl");
+        let mut journal = Some(AttemptJournal::create(&path)?);
+        let events = [
+            json!({"phase":"initialization","draw":7}),
+            json!({"phase":"potential","stage":2,"particle":3}),
+            json!({"phase":"mutation","stage":2,"particle":3,"sweep":1,"old_pose":null}),
+        ];
+        for (i, event) in events.into_iter().enumerate() {
+            begin_attempt(&mut journal, event)?;
+            // Read while writer is still alive: every begun attempt is durable to userspace.
+            assert_eq!(read_lines(path.clone())?.len(), i + 1);
+        }
+        assert_eq!(
+            journal.as_ref().unwrap().last_attempt.as_ref().unwrap()["sweep"],
+            1
+        );
+        assert!(AttemptJournal::create(&path).is_err());
+        begin_attempt(&mut None, json!({"phase":"unused"}))?;
+        Ok(())
+    }
+
+    #[test]
+    fn hard_free_smc_strict_mode_validation_precedes_output_creation() -> Result<()> {
+        let root = synthetic_fixture("validation")?;
+        let mut opts = synthetic_options(&root, "unsupported", 12);
+        let mut spec = json!({"schema":"defensive-hard-free-line-guide-v1",
+            "raw_translation_axes":[0,1,2],"defensive_uniform_shell_probability":0.5});
+        assert!(validate_initial_guide_options(&opts, &spec).is_err());
+        let path = root.0.join("guide.json");
+        fs::write(&path, serde_json::to_vec(&spec)?)?;
+        assert!(run_with_initial_guide(opts.clone(), &path).is_err());
+        assert!(!opts.out.exists());
+        opts.bridge = SmcBridge::ProposalDensity;
+        validate_initial_guide_options(&opts, &spec)?;
+        opts.initial_reference_region = Some(root.0.join("region.json"));
+        assert!(validate_initial_guide_options(&opts, &spec).is_err());
+        opts.initial_reference_region = None;
+        opts.exclude_native_entry = Some(root.0.join("compiled.json"));
+        assert!(validate_initial_guide_options(&opts, &spec).is_err());
+        opts.exclude_native_entry = None;
+        opts.initial_current_probability = 0.5;
+        assert!(validate_initial_guide_options(&opts, &spec).is_err());
+        opts.initial_current_probability = 1.;
+        for alpha in [0., -0.1, 1.1] {
+            spec["defensive_uniform_shell_probability"] = json!(alpha);
+            assert!(validate_initial_guide_options(&opts, &spec).is_err());
+        }
+        spec["defensive_uniform_shell_probability"] = json!(1.);
+        validate_initial_guide_options(&opts, &spec)?;
+        spec["raw_translation_axes"] = json!([0, 1]);
+        assert!(validate_initial_guide_options(&opts, &spec).is_err());
+        spec["raw_translation_axes"] = json!([0, 1, 2]);
+        spec["schema"] = json!("defensive-hard-free-pose-line-guide-v1");
+        assert!(validate_initial_guide_options(&opts, &spec).is_err());
+        Ok(())
+    }
+
     #[test]
     fn systematic_skips_zero_at_zero_offset_and_has_unbiased_counts() -> Result<()> {
         assert_eq!(
@@ -1154,7 +1573,7 @@ mod tests {
             let full = run(opts.clone())?;
             let full_out = opts.out.clone();
             opts.out = root.0.join(format!("{name}-identity"));
-            let restricted = run_impl(opts.clone(), Some(&SyntheticMask { kind: 0 }))?;
+            let restricted = run_impl(opts.clone(), None, Some(&SyntheticMask { kind: 0 }))?;
             assert_eq!(full["schema"], "latent-region-smc-summary-v1");
             assert_eq!(
                 restricted["schema"],
@@ -1195,7 +1614,7 @@ mod tests {
         let root = synthetic_fixture("zero")?;
         let mut opts = synthetic_options(&root, "all-native", 33401);
         opts.initial_draws = 257;
-        let result = run_impl(opts.clone(), Some(&SyntheticMask { kind: 1 }))?;
+        let result = run_impl(opts.clone(), None, Some(&SyntheticMask { kind: 1 }))?;
         assert_eq!(result["zero_estimate"], true);
         assert_eq!(result["initial_draws"], 257);
         assert_eq!(result["initial_hits"], 0);
@@ -1245,7 +1664,7 @@ mod tests {
             opts.sweeps_per_stage = 2;
             let full = run(opts.clone())?;
             opts.out = root.0.join(format!("left-{replicate}"));
-            let left = run_impl(opts.clone(), Some(&SyntheticMask { kind: 2 }))?;
+            let left = run_impl(opts.clone(), None, Some(&SyntheticMask { kind: 2 }))?;
             let rows = read_lines(opts.out.join("initialization.jsonl"))?;
             let mut sum = 0.;
             let mut hits = 0;
@@ -1261,7 +1680,7 @@ mod tests {
             near(left["log_Z"].as_f64().unwrap(), (sum / 4096.).ln());
             assert_eq!(left["initial_hits"], hits);
             opts.out = root.0.join(format!("right-{replicate}"));
-            let right = run_impl(opts, Some(&SyntheticMask { kind: 3 }))?;
+            let right = run_impl(opts, None, Some(&SyntheticMask { kind: 3 }))?;
             near(
                 left["Z"].as_f64().unwrap() + right["Z"].as_f64().unwrap(),
                 full["Z"].as_f64().unwrap(),
@@ -1303,7 +1722,7 @@ mod tests {
             };
             let mut opts = synthetic_options(&root, name, 726901);
             opts.bridge = bridge;
-            let result = run_impl(opts.clone(), Some(&SyntheticMask { kind: 2 }))?;
+            let result = run_impl(opts.clone(), None, Some(&SyntheticMask { kind: 2 }))?;
             let mut native_rejected = 0u64;
             let mut gate_rejected = 0u64;
             let stages = read_lines(opts.out.join("stages.jsonl"))?;
@@ -1414,6 +1833,7 @@ mod tests {
             latent: [0.; 6],
             initial_ancestor: 0,
             native_membership: Some(native_membership(&mask, pose)?),
+            guide_density_cache: None,
         };
         retained_membership(&particle, &mask)?;
         particle.pose.position[0] = -2.;

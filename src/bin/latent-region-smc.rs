@@ -19,6 +19,9 @@ struct Cli {
     initial_reference_region: Option<PathBuf>,
     #[arg(long)]
     initial_current_probability: Option<f64>,
+    /// Frozen normalized translation-only hard-free guide; requires --bridge proposal-density.
+    #[arg(long, conflicts_with_all = ["initial_reference_region", "initial_current_probability", "exclude_native_entry"])]
+    initial_guide: Option<PathBuf>,
     #[arg(long)]
     out: PathBuf,
     #[arg(long)]
@@ -51,7 +54,7 @@ fn main() -> Result<()> {
             } else {
                 1.
             });
-    let result = smc::run(SmcOptions {
+    let options = SmcOptions {
         config: cli.config,
         region: cli.region,
         exclude_native_entry: cli.exclude_native_entry,
@@ -68,7 +71,12 @@ fn main() -> Result<()> {
         sweeps_per_stage: cli.sweeps_per_stage,
         cloud_replicates: cli.cloud_replicates,
         lambda_ratio: cli.lambda_ratio,
-    })?;
+    };
+    let result = if let Some(path) = cli.initial_guide {
+        smc::run_with_initial_guide(options, &path)?
+    } else {
+        smc::run(options)?
+    };
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

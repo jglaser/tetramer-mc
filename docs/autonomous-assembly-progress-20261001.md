@@ -73,6 +73,14 @@ by construction. This is an exploratory SMC design diagnostic, not independent
 physical confirmation or a measured speedup. It adds no poses, clouds or
 classifications and does not open the full-vessel or assembly gates.
 
+An [optional SMC initial-guide mode](hard-free-smc-initial-guide.md) now
+implements that path with complete physical q/J, deterministic density
+caching and fresh auxiliary clouds. Five Rust tests, six independent-auditor
+tests and three reference-preparation tests pass. The sphere/Haar references
+are frozen but unlaunched; neither actual SMC improvement nor legacy stream
+parity is established yet. All new build work uses the isolated validation
+target, leaving the live assembly executable unchanged.
+
 That [larger stage](hard-free-line-population-size-stage.md) is now running at
 `/vast/xvg/tetramer-mc-runs/hard-free-line-population-size-20261001`: four fresh
 65,536-draw populations per arm, 524,288 attempted draws in total. Protocol hash:

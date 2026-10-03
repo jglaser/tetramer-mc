@@ -124,9 +124,12 @@ The focused implementation validation contains seventeen tests: the original
 eight factorized tests, eight guidance tests, and one additive accessor test.
 They cover zero counts, threshold support, capped failure, geometry-first
 counting, frame agreement, malformed clouds and correction composition. The
-existing production sampler and executable have not been replaced. A separate
-hard-sphere one-step stationarity control and a bounded protein probe must pass
-before integration into an assembly kernel.
+existing production sampler and executable have not been replaced. The separate
+[hard-sphere one-step stationarity control](auxiliary-overlap-sphere-control.md)
+has passed all eight prespecified checks and its wrong-correction control. The
+[bounded protein probe](auxiliary-overlap-probe.md) passes independent
+reconstruction; physical acceptance and trajectory efficiency require separate
+measurement before integration into an assembly kernel.
 
 The focused [Lean bridge](../formal/ReversibleSampling/AuxiliaryOverlapThreshold.lean)
 now checks fifteen scalar theorems: threshold positivity, normalization and CDF;

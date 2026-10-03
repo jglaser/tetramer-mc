@@ -54,15 +54,23 @@ the contact bit is insufficient. This diagnoses a proposal limitation, not
 finite-system instability. Contact ESS, equilibrium assembly and the original
 thermodynamic goal remain unresolved; production sampling is unchanged.
 
-The next [auxiliary overlap-threshold design](auxiliary-overlap-threshold.md)
+The [auxiliary overlap-threshold guide](auxiliary-overlap-threshold.md)
 conditions the internal edge on retaining a sampled amount of overlap, using a
 cloud fixed in the root body frame. Its source-dependent threshold carries the
 explicit correction \(m\log[(K_X+1)/(K_Y+1)]\); omitting it biases equilibrium.
 Six exact finite tests passed, covering 648 conditional and 108 collapsed
-physical kernels plus an integer threshold sampler. This is a checked design,
-not yet a protein implementation or evidence of improved sampling. Ephemeral
-auxiliaries permit composition with existing local/GCA/center-shift kernels;
-persistent memory would need additional joint-target handling.
+physical kernels plus an integer threshold sampler. The Rust implementation
+and checked correction accessor now pass seventeen focused tests, with fifteen
+additional Lean scalar lemmas. Its independent hard-only sphere reference
+completed 16,384 sources and 32,768 corrected decisions. All eight predeclared
+stationarity tests pass (largest pooled absolute z = 1.149), and deliberately
+omitting the correction raises close-contact probability by 0.280, a 77.7-SE
+shift. All 3,451,219 independent arithmetic and trace checks pass. This is a
+conditional sphere reference, not a general correctness proof or protein
+efficiency result. The fixed protein comparison uses 1,536 new guided trials
+and reuses 768 baseline trials; physical acceptance is assessed separately.
+Ephemeral auxiliaries permit composition with existing local/GCA/center-shift
+kernels; persistent memory would need additional joint-target handling.
 
 The separately frozen [independent-source sphere control](dimer-one-step-stationarity.md)
 completed 327,680 one-step trials. One of five primary stationarity tests

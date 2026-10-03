@@ -101,4 +101,17 @@ A two-state counterexample has \(K_0=0,K_1=1\), uniform physical and proposal pr
 
 This proposal does not add an overlap attraction to the physical model. Large \(m\) favors thresholds closer to the source count, while the explicit auxiliary ratio compensates for their source dependence. It may help preserve an existing internal contact during docking, but can also reduce access to a better state or add another proposal penalty. Finite clouds only approximate overlap volume; correctness relies on their explicitly defined count variable, not on that approximation being accurate. CPU cost and final physical acceptance remain open questions.
 
-Before protein use, require identical source/destination frame predicates, strict point-boundary conventions, source eligibility, complete draw/null/error records, fixed caps and guidance law, and tests of the full forward/reverse generator. Numerical errors must be fatal during validation rather than unaccounted retries. The existing scalar capped-factor Lean results can be reused conditionally on \((P,k)\); this note does not formalize the cloud measure, geometric frame transport, or floating-point implementation in Lean.
+Before protein use, require identical source/destination frame predicates, strict point-boundary conventions, source eligibility, complete draw/null/error records, fixed caps and guidance law, and tests of the full forward/reverse generator. Numerical errors must be fatal during validation rather than unaccounted retries.
+
+The focused [Lean bridge](../formal/ReversibleSampling/AuxiliaryOverlapThreshold.lean)
+now checks fifteen scalar theorems: threshold positivity, normalization and CDF;
+the zero-count limit; physical-mass marginalization; the auxiliary ratio and
+logarithmic correction; accepted-flow symmetry with zero proposal masses
+allowed; and conditional reuse of the capped mass identity. The standalone
+[axiom audit](../formal/AuxiliaryOverlapThresholdAudit.lean) reports only
+`Classical.choice`, `Quot.sound` and `propext`. Existing dependency pins and
+imported proofs remain unchanged; the global suite was not rerun. The
+[validation receipt](../formal/auxiliary-overlap-threshold-validation.json)
+binds the focused build and its archived import closure. This does not formalize
+the cloud measure, geometric frame transport, integer generator, or floating-point
+implementation, and it is not a continuous-state or Rust correctness proof.

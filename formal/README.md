@@ -348,6 +348,18 @@ rate does not cancel the physical Metropolis correction.
 
 ## Bounded independent hard-conditioned draws
 
+The focused module
+[`ReversibleSampling/AuxiliaryOverlapThreshold.lean`](ReversibleSampling/AuxiliaryOverlapThreshold.lean)
+adds fifteen scalar checks for ephemeral overlap guidance: its integer-threshold
+law, normalization, auxiliary correction, accepted-flow identity and conditional
+capped-mass identity. It is validated by the standalone
+[`AuxiliaryOverlapThresholdAudit.lean`](AuxiliaryOverlapThresholdAudit.lean), with
+the existing dependency pins and only the usual three audited axioms. See the
+[design and limitations](../docs/auxiliary-overlap-threshold.md) and
+[focused receipt](auxiliary-overlap-threshold-validation.json). The root library
+entry is unchanged; the focused module is not a proof of the cloud generator,
+geometric predicates, pose transformation or floating-point execution.
+
 `ReversibleSampling/CappedIndependent.lean` checks the algebraic bridge used by
 the optional independent redraw control. For success probability `z` and trial
 cap `T`, the renewal factor `B_T` satisfies `z B_T + (1-z)^T = 1`, including

@@ -1,0 +1,107 @@
+{
+  "allowed_axioms": [
+    "Classical.choice",
+    "Quot.sound",
+    "propext"
+  ],
+  "archived_closure": {
+    "/home/xvg/tetramer-mc/formal/AuxiliaryOverlapThresholdAudit.lean": {
+      "archive_path": "source/AuxiliaryOverlapThresholdAudit.lean",
+      "sha256": "8f310566264953222b341d16f7681cd4428d56aba02fb8ff2395899d091a6011"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/AuxiliaryOverlapThreshold.lean": {
+      "archive_path": "source/ReversibleSampling/AuxiliaryOverlapThreshold.lean",
+      "sha256": "3d94b7cc213d312b14b6fc8b463c3125cf9291c0d2a024b2d17f7239fd92060c"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Balance.lean": {
+      "archive_path": "source/ReversibleSampling/Balance.lean",
+      "sha256": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/CappedIndependent.lean": {
+      "archive_path": "source/ReversibleSampling/CappedIndependent.lean",
+      "sha256": "3f524a987f62d1738ee37e1c2bfd1285c76b98f6244105fec40ca56c921c0caa"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ClusterRates.lean": {
+      "archive_path": "source/ReversibleSampling/ClusterRates.lean",
+      "sha256": "cc40d15570edd30cb8dff91d067b5f4e44c58ba039ccad8e16dfa236747662bd"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/FactorizedIndependent.lean": {
+      "archive_path": "source/ReversibleSampling/FactorizedIndependent.lean",
+      "sha256": "9de1df81a71eb3ef461e2baba9e41c5decbde5b22936901aee3da3ad098f82fa"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ImportanceSampling.lean": {
+      "archive_path": "source/ReversibleSampling/ImportanceSampling.lean",
+      "sha256": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/MetropolisHastings.lean": {
+      "archive_path": "source/ReversibleSampling/MetropolisHastings.lean",
+      "sha256": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105"
+    },
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Poisson.lean": {
+      "archive_path": "source/ReversibleSampling/Poisson.lean",
+      "sha256": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2"
+    },
+    "/home/xvg/tetramer-mc/formal/lake-manifest.json": {
+      "archive_path": "source/lake-manifest.json",
+      "sha256": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5"
+    },
+    "/home/xvg/tetramer-mc/formal/lakefile.toml": {
+      "archive_path": "source/lakefile.toml",
+      "sha256": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7"
+    },
+    "/home/xvg/tetramer-mc/formal/lean-toolchain": {
+      "archive_path": "source/lean-toolchain",
+      "sha256": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434"
+    }
+  },
+  "artifact_sha256": {
+    "results/auxiliary-overlap-threshold-lean-20261003/axioms.log": "69b69a2aba12580fad83289d98f4ecc1c1d61afffccc02cf9af74ad52f476d9f",
+    "results/auxiliary-overlap-threshold-lean-20261003/build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "audit_exit_code": 0,
+  "build_exit_code": 0,
+  "checked_at_utc": "2026-10-03T00:11:51.104594+00:00",
+  "commands": [
+    "ELAN_HOME=\"$PWD/.elan\" .elan/bin/lake env lean -j2 -o .lake/build/lib/lean/ReversibleSampling/AuxiliaryOverlapThreshold.olean ReversibleSampling/AuxiliaryOverlapThreshold.lean",
+    "ELAN_HOME=\"$PWD/.elan\" .elan/bin/lake env lean -j2 AuxiliaryOverlapThresholdAudit.lean"
+  ],
+  "complete": true,
+  "dependency_pins_and_existing_imports_unchanged": true,
+  "global_suite_rerun": false,
+  "lean_threads": 2,
+  "root_library_entry_edited": false,
+  "schema": "auxiliary-overlap-threshold-lean-validation-v1",
+  "scope": "New focused scalar threshold PMF/CDF, normalization, ratio/log correction and accepted-flow bridge. Cloud law, rigid pose transport, exact bounded-integer RNG, shared-context normalization, geometry and floating-point execution remain implementation obligations. No instantiated continuous-state or Rust proof; no protein/cloud sampling.",
+  "sha256": {
+    "AuxiliaryOverlapThresholdAudit.lean": "8f310566264953222b341d16f7681cd4428d56aba02fb8ff2395899d091a6011",
+    "ReversibleSampling/AuxiliaryOverlapThreshold.lean": "3d94b7cc213d312b14b6fc8b463c3125cf9291c0d2a024b2d17f7239fd92060c",
+    "ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "ReversibleSampling/CappedIndependent.lean": "3f524a987f62d1738ee37e1c2bfd1285c76b98f6244105fec40ca56c921c0caa",
+    "ReversibleSampling/ClusterRates.lean": "cc40d15570edd30cb8dff91d067b5f4e44c58ba039ccad8e16dfa236747662bd",
+    "ReversibleSampling/FactorizedIndependent.lean": "9de1df81a71eb3ef461e2baba9e41c5decbde5b22936901aee3da3ad098f82fa",
+    "ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "ReversibleSampling/Poisson.lean": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2",
+    "lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434"
+  },
+  "theorem_axiom_audits": 15,
+  "theorems": [
+    "ReversibleSampling.AuxiliaryOverlapThreshold.denominator_positive",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.increment_positive",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.weight_nonnegative",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.weight_positive",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.weight_outside",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.increment_sum",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.weight_cdf",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.weight_normalized",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.zero_count",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.physical_mass_marginal",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.weight_ratio",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.log_weight_ratio",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.augmented_ratio",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.threshold_accepted_flow",
+    "ReversibleSampling.AuxiliaryOverlapThreshold.fixed_threshold_capped_mass"
+  ]
+}

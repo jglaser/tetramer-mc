@@ -416,3 +416,50 @@ covariances, three combined standard errors and the separate 0.2 kBT tolerance.
 Observer initialization has its own frozen query inventory and durable query
 records, including reference contacts and the fixed-scaffold classification.
 No protein query or new physical draw occurred in this validation.
+
+## Bounded selected geometry implementation and remaining integration
+
+`tools/native_class_selected_geometry.py` now implements the separately bounded
+full-reference layer. It binds 16 unconditional IDs declared before a
+population's first draw, then adds at most one largest Qz contributor in each
+decision region, breaking ties by original draw ID and deduplicating. Empty
+regions receive no substitute. Selection reads arithmetic and labels only;
+it preserves original record offsets, byte hashes and the unconditional
+population denominator. The execution plan separately binds the selection and
+external predeclaration review before any line geometry is reconstructed.
+
+Each population has at most 20 selected rows and 60 unpruned translation axes.
+The worker invokes the existing complete-density and inverse-draw reference,
+compares line membership with the independent endpoint labels, and records
+every begun query and any failed prefix without replacement or resume. Observer
+initialization is counted separately. Its frozen-class interface bridge
+preserves the initialized observer fields and frozen methods without rerunning
+constructors; this avoids a nominal Python class mismatch between the frozen
+classifier loader and the existing line reference. Existing reference code and
+the running proposal audit remain unchanged.
+
+Nine synthetic tests passed, including the dynamic frozen-module bridge through
+the real line reconstructor, complete interval reconstruction on toy geometry,
+selection/tie/empty cases and durable failure handling. The source-bound receipt
+is `results/native-class-selected-geometry-validation-20261003/validation.json`
+(SHA256 `3bc16802ada28fbd6c4b7614824312e21ade894b1609cfd3d3ac5d3648ee866b`).
+Independent implementation review is recorded in
+`results/native-class-selected-geometry-review-20261003/review.json`.
+These are implementation checks, not fresh protein geometry evidence or
+all-row certification.
+
+Before a primary physical campaign can be frozen, resolve a concrete format
+compatibility gap: the optimized existing H normalizer emits v6, whereas the
+new class-line algebra, endpoint and selected-geometry workers admit v7.
+The comparison needs an explicit v6 path using the existing H reference and
+common physical labels/statistics. Relabeling v6 as v7 is invalid; substituting
+the v7 H-only diagnostic would preserve its unnecessary class-geometry cost
+and would not provide the intended optimized-H runtime control.
+
+The remaining work is that compatibility path, a frozen population preparer and
+failure-draining lifecycle controller, and a final admission layer joining all
+algebra, endpoint, selected-geometry and population receipts. All 18 original
+proposal jobs must finish successfully before the one-time cost summary and
+fresh physical allocation. The selected receipt alone opens no convergence,
+full-vessel or assembly gate. A primary-only 16-population comparison cannot
+close the separate population-size, defensive-mixture and intensity checks.

@@ -54,9 +54,12 @@ factor, including zero probabilities. They do not certify the Rust geometry,
 random generator, SE(3) implementation or a configuration-dependent label
 selection law. Those remain separate obligations.
 
-The prepared passive comparison uses root/internal caps 32/32 and joint cap 1
+The completed [passive comparison](factorized-dimer-probe.md) uses root/internal caps 32/32 and joint cap 1
 against whole-joint cap 32. Both permit at most 64 raw edge draws per outer
 attempt. Independent method streams and a separate execution-order coin are
 frozen for every source/slot. Equal maximum budgets do not imply equal work or
-time. A physical test must include bath cost and rejections; this proposal alone
-does not establish faster mixing or native assembly.
+time. The subsequent [physical replay](factorized-dimer-physical.md) included
+bath cost and all rejections: none of its 1,536 trials accepted. Binary contact
+conditioning improves geometry search but fails to preserve enough overlap in
+these destinations. Production integration is deferred; the result does not
+establish faster mixing, native assembly or finite-system instability.

@@ -42,8 +42,16 @@ candidates per proposal CPU by 2.33×, 25.72× and 2.81×, respectively. The tim
 combine geometric factorization with deferred density scoring and exclude bath
 cost. Candidates with any external exclusion contact numbered 31 → 33,
 10 → 26 and 52 → 56; these are not native-registry measurements. A separate
-physical replay of all saved trials is pending, with no new pose search.
-Physical acceptance, contact ESS, equilibrium assembly and the original
+[physical replay](factorized-dimer-physical.md) of all saved trials is now
+complete and independently audited: **zero accepts in 1,536 outer attempts**,
+including all 971 candidates and 565 geometric nulls. Combined proposal/replay
+CPU was 170.797 seconds. Conditional on the saved clouds, summed acceptance
+probability was only 0.002007806. Most proposals lose substantial overlap;
+the geometry-only speedup does not justify integration into assembly runs.
+Among 374 candidates with only an internal contact at both endpoints, median
+estimated bath logratio is −36.57 with median conditional SE 0.799: preserving
+the contact bit is insufficient. This diagnoses a proposal limitation, not
+finite-system instability. Contact ESS, equilibrium assembly and the original
 thermodynamic goal remain unresolved; production sampling is unchanged.
 
 The separately frozen [independent-source sphere control](dimer-one-step-stationarity.md)
@@ -66,7 +74,7 @@ arbitrarily small errors. All-row generation, density, geometry and MH audits
 passed. The prepared-factor scoring correction is separate: the toy's identity
 factors already agreed, so that correction does not explain the earlier flag.
 
-As of 2026-10-02 22:51 UTC, the two saved-data SMC audits and their guarded
+As of 2026-10-02 23:40 UTC, the two saved-data SMC audits and their guarded
 analysis watcher remain live. Five user growth jobs remain live; the
 native-informed `cluster-oligomer-seed8-free256-z004` job completed its planned
 100,000 sweeps at 20:58 UTC. That completion alone supplies no new classified

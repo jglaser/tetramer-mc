@@ -4,7 +4,9 @@ The staged sampler produces feasible destinations with fewer raw edge draws and
 less proposal CPU in all three frozen atlases. This is a **passive proposal
 result**: no depletant bath, physical acceptance, native-registry classifier or
 state update was applied. The original finite-system assembly question remains
-unresolved. A separate physical replay of the saved candidates is being prepared.
+unresolved. The subsequent [physical replay](factorized-dimer-physical.md)
+completed with zero accepts in 1,536 trials: the geometric improvement does not
+yet yield useful physical sampling.
 
 ![Audited passive comparison](assets/factorized-dimer-probe.png)
 
@@ -140,11 +142,9 @@ The independent auditor exited zero.
 
 ## Next physical test
 
-The saved 971 feasible candidates can receive one independently drawn two-leg
+The saved 971 feasible candidates received one independently drawn two-leg
 implicit bath and one full physical MH decision, while all 565 failed outer
-trials retain their source state. Reusing those saved destinations avoids a new
-search allocation. The pending replay must retain all 1,536 unconditional
-trials, count bath work and rejected moves, and preserve the fixed-source scope.
-Even successful reset-source acceptance would not establish long-time mixing,
-reversible assembly or equilibrium native stability; those require subsequent
-trajectory and physical-weight evidence.
+trials retained their source state. The [completed replay](factorized-dimer-physical.md)
+preserved all 1,536 unconditional trials and accepted none. Loss of overlap and
+proposal-density penalties remain the bottleneck. No production integration or
+trajectory extension is justified by this passive speedup alone.

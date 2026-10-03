@@ -1,0 +1,6 @@
+{
+  "analysis": "/home/xvg/tetramer-mc/results/factorized-dimer-physical-20261002/analysis.json",
+  "analysis_sha256": "9b7fc8916c8f3e32a15dc65c2b9f025488e39b7b4de44179b9bf069a82999c8b",
+  "matplotlib": "3.11.1",
+  "scope": "Frozen reset-state physical decisions; point measurements, no native registry or equilibrium/ESS inference."
+}

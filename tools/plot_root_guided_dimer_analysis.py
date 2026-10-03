@@ -109,7 +109,6 @@ def render(rows, agreement, output):
             ax.set_yscale('log')
             ax.set_ylabel('Apparent ESS / full sampler CPU second')
             ax.axhline(1.35*null_level, color='#999999', ls=':', lw=.7)
-            ax.text(.01, .03, '× below dotted line: constant; ESS undefined', transform=ax.transAxes, fontsize=8)
         else:
             ax.set_yscale('symlog', linthresh=1.)
             ax.set_ylim(bottom=-.05)
@@ -137,7 +136,7 @@ def render(rows, agreement, output):
     fig.suptitle('Matched anchor-guided dimer comparison', x=.05, ha='left', fontsize=17)
     fig.legend(handles=[Line2D([0], [0], marker='o', color=colors[a], label=labels[a]) for a in ARMS],
         loc='upper left', bbox_to_anchor=(.045, .951), frameon=False, ncol=2)
-    fig.text(.05, .025, '32 new chains + 32 reused controls; four streams per group (dots), medians of defined values (bars). Both arms include identical local schedules.\n'
+    fig.text(.05, .025, '32 new chains + 32 reused controls; four streams per group (dots), medians of defined values (bars). × below dotted line = constant; ESS undefined.\n'
         '2 mobile tetramers + 262 fixed spectators; radius 1.4 Å, activity 0.0275 Å⁻³. External sets exclude the moving pair’s internal contact.\n'
         'Set changes can be contact gain/loss. Finite-record ESS and occupancy agreement do not certify equilibrium, native registry or finite-system stability.', fontsize=9)
     fig.subplots_adjust(left=.06, right=.985, bottom=.18, top=.86, hspace=.47, wspace=.32)

@@ -540,3 +540,72 @@ undefined ESS for constant observables, separates external contacts from the
 internal pair, and reports full sampler CPU and initialization disagreement.
 Its synthetic validation includes an all-constant ensemble; no experimental
 plot or partial-trajectory conclusion is generated before the observer passes.
+
+All 32 extension chains subsequently completed without failure or replacement.
+The separately bounded guidance audit passed all 147,456 collective and
+589,824 local scalar records and the 32 preselected first-event geometry
+checks. It used 583 count queries covering 2,752,853 point memberships and
+69.3 CPU seconds. Its result is
+`results/evolving-dimer-root-guidance-audit-20261003/audit.json`, SHA256
+`f268610798cf14be47c5464a35a15085f3589605707b29000fe78506bb8cf37e`.
+The child exited cleanly and was drained. Full physical-bath point geometry
+and every later event's geometry remain outside this audit's stated scope.
+The matched observer was then launched under its fixed single-worker budget,
+reusing the existing controls without recomputing their geometry.
+
+## Completed anchor-guided comparison
+
+The completed observer is
+`results/evolving-dimer-root-analysis-20261003/analysis/analysis.json`, SHA256
+`409913f47738ad2274e0025bc182792686bc6cc5017026e451722a98939ed540`.
+Its 147,488 new endpoint observations include all rejected residence; the 32
+control caches were reused. Observation cost was 189.8 CPU seconds, separate
+from sampling. The [plot](../results/evolving-dimer-root-report-readable-20261003/contact-efficiency.png)
+and its source-bound receipt were generated from the completed summary only.
+
+The new guide reduces CPU cost, but this experiment does **not** demonstrate
+better contact-environment mixing. Across the fixed allocation, sampler CPU
+decreased from 8,296.15 to 6,110.77 seconds (26.3%). External contact-set passages
+decreased from 31 to 20 and completed returns from 13 to 7. These pooled totals
+describe the allocation across different conditional targets; they are not an
+equilibrium rate or an uncertainty-controlled common speedup. The per-context
+counts, summed over four streams, are:
+
+| Moving pair | Start | Internal guide: passages / returns | Anchor + internal: passages / returns |
+|---|---|---:|---:|
+| 27–132 | Source | 7 / 4 | 6 / 4 |
+| 27–132 | Displaced | 9 / 4 | 5 / 1 |
+| 32–110 | Source | 7 / 3 | 4 / 1 |
+| 32–110 | Displaced | 0 / 0 | 0 / 0 |
+| 9–24 | Source | 0 / 0 | 0 / 0 |
+| 9–24 | Displaced | 2 / 1 | 2 / 1 |
+| 11–246 | Source | 4 / 0 | 3 / 0 |
+| 11–246 | Displaced | 2 / 1 | 0 / 0 |
+
+The largest cost reduction occurs for embedded 9–24 source states:
+2,070.14 → 422.62 CPU seconds, a factor of **4.90**. All four streams still
+accept zero collective moves and make zero external exchanges. Their
+source/displaced external environment distributions remain disjoint, with
+maximum edge-occupancy difference one. The larger patch/fingerprint ESS per
+CPU there reflects cheaper execution of the same trapped sampling, not escape.
+Compared with the already completed local-only controls, the new arm's whole
+fingerprint ESS per CPU in these four source streams is only 0.156–0.197 times
+local's; that historical comparison reuses the original aggregate observations.
+
+External-edge ESS is undefined for 22 of 32 new chains, versus 19 controls,
+because their observables are constant. The conspicuous 47.2-fold external
+ESS/CPU ratio in displaced 27–132 stream 1 is not evidence of rapid exchange:
+the new trace has one short contact excursion, occupancy 12/4096, and only
+one return. Every context still contains substantial initialization disagreement.
+Individual gains in apparent ESS or agreement therefore cannot establish
+stationarity. No native observer was used in this conditional benchmark.
+
+The next discriminating control is the alternating **two-neighbor singleton**
+proposal defined above: one of the two mobile tetramers moves while the other
+and the fixed anchor guide its destination; then their roles alternate. This
+keeps the same two-mobile physical target and full many-body acceptance while
+testing whether satisfying two interfaces for one body is more effective than
+factorizing a joint dimer redraw. A singleton's catalogue must be rebuilt when
+the other mobile body changes. Larger root-guided assembly runs are not
+justified by the present result. Native finite-system assembly remains
+unresolved; the original-condition contact-weight work continues separately.

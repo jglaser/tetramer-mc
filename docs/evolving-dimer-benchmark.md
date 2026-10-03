@@ -50,8 +50,56 @@ No efficiency or physical-stability result is claimed until the resulting trajec
 
 ## Frozen execution, 3 October 2026
 
-The campaign is running under `results/evolving-dimer-campaign-20261003`, with three workers. The configuration hash is `c96c938fe33fb6ade9d2a984fbcd790daa0885ffdd496d9cd21ebb7bebb62054`; the run-binding hash is `eedbf181270ef96b9991c08038e12fd205ee2496ea6f4ea20972327dc27cfaed`. `dispatch/status.json` records active, completed and unstarted jobs. Do not dispatch this allocation again.
+The campaign completed all 96 chains under `results/evolving-dimer-campaign-20261003`, using at most three workers. The configuration hash is `c96c938fe33fb6ade9d2a984fbcd790daa0885ffdd496d9cd21ebb7bebb62054`; the run-binding hash is `eedbf181270ef96b9991c08038e12fd205ee2496ea6f4ea20972327dc27cfaed`. `dispatch/status.json` records the complete, passed allocation. Do not dispatch this allocation again.
 
 Validation includes 17 Rust tests, 24 preparer/observer tests, nine independent-auditor tests, and 1,560 independent checks of synthetic sphere trajectories. The actual protein preparation audit checks 32 clouds (524,288 raw points), all 16 selected starts and all 21 attempted preparations, including five nulls. All 11,792 checks pass; maximum reconstructed complete-density correction error is 3.43e−13.
 
 The original preparation auditor incorrectly assumed an unpadded atomic AABB. Its failed receipt is preserved. The corrected auditor reconstructs the existing explicit conservative padding; it changes neither the sampled cloud nor strict sphere membership. The v2 audit uses the same saved data without redraws. The first sandbox background launcher exited before claiming work; an authoritative process check confirmed no controller or sampler, after which the identical frozen controller was launched on the host. Both launch records remain preserved and no scientific attempt was repeated.
+
+## Completed comparison
+
+The frozen observer completed all 96 chains and 442,464 initial/retained endpoints
+without adding sampling attempts. Its terminal receipt is
+`results/evolving-dimer-analysis-final-20261003/summary.json`; the complete analysis
+SHA256 is `46ced1e7cd2e4e4c928e4eff76a146d87fc92267d4d02c58479dae1aa3db85d2`.
+Sampler CPU totals 26,799.7 seconds; setup-inclusive sampling CPU is 26,841.3
+seconds and observer CPU is 529.1 seconds. The analysis preserves all attempted
+moves and rejected residence. Different conditional targets are not pooled.
+
+![Per-stream contact efficiency and initialization agreement](../results/evolving-dimer-report-final-20261003/contact-efficiency.png)
+
+The m=4 overlap threshold generally reduces the overhead of unguided dimer
+redraws, but does not establish equilibration. In both whole-dimer contexts,
+from both starts, every matched stream improves whole-fingerprint apparent
+ESS/CPU over unguided by 1.14–6.95 times. All finite paired comparisons still
+favor local moves for this descriptor. Local can explore its current contact
+region cheaply while never changing binding partners; its higher apparent ESS
+does not imply greater environment coverage.
+
+The embedded 9/24 source provides the clearest failure case. Neither collective
+arm accepts a dimer move in any stream. All contact time-series statistics and
+local acceptance counts match local exactly, while guided execution costs
+24.1–32.4 times as much. All arms retain maximum patch- and partner-occupancy
+differences of one between the source and prepared starts in every stream.
+Those starts have not equilibrated.
+
+One prepared 9/24 guided stream records 61 partner-set passages and 60 returns.
+Its only observed pair is 9/24 itself: these events alternate between that same
+pair being in contact and separated, with 10.18% contact occupancy. They are
+attachment/detachment events, not exchanges with a different partner. For
+embedded 11/246 from the source, guided moves produce one partner-set passage
+per stream and no return. Threshold crossings and finite ESS therefore cannot
+be treated as evidence of completed exchange between competing basins.
+
+The next proposal should address constraints from **external contacts** while
+preserving the same conditional target, rather than only increasing the
+internal-pair threshold. Before choosing the update, scalar rejection records
+can distinguish capped destination failure, proposal-density penalties and
+depletion loss without generating new physical draws. Allowing spectators to
+move would be a different benchmark and must be identified as such.
+
+The plot is reproducible with `tools/plot_evolving_dimer_analysis.py` and its
+source-bound receipt; `chains.csv` retains every stream separately. Native
+registry was not measured. These are conditional sampling results at 1.4 Å and
+0.0275 Å⁻³, not finite-system thermodynamics or evidence against assembly at the
+original decision conditions.

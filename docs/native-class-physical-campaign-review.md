@@ -247,6 +247,18 @@ The outer launcher must set the chosen resource limits, save stdout/stderr and a
 
 The journal replay validates stored acceptance decisions and retained states; it does not independently recompute every original Poisson cloud or every depletion acceptance factor. The new observer is explicitly native-blind (`native=None`). It reports patch/partner/fingerprint occupancies, apparent contact ESS, passages/returns and Jaccard changes with rejected residence retained. Constant observables have null ESS, not infinite speed. Summaries keep contexts and trajectories separate, compare paired arm streams and initializations, and charge full sampler CPU including warmup/null moves while reporting observer CPU separately. These results can guide reversible oligomer proposals; they cannot by themselves establish equilibrium or native assembly.
 
+On 2026-10-03 the campaign completed all **96/96** chains successfully, with no
+active or unstarted chain and no failure draining. The metadata-only final
+preparation bound 845 files and the original frozen observer. Its execution plan
+is `results/evolving-dimer-analysis-final-20261003/execution-plan.json`, SHA
+`255a1fc59a96cb19f733a0385eaefc637ad428f646b9b1cbd04fba00f72a4607`.
+The one-worker analysis was launched under the bounds above; its host receipt and
+resource preflight are in the same directory. Five scientific workers were
+reserved in total: three growth simulations, the original class-proposal audit
+and this observer, leaving three single-thread test slots. No physical draws
+were added. Sampling completion is distinct from analysis completion; inspect
+the analysis terminal receipt before interpreting efficiency or agreement.
+
 
 ## Population-statistics API and synthetic validation
 
@@ -289,3 +301,47 @@ independent seeds, denominator checks, and incompatible target identities.
 No old scientific inputs were read or recomputed, and no physical allocation or
 sampling was launched. Archived four-population analyses remain unchanged;
 these approximate uncertainty diagnostics do not establish unseen-mode coverage.
+
+## Streaming physical-weight algebra audit
+
+`tools/native_class_line_physical_algebra_audit.py` now provides the arithmetic
+half of a layered audit for v7 records. It streams every original attempted
+index and reconstructs the coordinate map, Jacobian, complete proposal density,
+conditional draw, capture/original-q/shell predicates, two-cloud arithmetic and
+unconditional denominator. The single-row implementation is
+`tools/native_class_line_weight_row.py`. Rejected poses retain zero weights;
+the two cloud estimates are averaged in linear weight, not log weight.
+
+Only four numeric arrays are retained for population statistics. Attempt and
+sample streams must contain exactly the declared rows, in order, with newline
+termination and no duplicate JSON keys or nonfinite constants. A durable journal
+records each begun and completed row, byte offsets and hashes. Source, runtime,
+input and consumed-stream hashes are checked; exceptions and SIGTERM preserve
+a failed receipt and do not trigger retries. An uncatchable termination can only
+leave the fsynced journal. Existing producers and complete geometry auditors
+are unchanged.
+
+This audit conditions on saved H/native/exclusion interval unions. It does not
+query atomic overlaps, establish the physical hard-valid flag, independently
+classify native contacts, or prove Poisson spatial sampling and RNG execution.
+Static atom-bijection validation is distinguished from geometry queries. The
+receipt explicitly reports `geometry_certified=false` and zero independently
+reconstructed geometry rows. The retained-five-coordinate dependence required
+by the proposal normalization argument remains a source-level obligation.
+
+The row validator passes 12 synthetic tests, with receipt
+`results/native-class-row-weight-validation-20261003/validation.json` (SHA256
+`b7e83caea9baa5d1911e8d302ff9962dcd35fc3ca25b8b727fde46d72dc05d2e`).
+The streaming wrapper passes 13 tests including tampering, malformed/truncated
+streams, impossible beta=1 lineage and interruption handling; receipt
+`results/native-class-physical-algebra-validation-20261003/wrapper-tests02.json`
+has SHA256 `68aa45a810d55e1f8b3cfc3bb9bf9ca0f27f657fe44dff0cc0406b863f93ea3d`.
+The earlier 12-case wrapper receipt is retained; the final extra case followed
+an independent review finding, rather than a repeated sampling allocation.
+These tests used no real scientific rows, atom queries or physical draws.
+
+The dimer final observer has also completed successfully. Its 96-chain analysis
+and implications are documented in [the benchmark report](evolving-dimer-benchmark.md#completed-comparison).
+The original unpruned class-proposal controller remains live: all nine query
+jobs and the first two independent audits have passed. It must finish its
+remaining frozen audits before the proposal pilot is declared complete.

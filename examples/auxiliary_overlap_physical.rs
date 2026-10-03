@@ -3,7 +3,6 @@
 use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use rand::{RngExt, SeedableRng, distr::Open01, rngs::StdRng};
-use rand_distr::{Distribution, Poisson};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -13,13 +12,13 @@ use std::{
     path::PathBuf,
 };
 use tetramer_mc::{
+    bounded_singleton_path::{Budget, Limits, bounded_path},
     capped_dimer::FixedDimerContext,
-    depletion::{GateOptions, GateResult},
+    depletion::GateOptions,
     geometry::{Shape, SphereTree},
     math::Pose,
-    rigid_subset::RigidSubset,
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
-    singleton_path::{SingletonOrder, SingletonPath, SingletonPathResult},
+    singleton_path::SingletonPath,
     spherical::{Container, validate_state},
 };
 
@@ -51,17 +50,6 @@ impl BoundFile {
     fn json(&self) -> Result<Value> {
         Ok(serde_json::from_slice(&self.read()?)?)
     }
-}
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-struct Limits {
-    raw_per_leg: u64,
-    raw_per_outer: u64,
-    raw_campaign: u64,
-    retained_per_leg: u64,
-    retained_per_outer: u64,
-    retained_campaign: u64,
-    cpu_seconds: f64,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -125,244 +113,6 @@ struct CachedRow {
     complete_log_correction: Value,
     contact_diagnostic_cpu_seconds: f64,
     raw_edge_draws: usize,
-}
-
-#[derive(Clone, Copy, Debug, Default, Serialize)]
-struct LegProgress {
-    gate: GateResult,
-    /// Planned Poisson count is in gate.raw_points, even when its cap is exceeded.
-    processed_points: u64,
-    complete: bool,
-}
-#[derive(Debug, Serialize)]
-struct PathFailure {
-    reason: String,
-    order: SingletonOrder,
-    ordered_members: [usize; 2],
-    intermediate_selected: [Pose; 2],
-    completed_legs: Vec<GateResult>,
-    failed_leg: usize,
-    failed_progress: LegProgress,
-}
-struct Budget {
-    limits: Limits,
-    started: f64,
-    raw: u64,
-    retained: u64,
-}
-impl Budget {
-    fn check_cpu(&self) -> Result<()> {
-        ensure!(
-            cpu_seconds() - self.started <= self.limits.cpu_seconds,
-            "fatal campaign CPU budget exceeded"
-        );
-        Ok(())
-    }
-}
-
-/// Same draw order and arithmetic as RigidSubset::sample_envelope. Only fatal
-/// resource guards are added. A partial cloud never supplies an MH factor.
-fn bounded_leg(
-    gate: &RigidSubset<'_>,
-    rng: &mut StdRng,
-    lambda: f64,
-    z: f64,
-    opts: GateOptions,
-    raw_cap: u64,
-    retained_cap: u64,
-    budget: &Budget,
-    progress: &mut LegProgress,
-) -> Result<GateResult> {
-    budget.check_cpu()?;
-    if z == 0. {
-        progress.complete = true;
-        return Ok(GateResult::default());
-    }
-    let envelope = gate.envelope(opts)?;
-    progress.gate = GateResult {
-        envelope_volume: envelope.volume,
-        retained_cells: envelope.cells.len(),
-        created_cells: envelope.created,
-        ..Default::default()
-    };
-    budget.check_cpu()?;
-    if envelope.volume == 0. {
-        progress.complete = true;
-        return Ok(progress.gate);
-    }
-    let mean = (lambda + z) * envelope.volume;
-    ensure!(mean.is_finite() && mean < 9e15, "unsupported Poisson mean");
-    let number = Poisson::<f64>::new(mean)?.sample(rng) as u64;
-    progress.gate.raw_points = number;
-    ensure!(number <= raw_cap, "fatal planned raw-point budget exceeded");
-    for index in 0..number {
-        if index % 1024 == 0 {
-            budget.check_cpu()?;
-        }
-        let target = rng.random::<f64>() * envelope.volume;
-        let k = envelope
-            .cumulative
-            .partition_point(|&v| v <= target)
-            .min(envelope.cells.len() - 1);
-        let cell = envelope.cells[k];
-        let point =
-            std::array::from_fn(|j| cell.lo[j] + rng.random::<f64>() * (cell.hi[j] - cell.lo[j]));
-        let (old, new) = gate.overlap_indicators(point);
-        if old && !new {
-            progress.gate.lost += 1;
-        }
-        if new && !old && rng.random::<f64>() < lambda / (lambda + z) {
-            progress.gate.gained += 1;
-        }
-        progress.processed_points = index + 1;
-        progress.gate.retained_points = progress.gate.gained + progress.gate.lost;
-        ensure!(
-            progress.gate.retained_points <= retained_cap,
-            "fatal retained-point budget exceeded"
-        );
-    }
-    let ratio = z / lambda;
-    let coefficient = if ratio.is_finite() {
-        ratio.ln_1p()
-    } else {
-        (lambda + z).ln() - lambda.ln()
-    };
-    progress.gate.log_weight =
-        coefficient * (progress.gate.gained as f64 - progress.gate.lost as f64);
-    progress.complete = true;
-    Ok(progress.gate)
-}
-
-fn aggregate(a: GateResult, b: GateResult) -> Result<GateResult> {
-    let result = GateResult {
-        gained: a.gained.checked_add(b.gained).context("gained overflow")?,
-        lost: a.lost.checked_add(b.lost).context("lost overflow")?,
-        raw_points: a
-            .raw_points
-            .checked_add(b.raw_points)
-            .context("raw overflow")?,
-        retained_points: a
-            .retained_points
-            .checked_add(b.retained_points)
-            .context("retained overflow")?,
-        retained_cells: a
-            .retained_cells
-            .checked_add(b.retained_cells)
-            .context("cell overflow")?,
-        created_cells: a
-            .created_cells
-            .checked_add(b.created_cells)
-            .context("created overflow")?,
-        envelope_volume: a.envelope_volume + b.envelope_volume,
-        log_weight: a.log_weight + b.log_weight,
-    };
-    ensure!(
-        result.envelope_volume.is_finite() && result.log_weight.is_finite(),
-        "nonfinite path aggregate"
-    );
-    Ok(result)
-}
-
-/// Production call uses None: exactly one fair order coin. Explicit order is
-/// only used by tiny reference tests and is unavailable through the config.
-fn bounded_path(
-    tree: &SphereTree,
-    state: &[Pose],
-    members: [usize; 2],
-    proposed: [Pose; 2],
-    path: &SingletonPath<'_>,
-    rng: &mut StdRng,
-    rd: f64,
-    lambda: f64,
-    z: f64,
-    opts: GateOptions,
-    budget: &mut Budget,
-    explicit_order: Option<SingletonOrder>,
-) -> std::result::Result<SingletonPathResult, PathFailure> {
-    let order = explicit_order.unwrap_or_else(|| {
-        if rng.random::<bool>() {
-            SingletonOrder::SecondThenFirst
-        } else {
-            SingletonOrder::FirstThenSecond
-        }
-    });
-    let ordered_members = path.ordered_members(order);
-    let intermediate_selected = path.intermediate_selected(order);
-    let indices = if order == SingletonOrder::FirstThenSecond {
-        [0, 1]
-    } else {
-        [1, 0]
-    };
-    let mut intermediate = state.to_vec();
-    intermediate[members[indices[0]]] = proposed[indices[0]];
-    let mut completed = Vec::new();
-    let mut outer_raw = 0u64;
-    let mut outer_retained = 0u64;
-    for (leg, &i) in indices.iter().enumerate() {
-        let mut progress = LegProgress::default();
-        let result = (|| -> Result<GateResult> {
-            let source = if leg == 0 { state } else { &intermediate };
-            let gate = RigidSubset::new(tree, source, &[members[i]], members[i], proposed[i], rd)?;
-            let raw_cap = budget
-                .limits
-                .raw_per_leg
-                .min(budget.limits.raw_per_outer - outer_raw)
-                .min(budget.limits.raw_campaign - budget.raw);
-            let retained_cap = budget
-                .limits
-                .retained_per_leg
-                .min(budget.limits.retained_per_outer - outer_retained)
-                .min(budget.limits.retained_campaign - budget.retained);
-            bounded_leg(
-                &gate,
-                rng,
-                lambda,
-                z,
-                opts,
-                raw_cap,
-                retained_cap,
-                budget,
-                &mut progress,
-            )
-        })();
-        match result {
-            Ok(gate) => {
-                outer_raw += gate.raw_points;
-                outer_retained += gate.retained_points;
-                budget.raw += gate.raw_points;
-                budget.retained += gate.retained_points;
-                completed.push(gate);
-            }
-            Err(error) => {
-                return Err(PathFailure {
-                    reason: format!("{error:#}"),
-                    order,
-                    ordered_members,
-                    intermediate_selected,
-                    completed_legs: completed,
-                    failed_leg: leg,
-                    failed_progress: progress,
-                });
-            }
-        }
-    }
-    let legs = [completed[0], completed[1]];
-    let aggregate = aggregate(legs[0], legs[1]).map_err(|error| PathFailure {
-        reason: format!("{error:#}"),
-        order,
-        ordered_members,
-        intermediate_selected,
-        completed_legs: completed,
-        failed_leg: 2,
-        failed_progress: LegProgress::default(),
-    })?;
-    Ok(SingletonPathResult {
-        order,
-        ordered_members,
-        intermediate_selected,
-        legs,
-        aggregate,
-    })
 }
 
 fn seed(master: u64, ledger_sha: &str, row: &CachedRow, role: &str) -> u64 {
@@ -996,7 +746,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tetramer_mc::geometry::Atom;
+    use tetramer_mc::{geometry::Atom, singleton_path::SingletonOrder};
     fn pose(x: f64) -> Pose {
         Pose {
             position: [x, 0., 0.],

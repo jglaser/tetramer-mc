@@ -573,7 +573,7 @@ fn environment<'a>(
     })
 }
 
-fn spherical_local_pose(rng: &mut StdRng, old: Pose, dt: f64, dc: f64) -> Pose {
+pub(crate) fn spherical_local_pose(rng: &mut StdRng, old: Pose, dt: f64, dc: f64) -> Pose {
     let displacement: Vec3 = std::array::from_fn(|_| {
         let z: f64 = StandardNormal.sample(rng);
         dt * z

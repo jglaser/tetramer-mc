@@ -54,6 +54,16 @@ the contact bit is insufficient. This diagnoses a proposal limitation, not
 finite-system instability. Contact ESS, equilibrium assembly and the original
 thermodynamic goal remain unresolved; production sampling is unchanged.
 
+The next [auxiliary overlap-threshold design](auxiliary-overlap-threshold.md)
+conditions the internal edge on retaining a sampled amount of overlap, using a
+cloud fixed in the root body frame. Its source-dependent threshold carries the
+explicit correction \(m\log[(K_X+1)/(K_Y+1)]\); omitting it biases equilibrium.
+Six exact finite tests passed, covering 648 conditional and 108 collapsed
+physical kernels plus an integer threshold sampler. This is a checked design,
+not yet a protein implementation or evidence of improved sampling. Ephemeral
+auxiliaries permit composition with existing local/GCA/center-shift kernels;
+persistent memory would need additional joint-target handling.
+
 The separately frozen [independent-source sphere control](dimer-one-step-stationarity.md)
 completed 327,680 one-step trials. One of five primary stationarity tests
 **rejects**: defensive independent redraw with the world Poisson bath has 1,554

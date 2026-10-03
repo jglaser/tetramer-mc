@@ -81,6 +81,9 @@ corrections. Simply retrying more binary-contact proposals or extending this
 same reset campaign is not justified. The
 [integration notes](factorized-dimer-integration-notes.md) retain the production
 balance requirements for a later successful proposal.
+The [next auxiliary-threshold design](auxiliary-overlap-threshold.md) has passed
+exact finite-state balance checks. Its extra source-dependent threshold ratio
+is explicit; protein performance remains to be tested.
 
 ## Fixed calculation
 

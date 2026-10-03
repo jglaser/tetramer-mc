@@ -3,10 +3,12 @@
 
 No protein data are opened and no geometry/random queries occur on import. Native
 geometry is reconstructed from the original Python observer's monomer atoms,
-residue IDs, member frames, and complete motif catalogue. The implementation uses
-unpruned leaf atom pairs and NumPy long-double quadratic roots; Rust BVH intervals
-are never inputs. This is an audit/reference implementation, not a production MC
-kernel. Closed native thresholds and strict core/exclusion thresholds are distinct.
+residue IDs, member frames, and complete motif catalogue. The default uses
+unpruned leaf atom pairs and NumPy long-double quadratic roots. Optional projected
+KD candidates only cull exclusion/native leaf pairs; hard cores remain unpruned.
+Rust BVH intervals are never inputs. This is an audit/reference implementation,
+not a production MC kernel. Closed native thresholds and strict core/exclusion
+thresholds are distinct.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import math
 import numpy as np
 from scipy.linalg import solve, solve_triangular
 from scipy.special import logsumexp
+from scipy.spatial import cKDTree
 
 import hard_free_line_reference as hard
 from native_contact_regions import CRITERIA, NativeContactRegions, angle_degrees, pose_arrays
@@ -130,9 +133,74 @@ def orthant_intervals(origin, direction, orthant, segment):
     return current
 
 
+def projected_candidates(fixed, moving, direction, fixed_radii, moving_radii, gap, segment):
+    """Conservative optional two-dimensional candidates, or None for all pairs.
+
+    Choose the largest direction component k. Stored projection rows are
+    e_i-(d_i/d_k)e_k for i != k; their norms are at most 2. For a contact at
+    |s| <= S, each projected separation is bounded by 2*r + S*|P*d|.
+    The second term explicitly retains leakage from rounded coefficients.
+    Coordinates are centered and projected in longdouble, then an outward
+    FP64-scale allowance covers projection/cast/KD distance arithmetic and the
+    leaf/root clipping arithmetic. A p=infinity, eps=0 query avoids squared
+    distance overflow. An unsafe bound disables culling, never a leaf predicate.
+
+    This is a numerical prefilter with synthetic equivalence tests, not a claim
+    that SciPy's floating-point tree operations have been formally verified.
+    """
+    fixed, moving = np.asarray(fixed, np.longdouble), np.asarray(moving, np.longdouble)
+    d = np.asarray(direction, np.longdouble)
+    fr, mr = np.asarray(fixed_radii, np.longdouble), np.asarray(moving_radii, np.longdouble)
+    require(len(segment) == 2 and np.isfinite(segment).all() and segment[0] <= segment[1],
+            'Invalid projected finite segment')
+    if not len(fixed) or not len(moving):
+        return [[] for _ in moving]
+    if not np.any(d):
+        return None
+    # Build at most two projected arrays, not a dense fixed x moving matrix.
+    with np.errstate(over='ignore', invalid='ignore', under='ignore'):
+        k = int(np.argmax(np.abs(d)))
+        axes = [i for i in range(3) if i != k]
+        coefficient = np.asarray(d[axes]/d[k], float).astype(np.longdouble)
+        if not np.isfinite(coefficient).all() or np.any(np.abs(coefficient) > 1):
+            return None
+        origin = fixed[0]
+        f, m = fixed-origin, moving-origin
+        fp = np.asarray(f[:, axes]-f[:, k, None]*coefficient, float)
+        mp = np.asarray(m[:, axes]-m[:, k, None]*coefficient, float)
+        residual = np.abs(d[axes]-coefficient*d[k])
+        residual += 8*np.finfo(np.longdouble).eps*(np.abs(d[axes])+np.abs(coefficient*d[k]))
+        smax = np.longdouble(max(abs(segment[0]), abs(segment[1])))
+        leakage = smax*residual.max()
+        radius = mr+fr.max()+np.longdouble(gap)
+        # The large margin intentionally sacrifices pruning for huge offsets.
+        # It covers both projected endpoints, stored coefficient rounding,
+        # cKDTree FP64 subtraction, and near-endpoint leaf-rounding ambiguity.
+        scale = (np.abs(fixed).max()+np.abs(moving).max()+np.abs(origin).max()
+                 +smax*np.abs(d).max()+radius.max()+np.finfo(float).tiny)
+        allowance = 128*np.finfo(float).eps*scale
+        query_radius = np.nextafter(np.asarray(2*radius+leakage+allowance, float), math.inf)
+    safe_limit = np.finfo(float).max/16
+    if (not np.isfinite(fp).all() or not np.isfinite(mp).all()
+            or not np.isfinite(query_radius).all()
+            or np.max(np.abs(fp)) > safe_limit or np.max(np.abs(mp)) > safe_limit
+            or np.max(query_radius) > safe_limit):
+        return None
+    try:
+        return cKDTree(fp).query_ball_point(mp, query_radius, p=np.inf, eps=0,
+                                           workers=1, return_sorted=True)
+    except (ValueError, OverflowError):
+        # Unsupported coordinate/radius arithmetic has the full reference law.
+        return None
+
+
 def leaf_contact_intervals(fixed, moving, direction, fixed_radii, moving_radii,
-                           gap, segment, *, inclusive, pairs=None):
-    """Unpruned atom-pair union. Ordered (fixed atom, moving atom) pairs."""
+                           gap, segment, *, inclusive, pairs=None, use_tree=False):
+    """Atom-pair union with optional candidates; ordered (fixed, moving) pairs.
+
+    The default evaluates every pair. Optional candidates only alter the pair
+    list: every retained longdouble quadratic and endpoint predicate is shared.
+    """
     fixed, moving = np.asarray(fixed, float), np.asarray(moving, float)
     fr, mr = np.asarray(fixed_radii, float), np.asarray(moving_radii, float)
     require(fixed.shape == (len(fr), 3) and moving.shape == (len(mr), 3), 'Atom geometry mismatch')
@@ -149,13 +217,24 @@ def leaf_contact_intervals(fixed, moving, direction, fixed_radii, moving_radii,
         pairs = np.asarray(list(pairs), int).reshape((-1, 2))
         require(np.all((pairs[:, 0] >= 0) & (pairs[:, 0] < len(fixed)))
                 and np.all((pairs[:, 1] >= 0) & (pairs[:, 1] < len(moving))), 'Invalid ordered residue atom pair')
+    candidates = projected_candidates(fixed, moving, velocity, fr, mr, gap, segment) if use_tree else None
+    if candidates is not None and pairs is not None:
+        memberships = [set(indices) for indices in candidates]
+        pairs = pairs[np.asarray([int(i) in memberships[int(j)] for i, j in pairs], bool)]
     def chunks():
         if pairs is None:
-            # Bounded arrays contain EVERY leaf pair, without a BVH/KD-tree or
-            # a geometric candidate pruning predicate.
+            # The default contains every pair. Optional culling keeps precisely
+            # the same fixed-major order within the original 32-atom blocks.
             for start in range(0, len(moving), 32):
                 js = np.arange(start, min(start+32, len(moving)))
-                yield np.repeat(np.arange(len(fixed)), len(js)), np.tile(js, len(fixed))
+                if candidates is None:
+                    ii, jj = np.repeat(np.arange(len(fixed)), len(js)), np.tile(js, len(fixed))
+                else:
+                    ii = np.concatenate([np.asarray(candidates[j], int) for j in js])
+                    jj = np.repeat(js, [len(candidates[j]) for j in js])
+                    order = np.lexsort((jj, ii))
+                    ii, jj = ii[order], jj[order]
+                yield ii, jj
         else:
             for start in range(0, len(pairs), 65536):
                 rows = pairs[start:start+65536]
@@ -190,9 +269,10 @@ def leaf_contact_intervals(fixed, moving, direction, fixed_radii, moving_radii,
 
 class NativeLineReference:
     """Entire union of the original classifier's motifs and ANY supporting bond."""
-    def __init__(self, observer):
+    def __init__(self, observer, *, use_tree=False):
         require(isinstance(observer, NativeContactRegions), 'Original native observer required')
         self.observer = observer
+        self.use_tree = use_tree
         require(len(observer.member_positions) == 4, 'Complete four-member body required')
         self.residue_atoms = {int(r): np.flatnonzero(observer.residues == r).tolist()
                               for r in np.unique(observer.residues)}
@@ -241,7 +321,7 @@ class NativeLineReference:
                             # first surviving subinterval: cache keys remain exact.
                             contacts = leaf_contact_intervals(model.atoms, model.atoms @ mr.T + md,
                                 vd, model.radii, model.radii, CRITERIA['contact_entry_A'],
-                                segment, inclusive=True, pairs=pairs)
+                                segment, inclusive=True, pairs=pairs, use_tree=self.use_tree)
                             bond = intersection(displacement, contacts['intervals'])
                             atom_count = contacts['leaf_atom_pairs']
                     cache[key] = dict(intervals=bond, leaf_atom_pairs=atom_count)
@@ -342,7 +422,7 @@ def conditional_branch(hard_free, selected_class, mean, sigma, floor, query):
 
 class Reconstructor(hard.Reconstructor):
     """Full independent component/axis/channel mixture and physical Jacobian."""
-    def __init__(self, region, guide, config, shape, observer):
+    def __init__(self, region, guide, config, shape, observer, *, use_tree=False):
         require(guide['schema'] == SCHEMA, 'Wrong native-class line schema')
         adapted = copy.deepcopy(guide)
         adapted['schema'] = 'defensive-hard-free-line-guide-v1'
@@ -372,7 +452,8 @@ class Reconstructor(hard.Reconstructor):
         for channel in self.channels: mass += channel['probability']
         require(abs(mass-1.) <= 1e-12, 'Channel probabilities must sum to one')
         for channel in self.channels: channel['probability'] /= mass
-        self.native = NativeLineReference(observer)
+        self.use_tree = use_tree
+        self.native = NativeLineReference(observer, use_tree=use_tree)
 
     def raw(self, u):
         answer = np.zeros(6)
@@ -383,7 +464,8 @@ class Reconstructor(hard.Reconstructor):
         require(np.isfinite(answer).all(), 'Unrepresentable raw chart coordinates')
         return answer
 
-    def reconstruct_axis(self, u, axis, use_tree=False):
+    def reconstruct_axis(self, u, axis, use_tree=None):
+        use_tree = self.use_tree if use_tree is None else use_tree
         require(axis in self.axes, 'Unknown raw translation axis')
         raw = self.raw(u); raw[axis] = 0.
         u0 = scalar_chart_solve(self.L0, raw-self.m0)
@@ -405,19 +487,21 @@ class Reconstructor(hard.Reconstructor):
                     geometry['empty_reason'] = 'disjoint_chords'
                 else:
                     geometry.update(segment=segment, **hard.hard_free_intervals(self.shape, self.config['fixed_poses'],
-                        origin, R, direction, segment, use_tree=use_tree))
+                        origin, R, direction, segment, use_tree=False))
         H = geometry['intervals']
         native, contacts = [], []
         details = None
         if 'segment' in geometry:
             position, rotation = pose_arrays(geometry['origin'])
             direction, segment = geometry['direction'], geometry['segment']
-            details = self.native.all_anchors(self.config['fixed_poses'], position, rotation, direction, segment)
+            native_reference = self.native if use_tree == self.use_tree else NativeLineReference(
+                self.native.observer, use_tree=use_tree)
+            details = native_reference.all_anchors(self.config['fixed_poses'], position, rotation, direction, segment)
             native = details['intervals']
             moving = self.atoms @ rotation.T + position
             for fixed in self.fixed_world:
                 contacts.extend(leaf_contact_intervals(fixed, moving, direction, self.radii, self.radii,
-                    2*self.config['depletant_radius'], segment, inclusive=False)['intervals'])
+                    2*self.config['depletant_radius'], segment, inclusive=False, use_tree=use_tree)['intervals'])
             contacts = union(contacts)
         classes = dict(hard_free=H, native=intersection(H, native),
                        contact_without_native=difference(intersection(H, contacts), native))

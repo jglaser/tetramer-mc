@@ -149,3 +149,24 @@ Artifacts: [Rust validation](../results/native-class-line-physical-validation-20
 The [next-campaign review](native-class-physical-campaign-review.md) describes
 fresh protein controls and the unresolved coverage checks. No new physical
 protein allocation has been launched by this sphere validation.
+
+## Optional independent geometry pruning
+
+The Python reference now has an opt-in projected KD-tree prefilter for exclusion
+and residue-restricted native intervals (`Reconstructor(..., use_tree=True)`).
+It projects along the dominant translation-direction component, bounds the two
+remaining coordinates, includes finite-segment leakage and a floating-point
+allowance, and falls back to all pairs when a safe finite bound is unavailable.
+Candidate pairs still use the original long-double quadratic and endpoint tests.
+The hard-core reference remains unpruned; the default and running frozen audits
+remain entirely unchanged.
+
+All 38 reference/projection/physical-reference tests pass, including tangencies,
+large coordinates, residue whitelists, fallbacks, full mixture densities and
+the unchanged default. A sparse synthetic case reduces 130 leaf evaluations to
+2 with identical intervals. This is not a protein runtime measurement. The
+[validation receipt](../results/native-class-projected-validation-20261003/validation.json)
+records the exact source hashes, NumPy version and long-double precision.
+Before enabling this path in a physical campaign, freeze a bounded comparison
+on saved protein poses against the existing unpruned evidence, including CPU
+and candidate counts. No protein geometry was queried for this implementation.

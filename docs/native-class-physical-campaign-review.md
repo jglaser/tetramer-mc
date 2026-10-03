@@ -69,9 +69,32 @@ The trust boundary must be visible in receipts and conclusions. All-row saved-in
 
 Adopt either optimization or split only in a new validated reference/protocol. Neither computational convenience nor the class guide's defensive component justifies silently weakening an already frozen all-row audit. Full physical convergence and remaining-support requirements remain separate from this audit-budget choice.
 
+The first bounded optional-pruning assessment can use **exactly 56 already saved poses**: fresh IDs 0–15 of `hard_free-r00`, plus all 40 `saved` development queries in the frozen proposal pilot. This is a new, separately bound evaluation of the optional reference path; it draws no poses/clouds and does not rerun the unpruned reference. Construct the current independent `Reconstructor(..., use_tree=True)`, call its density reconstruction once per selected row, then compare the full saved density trace, including every H/native/exclusion interval union and channel, q, J and coordinate maps. For the 16 fresh rows also run the existing inverse-CDF/draw-trace check using the reconstructed axes; saved probes must have `draw=None`. H-only q is insensitive to native/exclusion interval errors, so checking q alone would be inadequate. Endpoint topology and open/closed flags are mandatory. Three axes imply at most 168 line reconstructions; draw verification reuses them. No extra direct point-classifier pass is needed solely to test this candidate-pruning change.
+
+Observer initialization is an additional, explicit geometry allocation: seven directed reference-contact queries and one fixed-scaffold classifier, whose catalogue contains 30 distinct member/class triples and therefore permits at most 30 further contact queries. Bind that catalogue and scaffold, journal each begun/completed setup query, and report setup CPU separately. These at most 37 contact queries and one classifier call are outside the 56 density reconstructions; initialization is not geometry-free. Keep the existing observer checks intact.
+
+The first 16 unpruned checks are already complete inside the original audit journal. Bind an immutable byte-for-byte snapshot of its first **33 newline-terminated records**: the `started` event followed by the ordered `begin`/`complete` pairs for ordinals 0–15. Bind the original execution plan, the `started.input_sha256` closure, complete immutable Rust row files, and selected-row identities/hashes. Require the live journal to retain that exact prefix before and after the optional assessment; its later appended records must not invalidate the binding. Do not hash the whole changing journal as a purported immutable predecessor. Its original reference SHA is `1e154ca3b335be2ce233d460554bde66811f3a63b047143959ea9ac6a663ec80`. The journal records completion/error summaries rather than complete independently computed interval sets, so the comparison establishes that both reference paths agree with the same frozen Rust trace within declared tolerances; it is not a direct bitwise comparison of old and new independently generated endpoints.
+
+The 40 saved queries' original unpruned audits are still pending. Optional results can be recorded under the fixed 56-row allocation, but their final independent-equivalence status must remain pending until the existing unpruned completion evidence is available and linked without replay. Preserve all failures and unfinished predecessors; use no replacement IDs. Report matched-row CPU and candidate counts with scope limited to these selected fresh/development rows. Keep hard-core reconstruction unpruned for this first assessment. Only after its 56-row checks and predecessor evidence are complete should measured remaining hard-core cost motivate a separate pruning change, synthetic validation and independently declared protein check. Combining both optimizations now would obscure the source of any mismatch and change the comparison being validated.
+
+This assessment was prepared and launched on 2026-10-03 in
+`results/native-class-projected-protein-preparation-20261003`. Its allocation SHA
+is `d546082a71fe1e9ef70028e09b1481c9733292c835f12a6759973a2a567586b6`;
+freeze SHA is `ce83ad08021c44ab7c5e7103bbb42a9d51c25cf4b37ac161be04f99b32471ee1`.
+`tools/prepare_native_class_projected_probe.py` binds the exact saved inputs and
+separate root review, then launches the archived worker once. The worker journals
+setup and row attempts, drains on failure, and has no retry mode. Its limits are
+one scientific worker, 3,600 CPU seconds, 7,200 wall seconds and 16 GiB.
+The [10-test helper receipt](../results/native-class-projected-probe-validation-20261003/validation.json)
+and existing 38-test projected-reference receipt are linked by `root-review.json`.
+The host preflight reserved the eighth scientific worker alongside three growth
+jobs, up to three dimer jobs and the original one-worker audit. This launch creates
+no physical draws and leaves the full independent audit and physical campaign
+gates closed. Consult its terminal receipt for completion; launch is not a pass.
+
 ## Analysis requirements and stop decisions
 
-Two existing wrappers explicitly require four populations: `analyze_contact_confirmation.summarize_arm` and `analyze_conditional_ray_campaign.free_energy_interval`. A new validated adapter is required for eight populations. Use each population's linear mean importance weight, then calculate between-population uncertainty, covariance and ratios. Preserve the existing four-population outputs. The new paired-population delta interval uses Student-t with **7 degrees of freedom**, while historical four-population intervals retain 3. Add synthetic unequal-population-count, constant-weight, zero-mass, covariance and partition checks before launch.
+Two existing wrappers explicitly require four populations: `analyze_contact_confirmation.summarize_arm` and `analyze_conditional_ray_campaign.free_energy_interval`. The new arithmetic adapter documented below supports eight populations without modifying those wrappers or archived outputs; binding it to production inputs remains a future campaign obligation. It uses each population's linear mean importance weight to calculate between-population uncertainty, covariance and ratios. The new paired-population delta interval uses Student-t with **7 degrees of freedom**, while historical four-population intervals retain 3. Its synthetic validation includes unequal population counts, constant weights, zero mass, covariance and partition checks.
 
 Preserve the original numerical thresholds. The history contains two statistical implementations: the older generic `analyze_conditional_ray_campaign.compare_mass` uses a log-delta comparison, while the newer `analyze_hard_free_line_population_size.compare_linear` and `analyze_hard_free_line_sensitivity.compare_linear` compare **linear masses**. Archived outputs must retain their original rule. The new preregistration should explicitly use the latter linear comparison, consistent with the requested linear-mass evidence:
 
@@ -155,3 +178,46 @@ inputs, launch failure, nonzero exit, timeout draining and refusal of a second r
 The outer launcher must set the chosen resource limits, save stdout/stderr and a terminal receipt, drain/reap the process on timeout, interruption or SIGTERM, and preserve its claim on failure. The observer's own output creation is exclusive; it has **no resume mode**. Its JSONL observation files are buffered and it emits final `analysis.json`/`manifest.json` only after all chains. A failure may therefore leave incomplete output and some unflushed geometry observations. Do not erase them, restart in another directory, or call the missing results zero. Record the failed allocation as incomplete; any later salvage/continuation must have a new explicit protocol that avoids silently repeating the observed prefix. This limitation is a reason to use generous predeclared limits, not to claim resumability.
 
 The journal replay validates stored acceptance decisions and retained states; it does not independently recompute every original Poisson cloud or every depletion acceptance factor. The new observer is explicitly native-blind (`native=None`). It reports patch/partner/fingerprint occupancies, apparent contact ESS, passages/returns and Jaccard changes with rejected residence retained. Constant observables have null ESS, not infinite speed. Summaries keep contexts and trajectories separate, compare paired arm streams and initializations, and charge full sampler CPU including warmup/null moves while reporting observer CPU separately. These results can guide reversible oligomer proposals; they cannot by themselves establish equilibrium or native assembly.
+
+
+## Population-statistics API and synthetic validation
+
+`tools/contact_population_statistics.py` provides two pure arithmetic entry points:
+`summarize_populations(declaration, records)` and
+`compare_population_masses(left_declaration, left_records, right_declaration, right_records, region)`.
+A declaration fixes the arm, population count, equal attempted-draw budget per
+population, unconditional total, ordered region names, and every population ID
+and seed. Each record supplies the corresponding ID, seed, attempted draws,
+unconditional denominator, and regional log masses. These must be logs of
+linear population means; null or minus infinity denotes an observed zero.
+Four and eight populations are supported, with unequal counts and draw budgets
+allowed between independent comparison arms. Missing populations, changed
+denominators, repeated seeds, and invalid log masses are rejected.
+
+Each declaration also requires `target_and_regions_sha256`. The caller must
+bind this immutable identity to the exact shape, scaffold, domain, physical
+measure, depletant radius/activity, classifier, and complete region definitions.
+The helper requires identical identities for cross-arm comparisons; it does
+not load geometry, establish target equivalence, or verify the original row
+estimator. Those remain obligations of the upstream audited input preparation.
+
+The summary averages linear masses, retains paired population covariance, and
+reports the native/competing delta-method interval using Student t with P−1
+degrees of freedom. Independent-arm comparisons use linear-Q standard errors
+with each arm's own population count and the separate 0.2-log-unit condition.
+All-zero classes retain their observed counts but supply no precision claim,
+finite free-energy interval, physical-zero conclusion, or upper bound. Scaled
+linear quantities and finite log means distinguish numerical display underflow
+from unobserved mass. Row importance ESS and largest individual contributions
+cannot be inferred from population means and are not reported by this helper.
+
+The [source-bound validation](../results/contact-population-statistics-validation-20261003/validation.json)
+contains 16 arithmetic-only tests. Synthetic partition fixtures check that
+native-old plus native-remainder equals native, and native plus competing plus
+unbound equals total, including the covariance sums and arbitrary region and
+record order. Other fixtures cover four/eight populations, unequal population
+counts, paired correlations, zeros, constant observations, extreme log scales,
+independent seeds, denominator checks, and incompatible target identities.
+No old scientific inputs were read or recomputed, and no physical allocation or
+sampling was launched. Archived four-population analyses remain unchanged;
+these approximate uncertainty diagnostics do not establish unseen-mode coverage.

@@ -68,7 +68,17 @@ omitting the correction raises close-contact probability by 0.280, a 77.7-SE
 shift. All 3,451,219 independent arithmetic and trace checks pass. This is a
 conditional sphere reference, not a general correctness proof or protein
 efficiency result. The fixed protein comparison uses 1,536 new guided trials
-and reuses 768 baseline trials; physical acceptance is assessed separately.
+and reuses 768 baseline trials. Its [physical replay](auxiliary-overlap-physical.md)
+is complete and audited: zero accepts, despite improved overlap retention in
+the native-informed arm. The summed conditional acceptance probability is
+0.032399; two proposed detachments supply 98.42% of it. The kernel has not
+demonstrated useful docking, reorganization or contact sampling efficiency.
+The saved-count decomposition isolates a large internal-F penalty even when
+internal-only bath loss is nearly removed. The [center diagnosis](dimer-center-overlap.md)
+then distinguishes poor memory-atlas center coverage from infeasible draws
+around good FFT centers. A controlled FFT covariance-width test is the next
+candidate; changing the width may also worsen the full density ratio, so
+geometry alone cannot decide whether it helps.
 Ephemeral auxiliaries permit composition with existing local/GCA/center-shift
 kernels; persistent memory would need additional joint-target handling.
 
@@ -92,7 +102,7 @@ arbitrarily small errors. All-row generation, density, geometry and MH audits
 passed. The prepared-factor scoring correction is separate: the toy's identity
 factors already agreed, so that correction does not explain the earlier flag.
 
-As of 2026-10-02 23:40 UTC, the two saved-data SMC audits and their guarded
+As of 2026-10-03 01:01 UTC, the two saved-data SMC audits and their guarded
 analysis watcher remain live. Five user growth jobs remain live; the
 native-informed `cluster-oligomer-seed8-free256-z004` job completed its planned
 100,000 sweeps at 20:58 UTC. That completion alone supplies no new classified

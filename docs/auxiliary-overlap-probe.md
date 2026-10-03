@@ -77,9 +77,8 @@ retain every attempt. SHA256 values:
 - Analysis: `0f8a299d5efd945466fecdc54530b886c41006a94f693d42794e4d8f690b06c3`.
 - Completed review: `d8555ed4a062784f1842cc1712b8673ac006592a336a255951e5bc3dd2cc563e`.
 
-The next separately frozen comparison replays all 1,536 guided outers once
-through the many-body bath, resetting the source after every decision. It must
-add the auxiliary correction exactly once, reuse the cached baseline physical
-results, and count every null and rejection. This will measure physical
-acceptance and cost at these saved sources; it will still not supply trajectory
-ESS, equilibrium occupancies or a finite-system stability conclusion.
+The separately frozen [physical replay](auxiliary-overlap-physical.md) is now
+complete: all 1,536 guided outers, zero accepts. It adds the auxiliary correction
+exactly once, reuses the cached baseline physical results, and counts every
+null and rejection. Improved overlap retention does not yet give useful
+physical acceptance; no assembly-kernel promotion follows from this pilot.

@@ -684,5 +684,54 @@ The isolated validation build used four Cargo jobs and one test thread; the
 production executable was not rebuilt. An initial external test fixture used
 an unsupported RNG clone operation; its failed receipt remains recorded and
 the fixture now reconstructs the same stream from its seed. No protein poses,
-clouds or native labels were queried for this validation. A matched protein
-campaign for this control is **not yet allocated or launched**.
+clouds or native labels were queried for this validation.
+
+### Matched fused and unfused singleton benchmark
+
+The example runner now exposes `singleton_two_neighbor` and
+`singleton_two_neighbor_unfused`. Both alternate the two mobile labels, keeping
+the other member and the external anchor as their ordered pair of neighbors.
+Both retain the same four local attempts per block, local step sizes, 50%
+uniform defensive distribution, 160 Å cube half-width, and 32-trial cap.
+The fused arm assigns 0.8 of its learned mixture mass to fitted two-contact
+components when available. The unfused arm uses zero fused mass and retains
+the individual-neighbor components. Component eligibility and fallback follow
+the existing `OligomerMixture` construction. The entire mixture is rescored at
+both endpoints, including components other than the sampled one.
+
+The frozen allocation has 64 new chains: four fixed environments, two starts,
+four independent streams and two proposal arms. Every chain has 512 warmup and
+4,096 production blocks. This adds 1,179,648 local and 294,912 singleton attempts;
+the 294,976 retained/initial endpoints include every rejected residence. The
+16 displaced starts are reused from the original campaign. The new arms do
+not load or sample guidance clouds. The completed 32 local and 32 `m4` chains
+provide cached controls; no old contact geometry is recomputed.
+
+The scientific comparison remains conditional on two mobile tetramers and 262
+fixed spectators at rd=1.4 Å and z=0.0275 Å⁻³. Assess each environment and start
+separately. Contact-fingerprint ESS per full sampler CPU, external-contact
+exchanges and returns, and agreement between starting states are the primary
+diagnostics. Constant traces have undefined ESS; an isolated short excursion
+does not establish mixing. Shared RNG roles pair the two new proposal arms;
+the old `m4` collective stream is not the same proposal stream.
+
+The example has eight passing tests, including both arms and both starts across
+disk checkpoint continuation. The independent observer has 13 synthetic tests
+covering full-mixture arithmetic, first-success stopping, alternation, retained
+self-loops, one physical acceptance and all-chain admission. Its scalar replay
+does not independently reconstruct the learned catalogue, RNG or bath geometry.
+The frozen observer excludes native labels. This experiment can diagnose
+reorganization efficiency, but it cannot establish native assembly or refute
+the original 1.5 Å / 0.035 Å⁻³ finite-system target.
+
+Campaign preparation is
+`results/two-neighbor-singleton-benchmark-20261003`; config SHA256
+`a9fad5a0799f767951cd032a7014972afb8703cf3bbdf89cf79fc8f2c4c362cf`.
+It binds the isolated example executable, its build receipt and source bundle,
+the original preparation authority, all 64 cached control observations, and
+the observer before sampling. The controller has 17 passing synthetic tests,
+including launcher publication/stop failures and draining every owned worker.
+Dispatch permits three single-threaded chains at a time, with per-chain limits
+of 3,600 CPU seconds, 7,200 wall seconds and 16 GiB. A failed chain stops new
+launches and drains active jobs; failures and unstarted jobs remain visible,
+without reseeding, replacement or continuation of an incomplete campaign.

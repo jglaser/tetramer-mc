@@ -22,6 +22,7 @@ use tetramer_mc::{
     factorized_dimer::{FactorizedDimerCaps, FactorizedDimerOrder, FactorizedDimerProposal},
     geometry::{Shape, SphereTree},
     math::{Pose, norm, sub},
+    oligomer_proposal::OligomerConfig,
     proposal::FrozenRelativePoseProposal,
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
     spherical::{Container, validate_state},
@@ -118,6 +119,81 @@ fn dimer_role(arm: &str, role: &str) -> String {
         arm
     };
     format!("{prefix}/{role}")
+}
+fn singleton_arm(arm: &str) -> bool {
+    matches!(
+        arm,
+        "singleton_two_neighbor" | "singleton_two_neighbor_unfused"
+    )
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SingletonPolicy {
+    schema: String,
+    uniform_half_width: f64,
+    uniform_probability: f64,
+    trial_cap: usize,
+    member_schedule: String,
+    oligomer: OligomerConfig,
+}
+impl SingletonPolicy {
+    fn oligomer_for(&self, arm: &str) -> OligomerConfig {
+        let mut config = self.oligomer.clone();
+        if arm == "singleton_two_neighbor_unfused" {
+            config.multi_contact_mass = 0.;
+        }
+        config
+    }
+}
+/// Existing plans omit this field entirely. The two new arms declare the
+/// frozen common policy; only their deterministic fused mass differs.
+fn singleton_policy(plan: &Value, arm: &str) -> Result<Option<SingletonPolicy>> {
+    if !singleton_arm(arm) {
+        ensure!(
+            plan.get("singleton_policy").is_none(),
+            "singleton policy on an existing arm"
+        );
+        return Ok(None);
+    }
+    let policy: SingletonPolicy = serde_json::from_value(
+        plan.get("singleton_policy")
+            .context("new singleton arm requires singleton_policy")?
+            .clone(),
+    )?;
+    ensure!(
+        policy.schema == "two-neighbor-singleton-policy-v1"
+            && policy.uniform_half_width == 160.
+            && policy.uniform_probability == 0.5
+            && policy.trial_cap == 32
+            && policy.member_schedule == "alternating_0_first"
+            && policy.oligomer == OligomerConfig::default(),
+        "singleton policy differs from the frozen matched control"
+    );
+    Ok(Some(policy))
+}
+fn extra_role(arm: &str, role: &str) -> String {
+    if singleton_arm(arm) {
+        format!("singleton_two_neighbor/{role}")
+    } else {
+        dimer_role(arm, role)
+    }
+}
+fn singleton_contract(
+    engine: &FixedLabelUpdates<'_>,
+    policy: &SingletonPolicy,
+    arm: &str,
+) -> Value {
+    json!({
+        "schema":"evolving-dimer-two-neighbor-singleton-v1",
+        "policy":policy,"effective_oligomer":policy.oligomer_for(arm),
+        "member_labels":engine.members,"anchor_label":engine.anchor,
+        "member_slot_schedule":"(block-1)%2","neighbors":"[other_mobile,fixed_anchor]",
+        "uniform_frame":"fixed_anchor_body","catalogue_rebuild":"every elementary attempt",
+        "proposal_rng_role":extra_role(arm,"proposal"),
+        "bath_rng_role":extra_role(arm,"bath"),"accept_rng_role":extra_role(arm,"accept"),
+        "local_rng_roles":"unchanged shared local/{attempt}/{proposal,bath,accept}",
+        "physical_decisions_per_candidate":1,"guidance_cloud_used":false
+    })
 }
 fn root_guidance_contract(engine: &FixedLabelUpdates<'_>, bank: &Value) -> Value {
     json!({
@@ -340,6 +416,18 @@ fn validate_binding(args: &Args, plan: &Value) -> Result<Value> {
         plan["allocation"]["local_member_order"] == json!([0, 1, 0, 1]),
         "local schedule differs"
     );
+    ensure!(
+        plan.get("singleton_policy").is_none() || args.mode == "run",
+        "singleton arms reuse frozen preparation; new preparation is forbidden"
+    );
+    for job in plan["jobs"].as_array().context("jobs")? {
+        if singleton_policy(plan, job["arm"].as_str().context("arm")?)?.is_some() {
+            ensure!(
+                args.mode == "run",
+                "singleton arms reuse frozen preparation; new preparation is forbidden"
+            );
+        }
+    }
     Ok(binding)
 }
 fn prepare(args: &Args, plan: &Value, geometry: &Geometry) -> Result<()> {
@@ -508,9 +596,10 @@ fn run(args: &Args, plan: &Value, binding: &Value, geometry: &Geometry) -> Resul
     let init = job["initialization"].as_str().context("initialization")?;
     let arm = job["arm"].as_str().context("arm")?;
     ensure!(
-        ["local", "unguided", "m4", "root_m4"].contains(&arm),
+        ["local", "unguided", "m4", "root_m4"].contains(&arm) || singleton_arm(arm),
         "unknown arm"
     );
+    singleton_policy(plan, arm)?;
     let parent = PathBuf::from(plan["output"].as_str().context("output")?);
     fs::create_dir_all(&parent)?;
     let output = parent.join(format!("job-{job_id:03}"));
@@ -550,6 +639,7 @@ fn run_inner(
     init: &str,
     arm: &str,
 ) -> Result<()> {
+    let singleton = singleton_policy(plan, arm)?;
     let config_hash = hash_file(&args.config)?;
     let binding_hash = hash_file(&args.binding)?;
     let started = cpu_seconds();
@@ -558,49 +648,59 @@ fn run_inner(
         prepared["complete"] == true && prepared["passed"] == true,
         "incomplete preparation"
     );
-    for file in prepared["files"].as_array().context("prepared files")? {
-        bound(file)?.read()?;
-    }
-    let bank = prepared["cloud_banks"]
-        .as_array()
-        .context("cloud_banks")?
-        .iter()
-        .find(|b| {
-            b["context_index"].as_u64() == Some(ci as u64)
-                && b["initialization"] == init
-                && b["stream"].as_u64() == Some(stream as u64)
-        })
-        .context("missing cloud bank")?;
-    let raw = bound(&bank["raw"])?.read()?;
-    let meta = bound(&bank["metadata"])?.json()?;
-    let low: [f64; 3] = serde_json::from_value(meta["low"].clone())?;
-    let high: [f64; 3] = serde_json::from_value(meta["high"].clone())?;
-    ensure!(
-        raw.len() == 24 * usize_at(&plan["cloud"], "raw_count")?,
-        "cloud length differs"
-    );
-    let indices: Vec<usize> = serde_json::from_value(meta["kept_indices"].clone())?;
-    let points: Vec<[f64; 3]> = indices
-        .iter()
-        .map(|&i| {
-            std::array::from_fn(|k| {
-                let u =
-                    f64::from_le_bytes(raw[i * 24 + k * 8..i * 24 + k * 8 + 8].try_into().unwrap());
-                low[k] + (high[k] - low[k]) * u
-            })
-        })
-        .collect();
-    let guide = if matches!(arm, "m4" | "root_m4") {
-        Some(AuxiliaryOverlapThreshold::new(
-            &geometry.exclusion,
-            points,
-            4,
-        )?)
+    let (bank, meta, guide) = if singleton.is_some() {
+        // The bound manifest attests the original preparation. New singleton
+        // arms authenticate only their reused start below, and never load or
+        // thin any of the archived guidance clouds.
+        (None, None, None)
     } else {
-        None
+        for file in prepared["files"].as_array().context("prepared files")? {
+            bound(file)?.read()?;
+        }
+        let bank = prepared["cloud_banks"]
+            .as_array()
+            .context("cloud_banks")?
+            .iter()
+            .find(|b| {
+                b["context_index"].as_u64() == Some(ci as u64)
+                    && b["initialization"] == init
+                    && b["stream"].as_u64() == Some(stream as u64)
+            })
+            .context("missing cloud bank")?;
+        let raw = bound(&bank["raw"])?.read()?;
+        let meta = bound(&bank["metadata"])?.json()?;
+        let low: [f64; 3] = serde_json::from_value(meta["low"].clone())?;
+        let high: [f64; 3] = serde_json::from_value(meta["high"].clone())?;
+        ensure!(
+            raw.len() == 24 * usize_at(&plan["cloud"], "raw_count")?,
+            "cloud length differs"
+        );
+        let indices: Vec<usize> = serde_json::from_value(meta["kept_indices"].clone())?;
+        let points: Vec<[f64; 3]> = indices
+            .iter()
+            .map(|&i| {
+                std::array::from_fn(|k| {
+                    let u = f64::from_le_bytes(
+                        raw[i * 24 + k * 8..i * 24 + k * 8 + 8].try_into().unwrap(),
+                    );
+                    low[k] + (high[k] - low[k]) * u
+                })
+            })
+            .collect();
+        let guide = if matches!(arm, "m4" | "root_m4") {
+            Some(AuxiliaryOverlapThreshold::new(
+                &geometry.exclusion,
+                points,
+                4,
+            )?)
+        } else {
+            None
+        };
+        (Some(bank), Some(meta), guide)
     };
     let mut state = geometry.state.clone();
     let engine = geometry.engine(plan, ci)?;
+    let mut reused_start = Value::Null;
     if init == "proposal_prepared" {
         let start = prepared["alternative_starts"]
             .as_array()
@@ -612,6 +712,12 @@ fn run_inner(
             })
             .context("missing prepared start")?;
         let record = bound(&start["record"])?.json()?;
+        if singleton.is_some() {
+            if let Some(ledger) = start.get("ledger") {
+                bound(ledger)?.read()?;
+            }
+            reused_start = start.clone();
+        }
         let poses: [Pose; 2] = serde_json::from_value(record["selected"].clone())?;
         for i in 0..2 {
             state[engine.members[i]] = poses[i];
@@ -622,7 +728,11 @@ fn run_inner(
     let limits: Limits = serde_json::from_value(plan["limits"].clone())?;
     let mut budget = Budget::new(limits)?;
     budget.started = started;
-    let mut counts = json!({"local_attempted":0u64,"local_accepted":0u64,"dimer_attempted":0u64,"dimer_accepted":0u64,"dimer_self_loop":0u64});
+    let mut counts = if singleton.is_some() {
+        json!({"local_attempted":0u64,"local_accepted":0u64,"singleton_attempted":0u64,"singleton_accepted":0u64,"singleton_self_loop":0u64})
+    } else {
+        json!({"local_attempted":0u64,"local_accepted":0u64,"dimer_attempted":0u64,"dimer_accepted":0u64,"dimer_self_loop":0u64})
+    };
     let mut completed = 0usize;
     let journal_path = output.join("trajectory.jsonl");
     let mut journal = if let Some(path) = &args.resume {
@@ -675,12 +785,20 @@ fn run_inner(
         )?
     } else {
         let mut journal = Journal::new(&journal_path)?;
-        let mut initial = json!({"kind":"initial","block":0,"job":job,"selected":engine.selected(&state),
-            "fixed_source":plan["source_frame"],"cloud":bank,"cloud_cpu_seconds":meta["cpu_seconds"],
+        let mut initial = if let Some(policy) = &singleton {
+            json!({"kind":"initial","block":0,"job":job,"selected":engine.selected(&state),
+                "fixed_source":plan["source_frame"],"prepared_manifest":binding["prepared_manifest"],
+                "prepared_start":reused_start,"singleton_contract":singleton_contract(&engine,policy,arm),
+                "geometry_load_cpu_seconds":geometry.load_cpu_seconds,
+                "conditional_target":true,"sampler_cpu_seconds":cpu_seconds()-budget.started})
+        } else {
+            json!({"kind":"initial","block":0,"job":job,"selected":engine.selected(&state),
+            "fixed_source":plan["source_frame"],"cloud":bank.unwrap(),"cloud_cpu_seconds":meta.as_ref().unwrap()["cpu_seconds"],
             "geometry_load_cpu_seconds":geometry.load_cpu_seconds,
-            "conditional_target":true,"sampler_cpu_seconds":cpu_seconds()-budget.started});
+            "conditional_target":true,"sampler_cpu_seconds":cpu_seconds()-budget.started})
+        };
         if arm == "root_m4" {
-            initial["guidance_contract"] = root_guidance_contract(&engine, bank);
+            initial["guidance_contract"] = root_guidance_contract(&engine, bank.unwrap());
         }
         journal.line(&initial)?;
         journal
@@ -692,7 +810,11 @@ fn run_inner(
             .hard_valid(),
         "invalid evolving start"
     );
-    let proposal = geometry.proposal(plan)?;
+    let proposal = if singleton.is_none() {
+        Some(geometry.proposal(plan)?)
+    } else {
+        None
+    };
     let warmup = usize_at(&plan["allocation"], "warmup_blocks")?;
     let total = warmup + usize_at(&plan["allocation"], "production_blocks")?;
     ensure!(completed <= total, "checkpoint block exceeds allocation");
@@ -754,7 +876,52 @@ fn run_inner(
                 increment(&mut counts, "local_accepted");
             }
         }
-        if arm != "local" {
+        if let Some(policy) = &singleton {
+            let slot = (block - 1) % 2;
+            let mut record = Value::Null;
+            let mut prng = rng(
+                master,
+                ci,
+                init,
+                stream,
+                block,
+                &extra_role(arm, "proposal"),
+            );
+            let mut brng = rng(master, ci, init, stream, block, &extra_role(arm, "bath"));
+            let mut arng = rng(master, ci, init, stream, block, &extra_role(arm, "accept"));
+            let result = engine.two_neighbor_singleton(
+                &mut state,
+                slot,
+                &geometry.model,
+                &policy.oligomer_for(arm),
+                policy.uniform_half_width,
+                policy.trial_cap,
+                &mut prng,
+                &mut brng,
+                &mut arng,
+                &mut budget,
+                &mut record,
+            );
+            if record.is_null() {
+                record = json!({"kind":"two_neighbor_singleton","status":"failed_before_proposal"});
+            }
+            record["block"] = json!(block);
+            record["member_slot"] = json!(slot);
+            record["retained"] = json!(engine.selected(&state));
+            record["sampler_cpu_seconds"] = json!(cpu_seconds() - budget.started);
+            if let Err(error) = &result {
+                record["fatal_error"] = json!(format!("{error:#}"));
+            }
+            journal.line(&record)?;
+            result?;
+            increment(&mut counts, "singleton_attempted");
+            if record["accepted"] == true {
+                increment(&mut counts, "singleton_accepted");
+            }
+            if record["status"] == "proposal_self_loop" {
+                increment(&mut counts, "singleton_self_loop");
+            }
+        } else if arm != "local" {
             let mut record = Value::Null;
             let mut prng = rng(
                 master,
@@ -785,7 +952,7 @@ fn run_inner(
                 );
                 engine.dimer_with_guides(
                     &mut state,
-                    &proposal,
+                    proposal.as_ref().unwrap(),
                     guide.as_ref(),
                     guide.as_ref(),
                     &mut prng,
@@ -799,7 +966,7 @@ fn run_inner(
             } else {
                 engine.dimer(
                     &mut state,
-                    &proposal,
+                    proposal.as_ref().unwrap(),
                     guide.as_ref(),
                     &mut prng,
                     &mut trng,
@@ -951,11 +1118,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn root_arm_frozen_cloud_and_prepared_starts_replay_across_disk_checkpoint() -> Result<()> {
+    fn synthetic_geometry() -> Result<Geometry> {
         use tetramer_mc::geometry::Atom;
-        let dir = std::env::temp_dir().join(format!("root-arm-restart-{}", std::process::id()));
-        fs::create_dir(&dir)?;
         let sphere = |radius: f64| -> Result<SphereTree> {
             SphereTree::new(Shape {
                 name: "synthetic sphere".into(),
@@ -987,13 +1151,23 @@ mod tests {
             0.,
             [0.; 3],
         )?;
-        let geometry = Geometry {
+        Ok(Geometry {
             core,
             exclusion,
             wall,
             state: vec![pose(0.6), pose(1.2), pose(0.)],
             model,
             load_cpu_seconds: 0.,
+        })
+    }
+    #[test]
+    fn root_arm_frozen_cloud_and_prepared_starts_replay_across_disk_checkpoint() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("root-arm-restart-{}", std::process::id()));
+        fs::create_dir(&dir)?;
+        let geometry = synthetic_geometry()?;
+        let pose = |x| Pose {
+            position: [x, 0., 0.],
+            orientation: [1., 0., 0., 0.],
         };
         let raw_path = dir.join("frozen-cloud.bin");
         let raw = [0.55f64, 0.5, 0.5]
@@ -1130,6 +1304,225 @@ mod tests {
             let b = terminal(&split_out.join("terminal.json"))?;
             for key in ["counts", "raw", "retained", "blocks", "complete", "job"] {
                 assert_eq!(a[key], b[key]);
+            }
+        }
+        for (path, hash) in frozen {
+            assert_eq!(hash_file(&path)?, hash);
+        }
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+    #[test]
+    fn singleton_policy_is_explicit_frozen_and_absent_on_existing_arms() -> Result<()> {
+        let policy = synthetic_singleton_policy();
+        for arm in ["singleton_two_neighbor", "singleton_two_neighbor_unfused"] {
+            assert!(singleton_policy(&json!({}), arm).is_err());
+            let accepted = singleton_policy(&json!({"singleton_policy":policy}), arm)?.unwrap();
+            assert_eq!(
+                accepted.oligomer_for(arm).multi_contact_mass,
+                if arm == "singleton_two_neighbor" {
+                    0.8
+                } else {
+                    0.
+                }
+            );
+            for (field, value) in [
+                ("trial_cap", json!(31)),
+                ("uniform_probability", json!(0.4)),
+                ("uniform_half_width", json!(159.)),
+                ("member_schedule", json!("random")),
+                ("schema", json!("other")),
+                ("extra_field", json!(true)),
+            ] {
+                let mut changed = policy.clone();
+                changed[field] = value;
+                assert!(singleton_policy(&json!({"singleton_policy":changed}), arm).is_err());
+            }
+            let mut changed = policy.clone();
+            changed["oligomer"]["max_components"] = json!(33);
+            assert!(singleton_policy(&json!({"singleton_policy":changed}), arm).is_err());
+            let mut changed = policy.clone();
+            changed["oligomer"]["multi_contact_mass"] = json!(0.);
+            assert!(singleton_policy(&json!({"singleton_policy":changed}), arm).is_err());
+        }
+        for arm in ["local", "unguided", "m4", "root_m4"] {
+            assert!(singleton_policy(&json!({}), arm)?.is_none());
+            assert!(singleton_policy(&json!({"singleton_policy":null}), arm).is_err());
+            assert!(singleton_policy(&json!({"singleton_policy":policy}), arm).is_err());
+            for role in ["proposal", "bath", "accept", "threshold", "root_threshold"] {
+                assert_eq!(extra_role(arm, role), dimer_role(arm, role));
+            }
+        }
+        Ok(())
+    }
+    fn synthetic_singleton_policy() -> Value {
+        json!({"schema":"two-neighbor-singleton-policy-v1","uniform_half_width":160.,
+            "uniform_probability":0.5,"trial_cap":32,"member_schedule":"alternating_0_first",
+            "oligomer":OligomerConfig::default()})
+    }
+    #[test]
+    fn singleton_arms_share_named_streams_and_alternate_from_first_member() {
+        for init in ["source", "proposal_prepared"] {
+            for block in 1..=8 {
+                assert_eq!((block - 1) % 2, usize::from(block % 2 == 0));
+                for role in ["proposal", "bath", "accept"] {
+                    let a = extra_role("singleton_two_neighbor", role);
+                    let b = extra_role("singleton_two_neighbor_unfused", role);
+                    assert_eq!(a, format!("singleton_two_neighbor/{role}"));
+                    assert_eq!(a, b);
+                    assert_eq!(
+                        rng(77, 0, init, 0, block, &a).random::<u64>(),
+                        rng(77, 0, init, 0, block, &b).random::<u64>()
+                    );
+                    assert_ne!(
+                        rng(77, 0, init, 0, block, &a).random::<u64>(),
+                        rng(77, 0, init, 0, block, &format!("local/0/{role}")).random::<u64>()
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn singleton_both_arms_and_starts_resume_without_loading_guidance_clouds() -> Result<()> {
+        let dir =
+            std::env::temp_dir().join(format!("singleton-arms-restart-{}", std::process::id()));
+        fs::create_dir(&dir)?;
+        let geometry = synthetic_geometry()?;
+        let pose = |x| Pose {
+            position: [x, 0., 0.],
+            orientation: [1., 0., 0., 0.],
+        };
+        let start_path = dir.join("frozen-start.json");
+        save(&start_path, &json!({"selected":[pose(0.62),pose(1.23)]}))?;
+        let ledger_path = dir.join("frozen-start-attempts.jsonl");
+        fs::write(&ledger_path, b"{\"synthetic_preparation\":true}\n")?;
+        let manifest_path = dir.join("original-prepared-manifest.json");
+        let unreadable_cloud =
+            json!({"path":dir.join("cloud-must-not-be-opened"),"sha256":"0".repeat(64)});
+        save(
+            &manifest_path,
+            &json!({"complete":true,"passed":true,
+            "files":[unreadable_cloud],"cloud_banks":"must-not-be-inspected",
+            "alternative_starts":[{"context_index":0,"stream":0,"record":BoundFile::make(&start_path)?,
+                "ledger":BoundFile::make(&ledger_path)?}]}),
+        )?;
+        let binding = json!({"prepared_manifest":BoundFile::make(&manifest_path)?});
+        let binding_path = dir.join("binding.json");
+        save(&binding_path, &binding)?;
+        let frozen: Vec<_> = [&start_path, &ledger_path, &manifest_path]
+            .into_iter()
+            .map(|p| (p.clone(), hash_file(p).unwrap()))
+            .collect();
+        for arm in ["singleton_two_neighbor", "singleton_two_neighbor_unfused"] {
+            for init in ["source", "proposal_prepared"] {
+                let label = format!("{arm}-{init}");
+                let plan_for = |output: PathBuf| {
+                    json!({
+                    "master_seed":77,"output":output,"contexts":[{"root":0,"child":1,"anchor":2}],
+                    "source_frame":{"synthetic":"frozen_source"},
+                    "physical":{"wall_radius":50.,"depletant_radius":0.8,"activity":0.05,"lambda_ratio":64.},
+                    "singleton_policy":synthetic_singleton_policy(),
+                    "local":{"translation_std_A":0.02,"rotation_std_degrees":1.},
+                    "envelope":{"max_cells":63,"max_depth":6,"min_width":0.},
+                    "limits":{"raw_per_leg":1000000,"raw_per_outer":2000000,"raw_campaign":20000000,
+                        "retained_per_leg":1000000,"retained_per_outer":2000000,"retained_campaign":20000000,
+                        "cpu_seconds":60.},
+                    "allocation":{"warmup_blocks":2,"production_blocks":6},
+                    "jobs":[{"id":0,"context_index":0,"stream":0,"initialization":init,"arm":arm}]})
+                };
+                let full_plan = plan_for(dir.join(format!("{label}-full")));
+                let split_plan = plan_for(dir.join(format!("{label}-split")));
+                let full_config = dir.join(format!("{label}-full.json"));
+                let split_config = dir.join(format!("{label}-split.json"));
+                save(&full_config, &full_plan)?;
+                save(&split_config, &split_plan)?;
+                let args = |config, stop_after_block, resume| Args {
+                    config,
+                    binding: binding_path.clone(),
+                    mode: "run".into(),
+                    job: Some(0),
+                    stop_after_block,
+                    resume,
+                };
+                run(
+                    &args(full_config, None, None),
+                    &full_plan,
+                    &binding,
+                    &geometry,
+                )?;
+                run(
+                    &args(split_config.clone(), Some(3), None),
+                    &split_plan,
+                    &binding,
+                    &geometry,
+                )?;
+                let split_out = dir.join(format!("{label}-split/job-000"));
+                let checkpoint_path = split_out.join("checkpoint.json");
+                let checkpoint: Value = serde_json::from_slice(&fs::read(&checkpoint_path)?)?;
+                assert_eq!(checkpoint["block"], 3);
+                assert_eq!(checkpoint["journal_rows"], 19);
+                run(
+                    &args(split_config, None, Some(checkpoint_path)),
+                    &split_plan,
+                    &binding,
+                    &geometry,
+                )?;
+                let full_out = dir.join(format!("{label}-full/job-000"));
+                let rows = |output: &Path| -> Result<Vec<Value>> {
+                    fs::read_to_string(output.join("trajectory.jsonl"))?
+                        .lines()
+                        .map(|line| {
+                            let mut row: Value = serde_json::from_str(line)?;
+                            row.as_object_mut().unwrap().remove("sampler_cpu_seconds");
+                            Ok(row)
+                        })
+                        .collect()
+                };
+                let actual = rows(&split_out)?;
+                assert_eq!(actual, rows(&full_out)?);
+                assert_eq!(actual.len(), 49);
+                let initial = &actual[0];
+                assert!(
+                    initial.get("cloud").is_none() && initial.get("guidance_contract").is_none()
+                );
+                assert_eq!(initial["singleton_contract"]["guidance_cloud_used"], false);
+                assert_eq!(
+                    initial["singleton_contract"]["effective_oligomer"]["multi_contact_mass"],
+                    if arm == "singleton_two_neighbor" {
+                        json!(0.8)
+                    } else {
+                        json!(0.)
+                    }
+                );
+                assert_eq!(initial["prepared_start"].is_null(), init == "source");
+                assert_eq!(
+                    initial["selected"],
+                    if init == "source" {
+                        json!([pose(0.6), pose(1.2)])
+                    } else {
+                        json!([pose(0.62), pose(1.23)])
+                    }
+                );
+                for block in 1..=8 {
+                    let base = 1 + (block - 1) * 6;
+                    for (attempt, slot) in [0, 1, 0, 1].into_iter().enumerate() {
+                        assert_eq!(actual[base + attempt]["kind"], "local");
+                        assert_eq!(actual[base + attempt]["member"], slot);
+                    }
+                    let extra = &actual[base + 4];
+                    assert_eq!(extra["kind"], "two_neighbor_singleton");
+                    assert_eq!(extra["member_slot"], (block - 1) % 2);
+                    assert_eq!(extra["member"], (block - 1) % 2);
+                    assert_eq!(extra["neighbors"], json!([1 - (block - 1) % 2, 2]));
+                    assert_eq!(actual[base + 5]["counts"]["local_attempted"], block * 4);
+                    assert_eq!(actual[base + 5]["counts"]["singleton_attempted"], block);
+                    assert!(actual[base + 5]["counts"].get("dimer_attempted").is_none());
+                }
+                let a: Value = serde_json::from_slice(&fs::read(full_out.join("terminal.json"))?)?;
+                let b: Value = serde_json::from_slice(&fs::read(split_out.join("terminal.json"))?)?;
+                for key in ["counts", "raw", "retained", "blocks", "complete", "job"] {
+                    assert_eq!(a[key], b[key]);
+                }
             }
         }
         for (path, hash) in frozen {

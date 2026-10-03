@@ -234,7 +234,7 @@ pub struct LineGeometry {
 
 /// Analytic interval for |offset + s*direction| < radius (or <= when closed).
 /// Zero direction is a constant predicate; wall tangencies may be singletons.
-fn ball_interval(
+pub(crate) fn ball_interval(
     offset: Vec3,
     direction: Vec3,
     radius: f64,

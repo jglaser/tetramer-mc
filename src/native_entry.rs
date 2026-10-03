@@ -6,6 +6,11 @@
 //! independently reject atomic overlaps, as Python does, but that partial check
 //! cannot certify the entire configuration. Entry requires body registration AND
 //! at least one prescribed registered monomer bond sharing a reference residue pair.
+mod line;
+mod shape_compatibility;
+pub use line::{NativeLineCounts, NativeLineResult};
+pub use shape_compatibility::NativeShapeCompatibility;
+
 use crate::math::{Mat3, Pose, Vec3, add, matmul, matvec, rotation, sub, transpose};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -110,6 +115,8 @@ pub struct CompleteNativeEntry {
     reference_indices: BTreeMap<String, usize>,
     atom_x_order: Vec<usize>,
     maximum_atom_radius: f64,
+    /// Geometry-only cache; never serialized into the frozen definition.
+    residue_atom_indices: Vec<Vec<usize>>,
 }
 
 fn norm(v: Vec3) -> f64 {
@@ -326,12 +333,17 @@ impl CompleteNativeEntry {
             .iter()
             .map(|a| a.radius)
             .fold(0., f64::max);
+        let mut residue_atom_indices = vec![Vec::new(); definition.residue_count];
+        for (index, atom) in definition.monomer_atoms.iter().enumerate() {
+            residue_atom_indices[atom.residue].push(index);
+        }
         Ok(Self {
             definition,
             compiled_sha256: format!("{:x}", Sha256::digest(bytes)),
             reference_indices,
             atom_x_order,
             maximum_atom_radius,
+            residue_atom_indices,
         })
     }
     pub fn definition_sha256(&self) -> &str {

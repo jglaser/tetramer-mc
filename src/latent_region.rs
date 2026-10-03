@@ -213,6 +213,7 @@ enum FrozenGuide {
     ConditionalRay(ConditionalRayGuide),
     ContactLine(ContactLineGuide),
     HardFreeLine(ContactLineGuide),
+    ClassLine(ContactLineGuide),
     ContactDistance(ContactDistanceGuide),
 }
 impl FrozenGuide {
@@ -241,6 +242,9 @@ impl FrozenGuide {
             Some("defensive-hard-free-line-guide-v1") => Ok(Self::HardFreeLine(
                 ContactLineGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
             )),
+            Some("defensive-native-class-line-guide-v1") => Ok(Self::ClassLine(
+                ContactLineGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
+            )),
             Some("defensive-contact-distance-guide-v1") => Ok(Self::ContactDistance(
                 ContactDistanceGuide::from_bytes(raw, region_hash, chart, inner, cfg, tree)?,
             )),
@@ -252,7 +256,7 @@ impl FrozenGuide {
             Self::Gaussian(g) => g.alpha,
             Self::EntryShell(g) => g.alpha,
             Self::ConditionalRay(g) => g.alpha,
-            Self::ContactLine(g) | Self::HardFreeLine(g) => g.base.alpha,
+            Self::ContactLine(g) | Self::HardFreeLine(g) | Self::ClassLine(g) => g.base.alpha,
             Self::ContactDistance(g) => g.base.alpha,
         }
     }
@@ -261,7 +265,9 @@ impl FrozenGuide {
             Self::Gaussian(g) => g.components.len(),
             Self::EntryShell(g) => g.len(),
             Self::ConditionalRay(g) => g.len(),
-            Self::ContactLine(g) | Self::HardFreeLine(g) => g.base.components.len(),
+            Self::ContactLine(g) | Self::HardFreeLine(g) | Self::ClassLine(g) => {
+                g.base.components.len()
+            }
             Self::ContactDistance(g) => g.base.components.len(),
         }
     }
@@ -279,7 +285,7 @@ impl FrozenGuide {
                 .map(|(u, r, c)| (u, r, c, None)),
             Self::EntryShell(g) => g.draw(rng, chart, outer).map(|(u, r, c)| (u, r, c, None)),
             Self::ConditionalRay(g) => g.draw(rng, chart, outer),
-            Self::ContactLine(g) | Self::HardFreeLine(g) => {
+            Self::ContactLine(g) | Self::HardFreeLine(g) | Self::ClassLine(g) => {
                 g.draw(rng, chart, outer, inner, fraction)
             }
             Self::ContactDistance(g) => g.draw(rng, chart, outer, inner, fraction),
@@ -300,7 +306,7 @@ impl FrozenGuide {
             Self::ContactDistance(g) => g
                 .density_details(u, inside, volume, chart, radius)
                 .map(|v| v.0),
-            Self::ContactLine(g) | Self::HardFreeLine(g) => g
+            Self::ContactLine(g) | Self::HardFreeLine(g) | Self::ClassLine(g) => g
                 .density_details(u, inside, volume, chart, radius)
                 .map(|v| v.0),
         }
@@ -777,6 +783,30 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     if let Some(raw) = &guide_raw {
         fs::write(options.out.join("provenance/importance-guide.json"), raw)?;
     }
+    let class_native_provenance = if let Some(FrozenGuide::ClassLine(class_guide)) = &guide {
+        let spec: Value = serde_json::from_slice(guide_raw.as_ref().unwrap())?;
+        let path = PathBuf::from(
+            spec["compiled_native"]["path"]
+                .as_str()
+                .context("Missing native path")?,
+        );
+        let bytes = fs::read(path)?;
+        let sha = hash_bytes(&bytes);
+        ensure!(
+            spec["compiled_native"]["sha256"] == sha,
+            "Compiled native changed before archival"
+        );
+        let compiled: Value = serde_json::from_slice(&bytes)?;
+        fs::write(options.out.join("provenance/compiled-native.json"), &bytes)?;
+        Some(
+            json!({"compiled_sha256":sha,"source_definition_sha256":compiled["source_definition_sha256"],
+            "source_input_sha256":compiled["source_input_sha256"],
+            "shape_compatibility":class_guide.class_shape_compatibility().context("Missing class shape compatibility")?,
+            "geometry_identity_obligation":"Static bijection verified against physical atoms within the declared pair-gap tolerance; floating-point predicates remain implementation obligations"}),
+        )
+    } else {
+        None
+    };
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
@@ -838,6 +868,20 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                 json!("attempts.jsonl; begin record before each draw; no retries");
             manifest["resume_supported"] = json!(false);
         }
+        if matches!(g, FrozenGuide::ClassLine(_)) {
+            manifest["schema"] = json!("importance-latent-region-normalizer-v7");
+            manifest["compiled_native"] = class_native_provenance
+                .clone()
+                .context("Missing native provenance")?;
+            manifest["guide_schema"] = json!("defensive-native-class-line-guide-v1");
+            manifest["proposal_kind"] = json!("raw-translation-class-conditioned-Gaussian-mixture");
+            manifest["class_scope"] = json!(
+                "complete native and competing contact; optional original latent orthants; no old-R5 restriction"
+            );
+            manifest["attempt_journal"] =
+                json!("attempts.jsonl; begin record before each draw; no retries");
+            manifest["resume_supported"] = json!(false);
+        }
         if matches!(g, FrozenGuide::ContactDistance(_)) {
             manifest["schema"] = json!("importance-latent-region-normalizer-v5");
             manifest["guide_schema"] = json!("defensive-contact-distance-guide-v1");
@@ -877,16 +921,17 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             let shell_valid = guide.is_none()
                 || ((inner_radius == 0. || radial > inner_radius) && radial <= radius);
             let mut hard_free_line_density = None;
-            let log_proposal_density = if let Some(FrozenGuide::HardFreeLine(g)) = &guide {
-                let (density, detail) =
-                    g.density_compact(latent, shell_valid, log_volume, &chart, radius)?;
-                hard_free_line_density = Some(detail);
-                density
-            } else if let Some(g) = &guide {
-                g.log_density(latent, shell_valid, log_volume, &chart, radius)?
-            } else {
-                -log_volume
-            };
+            let log_proposal_density =
+                if let Some(FrozenGuide::HardFreeLine(g) | FrozenGuide::ClassLine(g)) = &guide {
+                    let (density, detail) =
+                        g.density_compact(latent, shell_valid, log_volume, &chart, radius)?;
+                    hard_free_line_density = Some(detail);
+                    density
+                } else if let Some(g) = &guide {
+                    g.log_density(latent, shell_valid, log_volume, &chart, radius)?
+                } else {
+                    -log_volume
+                };
             ensure!(
                 log_proposal_density.is_finite(),
                 "Unrepresentable latent proposal density"
@@ -976,6 +1021,8 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                         "contact-distance"
                     } else if matches!(guide, Some(FrozenGuide::ContactLine(_))) {
                         "contact-line"
+                    } else if matches!(guide, Some(FrozenGuide::ClassLine(_))) {
+                        "native-class-line"
                     } else if matches!(guide, Some(FrozenGuide::HardFreeLine(_))) {
                         "hard-free-line"
                     } else {
@@ -993,6 +1040,12 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                 }
                 if let Some(FrozenGuide::ContactLine(g)) = &guide {
                     row["contact_line_draw"] = g.last_draw.borrow().clone();
+                }
+                if let Some(FrozenGuide::ClassLine(g)) = &guide {
+                    row["native_class_line_draw"] = g.last_draw.borrow().clone();
+                    row["native_class_line_density"] = hard_free_line_density
+                        .take()
+                        .context("Missing complete class density trace")?;
                 }
                 if let Some(FrozenGuide::HardFreeLine(g)) = &guide {
                     row["hard_free_line_draw"] = g.last_draw.borrow().clone();

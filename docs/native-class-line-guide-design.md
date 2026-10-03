@@ -1,6 +1,6 @@
 # Next contact-weight calculation: exact class-conditioned translation lines
 
-This is a design for the next implementation and validation stage, **not an implemented sampler or a committed physical allocation**. No new protein pose, geometry query, native classification, or depletant draw was evaluated for this document. The evolving dimer benchmark and existing growth runs remain unchanged.
+The translation-line implementation is under validation in `src/native_entry/line.rs` and `src/latent_region/contact_line.rs`, with an independent Python reference in `tools/native_class_line_reference.py`. It is **not yet validated on proteins or allocated a physical-weight campaign**. The evolving dimer benchmark and existing growth runs remain unchanged.
 
 The physical target stays the repaired rigid shape, the frozen two-neighbor scaffold, the complete original R4 region, the existing translation/Haar measure, depletant radius **1.5 Å**, and activity **0.035 Å⁻³**. This conditional integral remains distinct from a finite-system assembly decision.
 
@@ -17,9 +17,9 @@ For each raw translation axis, let H be the existing hard-free line intervals wi
 - All exclusion contacts with no complete native entry.
 - The same competing-contact class restricted to frozen orthant 22.
 - The same competing-contact class restricted to frozen orthant 62.
-- Complete native entry in the original native remainder, restricted to orthant 55.
+- Complete native entry restricted to orthant 55, including both old-R5 support and its remainder.
 
-Keep a broad hard-free channel as well as the **50% uniform R4 defensive component**. Channel choices and probabilities must be frozen before fresh proposals; labels select a quadrature proposal, never a replacement physical target. All other classes, all 64 orthants, and the existing radial/angular strata remain reported.
+Keep a broad hard-free channel as well as the **50% uniform R4 defensive component**. The first prototype assigns these five channels equal probability. Channel choices and probabilities must be frozen before fresh proposals; labels select a quadrature proposal, never a replacement physical target. All other classes, all 64 orthants, and the existing radial/angular strata remain reported. The old-R5 Boolean support described below remains an independent reporting definition; conditioning directly on its complement is deferred. The native55 proposal must not be described as a remainder-only channel.
 
 ## Exact native-entry line intervals
 
@@ -50,6 +50,8 @@ Every conditional integrates to one; hence each original five-coordinate Gaussia
 
 A mixture of **different** classes does not in general dominate the old guide on their union: other nonempty class channels may give zero density at a pose in C. Include every channel in q and account for its fixed probability. A broad hard-free channel supplies its own positive lower bound; the 50% uniform R4 component retains coverage independently. Empty-class fallback must be evaluated independently for every axis/component/channel combination, not only the branch that generated the point.
 
+For the frozen five-channel prototype, the broad channel has probability 0.2, so the complete new density is at least **0.2 times the old hard-free density** everywhere. This follows by retaining that channel's contribution and the common uniform component; the other terms are nonnegative. It is a coverage bound, not a guarantee of improved variance or runtime.
+
 For the latent guide,
 
     q(u) = 0.5 U_R4(u)
@@ -61,24 +63,39 @@ For a later full-vessel stage, reuse the normalized outer 50/50 vessel/guide mix
 
 ## Minimum implementation and checks
 
-Add a native interval method alongside the current native observer, using the same frozen compiled definition. Expose only the interval primitives needed for member/residue constraints; keep the classifier itself unchanged. Extend the line guide with explicitly named class channels, the old-R5 reference binding, fixed channel probabilities, and per-channel interval/mass/fallback traces. Reuse its Gaussian component law and add the new schema as an alternative, preserving old guide formats.
+Add a native interval method alongside the current native observer, using the same frozen compiled definition. Expose only the interval primitives needed for member/residue constraints; keep the classifier itself unchanged. Extend the line guide with explicitly named class channels, fixed channel probabilities, and per-channel interval/mass/fallback traces. Reuse its Gaussian component law and add the new schema as an alternative, preserving old guide formats. The first schema binds the compiled native definition, shape, scaffold, capture domain and depletant radius; no old-R5 restriction is applied by this schema.
 
 Before protein sampling:
 
 - Compare interval membership with the complete classifier on toy motifs covering **ANY bond**, all-member intersections, wrong angular registration, native residue versus unrelated residue contacts, both anchors, overlapping motifs, and native complements. Include inclusive tangencies, zero-length sets and strict core/exclusion boundaries.
 - Independently reconstruct complete unions from leaf atom pairs in Python. Compare pruned versus brute-force interval topology and endpoints, not only classifier values at a few points. Protein development diagnostics must use a frozen saved-pose inventory and preserve every selected query and failure.
-- Test orthant zero-bit assignment, correlated raw/latent transforms, old-R5/native-q/capture Boolean complements, radial boundaries, constant predicates and empty lines.
+- Test orthant zero-bit assignment, correlated raw/latent transforms, radial boundaries, constant predicates and empty lines. Any future old-R5-remainder channel additionally requires testing its complete native-q/capture Boolean complement.
 - Verify conditional normalization, full component/axis/channel mixture density, hard-free fallback dominance on a single class, and a counterexample to union-wide dominance for different class channels. Test alpha=1 and disabled class conditioning against the original law, inverse-CDF reconstruction, floor transitions and exact endpoint handling.
 - Compare independent Rust/Python q and J. Verify sphere hard-only and analytic depletion limits, all-attempt zero accounting, independent cloud roles, deterministic continuation and fatal-trace draining. Exact geometry means analytic model geometry; floating-point roots and endpoint classification remain explicit implementation obligations.
 
 The expensive new part is residue-restricted contact interval construction. Perform the constant body-angle test and intersect the four member bounds first. Only surviving motif intervals need monomer checks or residue atom-pair searches. Native residue-pair atom lists can be built once from the frozen definition; cache shared member/class tests within a line. Conservative projected bounds may prune pairs, while exact leaf inequalities decide membership. Full mixture q needs all channels, but they can share H, N, exclusion-contact and old-reference sets per axis.
 
+The class-guide loader also verifies that the compiled member/monomer spheres describe the physical rigid body. It reconstructs every sphere and finds a deterministic bijection, allowing atom permutations. The setup tolerances are 1e-10 Å for centers and 1e-12 Å for radii, with a reported bound on the resulting pair-gap discrepancy that must fit inside the original observer's 1e-8 Å overlap tolerance. This check changes no geometry. Its implication assumes proper rotations in real arithmetic; subsequent floating-point transforms remain a separate obligation.
+
+Original-latent orthants require a precise numerical chart convention. The Rust chart validates/factorizes the covariance, reconstructs it from the factor, and factorizes again. Direct SciPy factorization can differ at approximately 1e-17 in nominally zero entries, which can change an exact sign test on an all-zero boundary probe. The independent reference therefore reconstructs this declared FP64 chart convention explicitly, without zero snapping or relaxed sign tests. Conditional Gaussian calculations, Normal integrals, atom-pair roots and physical labels remain independently implemented. Failed toy-audit records are retained; correcting the chart reconstruction does not redraw the Rust samples.
+
 ## Proposed staged evaluation, not yet an allocation
 
-First freeze a proposal-only diagnostic that reports class/orthant feasibility, empty-line and numerical-floor fallback rates, conditional masses, full q, and CPU. Preserve all source/axis/channel rows; do not report only successful lines. Saved rows selected from the completed 22/62/55 strata are development probes, not an independent validation population. Include the rest of the domain and then a fresh fixed-size proposal-only check before selecting a physical allocation.
+First freeze a proposal-only diagnostic that reports class/orthant feasibility, empty-line and numerical-floor fallback rates, conditional masses, full q, and CPU. Preserve all source/axis/channel rows; do not report only successful lines. `tools/prepare_native_class_line_probe.py` declares four populations of 128 unconditional fresh draws per arm (hard-free and class-conditioned; 1,024 total), plus 40 saved development probes: the eight already inspected 22/62/55 poses and eight per class from the existing breadth inventory. The saved probes are not an independent validation population. Every output receives an independent geometry/density audit, with no depletant clouds or physical-weight estimates. The preparation command only freezes inputs; the exact executable and reference source must be bound after synthetic tests and before execution.
+
+The H-only arm uses the new schema with one hard-free channel. It is a density/coverage control; it still constructs the full class geometry for audit, so its runtime is not the optimized legacy H runtime. No speedup claim should use that comparison. The independent audits traverse all leaf pairs in bounded arrays and may take substantially longer than the Rust queries. They use one worker, preserve per-row progress and failures, and have fixed resource limits with no automatic retries. The dispatcher binds exact commands as well as metadata, and the summary verifies the audited input hashes before reading proposal fractions. These fractions are not physical occupancies.
 
 A candidate physical comparison is **eight independent populations of 16,384 unconditional attempts per arm**: the existing hard-free guide versus the new class-balanced guide. Keep alpha=0.5, λ/z=128, two independent clouds per valid pose, and identical target/strata. More populations address the poorly calibrated four-population uncertainty without pretending that repartitioning alone increases pose ESS. This count, channel probabilities, numerical floor, seeds and analysis must be reviewed and frozen before launching; they are suggestions here, not authorization to draw or extend an existing campaign. A larger fresh stage should be specified in that new protocol, not appended after looking at its favorable bins.
 
 Use the existing population-based mass, ESS, largest-contribution, 0.2 kBT/three-SE agreement and native/competing free-energy interval checks. Keep all material strata and historical failures visible, and analyze stages separately. Reuse the completed aggregate SMC evidence without rerunning it. Evaluate improvements by useful effective weighted contact samples per CPU, not native proposal fraction alone.
 
 The principal limitation is unchanged: a translation-line proposal preserves five raw-coordinate marginals and **cannot recover a missing angular mode merely by conditioning its scalar translation**. High class-specific fallback rates would identify that limitation before an expensive physical campaign. Even successful regional convergence still needs full-domain coverage and the prescribed finite-system assembly, initialization, size, and boundary evidence.
+
+## Implementation and launch, 2026-10-03
+
+- 21 native-interval/classifier/shape-compatibility tests and 33 class/legacy line-guide tests passed. The latter include analytic sphere hard-volume and pair-depletion references.
+- 33 Python reference, allocation, binding, dispatcher and summary tests passed, including child draining on timeout, interruption and SIGTERM.
+- Five frozen synthetic CLI cases retained 256 fresh draws and 40 fixed queries. Independent complete geometry/density/Jacobian/inverse-CDF checks passed for all 296 rows. Maximum log-density discrepancy was 1.96e-14. Earlier audit failures and their corrections remain archived; no Rust draws were repeated.
+- The fixed protein diagnostic is bound by execution-plan SHA `7f1bfeb01f8c0d371a5e1f14fbc66371b68fb485452be5fe25f5a2ca72fc246e`, using the isolated audit executable SHA `f9afc90000004062b67e5cc872124cd8203e2acd6bb462df2eb4835b330474bc`. Its 1,024 fresh proposals and 40 saved queries completed; independent audits are running with one worker. All 4,004 compiled native atoms matched the physical shape exactly in the setup check. No physical Poisson weights were sampled.
+
+Artifacts: [Rust tests](../results/native-class-line-validation-20261003/class-validation-final.json), [Python tests](../results/native-class-line-validation-20261003/python-validation-final.json), [synthetic CLI audit](../results/native-class-line-synthetic-20261003/cli-validation-final.json), and [frozen protein execution plan](../results/native-class-line-proposal-preparation-20261003/execution-plan.json). The source-independent protein audit must finish before interpreting these proposal diagnostics. These checks do not open the physical-weight or assembly gates. The production assembly executable remains unchanged.

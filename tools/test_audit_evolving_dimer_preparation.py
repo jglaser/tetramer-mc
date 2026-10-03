@@ -24,8 +24,10 @@ def fixture():
 class PreparationAuditTests(unittest.TestCase):
     def test_cloud_reconstruction_closed_boundary_and_empty_retention(self):
         oracle = a.CountOracle([[0., 0., 0.]], [1.])
-        uniforms = np.asarray([[.5, .5, .5], [.9, .9, .9], [0., .5, .5]], dtype='<f8')
-        meta = dict(raw_count=3, low=[-1.]*3, high=[1.]*3, kept_indices=[0, 2], cpu_seconds=.01)
+        low, high, _ = a.cloud_bounds(oracle)
+        boundary_uniform = (-1.-low[0])/(high[0]-low[0])
+        uniforms = np.asarray([[.5, .5, .5], [.9, .9, .9], [boundary_uniform, .5, .5]], dtype='<f8')
+        meta = dict(raw_count=3, low=low.tolist(), high=high.tolist(), kept_indices=[0, 2], cpu_seconds=.01)
         checks = a.Checks()
         result = a.audit_cloud(meta, uniforms.tobytes(), oracle, checks, 'toy', expected_count=3)
         self.assertEqual(result['retained_points'], 2)
@@ -35,7 +37,8 @@ class PreparationAuditTests(unittest.TestCase):
 
     def test_cloud_indices_bounds_and_variates_are_independently_checked(self):
         oracle = a.CountOracle([[0., 0., 0.]], [1.])
-        original = dict(raw_count=2, low=[-1.]*3, high=[1.]*3, kept_indices=[0], cpu_seconds=0.)
+        low, high, _ = a.cloud_bounds(oracle)
+        original = dict(raw_count=2, low=low.tolist(), high=high.tolist(), kept_indices=[0], cpu_seconds=0.)
         raw = np.asarray([[.5, .5, .5], [.9, .9, .9]], dtype='<f8').tobytes()
         for kind in ['missing', 'extra', 'duplicate', 'boolean', 'bounds', 'count', 'truncated', 'extended', 'one', 'nan']:
             meta, blob = copy.deepcopy(original), raw
@@ -53,6 +56,19 @@ class PreparationAuditTests(unittest.TestCase):
                 blob = value.tobytes()
             with self.subTest(kind=kind), self.assertRaises(ValueError):
                 a.audit_cloud(meta, blob, oracle, a.Checks(), kind, expected_count=2)
+
+    def test_conservative_box_padding_does_not_inflate_atomic_membership(self):
+        oracle = a.CountOracle([[3., 4., 0.], [-1., 0., 2.]], [2., 1.])
+        low, high, guard = a.cloud_bounds(oracle)
+        expected_guard = 512.*np.finfo(float).eps*8.
+        self.assertEqual(guard, expected_guard)
+        self.assertEqual(low.tolist(), [-2.-guard, -1.-guard, -2.-guard])
+        self.assertEqual(high.tolist(), [5.+guard, 6.+guard, 3.+guard])
+        self.assertEqual(oracle.members([[5., 4., 0.], [5.+guard/2, 4., 0.]]).tolist(), [True, False])
+        raw = np.asarray([[.5, .5, .5]], dtype='<f8').tobytes()
+        meta = dict(raw_count=1, low=oracle.low.tolist(), high=oracle.high.tolist(), kept_indices=[], cpu_seconds=0.)
+        with self.assertRaisesRegex(ValueError, 'guarded root AABB'):
+            a.audit_cloud(meta, raw, oracle, a.Checks(), 'unpadded', expected_count=1)
 
     def test_preparation_uses_or_rule_and_quaternion_sign_invariance(self):
         identity = dict(position=[0.]*3, orientation=[1., 0., 0., 0.])

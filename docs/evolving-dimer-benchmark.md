@@ -47,3 +47,11 @@ The observer uses instantaneous surface-patch and neighbor fingerprints, includi
 Preparation, executable binding, independent preparation audit and dispatch are separate stages. `tools/prepare_evolving_dimer_benchmark.py` freezes inputs before any geometry search. `tools/run_evolving_dimer_benchmark.py` requires a successful bound review and drains already-started jobs if one fails. The existing production executable and user trajectories are not modified.
 
 No efficiency or physical-stability result is claimed until the resulting trajectories and convergence diagnostics have been evaluated.
+
+## Frozen execution, 3 October 2026
+
+The campaign is running under `results/evolving-dimer-campaign-20261003`, with three workers. The configuration hash is `c96c938fe33fb6ade9d2a984fbcd790daa0885ffdd496d9cd21ebb7bebb62054`; the run-binding hash is `eedbf181270ef96b9991c08038e12fd205ee2496ea6f4ea20972327dc27cfaed`. `dispatch/status.json` records active, completed and unstarted jobs. Do not dispatch this allocation again.
+
+Validation includes 17 Rust tests, 24 preparer/observer tests, nine independent-auditor tests, and 1,560 independent checks of synthetic sphere trajectories. The actual protein preparation audit checks 32 clouds (524,288 raw points), all 16 selected starts and all 21 attempted preparations, including five nulls. All 11,792 checks pass; maximum reconstructed complete-density correction error is 3.43e−13.
+
+The original preparation auditor incorrectly assumed an unpadded atomic AABB. Its failed receipt is preserved. The corrected auditor reconstructs the existing explicit conservative padding; it changes neither the sampled cloud nor strict sphere membership. The v2 audit uses the same saved data without redraws. The first sandbox background launcher exited before claiming work; an authoritative process check confirmed no controller or sampler, after which the identical frozen controller was launched on the host. Both launch records remain preserved and no scientific attempt was repeated.

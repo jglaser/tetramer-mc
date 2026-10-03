@@ -197,6 +197,7 @@ def freeze(base, output):
         numpy_version=np.__version__, scipy_version=scipy.__version__,
         maximum_workers=1, raw_cloud_points=32*16384, alternative_starts=16,
         density_tolerance=dict(absolute=2e-7, relative=2e-10),
+        cloud_bounds='The frozen SphereTree::bounds(0) pads each atomic AABB by 512*EPS*(1+max_i(hypot(hypot(cx,cy),cz)+r_i)). This padding changes only the saved uniform-cloud box, never sphere membership.',
         operations=['Reconstruct all raw AABB points; closed root exclusion membership and every retained index.',
             'Validate every source, raw root/internal draw, assembled endpoint and recovered frame independently.',
             'Validate all spectators, atomic spherical wall, core disjointness and internal exclusion contact.',
@@ -213,16 +214,34 @@ def freeze(base, output):
                 sources=len(sources), bound_inputs=len(inputs))
 
 
+def cloud_bounds(counter):
+    """Independent scalar reconstruction of the declared conservative AABB.
+
+    SphereTree::bounds pads the atomic box. The older FFT screen instead used
+    the unpadded box, so blindly reusing CountOracle.low/high is incorrect here.
+    This explicit formula is checked exactly; no geometry tolerance is enlarged.
+    """
+    bound = max(math.hypot(math.hypot(float(c[0]), float(c[1])), float(c[2]))+float(r)
+                for c, r in zip(counter.centers, counter.radii))
+    guard = 512.*np.finfo(float).eps*(1.+bound)
+    low = np.asarray([min(float(c[k])-float(r)-guard for c, r in zip(counter.centers, counter.radii))
+                      for k in range(3)])
+    high = np.asarray([max(float(c[k])+float(r)+guard for c, r in zip(counter.centers, counter.radii))
+                       for k in range(3)])
+    return low, high, guard
+
+
 def audit_cloud(meta, raw, counter, checks, tag, expected_count=16384):
     require(set(meta) == {'raw_count', 'low', 'high', 'kept_indices', 'cpu_seconds'}, 'Cloud metadata differs')
     require(len(raw) == expected_count*24, 'Truncated or extended cloud')
     require(type(meta['raw_count']) is int and meta['raw_count'] == expected_count, 'Cloud size differs')
     require(math.isfinite(meta['cpu_seconds']) and meta['cpu_seconds'] >= 0, 'Invalid cloud CPU')
-    strict_equal(meta['low'], counter.low.tolist(), checks, 'root AABB low', tag)
-    strict_equal(meta['high'], counter.high.tolist(), checks, 'root AABB high', tag)
+    low, high, guard = cloud_bounds(counter)
+    strict_equal(meta['low'], low.tolist(), checks, 'guarded root AABB low', tag)
+    strict_equal(meta['high'], high.tolist(), checks, 'guarded root AABB high', tag)
     u = np.frombuffer(raw, dtype='<f8').reshape((expected_count, 3))
     require(np.isfinite(u).all() and np.all((u >= 0) & (u < 1)), 'Invalid saved uniform')
-    points = counter.low+counter.width*u
+    points = low+(high-low)*u
     expected = np.flatnonzero(counter.members(points)).tolist()
     indices = meta['kept_indices']
     require(all(type(i) is int for i in indices), 'Noninteger retained point index')
@@ -230,7 +249,7 @@ def audit_cloud(meta, raw, counter, checks, tag, expected_count=16384):
     return dict(raw_points=expected_count, retained_points=len(expected),
                 reconstructed_raw_sha256=point_hash(points),
                 reconstructed_retained_sha256=point_hash(points[expected]),
-                setup_cpu_seconds=meta['cpu_seconds'])
+                setup_cpu_seconds=meta['cpu_seconds'], conservative_AABB_padding_A=guard)
 
 
 def separation(old, new):

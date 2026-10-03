@@ -1,6 +1,6 @@
 # A reversible auxiliary overlap threshold
 
-A root-frame guidance cloud can condition the internal dimer edge toward retaining exclusion overlap without changing the physical marginal. The correction is essential: threshold conditioning alone biases equilibrium. This is a design and exact finite-state check, not a protein implementation, a sampled cloud experiment, or evidence of improved acceptance.
+A root-frame guidance cloud can condition the internal dimer edge toward retaining exclusion overlap without changing the physical marginal. The correction is essential: threshold conditioning alone biases equilibrium. The Rust proposal now implements this construction with exact finite-state and focused implementation checks. Protein acceptance and sampling efficiency remain unmeasured.
 
 Fix the selected root/child labels, spectator anchor, all other poses, shapes, full edge densities, and caps as in [factorized dimer conditioning](factorized-dimer-conditioning.md). Write the two edge coordinates as
 
@@ -102,6 +102,31 @@ A two-state counterexample has \(K_0=0,K_1=1\), uniform physical and proposal pr
 This proposal does not add an overlap attraction to the physical model. Large \(m\) favors thresholds closer to the source count, while the explicit auxiliary ratio compensates for their source dependence. It may help preserve an existing internal contact during docking, but can also reduce access to a better state or add another proposal penalty. Finite clouds only approximate overlap volume; correctness relies on their explicitly defined count variable, not on that approximation being accurate. CPU cost and final physical acceptance remain open questions.
 
 Before protein use, require identical source/destination frame predicates, strict point-boundary conventions, source eligibility, complete draw/null/error records, fixed caps and guidance law, and tests of the full forward/reverse generator. Numerical errors must be fatal during validation rather than unaccounted retries.
+
+## Implementation contract
+
+[`AuxiliaryOverlapThreshold`](../src/auxiliary_overlap_threshold.rs) validates a
+finite root-frame cloud and draws the threshold using `rand`'s prepared
+`Uniform` integer distribution, including its rejection step. The geometry
+filters run before point counting; a skipped count is recorded as unmeasured,
+not zero. [`propose_guided`](../src/factorized_dimer.rs) uses a separate auxiliary
+RNG, fixes the cloud and threshold across every retry, and checks agreement of
+the relative, recovered and world-frame counts. Its unguided entry point keeps
+the previous proposal law and trace format.
+
+Successful consumers must use `complete_log_correction()` exactly once before
+adding the physical bath and any selection correction. This checked accessor
+combines the separately recorded full-density and auxiliary terms; it rejects
+missing or inconsistent guidance metadata. Reading only the generic candidate's
+full-density correction would omit the auxiliary term and bias the move.
+
+The focused implementation validation contains seventeen tests: the original
+eight factorized tests, eight guidance tests, and one additive accessor test.
+They cover zero counts, threshold support, capped failure, geometry-first
+counting, frame agreement, malformed clouds and correction composition. The
+existing production sampler and executable have not been replaced. A separate
+hard-sphere one-step stationarity control and a bounded protein probe must pass
+before integration into an assembly kernel.
 
 The focused [Lean bridge](../formal/ReversibleSampling/AuxiliaryOverlapThreshold.lean)
 now checks fifteen scalar theorems: threshold positivity, normalization and CDF;

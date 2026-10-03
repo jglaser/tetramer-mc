@@ -152,6 +152,10 @@ impl<'a> FixedDimerContext<'a> {
     pub fn members(&self) -> [usize; 2] {
         self.members
     }
+    /// The already inflated, immutable shape used by internal contact checks.
+    pub fn exclusion_tree(&self) -> &SphereTree {
+        self.exclusion
+    }
 
     /// Root prefilter for an independently decoded world pose. Both selected
     /// labels are excluded from the fixed spectators, exactly as in `evaluate`.

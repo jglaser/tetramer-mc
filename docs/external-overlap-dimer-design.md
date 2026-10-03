@@ -324,6 +324,31 @@ catalogue after the other mobile body moves; it is fixed only within its own
 elementary kernel. No current-contact anchor selection or native-label filter
 is needed.
 
+The implementation audit identified two important API details. Use
+`OligomerMixture`, whose fusion permits one member against distinct anchors;
+`FusedCatalogue` requires multiple members and excludes same-member pairs.
+Construct the singleton's internal geometry from an explicit identity pose,
+then score/draw the actual world handle.
+This avoids relying on rounded floating-point `old.inverse() * old` for
+catalogue identity. Retain one catalogue over all retries and both density
+evaluations; rebuild it when the other mobile label changes.
+
+Both `OligomerMixture::draw_singleton_independent` and
+`DockingProposal::draw_singleton_independent` draw only the learned part.
+They do not supply the defensive uniform branch. A complete capped-mixture
+wrapper must redraw that branch coin on **every** retry and score the full
+log-sum-exp mixture at both endpoints, including the unselected component.
+With normalized Haar orientation, a uniform translation cube has density
+1/V. Its center, side lengths and probability must be explicit retained
+metadata. Alternatively, preserve production's separately selected symmetric
+uniform kernel and its distinct balance argument.
+
+For a comparison with the dimer trajectory, alternate singleton updates of
+both original mobile labels, alongside the same local schedule. This keeps
+the two-mobile, 262-fixed target. Freezing the second label for the entire
+trajectory instead defines a different one-mobile, 263-fixed conditional
+target, whose equilibrium occupancies cannot serve as matched dimer controls.
+
 ## Degeneracies, implementation seams and minimum validation
 
 - K=0 gives k=0 and a well-defined correction. An empty cloud is a constant
@@ -508,3 +533,10 @@ failed chains. The wrapper tests are recorded under
 All of these contact descriptors remain finite-record sampling diagnostics.
 The conditional benchmark and independent contact-weight campaign answer
 different questions; a negative result here cannot refute native assembly.
+
+`tools/plot_root_guided_dimer_analysis.py` reads only the completed observer
+summary and its bound analysis artifacts. It plots every stream, preserves
+undefined ESS for constant observables, separates external contacts from the
+internal pair, and reports full sampler CPU and initialization disagreement.
+Its synthetic validation includes an all-constant ensemble; no experimental
+plot or partial-trajectory conclusion is generated before the observer passes.

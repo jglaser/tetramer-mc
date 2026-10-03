@@ -92,6 +92,74 @@ jobs, up to three dimer jobs and the original one-worker audit. This launch crea
 no physical draws and leaves the full independent audit and physical campaign
 gates closed. Consult its terminal receipt for completion; launch is not a pass.
 
+The [56-row terminal receipt](../results/native-class-projected-protein-preparation-20261003/completion.json)
+now reports a pass with no retries. All 168 axis reconstructions agreed with the
+saved Rust intervals and full densities: maximum endpoint discrepancy
+2.30e-13 Å, log-density discrepancy 1.36e-12, Jacobian discrepancy zero, and
+inverse-CDF discrepancy 6.67e-15. Setup used seven reference contacts and six
+scaffold contacts inside one classifier call. The
+[cost assessment](../results/native-class-projected-protein-preparation-20261003/cost-assessment.json)
+uses only completed counters: 918.72 row CPU seconds, or 16.41 per row; the fresh
+16-row and saved 40-row means are 16.15 and 16.51 seconds respectively.
+Exclusion-pair candidates fell from 5,386,757,376 to 154,844,507 (97.13% removed),
+but 5,386,757,376 hard-core pairs remained. Hard cores account for 97.20% of the
+remaining evaluated pairs. Native-whitelist pairs were 535,128 possible and
+533,113 evaluated. Pair fractions are not CPU fractions. The original audit
+also ran point observers, so these measurements do not define a matched-workload
+speedup ratio. The 40 saved queries still await their original unpruned audits;
+the complete pilot and physical campaign gates remain closed.
+
+### Geometry-free proposal algebra foundation
+
+`tools/native_class_line_algebra_reference.py` now supplies
+`AlgebraLaw(region, guide, config)`, `evaluate_saved(u, compact_trace)` and
+`verify_draw(draw, u, evaluation)`. Its initializer builds coordinate and Gaussian
+parameters without atom trees or a native observer. The evaluator independently
+reconstructs the raw/physical maps and Jacobian, R4/capture chords, class Boolean
+sets and original orthants, all conditional Gaussian masses, fallback decisions
+and the full component/axis/channel density. Serialized channel intervals and
+component multipliers are checked after reconstruction, not used as answers.
+The draw verifier reuses these results and reports numerically ambiguous interval
+selection using the existing 2e-14 cumulative-mass tolerance. Exact serialized
+interval identity distinguishes nearby narrow intervals before tolerance matching.
+
+The [12-test receipt](../results/native-class-algebra-validation-20261003/validation.json)
+includes comparison with full toy geometry, 92 components × three axes × five
+channels, coordinate/Jacobian inverses, every fallback, disabled conditioning,
+exterior and tangent cases, deliberate derived-field corruption, and guards
+against geometry calls. A deliberately self-consistent incorrect base union can
+pass this algebra audit while disagreeing with atoms; the result explicitly sets
+`geometry_certified=false`. Sixteen evaluations on one fixed 92-component toy
+trace took 0.05445 CPU seconds (3.40 ms/evaluation). This is neither protein timing
+nor a comparison against the full atom audit. A production streaming wrapper,
+physical estimator/label pass and frozen independent geometry allocation remain
+to be implemented and bound; this module does not launch or certify a campaign.
+
+The distinction between proposal geometry and physical geometry is useful.
+In exact arithmetic, write the raw chart as `x=T(u)=(y,s)`, with `s=x[a]` and
+`y` the other five coordinates. For Gaussian component k, any measurable
+effective set `E_kac(y)` with positive Normal conditional mass `M_kac(y)` defines
+a normalized component density
+`g_k(u) * 1_E(s) / M_kac(y)`. Integrating over s first recovers the Gaussian
+marginal of y. The class → H → whole-line fallback also has this property when
+its decisions depend only on y; the whole-line mass is one. Fixed component,
+axis, channel and defensive mixture probabilities therefore preserve
+normalization. These sets need not coincide with physical contacts.
+
+The Rust `class_geometry` construction sets `raw[axis]=0` before constructing
+its frame, chords and sets; its Normal conditional excludes that coordinate.
+Draw and density paths use the same construction. This supplies a source-level
+real-arithmetic argument, not a proof from isolated saved rows or of floating-point
+execution. No hidden random/cache/state dependence may change the sets between
+generation and scoring. Masses, inverse draws, full q, fallbacks, uncensored
+attempts and support must remain correct. Raw/latent roundoff near topology and
+mass-floor boundaries remains a numerical obligation. With those conditions,
+imperfect **proposal** contact sets affect efficiency rather than the physical
+importance integral. The physical hard predicate, target domain/Jacobian,
+conditional expectation of the depletion estimator, and complete native/contact
+labels must still be correct independently. This observation does not change any
+running audit, frozen allocation or launch gate.
+
 ## Analysis requirements and stop decisions
 
 Two existing wrappers explicitly require four populations: `analyze_contact_confirmation.summarize_arm` and `analyze_conditional_ray_campaign.free_energy_interval`. The new arithmetic adapter documented below supports eight populations without modifying those wrappers or archived outputs; binding it to production inputs remains a future campaign obligation. It uses each population's linear mean importance weight to calculate between-population uncertainty, covariance and ratios. The new paired-population delta interval uses Student-t with **7 degrees of freedom**, while historical four-population intervals retain 3. Its synthetic validation includes unequal population counts, constant weights, zero mass, covariance and partition checks.

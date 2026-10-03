@@ -362,3 +362,57 @@ inventory/command tampering, exclusive execution and stopping after failure.
 Arithmetic audit CPU was 136.5 seconds. The prior 163.0-second sphere geometry
 audit performed different work; this is compatibility evidence, not a matched
 protein speedup benchmark. Physical-label and spatial-Poisson obligations remain.
+
+## Independent endpoint labels and population analysis
+
+The new `tools/native_class_physical_labels.py` supplies a separate endpoint
+pass for completed v7 protein populations. It requires a frozen execution plan
+and reads every attempted index, including saved invalid and exterior zeros.
+Capture is checked on every row; strict atomic validity is checked on every
+captured row. The full frozen native observer and exclusion-contact classifier
+run on contributing endpoints. Native labels are retained even if an exclusion
+contact anomaly is detected, with that inconsistency reported separately.
+The old-R5 intersection, its native remainder and the original strata remain
+unchanged. The original atomic wall is redundant inside this capture region
+by an explicit enclosing-radius certificate; no new wall restriction is added.
+
+Endpoint checks use bounded 64-atom KD-tree queries and cached maximum radii.
+The final predicate is still Euclidean distance strictly less than the sum of
+atomic radii. The candidate-search cushion does not modify that predicate.
+This avoids reconstructing every line interval to label a pose. It is a
+runtime optimization, not an independent validation of the proposal's line
+sets. Protein timing has not yet been measured. The original full-reference
+pilot continues unchanged.
+
+`tools/analyze_native_class_physical_populations.py` connects the endpoint
+receipt and all-row algebra receipt to population statistics. Exact input-line
+hashes couple labels to attempts. It streams unconditional regional/stratum
+moments, importance ESS, maximum-contribution locations and two-cloud noise;
+invalid attempts remain in every denominator. It supports four or eight
+independent populations and keeps comparison stages separate. Target identities
+bind shape, domain, measure, bath and region definitions while excluding
+proposal settings. Each stratum has a distinct comparison identity.
+
+Reported evidence includes hard-only volumes, linear physical masses, paired
+population covariance, Student-t free-energy intervals, and proposal/population
+comparisons. Negative residual pose-variance estimates are retained rather than
+clipped. Unobserved bins remain unresolved, and historically failed strata
+remain visible even when their new estimated contribution is small. These
+tools do not open any convergence, full-vessel or assembly gate: selected
+independent line geometry, spatial-Poisson implementation, important-region
+coverage and physical sensitivity checks remain necessary. No fresh protein
+weight allocation has been frozen or launched with these tools.
+
+The integrated validation has **26 passing synthetic tests** (11 endpoint and
+15 statistics), using one CPU and an unchanged 50-file source closure. Receipt:
+`results/native-class-endpoint-label-validation-20261003/validation.json`,
+SHA256 `54198c3f597cef842870d6f6fe336e303c31960496daa42b293aebbb86fea846`.
+Tests include unequal atomic radii, strict tangency and overlaps beyond the
+first 64/128 atoms; invalid-row checks; interrupted-output preservation;
+four/eight-population covariance and unconditional zeros; and a case in which
+both regional masses agree individually but their more precise free-energy
+contrast fails. The direct cross-arm contrast test uses both within-arm
+covariances, three combined standard errors and the separate 0.2 kBT tolerance.
+Observer initialization has its own frozen query inventory and durable query
+records, including reference contacts and the fixed-scaffold classification.
+No protein query or new physical draw occurred in this validation.

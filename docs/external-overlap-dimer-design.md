@@ -483,3 +483,28 @@ The preparer, exclusive bounded dispatcher and observer are
 `tools/analyze_root_guided_dimer_benchmark.py`. Their frozen campaign records
 bind source, executable, inherited preparations, completed controls and
 evaluation allocation before physical execution.
+
+The concrete campaign is
+`results/evolving-dimer-root-m4-extension-20261003`. Its prelaunch review and
+host-launch receipt authenticate three new workers, alongside the three
+existing growth workers and one contact-guide audit worker. The compiled
+example is isolated from the production executable used by the growth runs.
+
+Postrun execution is deliberately staged. First,
+`tools/run_evolving_dimer_root_guidance_audit.py` admits all 32 successful
+terminal journals, binds the original preparation audit, and archives the
+already frozen scientific auditor. A separately reviewed plan runs one child
+with a 1800-second CPU limit, 3600-second wall limit and 16 GiB address-space
+limit. Second, `tools/run_root_guided_dimer_analysis.py` requires that completed
+audit before running the frozen contact observer under the same limits.
+Its output contains 32 new chains plus the 32 cached controls, with exactly
+147,488 new initial/retained endpoints and 131,072 new production endpoints.
+Each stage has an exclusive claim, preserves partial output on failure and
+drains its owned child. Neither stage automatically retries or substitutes
+failed chains. The wrapper tests are recorded under
+`results/evolving-dimer-root-audit-wrapper-validation-20261003` and
+`results/root-guided-observer-wrapper-validation-20261003`.
+
+All of these contact descriptors remain finite-record sampling diagnostics.
+The conditional benchmark and independent contact-weight campaign answer
+different questions; a negative result here cannot refute native assembly.

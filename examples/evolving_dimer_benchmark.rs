@@ -109,6 +109,33 @@ fn rng(master: u64, context: usize, init: &str, stream: usize, block: usize, rol
     );
     StdRng::from_seed(digest.into())
 }
+/// Retain m4's common random numbers; only the extra root threshold gets a
+/// new role. Existing arms keep every original role byte unchanged.
+fn dimer_role(arm: &str, role: &str) -> String {
+    let prefix = if arm == "root_m4" && role != "root_threshold" {
+        "m4"
+    } else {
+        arm
+    };
+    format!("{prefix}/{role}")
+}
+fn root_guidance_contract(engine: &FixedLabelUpdates<'_>, bank: &Value) -> Value {
+    json!({
+        "schema":"evolving-dimer-root-guidance-v1",
+        "cloud":bank,
+        "cloud_reuse":"identical frozen body-frame points; no additional cloud draws",
+        "root":{"m":4,"point_frame":"fixed_anchor_body","anchor_label":engine.anchor,
+            "mobile_label":engine.members[0],"threshold_rng_role":dimer_role("root_m4","root_threshold")},
+        "internal":{"m":4,"point_frame":"mobile_root_body","root_label":engine.members[0],
+            "child_label":engine.members[1],"threshold_rng_role":dimer_role("root_m4","threshold")},
+        "matched_control_arm":"m4",
+        "proposal_rng_role":dimer_role("root_m4","proposal"),
+        "bath_rng_role":dimer_role("root_m4","bath"),
+        "accept_rng_role":dimer_role("root_m4","accept"),
+        "local_rng_roles":"unchanged shared local/{attempt}/{proposal,bath,accept}",
+        "physical_decisions_per_candidate":1
+    })
+}
 fn far_enough(old: [Pose; 2], new: [Pose; 2], distance: f64, angle: f64) -> bool {
     (0..2).any(|i| {
         let a = old[i].orientation;
@@ -332,7 +359,7 @@ fn prepare(args: &Args, plan: &Value, geometry: &Geometry) -> Result<()> {
     result
 }
 fn prepare_inner(args: &Args, plan: &Value, geometry: &Geometry, output: &Path) -> Result<()> {
-    let preparation_started=cpu_seconds();
+    let preparation_started = cpu_seconds();
     let master = plan["master_seed"].as_u64().context("master_seed")?;
     let contexts = plan["contexts"].as_array().context("contexts")?;
     let streams = usize_at(&plan["allocation"], "streams")?;
@@ -480,7 +507,10 @@ fn run(args: &Args, plan: &Value, binding: &Value, geometry: &Geometry) -> Resul
     let stream = usize_at(job, "stream")?;
     let init = job["initialization"].as_str().context("initialization")?;
     let arm = job["arm"].as_str().context("arm")?;
-    ensure!(["local", "unguided", "m4"].contains(&arm), "unknown arm");
+    ensure!(
+        ["local", "unguided", "m4", "root_m4"].contains(&arm),
+        "unknown arm"
+    );
     let parent = PathBuf::from(plan["output"].as_str().context("output")?);
     fs::create_dir_all(&parent)?;
     let output = parent.join(format!("job-{job_id:03}"));
@@ -560,7 +590,7 @@ fn run_inner(
             })
         })
         .collect();
-    let guide = if arm == "m4" {
+    let guide = if matches!(arm, "m4" | "root_m4") {
         Some(AuxiliaryOverlapThreshold::new(
             &geometry.exclusion,
             points,
@@ -645,10 +675,14 @@ fn run_inner(
         )?
     } else {
         let mut journal = Journal::new(&journal_path)?;
-        journal.line(&json!({"kind":"initial","block":0,"job":job,"selected":engine.selected(&state),
+        let mut initial = json!({"kind":"initial","block":0,"job":job,"selected":engine.selected(&state),
             "fixed_source":plan["source_frame"],"cloud":bank,"cloud_cpu_seconds":meta["cpu_seconds"],
             "geometry_load_cpu_seconds":geometry.load_cpu_seconds,
-            "conditional_target":true,"sampler_cpu_seconds":cpu_seconds()-budget.started}))?;
+            "conditional_target":true,"sampler_cpu_seconds":cpu_seconds()-budget.started});
+        if arm == "root_m4" {
+            initial["guidance_contract"] = root_guidance_contract(&engine, bank);
+        }
+        journal.line(&initial)?;
         journal
     };
     ensure!(
@@ -722,21 +756,59 @@ fn run_inner(
         }
         if arm != "local" {
             let mut record = Value::Null;
-            let mut prng = rng(master, ci, init, stream, block, &format!("{arm}/proposal"));
-            let mut trng = rng(master, ci, init, stream, block, &format!("{arm}/threshold"));
-            let mut brng = rng(master, ci, init, stream, block, &format!("{arm}/bath"));
-            let mut arng = rng(master, ci, init, stream, block, &format!("{arm}/accept"));
-            let result = engine.dimer(
-                &mut state,
-                &proposal,
-                guide.as_ref(),
-                &mut prng,
-                &mut trng,
-                &mut brng,
-                &mut arng,
-                &mut budget,
-                &mut record,
+            let mut prng = rng(
+                master,
+                ci,
+                init,
+                stream,
+                block,
+                &dimer_role(arm, "proposal"),
             );
+            let mut trng = rng(
+                master,
+                ci,
+                init,
+                stream,
+                block,
+                &dimer_role(arm, "threshold"),
+            );
+            let mut brng = rng(master, ci, init, stream, block, &dimer_role(arm, "bath"));
+            let mut arng = rng(master, ci, init, stream, block, &dimer_role(arm, "accept"));
+            let result = if arm == "root_m4" {
+                let mut root_rng = rng(
+                    master,
+                    ci,
+                    init,
+                    stream,
+                    block,
+                    &dimer_role(arm, "root_threshold"),
+                );
+                engine.dimer_with_guides(
+                    &mut state,
+                    &proposal,
+                    guide.as_ref(),
+                    guide.as_ref(),
+                    &mut prng,
+                    Some(&mut root_rng),
+                    Some(&mut trng),
+                    &mut brng,
+                    &mut arng,
+                    &mut budget,
+                    &mut record,
+                )
+            } else {
+                engine.dimer(
+                    &mut state,
+                    &proposal,
+                    guide.as_ref(),
+                    &mut prng,
+                    &mut trng,
+                    &mut brng,
+                    &mut arng,
+                    &mut budget,
+                    &mut record,
+                )
+            };
             if record.is_null() {
                 record = json!({"kind":"factorized_dimer","status":"failed_before_proposal"});
             }
@@ -836,6 +908,235 @@ mod tests {
             a[0],
             rng(77, 1, "source", 2, 1, "m4/proposal").random::<u64>()
         );
+    }
+    #[test]
+    fn root_arm_shares_control_streams_but_separates_root_threshold() {
+        for arm in ["unguided", "m4"] {
+            for role in ["proposal", "threshold", "bath", "accept"] {
+                assert_eq!(dimer_role(arm, role), format!("{arm}/{role}"));
+            }
+        }
+        for block in 1..=8 {
+            for role in ["proposal", "threshold", "bath", "accept"] {
+                assert_eq!(dimer_role("root_m4", role), format!("m4/{role}"));
+                assert_eq!(
+                    rng(77, 1, "source", 2, block, &dimer_role("root_m4", role)).random::<u64>(),
+                    rng(77, 1, "source", 2, block, &dimer_role("m4", role)).random::<u64>(),
+                );
+            }
+            assert_ne!(
+                rng(
+                    77,
+                    1,
+                    "source",
+                    2,
+                    block,
+                    &dimer_role("root_m4", "root_threshold")
+                )
+                .random::<u64>(),
+                rng(
+                    77,
+                    1,
+                    "source",
+                    2,
+                    block,
+                    &dimer_role("root_m4", "threshold")
+                )
+                .random::<u64>(),
+            );
+        }
+        assert_eq!(
+            dimer_role("root_m4", "root_threshold"),
+            "root_m4/root_threshold"
+        );
+    }
+
+    #[test]
+    fn root_arm_frozen_cloud_and_prepared_starts_replay_across_disk_checkpoint() -> Result<()> {
+        use tetramer_mc::geometry::Atom;
+        let dir = std::env::temp_dir().join(format!("root-arm-restart-{}", std::process::id()));
+        fs::create_dir(&dir)?;
+        let sphere = |radius: f64| -> Result<SphereTree> {
+            SphereTree::new(Shape {
+                name: "synthetic sphere".into(),
+                volume: 4. * std::f64::consts::PI * radius.powi(3) / 3.,
+                atoms: vec![Atom {
+                    center: [0.; 3],
+                    radius,
+                }],
+            })
+        };
+        let core = sphere(0.2)?;
+        let exclusion = sphere(1.)?;
+        let wall = Container::new(50., &core)?;
+        let pose = |x| Pose {
+            position: [x, 0., 0.],
+            orientation: [1., 0., 0., 0.],
+        };
+        let sha = "0".repeat(64);
+        let cov: [[f64; 6]; 6] =
+            std::array::from_fn(|i| std::array::from_fn(|j| if i == j { 0.01 } else { 0. }));
+        let model_json = json!({"coordinate_convention":"anchor-body-relative","shape_sha256":sha,
+            "angular_length":1.,"weights":[1.],"anchors":[{"position":[0.6,0.,0.],
+            "rotation":[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]]}],
+            "means":[[0.,0.,0.,0.,0.,0.]],"covariances":[cov]})
+        .to_string();
+        let model = DockingProposal::new(
+            FrozenRelativePoseProposal::from_json_str_open(&model_json, [100.; 3], 0.1, &sha)?,
+            DockingMethod::PosteriorInvolution,
+            0.,
+            [0.; 3],
+        )?;
+        let geometry = Geometry {
+            core,
+            exclusion,
+            wall,
+            state: vec![pose(0.6), pose(1.2), pose(0.)],
+            model,
+            load_cpu_seconds: 0.,
+        };
+        let raw_path = dir.join("frozen-cloud.bin");
+        let raw = [0.55f64, 0.5, 0.5]
+            .into_iter()
+            .flat_map(f64::to_le_bytes)
+            .collect::<Vec<_>>();
+        fs::write(&raw_path, &raw)?;
+        let meta_path = dir.join("frozen-cloud.json");
+        save(
+            &meta_path,
+            &json!({"raw_count":1,"low":[-1.,-1.,-1.],"high":[1.,1.,1.],
+            "kept_indices":[0],"cpu_seconds":0.}),
+        )?;
+        let prepared_path = dir.join("frozen-start.json");
+        save(&prepared_path, &json!({"selected":[pose(0.62),pose(1.23)]}))?;
+        let raw_file = BoundFile::make(&raw_path)?;
+        let meta_file = BoundFile::make(&meta_path)?;
+        let start_file = BoundFile::make(&prepared_path)?;
+        let banks: Vec<Value> = ["source", "proposal_prepared"]
+            .into_iter()
+            .map(|init| {
+                json!({"context_index":0,"initialization":init,"stream":0,
+                "raw":raw_file,"metadata":meta_file})
+            })
+            .collect();
+        let manifest_path = dir.join("original-prepared-manifest.json");
+        save(
+            &manifest_path,
+            &json!({"complete":true,"passed":true,
+            "files":[raw_file,meta_file,start_file],"cloud_banks":banks,
+            "alternative_starts":[{"context_index":0,"stream":0,"record":start_file}]}),
+        )?;
+        let binding = json!({"prepared_manifest":BoundFile::make(&manifest_path)?});
+        let binding_path = dir.join("binding.json");
+        save(&binding_path, &binding)?;
+        let frozen: Vec<_> = [&raw_path, &meta_path, &prepared_path, &manifest_path]
+            .into_iter()
+            .map(|p| (p.clone(), hash_file(p).unwrap()))
+            .collect();
+        for init in ["source", "proposal_prepared"] {
+            let plan_for = |output: PathBuf| {
+                json!({
+                    "master_seed":77,"output":output,"contexts":[{"root":0,"child":1,"anchor":2}],
+                    "source_frame":{"synthetic":"frozen_source"},
+                    "physical":{"wall_radius":50.,"depletant_radius":0.8,"activity":0.05,"lambda_ratio":64.},
+                    "factorized":{"order":"root_first","uniform_half_width":4.,"uniform_probability":0.,
+                        "root_cap":4,"internal_cap":4,"joint_cap":2},
+                    "cloud":{"raw_count":1},"local":{"translation_std_A":0.02,"rotation_std_degrees":1.},
+                    "envelope":{"max_cells":63,"max_depth":6,"min_width":0.},
+                    "limits":{"raw_per_leg":1000000,"raw_per_outer":2000000,"raw_campaign":20000000,
+                        "retained_per_leg":1000000,"retained_per_outer":2000000,"retained_campaign":20000000,
+                        "cpu_seconds":60.},
+                    "allocation":{"warmup_blocks":2,"production_blocks":6},
+                    "jobs":[{"id":0,"context_index":0,"stream":0,"initialization":init,"arm":"root_m4"}]
+                })
+            };
+            let full_plan = plan_for(dir.join(format!("{init}-full")));
+            let split_plan = plan_for(dir.join(format!("{init}-split")));
+            let full_config = dir.join(format!("{init}-full.json"));
+            let split_config = dir.join(format!("{init}-split.json"));
+            save(&full_config, &full_plan)?;
+            save(&split_config, &split_plan)?;
+            let make_args = |config, stop, resume| Args {
+                config,
+                binding: binding_path.clone(),
+                mode: "run".into(),
+                job: Some(0),
+                stop_after_block: stop,
+                resume,
+            };
+            run(
+                &make_args(full_config, None, None),
+                &full_plan,
+                &binding,
+                &geometry,
+            )?;
+            run(
+                &make_args(split_config.clone(), Some(3), None),
+                &split_plan,
+                &binding,
+                &geometry,
+            )?;
+            let split_out = dir.join(format!("{init}-split/job-000"));
+            let checkpoint_path = split_out.join("checkpoint.json");
+            let checkpoint: Value = serde_json::from_slice(&fs::read(&checkpoint_path)?)?;
+            assert_eq!(checkpoint["block"], 3);
+            assert_eq!(checkpoint["journal_rows"], 19);
+            run(
+                &make_args(split_config, None, Some(checkpoint_path)),
+                &split_plan,
+                &binding,
+                &geometry,
+            )?;
+            let full_out = dir.join(format!("{init}-full/job-000"));
+            let rows = |path: &Path| -> Result<Vec<Value>> {
+                fs::read_to_string(path)?
+                    .lines()
+                    .map(|line| {
+                        let mut value: Value = serde_json::from_str(line)?;
+                        value.as_object_mut().unwrap().remove("sampler_cpu_seconds");
+                        Ok(value)
+                    })
+                    .collect()
+            };
+            let actual = rows(&split_out.join("trajectory.jsonl"))?;
+            assert_eq!(actual, rows(&full_out.join("trajectory.jsonl"))?);
+            assert_eq!(actual.len(), 49);
+            let contract = &actual[0]["guidance_contract"];
+            assert_eq!(
+                contract["root"]["threshold_rng_role"],
+                "root_m4/root_threshold"
+            );
+            assert_eq!(contract["internal"]["threshold_rng_role"], "m4/threshold");
+            assert_eq!(contract["root"]["point_frame"], "fixed_anchor_body");
+            assert_eq!(contract["internal"]["point_frame"], "mobile_root_body");
+            assert_eq!(contract["cloud"], actual[0]["cloud"]);
+            assert!(
+                actual
+                    .iter()
+                    .any(|row| row["kind"] == "factorized_dimer" && row["status"] == "completed")
+            );
+            for row in actual
+                .iter()
+                .filter(|row| row["kind"] == "factorized_dimer")
+            {
+                assert_eq!(row["proposal"]["root_guidance"]["point_count"], 1);
+                assert_eq!(row["proposal"]["guidance"]["point_count"], 1);
+                assert_eq!(row["proposal"]["root_guidance"]["m"], 4);
+                assert_eq!(row["proposal"]["guidance"]["m"], 4);
+            }
+            let terminal =
+                |path: &Path| -> Result<Value> { Ok(serde_json::from_slice(&fs::read(path)?)?) };
+            let a = terminal(&full_out.join("terminal.json"))?;
+            let b = terminal(&split_out.join("terminal.json"))?;
+            for key in ["counts", "raw", "retained", "blocks", "complete", "job"] {
+                assert_eq!(a[key], b[key]);
+            }
+        }
+        for (path, hash) in frozen {
+            assert_eq!(hash_file(&path)?, hash);
+        }
+        fs::remove_dir_all(dir)?;
+        Ok(())
     }
     #[test]
     fn journal_rejects_uncheckpointed_tail() -> Result<()> {

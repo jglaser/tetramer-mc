@@ -142,16 +142,57 @@ impl FixedLabelUpdates<'_> {
         budget: &mut Budget,
         record: &mut Value,
     ) -> Result<()> {
+        self.dimer_with_guides(
+            state,
+            proposal,
+            None,
+            guide,
+            proposal_rng,
+            None,
+            Some(threshold_rng),
+            bath_rng,
+            accept_rng,
+            budget,
+            record,
+        )
+    }
+
+    /// Optional fixed-anchor/root and root/child guidance, followed by the
+    /// same single physical path and MH decision as `dimer`.
+    ///
+    /// A shared fixed body-frame cloud may supply both guides, but their
+    /// thresholds require independent streams. Root points are interpreted
+    /// in the spectator anchor frame; internal points in the mobile root
+    /// frame. `complete_log_correction` includes BOTH auxiliary terms once.
+    /// The unchanged `dimer` API disables root guidance and consumes no new RNG.
+    pub fn dimer_with_guides(
+        &self,
+        state: &mut [Pose],
+        proposal: &FactorizedDimerProposal<'_>,
+        root_guide: Option<&AuxiliaryOverlapThreshold<'_>>,
+        internal_guide: Option<&AuxiliaryOverlapThreshold<'_>>,
+        proposal_rng: &mut StdRng,
+        root_threshold_rng: Option<&mut StdRng>,
+        internal_threshold_rng: Option<&mut StdRng>,
+        bath_rng: &mut StdRng,
+        accept_rng: &mut StdRng,
+        budget: &mut Budget,
+        record: &mut Value,
+    ) -> Result<()> {
         budget.check_cpu()?;
         let old = self.selected(state);
         *record = json!({"kind":"factorized_dimer", "members":self.members,
             "anchor":self.anchor, "old":old, "accepted":false, "status":"in_progress"});
         let context = self.context(state)?;
-        let result = if let Some(guide) = guide {
-            proposal.propose_guided(proposal_rng, threshold_rng, &context, old, guide)
-        } else {
-            proposal.propose(proposal_rng, &context, old)
-        };
+        let result = proposal.propose_with_guides(
+            proposal_rng,
+            &context,
+            old,
+            root_guide,
+            root_threshold_rng,
+            internal_guide,
+            internal_threshold_rng,
+        );
         let outcome = match result {
             Ok(value) => value,
             Err(error) => {
@@ -495,6 +536,287 @@ mod tests {
             (full_budget.raw, full_budget.retained),
             (restored.raw, restored.retained)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn dual_guidance_matches_one_direct_proposal_bath_and_acceptance() -> Result<()> {
+        let core = sphere(0.2);
+        let ex = sphere(1.);
+        let wall = Container::new(50., &core)?;
+        let mut e = engine(&core, &ex, &wall);
+        e.rd = 0.8;
+        let covariance: [[f64; 6]; 6] =
+            std::array::from_fn(|i| std::array::from_fn(|j| if i == j { 1e-4 } else { 0. }));
+        let sha = "0".repeat(64);
+        let model = json!({"coordinate_convention":"anchor-body-relative","shape_sha256":sha,
+            "angular_length":1.,"weights":[1.],
+            "anchors":[{"position":[0.6,0.,0.],"rotation":rotation(ID.orientation)}],
+            "means":[[0.,0.,0.,0.,0.,0.]],"covariances":[covariance]})
+        .to_string();
+        let atlas = DockingProposal::new(
+            FrozenRelativePoseProposal::from_json_str_open(&model, [100.; 3], 0.1, &sha)?,
+            DockingMethod::PosteriorInvolution,
+            0.,
+            [0.; 3],
+        )?;
+        let proposal = FactorizedDimerProposal::new(
+            DefensiveDimerProposal::new(&atlas, 4., 0.)?,
+            FactorizedDimerCaps {
+                root: 4,
+                internal: 4,
+                joint: 3,
+            },
+            FactorizedDimerOrder::RootFirst,
+        );
+        let guide = AuxiliaryOverlapThreshold::new(&ex, vec![[0.1, 0., 0.]], 4)?;
+        let mut decisions = vec![];
+        for distance in [1.5, 0.6] {
+            let old = vec![
+                Pose {
+                    position: [distance, 0., 0.],
+                    ..ID
+                },
+                Pose {
+                    position: [2. * distance, 0., 0.],
+                    ..ID
+                },
+                ID,
+            ];
+            let (mut p, mut r, mut t, mut b, mut a) = (
+                StdRng::seed_from_u64(8),
+                StdRng::seed_from_u64(44),
+                StdRng::seed_from_u64(45),
+                StdRng::seed_from_u64(46),
+                StdRng::seed_from_u64(47),
+            );
+            let context = e.context(&old)?;
+            let expected = proposal.propose_with_guides(
+                &mut p,
+                &context,
+                e.selected(&old),
+                Some(&guide),
+                Some(&mut r),
+                Some(&guide),
+                Some(&mut t),
+            )?;
+            let candidate = expected.candidate.as_ref().expect("sphere candidate");
+            let new = [candidate.root, candidate.child];
+            let path = SingletonPath::new(&core, &old, &e.members, &new, e.rd)?;
+            let mut expected_budget = budget();
+            let bath = bounded_path(
+                &core,
+                &old,
+                e.members,
+                new,
+                &path,
+                &mut b,
+                e.rd,
+                e.lambda,
+                e.activity,
+                e.envelope,
+                &mut expected_budget,
+                None,
+            )?;
+            let full = candidate.diagnostics.log_reverse_forward;
+            let internal = expected
+                .guidance
+                .as_ref()
+                .unwrap()
+                .aux_log_correction
+                .unwrap();
+            let root = expected
+                .root_guidance
+                .as_ref()
+                .unwrap()
+                .aux_log_correction
+                .unwrap();
+            if distance == 1.5 {
+                assert!((root + 4. * 2f64.ln()).abs() < 1e-14);
+                assert_eq!(root, internal);
+            }
+            let correction = (full + internal) + root;
+            let log_ratio = correction + bath.aggregate.log_weight;
+            let log_u = a.sample::<f64, _>(Open01).ln();
+            let accepted = log_u < log_ratio.min(0.);
+            decisions.push(accepted);
+            let (mut pp, mut rr, mut tt, mut bb, mut aa) = (
+                StdRng::seed_from_u64(8),
+                StdRng::seed_from_u64(44),
+                StdRng::seed_from_u64(45),
+                StdRng::seed_from_u64(46),
+                StdRng::seed_from_u64(47),
+            );
+            let mut actual_state = old.clone();
+            let mut actual_budget = budget();
+            let mut record = Value::Null;
+            e.dimer_with_guides(
+                &mut actual_state,
+                &proposal,
+                Some(&guide),
+                Some(&guide),
+                &mut pp,
+                Some(&mut rr),
+                Some(&mut tt),
+                &mut bb,
+                &mut aa,
+                &mut actual_budget,
+                &mut record,
+            )?;
+            assert_eq!(record["status"], "completed");
+            assert_eq!(record["proposal"], json!(expected));
+            assert_eq!(record["bath"], json!(bath));
+            assert_eq!(record["complete_log_correction"], json!(correction));
+            assert_eq!(record["log_acceptance_ratio"], json!(log_ratio));
+            assert_eq!(record["log_u"], json!(log_u));
+            assert_eq!(record["accepted"], accepted);
+            assert_eq!(actual_state[2], old[2]);
+            assert_eq!(
+                e.selected(&actual_state),
+                if accepted { new } else { e.selected(&old) }
+            );
+            assert_eq!(
+                (actual_budget.raw, actual_budget.retained),
+                (expected_budget.raw, expected_budget.retained)
+            );
+            for (x, y) in [
+                (&mut p, &mut pp),
+                (&mut r, &mut rr),
+                (&mut t, &mut tt),
+                (&mut b, &mut bb),
+                (&mut a, &mut aa),
+            ] {
+                assert_eq!(x.random::<u64>(), y.random::<u64>());
+            }
+        }
+        assert_eq!(decisions, [false, true]);
+        Ok(())
+    }
+
+    #[test]
+    fn no_root_wrapper_preserves_old_records_state_budget_and_rng() -> Result<()> {
+        let core = sphere(0.45);
+        let ex = sphere(0.6);
+        let wall = Container::new(50., &core)?;
+        let e = engine(&core, &ex, &wall);
+        let atlas = atlas();
+        let proposal = FactorizedDimerProposal::new(
+            DefensiveDimerProposal::new(&atlas, 4., 0.5)?,
+            FactorizedDimerCaps {
+                root: 16,
+                internal: 16,
+                joint: 2,
+            },
+            FactorizedDimerOrder::RootFirst,
+        );
+        let guide = AuxiliaryOverlapThreshold::new(&ex, vec![[0.; 3], [0.3, 0., 0.]], 4)?;
+        for guided in [false, true] {
+            for seed in 1..=4 {
+                let (mut before, mut after) = (state(), state());
+                let (mut first, mut second) = (Value::Null, Value::Null);
+                let (mut first_budget, mut second_budget) = (budget(), budget());
+                let mut old_rngs: [StdRng; 4] =
+                    std::array::from_fn(|k| StdRng::seed_from_u64(seed * 10 + k as u64));
+                let mut new_rngs: [StdRng; 4] =
+                    std::array::from_fn(|k| StdRng::seed_from_u64(seed * 10 + k as u64));
+                let [p, t, b, a] = &mut old_rngs;
+                e.dimer(
+                    &mut before,
+                    &proposal,
+                    if guided { Some(&guide) } else { None },
+                    p,
+                    t,
+                    b,
+                    a,
+                    &mut first_budget,
+                    &mut first,
+                )?;
+                let [p, t, b, a] = &mut new_rngs;
+                let mut unused_root = StdRng::seed_from_u64(123);
+                e.dimer_with_guides(
+                    &mut after,
+                    &proposal,
+                    None,
+                    if guided { Some(&guide) } else { None },
+                    p,
+                    Some(&mut unused_root),
+                    Some(t),
+                    b,
+                    a,
+                    &mut second_budget,
+                    &mut second,
+                )?;
+                assert_eq!(before, after);
+                assert_eq!(first, second);
+                assert!(!second.to_string().contains("root_guidance"));
+                assert_eq!(
+                    (first_budget.raw, first_budget.retained),
+                    (second_budget.raw, second_budget.retained)
+                );
+                for (x, y) in old_rngs.iter_mut().zip(&mut new_rngs) {
+                    assert_eq!(x.random::<u64>(), y.random::<u64>());
+                }
+                assert_eq!(
+                    unused_root.random::<u64>(),
+                    StdRng::seed_from_u64(123).random::<u64>()
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn dual_guidance_self_loops_leave_every_stream_and_state_untouched() -> Result<()> {
+        let core = sphere(0.45);
+        let ex = sphere(0.6);
+        let wall = Container::new(50., &core)?;
+        let e = engine(&core, &ex, &wall);
+        let atlas = atlas();
+        let guide = AuxiliaryOverlapThreshold::new(&ex, vec![[0.; 3]], 4)?;
+        for outside in [false, true] {
+            let mut s = state();
+            if outside {
+                s[1].position = [10., 0., 0.];
+            }
+            let old = s.clone();
+            let proposal = FactorizedDimerProposal::new(
+                DefensiveDimerProposal::new(&atlas, 4., 0.5)?,
+                FactorizedDimerCaps {
+                    root: if outside { 4 } else { 0 },
+                    internal: 4,
+                    joint: 2,
+                },
+                FactorizedDimerOrder::RootFirst,
+            );
+            let mut streams: [StdRng; 5] =
+                std::array::from_fn(|k| StdRng::seed_from_u64(k as u64 + 1));
+            let [p, r, t, b, a] = &mut streams;
+            let mut record = Value::Null;
+            let mut budget = budget();
+            e.dimer_with_guides(
+                &mut s,
+                &proposal,
+                Some(&guide),
+                Some(&guide),
+                p,
+                Some(r),
+                Some(t),
+                b,
+                a,
+                &mut budget,
+                &mut record,
+            )?;
+            assert_eq!(s, old);
+            assert_eq!(record["status"], "proposal_self_loop");
+            assert!(record.get("bath").is_none());
+            assert_eq!((budget.raw, budget.retained), (0, 0));
+            for (k, actual) in streams.iter_mut().enumerate() {
+                assert_eq!(
+                    actual.random::<u64>(),
+                    StdRng::seed_from_u64(k as u64 + 1).random::<u64>()
+                );
+            }
+        }
         Ok(())
     }
 }

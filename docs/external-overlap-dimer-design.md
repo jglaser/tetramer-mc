@@ -405,3 +405,81 @@ augmented mass, then the existing `accept_reject_correct` and
 derived paired-guide corollary of the checked building blocks, not a newly
 Lean-checked declaration or a proof of the Rust implementation. No new Lean
 build or dependency change was performed for this extension.
+
+## Matched anchor-guided extension
+
+The `root_m4` arm in `examples/evolving_dimer_benchmark.rs` now composes the
+root and internal guides through `FixedLabelUpdates::dimer_with_guides`.
+There is one two-member physical bath evaluation and one MH decision for an
+assembled candidate. Both auxiliary corrections enter that decision once.
+The old `dimer` entry point passes no root guide and preserves its records
+and random streams. Twelve additional integration tests passed, including
+disk checkpoint continuation from both kinds of prepared start; their
+receipt is `results/evolving-dimer-root-integration-validation-20261003/rust-tests02.json`.
+
+The fixed comparison adds 32 chains against the 32 completed `m4` controls
+from `results/evolving-dimer-campaign-20261003`. It reuses the exact same four
+contexts, two starts per context, four streams, 32 fixed point banks and
+16 prepared starts. Preparation identities remain those of the original
+campaign: no replacement starts, new point draws or repeated thinning.
+Each new chain contains 512 warmup and 4096 production blocks, with four
+local attempts and one collective attempt per block. Thus the new allocation
+is 589,824 local and 147,456 collective attempts, including every failure
+and self-loop. At most three new chains run concurrently.
+
+The physical setting is the saved 264-body growth configuration at radius
+1.4 Å and activity 0.0275 Å⁻³. Only the two specified members move; the other
+262 bodies stay fixed. This tests conditional contact reorganization. It
+does not test the original 1.5 Å / 0.035 Å⁻³ finite-system assembly objective.
+
+For each block, `root_m4` shares the completed control's `m4/proposal`,
+`m4/threshold`, `m4/bath` and `m4/accept` streams and the same local streams.
+Only `root_m4/root_threshold` is new. The two threshold streams are distinct;
+the same frozen body-frame point cloud is intentionally reused in the
+fixed-anchor frame for the root and in the moving-root frame for the child.
+The CPU limit rises from 1800 to 3600 seconds per new chain to allow for
+the additional count work; the number of attempts and all physical point
+budgets remain fixed. A limit failure is retained, without replacement.
+
+This is a single-anchor proxy. It cannot preserve all exclusion overlap
+with several spectators, nor guarantee an accessible root destination.
+The full many-body physical correction still determines acceptance. The
+test asks whether this inexpensive factorable guide improves actual
+contact-environment sampling enough to justify extending the geometry.
+
+### Evaluation and independent checks
+
+The new observer classifies the initial state and all 4608 retained block
+endpoints in each new chain. Completed control observations and metrics are
+reused by hash. No control geometry is recomputed. In addition to the original
+patch and partner fingerprints, it reports an external-only edge set that
+excludes the moving pair's internal edge. Empty external sets and rejected
+residence remain in the sequence. Repeated attachment and detachment of the
+same moving pair therefore cannot masquerade as external-contact exchange.
+Even an external set change can be simple contact gain/loss; it is not
+automatically a new partner, metastable-basin transition or native registry.
+
+Compare external and patch ESS per actual full sampler CPU, passages and
+completed returns, and occupancy agreement between starts. Constant
+observables have undefined ESS. Keep contexts separate and show all four
+streams; their fixed spectator environments define different conditional
+targets. Higher acceptance alone is insufficient. The source and deliberately
+displaced starts are not independent equilibrium preparations.
+
+The separate Python audit checks threshold support, capped stopping, count
+accounting and the complete correction for every collective attempt. Its
+independent geometric checks use exactly the first scheduled collective
+event after four local attempts in each of the 32 chains, including null
+events. It never substitutes the first successful event. This fixed budget
+is at most 2560 count queries and 41,943,040 point-membership tests. The
+remaining events receive scalar replay checks, not independent geometric
+certification. Existing preparation audits authenticate the reused clouds;
+they are not rerun. The 12 synthetic auditor controls passed, with receipt
+`results/evolving-dimer-root-audit-validation-20261003/tests03.json`.
+
+The preparer, exclusive bounded dispatcher and observer are
+`tools/prepare_evolving_dimer_root_extension.py`,
+`tools/run_evolving_dimer_root_extension.py` and
+`tools/analyze_root_guided_dimer_benchmark.py`. Their frozen campaign records
+bind source, executable, inherited preparations, completed controls and
+evaluation allocation before physical execution.

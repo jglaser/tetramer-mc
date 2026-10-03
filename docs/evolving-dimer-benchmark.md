@@ -103,3 +103,37 @@ source-bound receipt; `chains.csv` retains every stream separately. Native
 registry was not measured. These are conditional sampling results at 1.4 Å and
 0.0275 Å⁻³, not finite-system thermodynamics or evidence against assembly at the
 original decision conditions.
+
+## Why the trapped source rejects feasible dimers
+
+A separately frozen scalar-only pass through all 96 journals accounts for
+1,769,472 local and 294,912 collective attempts. Every trajectory hash and
+terminal counter matches. It adds no geometry observations or physical draws;
+the full report is
+`results/evolving-dimer-rejection-diagnostic-20261003/report.md`, with per-stream
+warmup/production results in `analysis.json` (SHA256
+`d4ca76538d144e5c7f628b6307d353e37901ff1806d9ab5e21606054990f9c89`).
+
+For embedded 9/24 from the source, each arm has 16,384 production collective
+attempts across its four streams:
+
+| Arm | Feasible destinations | Accepted | Median full-F correction | Median auxiliary correction | Median bath correction |
+|---|---:|---:|---:|---:|---:|
+| Unguided | 13,211 | 0 | −5.06 | 0 | −98.81 |
+| Guided m=4 | 7,640 | 0 | −8.80 | +0.061 | −81.58 |
+
+These are separate median log factors, not additive median energies. The sum
+of recorded guided MH acceptance probabilities is only 2.79×10⁻³². Removing
+the proposal-density correction at those same candidates and clouds leaves
+2.61×10⁻²⁴; removing the bath term instead gives 348.7. These factor-removal
+calculations diagnose the saved decisions. They are not replacement reversible
+kernels, equilibrium expectations, or rates for a hypothetical trajectory.
+
+The dominant obstruction for these feasible candidates is the depletion bath
+penalty. Larger retry caps or a better proposal ratio alone would not make them
+competitive. The aggregate bath records do not separate internal-pair from
+external-contact loss. External-overlap guidance is therefore a hypothesis to
+test, supported by the exact union-volume decomposition, rather than an already
+measured cause. The [extension design](external-overlap-dimer-design.md) gives
+the balance argument and a minimal anchor-root guide, alongside the complete
+external-union and two-neighbor singleton alternatives.

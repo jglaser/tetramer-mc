@@ -7,6 +7,11 @@
 //! other stage if necessary. Final failure discards BOTH successful edges.
 //! Thus the successful subdensity is a(C) s_J(q(C)) F0 F1 1_D, and its common
 //! factor cancels. Full F scoring happens only at a geometrically feasible end.
+//! Optional independent thresholds may filter the anchor/root edge and the
+//! root/child edge. Each cloud is fixed in its own anchor body's frame, each
+//! threshold is refreshed once before all retries, and both auxiliary target
+//! corrections accompany the full-F ratio. Root guidance is a single-anchor
+//! contact proxy, not the full external union or the physical bath.
 //!
 //! This is not a physical kernel. Source/endpoint frame-predicate disagreement,
 //! numerical null or scoring failure is FATAL with the partial outcome retained,
@@ -74,6 +79,8 @@ pub struct FactorizedRootDraw {
     pub draw: DefensiveDimerEdge,
     pub world_pose: Option<Pose>,
     pub feasibility: Option<FixedBodyFeasibility>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guidance_count: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -96,6 +103,9 @@ pub struct FactorizedFrameCheck {
     pub internal_relative: InternalDimerFeasibility,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guidance: Option<OverlapCountFrame>,
+    /// Anchor/root counts; `guidance` above remains the internal root/child edge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_guidance: Option<OverlapCountFrame>,
 }
 
 impl FactorizedFrameCheck {
@@ -109,6 +119,7 @@ impl FactorizedFrameCheck {
             reconstructed_root: context.evaluate_fixed_body(reconstructed_members[0])?,
             internal_relative: context.evaluate_internal_relative(recovered_edges[1])?,
             guidance: None,
+            root_guidance: None,
         })
     }
 
@@ -180,6 +191,35 @@ pub struct FactorizedDimerOutcome {
     /// Separate auxiliary target correction; never folded into full F.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub guidance: Option<OverlapGuidanceDiagnostics>,
+    /// Fixed-anchor/root auxiliary target, separate from internal guidance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_guidance: Option<OverlapGuidanceDiagnostics>,
+}
+
+fn checked_auxiliary_correction(d: &OverlapGuidanceDiagnostics) -> Result<f64> {
+    let old = d.old_count.context("missing old guidance count")?;
+    let new = d.new_count.context("missing new guidance count")?;
+    let threshold = d.threshold.context("missing guidance threshold")?;
+    let auxiliary = d
+        .aux_log_correction
+        .context("missing auxiliary correction")?;
+    ensure!(
+        d.m > 0
+            && old <= d.point_count
+            && new <= d.point_count
+            && threshold <= old
+            && threshold <= new
+            && d.integer_draws.len() == d.m
+            && d.integer_draws.iter().all(|&n| n <= old)
+            && d.integer_draws.iter().copied().max() == Some(threshold),
+        "inconsistent guidance support or threshold trace"
+    );
+    let expected = (d.m as f64) * ((old as f64).ln_1p() - (new as f64).ln_1p());
+    ensure!(
+        auxiliary.is_finite() && auxiliary == expected,
+        "invalid auxiliary correction"
+    );
+    Ok(auxiliary)
 }
 
 impl FactorizedDimerOutcome {
@@ -203,33 +243,18 @@ impl FactorizedDimerOutcome {
             "invalid full-F correction"
         );
         let auxiliary = if let Some(d) = &self.guidance {
-            let old = d.old_count.context("missing old guidance count")?;
-            let new = d.new_count.context("missing new guidance count")?;
-            let threshold = d.threshold.context("missing guidance threshold")?;
-            let auxiliary = d
-                .aux_log_correction
-                .context("missing auxiliary correction")?;
-            ensure!(
-                d.m > 0
-                    && old <= d.point_count
-                    && new <= d.point_count
-                    && threshold <= old
-                    && threshold <= new
-                    && d.integer_draws.len() == d.m
-                    && d.integer_draws.iter().all(|&n| n <= old)
-                    && d.integer_draws.iter().copied().max() == Some(threshold),
-                "inconsistent guidance support or threshold trace"
-            );
-            let expected = (d.m as f64) * ((old as f64).ln_1p() - (new as f64).ln_1p());
-            ensure!(
-                auxiliary.is_finite() && auxiliary == expected,
-                "invalid auxiliary correction"
-            );
-            auxiliary
+            checked_auxiliary_correction(d)?
         } else {
             0.
         };
+        // Preserve the original internal-only operation order exactly. The
+        // optional root target is included once, never in the full-F score.
         let result = full + auxiliary;
+        let result = if let Some(d) = &self.root_guidance {
+            result + checked_auxiliary_correction(d)?
+        } else {
+            result
+        };
         ensure!(
             result.is_finite() || result == f64::NEG_INFINITY,
             "invalid complete correction"
@@ -273,6 +298,8 @@ impl<'a> FactorizedDimerProposal<'a> {
         context: &FixedDimerContext<'_>,
         old: Pose,
         attempt: &mut FactorizedDimerAttempt,
+        guidance: Option<&AuxiliaryOverlapThreshold<'_>>,
+        diagnostics: &mut Option<OverlapGuidanceDiagnostics>,
     ) -> Result<bool> {
         for index in 1..=self.caps.root {
             let draw = self.raw.draw_edge(rng, old);
@@ -281,6 +308,7 @@ impl<'a> FactorizedDimerProposal<'a> {
                 draw,
                 world_pose: None,
                 feasibility: None,
+                guidance_count: None,
             });
             let record = attempt.root_draws.last_mut().unwrap();
             let relative = record.draw.proposed_relative_pose.context(
@@ -297,8 +325,20 @@ impl<'a> FactorizedDimerProposal<'a> {
             let root = tree_members(context.anchor(), [relative, IDENTITY])?[0];
             record.world_pose = Some(root);
             let feasibility = context.evaluate_fixed_body(root)?;
-            let pass = feasibility.hard_valid();
+            let mut pass = feasibility.hard_valid();
             record.feasibility = Some(feasibility);
+            // Only fixed-body hard-valid roots query this anchor-body cloud.
+            // The child never enters the root edge's capped predicate.
+            if let Some(guide) = guidance.filter(|_| pass) {
+                let d = diagnostics
+                    .as_mut()
+                    .context("missing root guidance diagnostics")?;
+                let count = guide.recorded_relative(relative, d)?;
+                record.guidance_count = Some(count);
+                pass &= count
+                    >= d.threshold
+                        .context("missing fixed root guidance threshold")?;
+            }
             if pass {
                 return Ok(true);
             }
@@ -364,6 +404,8 @@ impl<'a> FactorizedDimerProposal<'a> {
         outcome: &mut FactorizedDimerOutcome,
         guidance: Option<&AuxiliaryOverlapThreshold<'_>>,
         auxiliary_rng: Option<&mut StdRng>,
+        root_guidance: Option<&AuxiliaryOverlapThreshold<'_>>,
+        root_auxiliary_rng: Option<&mut StdRng>,
     ) -> Result<()> {
         ensure!(
             outcome.source_feasibility.hard_valid(),
@@ -372,6 +414,25 @@ impl<'a> FactorizedDimerProposal<'a> {
         outcome.source_frame = Some(FactorizedFrameCheck::evaluate(context, outcome.old)?);
         let source_frame = outcome.source_frame.as_mut().unwrap();
         source_frame.validate(&outcome.source_feasibility, None, None)?;
+        if let Some(guide) = root_guidance {
+            guide.validate_shape(context.exclusion_tree())?;
+            let d = outcome
+                .root_guidance
+                .as_mut()
+                .context("missing root guidance diagnostics")?;
+            source_frame.root_guidance = Some(OverlapCountFrame::default());
+            let counts = source_frame.root_guidance.as_mut().unwrap();
+            let checked = guide.check_frame(
+                source_frame.recovered_edges[0],
+                source_frame.recovered_edges[0],
+                [context.anchor(), outcome.old[0]],
+                [context.anchor(), source_frame.reconstructed_members[0]],
+                d,
+                counts,
+            );
+            d.old_count = counts.relative_count;
+            checked?;
+        }
         if let Some(guide) = guidance {
             guide.validate_shape(context.exclusion_tree())?;
             let d = outcome
@@ -401,6 +462,12 @@ impl<'a> FactorizedDimerProposal<'a> {
             outcome.status = FactorizedDimerStatus::CapExhausted;
             return Ok(());
         }
+        if let Some(guide) = root_guidance {
+            guide.draw_threshold(
+                root_auxiliary_rng.context("missing root auxiliary RNG")?,
+                outcome.root_guidance.as_mut().unwrap(),
+            )?;
+        }
         if let Some(guide) = guidance {
             guide.draw_threshold(
                 auxiliary_rng.context("missing auxiliary RNG")?,
@@ -421,15 +488,21 @@ impl<'a> FactorizedDimerProposal<'a> {
             let attempt = outcome.attempts.last_mut().unwrap();
             let success = match self.order {
                 FactorizedDimerOrder::RootFirst => {
-                    self.root_stage(rng, context, old_edges[0], attempt)?
-                        && self.internal_stage(
-                            rng,
-                            context,
-                            old_edges[1],
-                            attempt,
-                            guidance,
-                            &mut outcome.guidance,
-                        )?
+                    self.root_stage(
+                        rng,
+                        context,
+                        old_edges[0],
+                        attempt,
+                        root_guidance,
+                        &mut outcome.root_guidance,
+                    )? && self.internal_stage(
+                        rng,
+                        context,
+                        old_edges[1],
+                        attempt,
+                        guidance,
+                        &mut outcome.guidance,
+                    )?
                 }
                 FactorizedDimerOrder::InternalFirst => {
                     self.internal_stage(
@@ -439,7 +512,14 @@ impl<'a> FactorizedDimerProposal<'a> {
                         attempt,
                         guidance,
                         &mut outcome.guidance,
-                    )? && self.root_stage(rng, context, old_edges[0], attempt)?
+                    )? && self.root_stage(
+                        rng,
+                        context,
+                        old_edges[0],
+                        attempt,
+                        root_guidance,
+                        &mut outcome.root_guidance,
+                    )?
                 }
             };
             if !success {
@@ -465,6 +545,28 @@ impl<'a> FactorizedDimerProposal<'a> {
                 root_record.feasibility.as_ref(),
                 internal_record.feasibility.as_ref(),
             )?;
+            if let Some(guide) = root_guidance {
+                let d = outcome.root_guidance.as_mut().unwrap();
+                let frame = attempt.frame.as_mut().unwrap();
+                frame.root_guidance = Some(OverlapCountFrame::default());
+                let counts = frame.root_guidance.as_mut().unwrap();
+                guide.check_frame(
+                    edges[0],
+                    frame.recovered_edges[0],
+                    [context.anchor(), members[0]],
+                    [context.anchor(), frame.reconstructed_members[0]],
+                    d,
+                    counts,
+                )?;
+                ensure!(
+                    counts.relative_count == root_record.guidance_count,
+                    "fatal root guidance count mismatch: raw root draw"
+                );
+                ensure!(
+                    counts.relative_count.unwrap() >= d.threshold.unwrap(),
+                    "fatal root guidance threshold mismatch at endpoint"
+                );
+            }
             if let Some(guide) = guidance {
                 let d = outcome.guidance.as_mut().unwrap();
                 let frame = attempt.frame.as_mut().unwrap();
@@ -500,6 +602,20 @@ impl<'a> FactorizedDimerProposal<'a> {
                 members[0],
                 members[1],
             )?;
+            if let Some(guide) = root_guidance {
+                let d = outcome.root_guidance.as_mut().unwrap();
+                let count = attempt
+                    .frame
+                    .as_ref()
+                    .unwrap()
+                    .root_guidance
+                    .as_ref()
+                    .unwrap()
+                    .relative_count
+                    .unwrap();
+                d.new_count = Some(count);
+                d.aux_log_correction = Some(guide.log_correction(d.old_count.unwrap(), count)?);
+            }
             if let Some(guide) = guidance {
                 let d = outcome.guidance.as_mut().unwrap();
                 let count = attempt
@@ -533,7 +649,7 @@ impl<'a> FactorizedDimerProposal<'a> {
         context: &FixedDimerContext<'_>,
         old: [Pose; 2],
     ) -> std::result::Result<FactorizedDimerOutcome, FactorizedDimerFailure> {
-        self.propose_impl(rng, context, old, None, None)
+        self.propose_impl(rng, context, old, None, None, None, None)
     }
 
     /// Ephemeral guidance; the caller supplies a state-independent root-body
@@ -550,7 +666,54 @@ impl<'a> FactorizedDimerProposal<'a> {
         old: [Pose; 2],
         guidance: &AuxiliaryOverlapThreshold<'_>,
     ) -> std::result::Result<FactorizedDimerOutcome, FactorizedDimerFailure> {
-        self.propose_impl(rng, context, old, Some(guidance), Some(auxiliary_rng))
+        self.propose_impl(
+            rng,
+            context,
+            old,
+            Some(guidance),
+            Some(auxiliary_rng),
+            None,
+            None,
+        )
+    }
+
+    /// Optional anchor/root and root/child thresholds with separate streams.
+    ///
+    /// `root_guidance` points are fixed in the spectator anchor's body frame;
+    /// `internal_guidance` points are fixed in the mobile root's body frame.
+    /// Each enabled threshold is refreshed ONCE (root then internal), after
+    /// source eligibility and nonzero-cap checks, and is fixed through every
+    /// edge/joint retry. An absent guide consumes no corresponding RNG.
+    /// The caller must use independent proposal/root/internal random streams;
+    /// two RNG objects cloned from the same state do not satisfy the joint
+    /// threshold target's conditional-independence obligation.
+    /// Enabled guides require an RNG when a threshold is actually refreshed.
+    /// Root filtering depends only on its edge and the fixed anchor/context,
+    /// so its finite-cap scalar cancels independently of the internal stage.
+    /// The root score covers one anchor interface, not all external contacts.
+    ///
+    /// Use `complete_log_correction` with the physical bath in ONE acceptance
+    /// decision and discard both auxiliary thresholds afterward. Passing no
+    /// root guide preserves the existing unguided/internal-only behavior.
+    pub fn propose_with_guides(
+        &self,
+        rng: &mut StdRng,
+        context: &FixedDimerContext<'_>,
+        old: [Pose; 2],
+        root_guidance: Option<&AuxiliaryOverlapThreshold<'_>>,
+        root_threshold_rng: Option<&mut StdRng>,
+        internal_guidance: Option<&AuxiliaryOverlapThreshold<'_>>,
+        internal_threshold_rng: Option<&mut StdRng>,
+    ) -> std::result::Result<FactorizedDimerOutcome, FactorizedDimerFailure> {
+        self.propose_impl(
+            rng,
+            context,
+            old,
+            internal_guidance,
+            internal_threshold_rng,
+            root_guidance,
+            root_threshold_rng,
+        )
     }
 
     fn propose_impl(
@@ -560,6 +723,8 @@ impl<'a> FactorizedDimerProposal<'a> {
         old: [Pose; 2],
         guidance: Option<&AuxiliaryOverlapThreshold<'_>>,
         auxiliary_rng: Option<&mut StdRng>,
+        root_guidance: Option<&AuxiliaryOverlapThreshold<'_>>,
+        root_auxiliary_rng: Option<&mut StdRng>,
     ) -> std::result::Result<FactorizedDimerOutcome, FactorizedDimerFailure> {
         let source_feasibility = context.evaluate(old).map_err(|e| FactorizedDimerFailure {
             fatal_error: e.to_string(),
@@ -577,8 +742,17 @@ impl<'a> FactorizedDimerProposal<'a> {
             attempts: vec![],
             candidate: None,
             guidance: guidance.map(AuxiliaryOverlapThreshold::diagnostics),
+            root_guidance: root_guidance.map(AuxiliaryOverlapThreshold::diagnostics),
         };
-        match self.run(rng, context, &mut outcome, guidance, auxiliary_rng) {
+        match self.run(
+            rng,
+            context,
+            &mut outcome,
+            guidance,
+            auxiliary_rng,
+            root_guidance,
+            root_auxiliary_rng,
+        ) {
             Ok(()) => Ok(outcome),
             Err(e) => Err(FactorizedDimerFailure {
                 fatal_error: e.to_string(),

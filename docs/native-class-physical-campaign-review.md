@@ -345,3 +345,20 @@ and implications are documented in [the benchmark report](evolving-dimer-benchma
 The original unpruned class-proposal controller remains live: all nine query
 jobs and the first two independent audits have passed. It must finish its
 remaining frozen audits before the proposal pilot is declared complete.
+
+The new arithmetic path subsequently passed all **32,768 existing sphere-control
+rows**, in 16 populations, without regenerating a pose, cloud, or geometry query.
+Every population's unconditional moments, hard-only moments, paired-cloud noise,
+counters and consumed-stream hashes agree with its prior full-geometry audit.
+The frozen replay plan is
+`results/native-class-sphere-algebra-replay-20261003/execution-plan.json`, SHA256
+`2b7d0c1403a57742f9ec5444a3fdd744bace25a852f540456c3c37d7c029aa5c`;
+the complete receipt SHA256 is
+`8d719ff6cf8fbedb1a20f9be31e78d4a9ba3bb8899fd992ec41fb4376758e389`.
+It used one sequential worker, 208 frozen bindings and fixed per-population
+limits, with no failures or retries. `tools/run_native_class_sphere_algebra_replay.py`
+reuses the tested child-draining launcher; its three driver-specific tests cover
+inventory/command tampering, exclusive execution and stopping after failure.
+Arithmetic audit CPU was 136.5 seconds. The prior 163.0-second sphere geometry
+audit performed different work; this is compatibility evidence, not a matched
+protein speedup benchmark. Physical-label and spatial-Poisson obligations remain.

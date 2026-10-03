@@ -508,3 +508,133 @@ fn class_line_hard_free_only_channel_matches_legacy_density() {
         assert!((a - b).abs() < 2e-12 || a == b, "legacy H={a} class H={b}");
     }
 }
+
+#[test]
+fn class_line_compact_trace_retains_exact_density_and_reconstruction_geometry() {
+    let c = chart();
+    for (alpha, beta, floor) in [
+        (0.5, 1., 1e-10),
+        (0.5, 1., 0.99),
+        (0.5, 0., 1e-10),
+        (1., 1., 1e-10),
+    ] {
+        let mut g = guide(alpha, beta, channels());
+        g.minimum_mass = floor;
+        let mut rng = StdRng::seed_from_u64(6100401011);
+        let mut poses = vec![[0.; 6], [9.; 6], [0.3, -0.4, 0., 0.1, 0.2, -0.1]];
+        for _ in 0..32 {
+            poses.push(g.base.draw(&mut rng, 4., 0., 1.).unwrap().0);
+        }
+        for u in poses {
+            let inside = u.iter().map(|v| v * v).sum::<f64>() <= 16.;
+            let full = g.density_details(u, inside, volume(), &c, 4.).unwrap();
+            let compact = g.density_compact(u, inside, volume(), &c, 4.).unwrap();
+            assert_eq!(full.0, compact.0);
+            let mut reduced = full.1;
+            if let Some(axes) = reduced.get_mut("axes").and_then(Value::as_array_mut) {
+                for axis in axes {
+                    assert!(axis.as_object_mut().unwrap().remove("components").is_some());
+                }
+                reduced["trace_format"] = json!("class-line-compact-v1");
+            }
+            assert_eq!(reduced, compact.1);
+            assert_eq!(
+                compact,
+                g.density_compact(u, inside, volume(), &c, 4.).unwrap()
+            );
+            assert_eq!(*g.last_draw.borrow(), Value::Null);
+        }
+    }
+}
+
+#[test]
+fn class_line_compact_scoring_cannot_advance_proposal_or_cloud_streams() {
+    let c = chart();
+    let full = guide(0.5, 1., channels());
+    let compact = guide(0.5, 1., channels());
+    let mut a = StdRng::seed_from_u64(6100401012);
+    let mut b = StdRng::seed_from_u64(6100401012);
+    for draw in 0..128 {
+        let p = full.draw(&mut a, &c, 4., 0., 1.).unwrap();
+        let q = compact.draw(&mut b, &c, 4., 0., 1.).unwrap();
+        assert_eq!(p, q);
+        assert_eq!(*full.last_draw.borrow(), *compact.last_draw.borrow());
+        let before = compact.last_draw.borrow().clone();
+        assert_eq!(
+            full.density_details(p.0, p.1 <= 4., volume(), &c, 4.)
+                .unwrap()
+                .0,
+            compact
+                .density_compact(q.0, q.1 <= 4., volume(), &c, 4.)
+                .unwrap()
+                .0
+        );
+        assert_eq!(before, *compact.last_draw.borrow());
+        let mut cloud0 = stream(6100401012, draw, 0, "cloud");
+        let mut cloud1 = stream(6100401012, draw, 1, "cloud");
+        let mut proposal = stream(6100401012, draw, 0, "latent");
+        let zero: [u64; 8] = std::array::from_fn(|_| cloud0.random());
+        let one: [u64; 8] = std::array::from_fn(|_| cloud1.random());
+        let latent: [u64; 8] = std::array::from_fn(|_| proposal.random());
+        assert_ne!(zero, one);
+        assert_ne!(zero, latent);
+        assert_ne!(one, latent);
+        let mut restarted = stream(6100401012, draw, 0, "cloud");
+        assert_eq!(zero, std::array::from_fn(|_| restarted.random::<u64>()));
+    }
+    assert_eq!(a.random::<u64>(), b.random::<u64>());
+    // Domain separation and deterministic replay are tested here. Independent
+    // point-process laws additionally rely on the RNG implementation/assumption.
+}
+
+#[test]
+fn class_line_compact_92_component_trace_omits_only_redundant_branch_records() {
+    let c = chart();
+    let mut g = guide(0.5, 1., channels());
+    let original = std::mem::take(&mut g.base.components);
+    g.base.components = (0..92)
+        .map(|i| {
+            let old = &original[i % 2];
+            ImportanceComponent {
+                weight: old.weight / 46.,
+                mean: old.mean,
+                lower: old.lower,
+                log_normalizer: old.log_normalizer,
+            }
+        })
+        .collect();
+    g.conditionals = g
+        .axes
+        .iter()
+        .map(|&axis| {
+            g.base
+                .components
+                .iter()
+                .map(|p| ConditionalNormal::new(p, &c, axis).unwrap())
+                .collect()
+        })
+        .collect();
+    let full = g.density_details([0.; 6], true, volume(), &c, 4.).unwrap();
+    let compact = g.density_compact([0.; 6], true, volume(), &c, 4.).unwrap();
+    assert_eq!(full.0, compact.0);
+    assert_eq!(
+        compact.1["component_mixture_multipliers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        92
+    );
+    assert!(
+        compact.1["axes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| a.get("components").is_none())
+    );
+    let full_bytes = serde_json::to_vec(&full.1).unwrap().len();
+    let compact_bytes = serde_json::to_vec(&compact.1).unwrap().len();
+    eprintln!(
+        "synthetic 92-component density trace bytes full={full_bytes} compact={compact_bytes}"
+    );
+    assert!(compact_bytes * 5 < full_bytes);
+}

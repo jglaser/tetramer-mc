@@ -606,6 +606,22 @@ fn normalizer_attempt<T>(
     }
 }
 
+/// Additional v7 failure evidence. A cloud's internal point progress is not
+/// available from the existing gate API, so only completed clouds are retained.
+fn save_class_normalizer_failure(
+    out: &Path,
+    draw: u64,
+    error: &anyhow::Error,
+    context: &Value,
+) -> Result<()> {
+    save(
+        &out.join("failure.json"),
+        &json!({"complete":false,"draw":draw,
+        "error":format!("{error:#}"),"retry_performed":false,"attempt_context":context,
+        "failed_cloud_internal_point_progress_available":false}),
+    )
+}
+
 fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<Value> {
     ensure!(
         options.samples > 0 && options.cloud_replicates > 0,
@@ -874,6 +890,14 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                 .clone()
                 .context("Missing native provenance")?;
             manifest["guide_schema"] = json!("defensive-native-class-line-guide-v1");
+            manifest["density_trace_contract"] = json!({
+                "format":"class-line-compact-v1", "retained":"Every axis/class interval set, geometric work counts, raw coordinates and full per-component axis-averaged multipliers",
+                "omitted":"Per-component per-channel masses and fallback records; reconstruct from frozen guide plus retained intervals",
+                "diagnostic_full_trace_unchanged":true});
+            manifest["random_stream_contract"] = json!({"hash_domain":"tetramer-uniform-latent-region-v1",
+                "key_fields":["master seed u64 little endian","draw u64 little endian","cloud index u64 little endian","role UTF-8 bytes"],
+                "proposal_role":"latent", "proposal_cloud_index":0, "physical_cloud_role":"cloud",
+                "physical_cloud_indices":"0..cloud_replicates, separately derived; no proposal RNG consumption"});
             manifest["proposal_kind"] = json!("raw-translation-class-conditioned-Gaussian-mixture");
             manifest["class_scope"] = json!(
                 "complete native and competing contact; optional original latent orthants; no old-R5 restriction"
@@ -881,6 +905,9 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             manifest["attempt_journal"] =
                 json!("attempts.jsonl; begin record before each draw; no retries");
             manifest["resume_supported"] = json!(false);
+            manifest["failure_trace_contract"] = json!(
+                "Attempt ID and completed rows retained; v7 additionally saves available latent/pose/density/validity fields, completed cloud records and current cloud index; internal progress of a failed cloud is unavailable"
+            );
         }
         if matches!(g, FrozenGuide::ContactDistance(_)) {
             manifest["schema"] = json!("importance-latent-region-normalizer-v5");
@@ -907,6 +934,11 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
     let mut maximum_backmap_error = 0_f64;
     let mut raw_points = 0_u64;
     for draw in 0..options.samples {
+        let mut class_failure_context =
+            matches!(guide, Some(FrozenGuide::ClassLine(_))).then(|| {
+                json!({"schema":"class-region-attempt-context-v1", "phase":"proposal",
+                "draw":draw,"master_seed":options.seed,"completed_clouds":[],"row_saved":false})
+            });
         let outcome = normalizer_attempt(&options.out, &mut journal, draw, || -> Result<()> {
             let mut rng = stream(options.seed, draw, 0, "latent");
             let (latent, radial, selected_component, selected_ray_fallback) =
@@ -916,6 +948,12 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                     let (u, radial) = draw_uniform(&mut rng, radius, inner_radius, shell_fraction)?;
                     (u, radial, None, None)
                 };
+            if let Some(context) = &mut class_failure_context {
+                context["phase"] = json!("density");
+                context["latent"] = json!(latent);
+                context["latent_radius"] = json!(radial);
+                context["proposal_component"] = json!(selected_component);
+            }
             // Preserve legacy uniform boundary arithmetic. The guide branch has an
             // explicit target-shell indicator and never retries an exterior draw.
             let shell_valid = guide.is_none()
@@ -936,7 +974,16 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                 log_proposal_density.is_finite(),
                 "Unrepresentable latent proposal density"
             );
+            if let Some(context) = &mut class_failure_context {
+                context["phase"] = json!("pose_decode");
+                context["log_proposal_density"] = json!(log_proposal_density);
+            }
             let (pose, log_jacobian) = chart.decode(latent);
+            if let Some(context) = &mut class_failure_context {
+                context["phase"] = json!("physical_predicates");
+                context["pose"] = json!(pose);
+                context["log_physical_jacobian"] = json!(log_jacobian);
+            }
             pose.validate()?;
             let backmap = chart.encode(pose)?;
             let backmap_radius = backmap.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -972,6 +1019,14 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             hard_rejected += u64::from(capture_valid && !hard_valid);
             region_rejected += u64::from(hard_valid && !region_valid);
             shell_rejected += u64::from(!shell_valid);
+            if let Some(context) = &mut class_failure_context {
+                context["phase"] = json!("envelope_or_zero");
+                context["shell_valid"] = json!(shell_valid);
+                context["capture_valid"] = json!(capture_valid);
+                context["hard_valid"] = json!(hard_valid);
+                context["region_valid"] = json!(region_valid);
+                context["q"] = json!(q);
+            }
             let mut clouds = Vec::new();
             let mut log_weight = None;
             let mut log_hard_weight = None;
@@ -979,6 +1034,11 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                 let envelope = OverlapEnvelope::build(&env, pose, cfg.endpoint_gate)?;
                 let mut log_cloud_sum = f64::NEG_INFINITY;
                 for cloud in 0..options.cloud_replicates {
+                    if let Some(context) = &mut class_failure_context {
+                        context["phase"] = json!("cloud");
+                        context["current_cloud_index"] = json!(cloud);
+                        context["cloud_rng_role"] = json!("cloud");
+                    }
                     let w = overlap_weight::sample_with_envelope(
                         &mut stream(options.seed, draw, cloud, "cloud"),
                         &env,
@@ -988,9 +1048,19 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                         &envelope,
                     )
                     .with_context(|| format!("Poisson cloud {cloud} for draw {draw}"))?;
+                    if let Some(context) = &mut class_failure_context {
+                        context["completed_clouds"]
+                            .as_array_mut()
+                            .unwrap()
+                            .push(serde_json::to_value(&w)?);
+                        context["phase"] = json!("cloud_complete");
+                    }
                     raw_points += w.raw_points;
                     log_cloud_sum = log_add(log_cloud_sum, w.log_weight);
                     clouds.push(w);
+                }
+                if let Some(context) = &mut class_failure_context {
+                    context["phase"] = json!("importance_weight");
                 }
                 let h = if guide.is_some() {
                     log_jacobian - log_proposal_density
@@ -1053,10 +1123,17 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
                         .context("Missing complete hard-free density trace")?;
                 }
             }
+            if let Some(context) = &mut class_failure_context {
+                context["phase"] = json!("row_write");
+            }
             serde_json::to_writer(&mut writer, &row)?;
             writer.write_all(b"\n")?;
             // Preserve completed rows if a later attempt fails or is interrupted.
             writer.flush()?;
+            if let Some(context) = &mut class_failure_context {
+                context["phase"] = json!("progress_write");
+                context["row_saved"] = json!(true);
+            }
             if (draw + 1) % 100 == 0 || draw + 1 == options.samples {
                 writer.flush()?;
                 save(
@@ -1068,6 +1145,9 @@ fn run_inner(options: LatentRegionOptions, guide_path: Option<&Path>) -> Result<
             Ok(())
         });
         if let Err(error) = outcome {
+            if let Some(context) = &class_failure_context {
+                save_class_normalizer_failure(&options.out, draw, &error, context)?;
+            }
             writer.flush()?;
             writer.get_ref().sync_data()?;
             return Err(error);
@@ -1111,6 +1191,45 @@ mod q_window_tests {
 #[cfg(test)]
 mod normalizer_attempt_tests {
     use super::*;
+    #[test]
+    fn class_failure_retains_completed_clouds_and_marks_unknown_internal_progress() -> Result<()> {
+        let path =
+            std::env::temp_dir().join(format!("class-normalizer-failure-{}", std::process::id()));
+        fs::create_dir(&path)?;
+        let mut journal = File::create(path.join("attempts.jsonl"))?;
+        let mut context = json!({"phase":"proposal","draw":9,"completed_clouds":[]});
+        let mut calls = 0;
+        let result: Result<()> = normalizer_attempt(&path, &mut journal, 9, || {
+            calls += 1;
+            context = json!({"phase":"cloud","draw":9,"latent":[0.,0.,0.,0.,0.,0.],
+                "pose":Pose{position:[1.,0.,0.],orientation:[1.,0.,0.,0.]},
+                "log_proposal_density":-3.,"hard_valid":true,"shell_valid":true,
+                "current_cloud_index":1,"cloud_rng_role":"cloud",
+                "completed_clouds":[{"synthetic_completed_cloud":true,"raw_points":17}]});
+            anyhow::bail!("injected failure before second toy cloud completes")
+        });
+        let error = result.unwrap_err();
+        save_class_normalizer_failure(&path, 9, &error, &context)?;
+        let failure: Value = serde_json::from_slice(&fs::read(path.join("failure.json"))?)?;
+        assert_eq!(calls, 1);
+        assert_eq!(failure["draw"], 9);
+        assert_eq!(failure["attempt_context"], context);
+        assert_eq!(
+            failure["failed_cloud_internal_point_progress_available"],
+            false
+        );
+        assert_eq!(failure["retry_performed"], false);
+        assert_eq!(
+            fs::read_to_string(path.join("attempts.jsonl"))?
+                .lines()
+                .count(),
+            1
+        );
+        assert!(!path.join("summary.json").exists());
+        fs::remove_dir_all(path)?;
+        Ok(())
+    }
+
     #[test]
     fn failed_attempt_is_recorded_once_before_work_and_never_retried() -> Result<()> {
         let path =

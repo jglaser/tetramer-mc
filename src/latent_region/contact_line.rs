@@ -686,7 +686,7 @@ impl ContactLineGuide {
         volume: f64,
         chart: &Chart,
         outer: f64,
-        _full_trace: bool,
+        full_trace: bool,
     ) -> Result<(f64, Value)> {
         let base = self.base.log_density(u, inside, volume);
         if self.beta == 0. || self.base.alpha == 1. {
@@ -708,18 +708,24 @@ impl ContactLineGuide {
                         self.class_law(&geometry.hard_free, &geometry.channels[hi], mean, sigma)?;
                     let multiplier = law.multiplier(x[axis]);
                     mixture += channel.probability * multiplier;
-                    channels.push(json!({"channel":hi,"class_mass":law.class_mass,
+                    if full_trace {
+                        channels.push(json!({"channel":hi,"class_mass":law.class_mass,
                         "hard_free_mass":law.hard_free_mass,"effective_mass":law.effective_mass,
                         "fallback_target":law.target,"query_coordinate_allowed":law.intervals.is_none_or(|v|v.contains(x[axis])),
                         "multiplier":multiplier}));
+                    }
                 }
                 factors[ci] += mixture / self.axes.len() as f64;
-                components.push(
-                    json!({"component":ci,"conditional_mean":mean,"conditional_sigma":sigma,
+                if full_trace {
+                    components.push(
+                        json!({"component":ci,"conditional_mean":mean,"conditional_sigma":sigma,
                     "channels":channels,"channel_mixture_multiplier":mixture}),
-                );
+                    );
+                }
             }
-            geometry.detail["components"] = json!(components);
+            if full_trace {
+                geometry.detail["components"] = json!(components);
+            }
             axes.push(geometry.detail);
         }
         let mut result = if inside {
@@ -748,11 +754,15 @@ impl ContactLineGuide {
                 (1. - self.base.alpha).ln() + c.weight.ln() + log_g + correction.ln(),
             );
         }
-        Ok((
-            result,
-            json!({"raw_coordinates":x,"axes":axes,"component_mixture_multipliers":factors,
-            "baseline_log_density":base,"class_scope":"complete native; optional original latent orthants; no old-R5 restriction"}),
-        ))
+        let mut detail = json!({"raw_coordinates":x,"axes":axes,"component_mixture_multipliers":factors,
+            "baseline_log_density":base,"class_scope":"complete native; optional original latent orthants; no old-R5 restriction"});
+        if !full_trace {
+            // Every branch normalizer is reconstructible from the retained
+            // intervals and frozen conditional Gaussian parameters. Suppress
+            // only redundant per-component JSON, without changing arithmetic.
+            detail["trace_format"] = json!("class-line-compact-v1");
+        }
+        Ok((result, detail))
     }
 
     fn class_draw(

@@ -99,3 +99,53 @@ The principal limitation is unchanged: a translation-line proposal preserves fiv
 - The fixed protein diagnostic is bound by execution-plan SHA `7f1bfeb01f8c0d371a5e1f14fbc66371b68fb485452be5fe25f5a2ca72fc246e`, using the isolated audit executable SHA `f9afc90000004062b67e5cc872124cd8203e2acd6bb462df2eb4835b330474bc`. Its 1,024 fresh proposals and 40 saved queries completed; independent audits are running with one worker. All 4,004 compiled native atoms matched the physical shape exactly in the setup check. No physical Poisson weights were sampled.
 
 Artifacts: [Rust tests](../results/native-class-line-validation-20261003/class-validation-final.json), [Python tests](../results/native-class-line-validation-20261003/python-validation-final.json), [synthetic CLI audit](../results/native-class-line-synthetic-20261003/cli-validation-final.json), and [frozen protein execution plan](../results/native-class-line-proposal-preparation-20261003/execution-plan.json). The source-independent protein audit must finish before interpreting these proposal diagnostics. These checks do not open the physical-weight or assembly gates. The production assembly executable remains unchanged.
+
+## Compact physical estimator and analytic control
+
+The v7 normalizer now retains every class/axis interval, raw coordinates and the
+complete per-component multiplier, while omitting redundant component/channel
+records from production JSON. An independent reference reconstructs every branch
+mass and fallback from the saved intervals and frozen guide. The full diagnostic
+trace is unchanged. Compact/full q and random draws are bit-identical in tests;
+a synthetic 92-component trace shrank from 270,128 to 7,124 bytes. This reduces
+storage; it does not establish improved sampling. The isolated normalizer passed
+94 tests, with one deliberately ignored fixture emitter. Available pose, q/J,
+validity and completed-cloud fields are retained on a later attempt failure;
+internal progress of an unfinished cloud is explicitly unavailable.
+
+A frozen analytic sphere control used **16 independent populations of 2,048
+attempts**: H-only and class proposals, four streams each, at z=0 and z=0.3,
+core radius 1 and depletant radius 0.5. Four coincident member spheres represent
+exactly one union sphere. The six-dimensional R4 chart couples translation and
+orientation; the analytic reference integrates the normalized Haar cap rather
+than treating the two as an independent product. These are test parameters, not
+the protein decision conditions.
+
+| Test | H-only estimate ± population SE | Class estimate ± population SE | Analytic |
+|---|---:|---:|---:|
+| Hard-only mass | 2.43936 ± 0.01413 | 2.41252 ± 0.01611 | 2.42201 |
+| Depletion mass, z=0.3 | 2.83151 ± 0.02818 | 2.86610 ± 0.03051 | 2.83080 |
+
+All 32,768 attempted poses received independent geometry, complete-q, Jacobian,
+inverse-map and physical-estimator audits. The unconditional denominator retains
+5,464 hard-invalid and 2,154 exterior flags (these categories may overlap).
+There were 25,156 contributing poses and two cloud estimates per contributing
+pose. At z=0 the estimator legitimately skips Poisson point generation.
+Checks of counts, conditional weight moments, replica differences/products,
+proposal agreement and analytic masses passed the fixed five-SE reference
+criteria. These are validation diagnostics, not a proof of convergence.
+
+The fixed physical execution and all independent audits completed without a
+retry. Its frozen toy controller drained timeouts but lacked general signal/
+exception draining; that limitation is preserved with the execution record.
+The working controller now drains exceptions and signals as well, including
+the process-launch ownership window; eight focused controller tests passed.
+Those changes did not alter or repeat the completed allocation. The normalizer
+and auditors themselves retain their attempted-row journals.
+
+Artifacts: [Rust validation](../results/native-class-line-physical-validation-20261003/rust-validation.json),
+[frozen sphere allocation](../results/native-class-line-physical-sphere-final-20261003/allocation.json),
+[complete analytic result](../results/native-class-line-physical-sphere-final-20261003/analytic-validation.json).
+The [next-campaign review](native-class-physical-campaign-review.md) describes
+fresh protein controls and the unresolved coverage checks. No new physical
+protein allocation has been launched by this sphere validation.

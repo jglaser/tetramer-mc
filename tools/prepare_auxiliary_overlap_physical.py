@@ -48,7 +48,13 @@ def copy(source, target):
 
 
 def validate_correction(row):
-    m=row['m'];g=row['outcome']['guidance'];candidate=row['outcome']['candidate']
+    m=row['m'];g=row['outcome'].get('guidance');candidate=row['outcome']['candidate']
+    if m == 0 and row['method'] == 'unguided':
+        if g is not None:raise ValueError('Unguided proposal has auxiliary trace')
+        if row['standalone_proposal_cpu_seconds']!=row['proposal_cpu_seconds']:raise ValueError('Unguided standalone CPU differs')
+        expected=None if candidate is None else candidate['diagnostics']['log_reverse_forward']
+        if row['complete_log_correction']!=expected:raise ValueError('Unguided complete correction differs')
+        return
     if m not in (1,4) or row['method']!='m'+str(m) or g['m']!=m:
         raise ValueError('Changed guide multiplicity')
     if candidate is None:
@@ -86,7 +92,7 @@ def cache_rows(lines):
             raise ValueError('Passive candidate/status mismatch')
         if candidate is None and status not in ('cap_exhausted', 'source_outside_domain', 'source_outside_contact'):
             raise ValueError('Unclassified passive null')
-        if row['method'] not in ('m1', 'm4'):
+        if row['method'] not in ('m1', 'm4', 'unguided'):
             raise ValueError('Unexpected proposal method')
         for name in ('proposal_cpu_seconds', 'contact_diagnostic_cpu_seconds', 'cloud_construction_cpu_seconds', 'guidance_setup_cpu_seconds', 'standalone_proposal_cpu_seconds'):
             if not math.isfinite(row[name]) or row[name] < 0:
@@ -96,7 +102,7 @@ def cache_rows(lines):
             **{k: row[k] for k in ('atlas', 'atlas_index', 'case', 'case_index', 'attempt', 'method',
                                  'old', 'anchor_pose', 'proposal_cpu_seconds', 'contact_diagnostic_cpu_seconds', 'raw_edge_draws',
                                  'cloud_construction_cpu_seconds','guidance_setup_cpu_seconds','standalone_proposal_cpu_seconds','m','complete_log_correction')},
-            guidance=row['outcome']['guidance'],
+            guidance=row['outcome'].get('guidance'),
             proposal_status=status, candidate=candidate))
     return cached
 
@@ -131,7 +137,7 @@ def prepare(base, passive_base, executable, passive_review, audit_files, test_re
     assert review['output_hashes']['analysis.json'] == sha(audit_path), 'Root review binds a different analysis'
     assert audit_files and all(Path(p).is_file() for p in audit_files), 'Decision audit source closure required before preparation'
     tests=read(test_receipt)
-    assert tests['complete'] and tests['passed'] and tests['rust_example_tests']==6 and tests['preparer_tests']==3 and tests['auditor_tests']>0, 'Incomplete test receipt'
+    assert tests['complete'] and tests['passed'] and tests['rust_example_tests']>=6 and tests['preparer_tests']>=3 and tests['auditor_tests']>0, 'Incomplete test receipt'
     assert tests['executable_sha256']==sha(executable), 'Test receipt binary differs'
     assert all(sha(path)==digest for path,digest in tests['source_sha256'].items()), 'Tested source changed'
     run = passive_base / 'execution'
@@ -145,9 +151,15 @@ def prepare(base, passive_base, executable, passive_review, audit_files, test_re
         assert sha(run / name) == passive_binding[key], 'Changed passive binding: ' + name
     assert sha(run / 'attempts.jsonl') == terminal['attempts_sha256']
     passive_config = read(run / 'config.json')
+    width_mode = passive_config['schema']=='fft-width-screen-v1'
+    assert width_mode or passive_config['schema']=='auxiliary-overlap-screen-v1', 'Unknown passive experiment'
     assert passive_config['density_law'] == 'map-factor-full-mixture-v1'
     assert [passive_config[k] for k in ('root_cap', 'internal_cap', 'factorized_joint_cap', 'attempts_per_context','cloud_raw_count')] == [32, 32, 1, 32,16384]
-    assert passive_config['scientific_allocation']['sha256']=='d768b70d07e5837218217d512a3266bb75b221916fb3ee74c7312aba15126b1f'
+    if not width_mode:
+        assert passive_config['scientific_allocation']['sha256']=='d768b70d07e5837218217d512a3266bb75b221916fb3ee74c7312aba15126b1f'
+    else:
+        assert [a['tau'] for a in passive_config['scaled_atlases']]==[.125,.25,.5]
+        assert passive_config['master_seed']==6100300401
     assert passive_config['factorized_order'] == 'root_first'
     reference_record = passive_config['reference_config']
     assert reference_record['sha256'] == REFERENCE_SHA == sha(reference_record['path'])
@@ -156,6 +168,7 @@ def prepare(base, passive_base, executable, passive_review, audit_files, test_re
     assert len(reference['cases']) == 8 and len(reference['atlases']) == 3
     source_inputs = [reference[k] for k in ('panel', 'shape', 'source_config', 'source_frame', 'source_freeze_manifest')]
     source_inputs += [atlas['model'] for atlas in reference['atlases']]
+    if width_mode:source_inputs += [a['model'] for a in passive_config['scaled_atlases']]
     assert all(sha(r['path']) == r['sha256'] for r in source_inputs)
     passive_bundle = read(run / 'source-bundle.json')
     for name in PROPOSAL_FILES:
@@ -172,11 +185,13 @@ def prepare(base, passive_base, executable, passive_review, audit_files, test_re
     rows = cache_rows((run / 'attempts.jsonl').read_text().splitlines())
     assert len(rows) == len(audit['rows']) == 1536
     keys = {(r['atlas_index'], r['case_index'], r['attempt'], r['method']) for r in rows}
-    assert keys == {(a, c, t, m) for a in range(3) for c in range(8) for t in range(32) for m in ('m1', 'm4')}
+    methods=['unguided','m4'] if width_mode else ['m1','m4']
+    assert keys == {(a, c, t, m) for a in range(3) for c in range(8) for t in range(32) for m in methods}
     candidate_count = sum(r['candidate'] is not None for r in rows)
     assert candidate_count == audit['summary']['candidate_count'] == terminal['summary']['result']['candidates']
-    baseline_lines,baseline_sources=baseline_rows()
-    assert read(baseline_sources['execution/source-state.json']['path'])==read(reference['source_config']['path'])['initial_poses'], 'Baseline reset state differs'
+    baseline_lines,baseline_sources=([],{}) if width_mode else baseline_rows()
+    if not width_mode:
+        assert read(baseline_sources['execution/source-state.json']['path'])==read(reference['source_config']['path'])['initial_poses'], 'Baseline reset state differs'
     base.mkdir()
     common = base / 'common'
     common.mkdir()
@@ -205,17 +220,19 @@ def prepare(base, passive_base, executable, passive_review, audit_files, test_re
     with ledger.open('x') as out:
         for row in rows:
             out.write(json.dumps(row, allow_nan=False, separators=(',', ':')) + '\n')
-    baseline_cache=common/'baseline-physical.jsonl'
-    with baseline_cache.open('xb') as out:out.writelines(baseline_lines)
+    baseline_cache=None
+    if not width_mode:
+        baseline_cache=common/'baseline-physical.jsonl'
+        with baseline_cache.open('xb') as out:out.writelines(baseline_lines)
     limits = dict(raw_per_leg=20_000_000, raw_per_outer=40_000_000, raw_campaign=2_000_000_000,
                   retained_per_leg=20_000_000, retained_per_outer=40_000_000, retained_campaign=2_000_000_000,
                   cpu_seconds=1200.)
-    protocol = dict(schema='auxiliary-overlap-physical-reset-protocol-v1', prepared_utc=datetime.now(timezone.utc).isoformat(),
+    protocol = dict(schema='fft-width-physical-reset-protocol-v1' if width_mode else 'auxiliary-overlap-physical-reset-protocol-v1', prepared_utc=datetime.now(timezone.utc).isoformat(),
         execution_authorized=False, allocation=dict(total_outer=1536, candidates=candidate_count,
             failed_proposals=1536-candidate_count, atlases=3, contexts=8, attempts_per_context_and_method=32,
-            methods=['m1', 'm4'], selection='Every saved outer row exactly once in immutable ledger order', extension=False),
-        master_seed=6100300301, candidate_ledger=record(ledger), passive=passive_files,
-        baseline=baseline_sources,baseline_cache=record(baseline_cache),reused_baseline_attempts=768,new_baseline_baths=0,
+            methods=methods, selection='Every saved outer row exactly once in immutable ledger order', extension=False),
+        master_seed=6100300501 if width_mode else 6100300301, candidate_ledger=record(ledger), passive=passive_files,
+        baseline=baseline_sources,baseline_cache=record(baseline_cache) if baseline_cache else None,reused_baseline_attempts=0 if width_mode else 768,new_baseline_baths=0,
         audit_files=audit_records,validation_tests=archived_tests,
         reference_config=reference_record, source_inputs=source_inputs, archived_source_inputs=archive_inputs,
         density='Cached independently audited complete fullF product correction PLUS m[log1p(Kold)-log1p(Knew)] exactly once; checked passive accessor value, both terms retained',
@@ -234,10 +251,12 @@ def prepare(base, passive_base, executable, passive_review, audit_files, test_re
             'A fatal budget/arithmetic/frame/input error stops the fixed allocation with partial ledger; no extension or replacement samples.',
             'Finite budget failure is a validation failure, not a complete physical rejection sample.',
             'The local bounded wrapper is validated against unchanged SingletonPath on small controls; full floating-point measure/RNG correctness remains outside that test.'])
+    if width_mode:
+        protocol['timing']='Standalone proposal proxy charges cloud construction and guidance setup only to m4; unguided charges proposal call only. Both include complete-F scoring inside successful proposal calls. Repeated source-density and contact diagnostics are excluded from this proxy. Physical whole-process CPU plus actual passive whole-process CPU is the total diagnostic execution cost before terminal serialization; independent audits are reported separately. Historical tau1 timing is descriptive only.'
     write(base / 'protocol.json', protocol)
-    config = dict(schema='auxiliary-overlap-physical-reset-v1', protocol=record(base / 'protocol.json'),
+    config = dict(schema='fft-width-physical-reset-v1' if width_mode else 'auxiliary-overlap-physical-reset-v1', protocol=record(base / 'protocol.json'),
         reference_config=reference_record, passive=passive_files, candidate_ledger=record(ledger),
-        baseline=baseline_sources,baseline_cache=record(baseline_cache),
+        baseline=baseline_sources,baseline_cache=record(baseline_cache) if baseline_cache else None,
         total_outer=1536,total_candidates=candidate_count,master_seed=protocol['master_seed'],
         depletant_radius=1.4,activity=.0275,**{'lambda':1.76},envelope=protocol['envelope'],limits=limits,
         compiled_source_sha256=hashes,output=str((base / 'execution').resolve()))

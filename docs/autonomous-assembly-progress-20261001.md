@@ -76,9 +76,18 @@ demonstrated useful docking, reorganization or contact sampling efficiency.
 The saved-count decomposition isolates a large internal-F penalty even when
 internal-only bath loss is nearly removed. The [center diagnosis](dimer-center-overlap.md)
 then distinguishes poor memory-atlas center coverage from infeasible draws
-around good FFT centers. A controlled FFT covariance-width test is the next
-candidate; changing the width may also worsen the full density ratio, so
-geometry alone cannot decide whether it helps.
+around good FFT centers. The [controlled covariance-width comparison](fft-width-probe.md)
+is now complete: 1,536 fresh outers, 789 candidates and eight physical accepts.
+One accepted move gains an external exclusion contact and switches its internal
+native motif 7→6 (both C4); the new external contact is not native. All accepted
+endpoints retain the source's 157 registered edges and largest certified native
+component of 20. Seven accepts have only an internal contact at both endpoints;
+none comes from embedded contexts. Guided width τ=0.25 produced four accepts
+per 256 attempts and is a candidate for held-out testing, not an established
+optimum or mixing speedup. Narrowest τ=0.125 also loses learned source coverage
+in an embedded pair. All 1,241,235 proposal audit checks and the complete
+physical audit pass. Actual diagnostic execution cost was 160.978 CPU seconds,
+with audits separate. Native growth and finite-system stability remain unresolved.
 Ephemeral auxiliaries permit composition with existing local/GCA/center-shift
 kernels; persistent memory would need additional joint-target handling.
 
@@ -102,7 +111,7 @@ arbitrarily small errors. All-row generation, density, geometry and MH audits
 passed. The prepared-factor scoring correction is separate: the toy's identity
 factors already agreed, so that correction does not explain the earlier flag.
 
-As of 2026-10-03 01:01 UTC, the two saved-data SMC audits and their guarded
+As of 2026-10-03 01:38 UTC, the two saved-data SMC audits and their guarded
 analysis watcher remain live. Five user growth jobs remain live; the
 native-informed `cluster-oligomer-seed8-free256-z004` job completed its planned
 100,000 sweeps at 20:58 UTC. That completion alone supplies no new classified

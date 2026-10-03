@@ -73,6 +73,43 @@ def null_fixture():
 
 
 class GuidedDecisionAudit(unittest.TestCase):
+    def test_width_allocation_seed_and_no_baseline_contract(self):
+        p=dict(schema='fft-width-physical-reset-v1',master_seed=6100300501,total_outer=1536,total_candidates=10,
+               activity=.0275,depletant_radius=1.4,**{'lambda':1.76},limits=audit.LIMITS,
+               envelope=dict(max_cells=255,max_depth=8,min_width=0.),reference_config=dict(sha256=audit.REFERENCE_SHA),
+               candidate_ledger={},passive={},baseline={},baseline_cache=None)
+        q={k:copy.deepcopy(p[k]) for k in ['master_seed','limits','envelope','candidate_ledger','passive','baseline','baseline_cache']}
+        q.update(schema='fft-width-physical-reset-protocol-v1',allocation=dict(total_outer=1536,candidates=10,failed_proposals=1526,
+                 atlases=3,contexts=8,attempts_per_context_and_method=32,methods=['unguided','m4'],extension=False),
+                 reused_baseline_attempts=0,new_baseline_baths=0,no_new_proposal_draws=True,native_classifier=False,outcome_filtering=False)
+        audit.validate_contract(p,q)
+        for mutate in ['seed','methods','baseline','extension','density']:
+            a,b=copy.deepcopy(p),copy.deepcopy(q)
+            if mutate=='seed':a['master_seed']=b['master_seed']=6100300301
+            elif mutate=='methods':b['allocation']['methods']=['m1','m4']
+            elif mutate=='baseline':a['baseline_cache']=b['baseline_cache']={}
+            elif mutate=='extension':b['allocation']['extension']=True
+            else:a['activity']=.035
+            with self.subTest(mutate=mutate),self.assertRaises(ValueError):audit.validate_contract(a,b)
+        seeds={audit.seed(dict(master_seed=6100300501,candidate_ledger=dict(sha256='0'*64)),dict(atlas_index=a,case_index=c,attempt=j,method=m),role)
+               for a in range(3) for c in range(8) for j in range(32) for m in ['unguided','m4'] for role in ['gate','mh']}
+        self.assertEqual(len(seeds),3072)
+
+    def test_unguided_width_physical_decision_and_null(self):
+        args=fixture();r,c,state,_,plan=args
+        plan['master_seed']=6100300501;c.update(method='unguided',m=0,guidance=None,complete_log_correction=-5.,standalone_proposal_cpu_seconds=.2)
+        r.update(gate_seed=audit.seed(plan,c,'gate'),mh_seed=audit.seed(plan,c,'mh'),auxiliary_correction=0.,q_correction=-5.)
+        r['log_ratio']=-5.+r['gate']['aggregate']['log_weight']
+        audit.audit_decision(*args)
+        bad=copy.deepcopy(args);bad[1]['guidance']={}
+        with self.assertRaisesRegex(ValueError,'auxiliary'):audit.audit_decision(*bad)
+        bad=copy.deepcopy(args);bad[1]['complete_log_correction']=-4.
+        with self.assertRaisesRegex(ValueError,'complete'):audit.audit_decision(*bad)
+        c.update(candidate=None,proposal_status='cap_exhausted',complete_log_correction=None)
+        r.update(status='proposal_null',gate=None,log_ratio=None,proposed_selected=None,full_f_correction=None,auxiliary_correction=None,q_correction=None)
+        rejected(r,c,state);del r['gate_cpu_seconds'],r['gate_rng_after_fingerprint']
+        self.assertEqual(audit.audit_decision(*args)['raw_points'],0)
+
     def test_both_m_values_accept_reject_and_path_orders(self):
         for m in (1, 4):
             args = fixture(m)

@@ -1,11 +1,11 @@
 //! Prepared-only reset-state physical replay of an immutable passive ledger.
 //! No proposal draws, adaptation, intermediate hard filtering or trajectory.
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use clap::Parser;
-use rand::{distr::Open01, rngs::StdRng, RngExt, SeedableRng};
+use rand::{RngExt, SeedableRng, distr::Open01, rngs::StdRng};
 use rand_distr::{Distribution, Poisson};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     fs::{self, OpenOptions},
@@ -20,7 +20,7 @@ use tetramer_mc::{
     rigid_subset::RigidSubset,
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
     singleton_path::{SingletonOrder, SingletonPath, SingletonPathResult},
-    spherical::{validate_state, Container},
+    spherical::{Container, validate_state},
 };
 
 const BUNDLE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
@@ -72,7 +72,7 @@ struct Plan {
     passive: BTreeMap<String, BoundFile>,
     candidate_ledger: BoundFile,
     baseline: BTreeMap<String, BoundFile>,
-    baseline_cache: BoundFile,
+    baseline_cache: Option<BoundFile>,
     total_outer: usize,
     total_candidates: usize,
     master_seed: u64,
@@ -394,7 +394,9 @@ fn log_json(value: f64) -> Value {
 fn checked_correction(cached: &CachedRow) -> Result<(f64, f64, f64)> {
     ensure!(!cached.candidate.is_null(), "no candidate correction");
     ensure!(
-        (cached.method == "m1" && cached.m == 1) || (cached.method == "m4" && cached.m == 4),
+        (cached.method == "m1" && cached.m == 1)
+            || (cached.method == "m4" && cached.m == 4)
+            || (cached.method == "unguided" && cached.m == 0),
         "method/m differs"
     );
     let d = &cached.candidate["diagnostics"];
@@ -409,6 +411,14 @@ fn checked_correction(cached: &CachedRow) -> Result<(f64, f64, f64)> {
         "cached full-F correction differs"
     );
     let g = &cached.guidance;
+    if cached.m == 0 {
+        ensure!(g.is_null(), "unguided proposal has an auxiliary trace");
+        ensure!(
+            full == log_value(&cached.complete_log_correction)?,
+            "unguided correction differs"
+        );
+        return Ok((full, 0., full));
+    }
     let point_count = g["point_count"].as_u64().context("point count")?;
     let old = g["old_count"].as_u64().context("old count")?;
     let new = g["new_count"].as_u64().context("new count")?;
@@ -488,7 +498,13 @@ fn validate_baseline(plan: &Plan) -> Result<()> {
         }
     }
     ensure!(
-        count == 768 && selected == plan.baseline_cache.read()?,
+        count == 768
+            && selected
+                == plan
+                    .baseline_cache
+                    .as_ref()
+                    .context("missing baseline cache")?
+                    .read()?,
         "baseline cache not exact 768-row subset"
     );
     Ok(())
@@ -503,10 +519,12 @@ fn line(out: &mut impl Write, value: &Value) -> Result<()> {
 
 fn execute(plan: &Plan, out: &mut impl Write) -> Result<Value> {
     let campaign_started = cpu_seconds();
+    let width_mode = plan.schema == "fft-width-physical-reset-v1";
     ensure!(
-        plan.schema == "auxiliary-overlap-physical-reset-v1"
-            && plan.total_outer == 1536
-            && plan.master_seed == 6100300301,
+        plan.total_outer == 1536
+            && ((plan.schema == "auxiliary-overlap-physical-reset-v1"
+                && plan.master_seed == 6100300301)
+                || (width_mode && plan.master_seed == 6100300501)),
         "unknown plan/allocation"
     );
     ensure!(
@@ -547,7 +565,14 @@ fn execute(plan: &Plan, out: &mut impl Write) -> Result<Value> {
         hashes == plan.compiled_source_sha256,
         "compiled source mismatch"
     );
-    validate_baseline(plan)?;
+    if width_mode {
+        ensure!(
+            plan.baseline.is_empty() && plan.baseline_cache.is_none(),
+            "width replay must not redraw baseline"
+        );
+    } else {
+        validate_baseline(plan)?;
+    }
     let mut passive = BTreeMap::new();
     for (name, file) in &plan.passive {
         passive.insert(name.clone(), file.read()?);
@@ -583,6 +608,15 @@ fn execute(plan: &Plan, out: &mut impl Write) -> Result<Value> {
     ensure!(
         passive_config["reference_config"]["sha256"] == plan.reference_config.sha256,
         "physical source/reference differs from spectator-conditioned passive proposal"
+    );
+    ensure!(
+        passive_config["schema"]
+            == if width_mode {
+                "fft-width-screen-v1"
+            } else {
+                "auxiliary-overlap-screen-v1"
+            },
+        "wrong passive experiment"
     );
     let passive_binding: Value = serde_json::from_slice(
         passive
@@ -646,14 +680,16 @@ fn execute(plan: &Plan, out: &mut impl Write) -> Result<Value> {
     );
     let state: Vec<Pose> = serde_json::from_value(source["initial_poses"].clone())?;
     ensure!(state.len() == 264, "wrong source state");
-    ensure!(
-        plan.baseline
-            .get("execution/source-state.json")
-            .context("missing baseline state")?
-            .json()?
-            == serde_json::to_value(&state)?,
-        "baseline and guided reset states differ"
-    );
+    if !width_mode {
+        ensure!(
+            plan.baseline
+                .get("execution/source-state.json")
+                .context("missing baseline state")?
+                .json()?
+                == serde_json::to_value(&state)?,
+            "baseline and guided reset states differ"
+        );
+    }
     save(&plan.output.join("source-state.json"), &state)?;
     let tree = SphereTree::new(serde_json::from_value::<Shape>(shape.clone())?)?;
     let mut inflated: Shape = serde_json::from_value(shape)?;
@@ -703,6 +739,16 @@ fn execute(plan: &Plan, out: &mut impl Write) -> Result<Value> {
             );
             let original: Value = serde_json::from_str(original_rows[index])?;
             ensure!(
+                if width_mode {
+                    (cached.method == "unguided" && cached.m == 0)
+                        || (cached.method == "m4" && cached.m == 4)
+                } else {
+                    (cached.method == "m1" && cached.m == 1)
+                        || (cached.method == "m4" && cached.m == 4)
+                },
+                "unallocated arm"
+            );
+            ensure!(
                 original["status"] == "completed"
                     && original["outcome"]["candidate"] == cached.candidate
                     && original["outcome"]["status"] == cached.proposal_status
@@ -738,9 +784,13 @@ fn execute(plan: &Plan, out: &mut impl Write) -> Result<Value> {
             ensure!(
                 cached.standalone_proposal_cpu_seconds.is_finite()
                     && cached.standalone_proposal_cpu_seconds
-                        == cached.cloud_construction_cpu_seconds
-                            + cached.guidance_setup_cpu_seconds
-                            + cached.proposal_cpu_seconds,
+                        == if cached.m == 0 {
+                            cached.proposal_cpu_seconds
+                        } else {
+                            cached.cloud_construction_cpu_seconds
+                                + cached.guidance_setup_cpu_seconds
+                                + cached.proposal_cpu_seconds
+                        },
                 "invalid standalone saved CPU"
             );
             reused_cpu += cached.standalone_proposal_cpu_seconds;
@@ -1160,6 +1210,30 @@ mod tests {
             }
             assert!(checked_correction(&value).is_err(), "{change}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn unguided_width_control_uses_full_density_without_auxiliary() -> Result<()> {
+        let mut row = corrected_row();
+        row.method = "unguided".into();
+        row.m = 0;
+        row.guidance = Value::Null;
+        row.complete_log_correction = json!(-3.);
+        assert_eq!(checked_correction(&row)?, (-3., 0., -3.));
+        row.complete_log_correction = json!(-2.);
+        assert!(checked_correction(&row).is_err());
+        row.complete_log_correction = json!(-3.);
+        row.guidance = json!({"m":0});
+        assert!(checked_correction(&row).is_err());
+        row.guidance = Value::Null;
+        row.candidate["diagnostics"]["full_old_log_density"] = json!("-inf");
+        row.candidate["diagnostics"]["log_reverse_forward"] = json!("-inf");
+        row.complete_log_correction = json!("-inf");
+        assert_eq!(
+            checked_correction(&row)?,
+            (f64::NEG_INFINITY, 0., f64::NEG_INFINITY)
+        );
         Ok(())
     }
 

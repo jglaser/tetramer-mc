@@ -15,6 +15,18 @@ def row(candidate=False):
 
 
 class CacheTests(unittest.TestCase):
+    def test_unguided_width_rows_preserve_nulls_and_full_density(self):
+        for candidate in [False,True]:
+            r=row(candidate);r.update(method='unguided',m=0,complete_log_correction=-3. if candidate else None,standalone_proposal_cpu_seconds=.1)
+            r['outcome'].pop('guidance')
+            cached=cache_rows([json.dumps(r)])[0]
+            self.assertIsNone(cached['guidance'])
+            self.assertEqual(cached['complete_log_correction'],r['complete_log_correction'])
+            bad=copy.deepcopy(r);bad['complete_log_correction']=0.
+            with self.assertRaises(ValueError):cache_rows([json.dumps(bad)])
+            bad=copy.deepcopy(r);bad['outcome']['guidance']={}
+            with self.assertRaises(ValueError):cache_rows([json.dumps(bad)])
+
     def test_nulls_retained_and_separate_factors_preserved(self):
         raw=[row(),row(True),row()];cached=cache_rows([json.dumps(r) for r in raw])
         self.assertEqual(len(cached),3);self.assertEqual([r['index'] for r in cached],[0,1,2])

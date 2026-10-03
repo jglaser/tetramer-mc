@@ -89,6 +89,18 @@ def audit_gate(gate, plan):
 def auxiliary_terms(cached):
     """Check the source conditional, support and the two separate corrections."""
     m = cached['m']
+    if type(m) is int and m == 0 and cached['method']=='unguided':
+        require(cached['guidance'] is None, 'Unguided arm has auxiliary trace')
+        c=cached['candidate']
+        if c is None:
+            require(cached['complete_log_correction'] is None, 'Unguided null has correction')
+            return None
+        d=c['diagnostics'];full=log_value(d['log_reverse_forward'])
+        old_f,new_f=log_value(d['full_old_log_density']),log_value(d['full_new_log_density'])
+        require(math.isfinite(new_f) and full==old_f-new_f, 'Wrong unguided full density')
+        require(d['selection_log_reverse_forward']==d['log_tree_coordinate_jacobian']==0, 'Unguided selection/Jacobian')
+        require(log_value(cached['complete_log_correction'])==full, 'Wrong unguided complete correction')
+        return dict(full=full,auxiliary=0.,complete=full)
     require(type(m) is int and m in (1, 4) and cached['method'] == f'm{m}', 'Changed guided arm')
     d = cached['guidance']
     require(d['m'] == m, 'Guidance multiplicity differs')
@@ -144,7 +156,7 @@ def audit_decision(row, cached, state, source_sha, plan):
     for key in ('proposal_cpu_seconds', 'cloud_construction_cpu_seconds', 'guidance_setup_cpu_seconds',
                 'standalone_proposal_cpu_seconds'):
         nonnegative(cached[key], 'Saved '+key)
-    close(cached['standalone_proposal_cpu_seconds'], sum(cached[key] for key in
+    close(cached['standalone_proposal_cpu_seconds'], cached['proposal_cpu_seconds'] if cached['m']==0 else sum(cached[key] for key in
           ('proposal_cpu_seconds', 'cloud_construction_cpu_seconds', 'guidance_setup_cpu_seconds')),
           'Incomplete standalone proposal CPU')
     nonnegative(cached['contact_diagnostic_cpu_seconds'], 'Saved contact CPU')
@@ -244,9 +256,10 @@ def summarize(rows):
 
 
 def validate_contract(plan, protocol):
-    require(plan['schema'] == 'auxiliary-overlap-physical-reset-v1' and
-            protocol['schema'] == 'auxiliary-overlap-physical-reset-protocol-v1', 'Unknown guided physical protocol')
-    require(plan['master_seed'] == protocol['master_seed'] == 6100300301, 'Changed bath seed domain')
+    width=plan['schema']=='fft-width-physical-reset-v1'
+    require((width and protocol['schema']=='fft-width-physical-reset-protocol-v1') or
+            (plan['schema']=='auxiliary-overlap-physical-reset-v1' and protocol['schema']=='auxiliary-overlap-physical-reset-protocol-v1'), 'Unknown guided physical protocol')
+    require(plan['master_seed'] == protocol['master_seed'] == (6100300501 if width else 6100300301), 'Changed bath seed domain')
     require(plan['total_outer'] == 1536 and type(plan['total_candidates']) is int and
             0 <= plan['total_candidates'] <= 1536, 'Changed allocation')
     require(plan['activity'] == .0275 and plan['depletant_radius'] == 1.4 and
@@ -262,11 +275,12 @@ def validate_contract(plan, protocol):
             allocation['failed_proposals'] == 1536-plan['total_candidates'] and
             allocation['atlases'] == 3 and allocation['contexts'] == 8 and
             allocation['attempts_per_context_and_method'] == 32 and
-            allocation['methods'] == ['m1', 'm4'] and allocation['extension'] is False,
+            allocation['methods'] == (['unguided','m4'] if width else ['m1', 'm4']) and allocation['extension'] is False,
             'Changed fixed physical allocation')
-    require(protocol['reused_baseline_attempts'] == 768 and protocol['new_baseline_baths'] == 0 and
+    require(protocol['reused_baseline_attempts'] == (0 if width else 768) and protocol['new_baseline_baths'] == 0 and
             protocol['no_new_proposal_draws'] is True and protocol['native_classifier'] is False and
             protocol['outcome_filtering'] is False, 'Changed reuse/reset scope')
+    if width:require(plan['baseline']=={} and plan['baseline_cache'] is None, 'Width replay included baseline redraw')
 
 
 def baseline_subset(raw_bytes):
@@ -347,6 +361,7 @@ def audit(run):
              'source-state.json', 'attempts.jsonl', 'terminal.json')
     hashes = {name: sha(run / name) for name in names}
     plan, binding, terminal = (read(run / name) for name in ('config.json', 'binding.json', 'terminal.json'))
+    width=plan['schema']=='fft-width-physical-reset-v1'
     require(binding['schema'] == 'auxiliary-overlap-physical-binding-v1', 'Unknown physical binding')
     for filename, key in [('config.json', 'config_sha256'), ('protocol.json', 'protocol_sha256'),
                           ('source-bundle.json', 'compiled_source_bundle_sha256'), ('example.rs', 'example_source_sha256')]:
@@ -382,7 +397,7 @@ def audit(run):
         require(compiled[name] == passive_compiled[name]['sha256'], 'Changed proposal/geometry implementation: ' + name)
         require(compiled[name] == protocol['proposal_source_sha256'][name], 'Proposal source absent from protocol: '+name)
     prior_audit = read(passive['analysis.json'])
-    require(prior_audit['schema'] == 'auxiliary-overlap-independent-analysis-v1' and
+    require(prior_audit['schema'] == ('fft-width-independent-analysis-v1' if width else 'auxiliary-overlap-independent-analysis-v1') and
             prior_audit['complete'] is True and prior_audit['passed'] is True and not prior_audit['failures'],
             'Passive audit failed')
     require(prior_audit['summary']['outer_attempts'] == 1536 and
@@ -399,10 +414,15 @@ def audit(run):
         checked(reference[name])
     for atlas in reference['atlases']:
         checked(atlas['model'])
+    if width:
+        pc=read(passive['config.json'])
+        require(pc['schema']=='fft-width-screen-v1' and pc['master_seed']==6100300401 and
+                [a['tau'] for a in pc['scaled_atlases']]==[.125,.25,.5], 'Wrong width proposal family')
+        for atlas in pc['scaled_atlases']:checked(atlas['model'])
     require(reference['depletant_radius'] == plan['depletant_radius'] == 1.4 and reference['activity'] == plan['activity'] == .0275,
             'Changed diagnostic physical conditions')
     require(plan['lambda'] == 1.76 and len(state) == 264, 'Wrong model/intensity')
-    baseline_results = audit_baseline(plan, checked, state, read(passive['protocol.json'])['baseline_cache'])
+    baseline_results = [] if width else audit_baseline(plan, checked, state, read(passive['protocol.json'])['baseline_cache'])
     ledger = checked(plan['candidate_ledger'])
     cache = [json.loads(line) for line in ledger.read_text().splitlines()]
     original_lines = passive['attempts.jsonl'].read_text().splitlines()
@@ -417,7 +437,7 @@ def audit(run):
         expected = {k: original[k] for k in CACHED_FIELDS}
         expected.update(index=i, passive_row_sha256=hashlib.sha256(line.encode()).hexdigest(),
                         proposal_status=original['outcome']['status'], candidate=original['outcome']['candidate'],
-                        guidance=original['outcome']['guidance'])
+                        guidance=original['outcome'].get('guidance'))
         require(original['status'] == 'completed' and cached == expected, 'Cached row differs from passive ledger')
         require(all(passive_row[k] == cached[k] for k in ('atlas', 'method', 'attempt')) and passive_row['case'] == cached['case']['name'], 'Wrong contact audit row')
         key = (cached['atlas_index'], cached['case_index'], cached['attempt'], cached['method'])
@@ -444,7 +464,7 @@ def audit(run):
             log_ratio=row['log_ratio'],
             saved_proposal_cpu_seconds=cached['standalone_proposal_cpu_seconds'], gate_cpu_seconds=row.get('gate_cpu_seconds', 0.),
             physical_replay_cpu_seconds=row['physical_replay_cpu_seconds']))
-    require(keys == {(a,c,t,m) for a in range(3) for c in range(8) for t in range(32) for m in ('m1','m4')}, 'Changed frozen allocation')
+    require(keys == {(a,c,t,m) for a in range(3) for c in range(8) for t in range(32) for m in (['unguided','m4'] if width else ['m1','m4'])}, 'Changed frozen allocation')
     summary = summarize(results)
     actual = terminal['summary']['result']
     for key in ('outer_attempts','candidates','accepted','raw_points','retained_points'):
@@ -458,6 +478,8 @@ def audit(run):
     require(whole+1e-8 >= summary['physical_replay_cpu_seconds'], 'Incomplete whole-process clock')
     close(terminal['summary']['whole_process_plus_saved_proposal_cpu_seconds'], whole+summary['saved_proposal_cpu_seconds'], 'Wrong complete CPU')
     summary['whole_process_plus_saved_proposal_cpu_seconds'] = whole+summary['saved_proposal_cpu_seconds']
+    summary['passive_whole_process_cpu_seconds']=nonnegative(read(passive['terminal.json'])['cpu_seconds'],'Passive whole CPU')
+    summary['diagnostic_execution_cpu_seconds']=whole+summary['passive_whole_process_cpu_seconds']
     groups = defaultdict(list)
     contexts = defaultdict(list)
     for row in baseline_results + results:
@@ -468,10 +490,11 @@ def audit(run):
     require(sha(frozen_path) == frozen_sha, 'Prelaunch changed during audit')
     return dict(schema='auxiliary-overlap-physical-independent-audit-v1', complete=True, passed=True,
         failures=[], input_hashes=hashes, checked_input_hashes=checked_inputs, candidate_ledger_sha256=sha(ledger), summary=summary,
-        prelaunch_sha256=frozen_sha, baseline_review_sha256=BASELINE_RECEIPT,
+        prelaunch_sha256=frozen_sha, baseline_review_sha256=None if width else BASELINE_RECEIPT,
         reused_baseline_summary=summarize(baseline_results), reused_baseline_rows=baseline_results,
-        allocation=dict(new_guided_decisions=1536, reused_baseline_decisions=768, new_baseline_baths=0,
-                        independent_reset_contexts=True, extension=False),
+        allocation=dict(new_reset_decisions=1536, reused_baseline_decisions=0 if width else 768, new_baseline_baths=0,
+                        new_guided_decisions=768 if width else 1536, independent_reset_contexts=False,
+                        fixed_purposive_contexts=True, independent_bath_streams=True, extension=False),
         comparisons=[dict(atlas=a, method=m, summary=summarize(r)) for (a,m),r in sorted(groups.items())],
         contexts=[dict(atlas=a,method=m,case=c,summary=summarize(r)) for (a,m,c),r in sorted(contexts.items())],
         rows=results, auditor_cpu_seconds=time.process_time()-started,
@@ -479,8 +502,8 @@ def audit(run):
             'Geometry and full proposal densities rely on the separately bound complete independent passive audit.',
             'Fixed reset contexts are not an equilibrium trajectory; accepted counts are not contact ESS or native assembly.',
             'Guided arms share passive proposal prefixes; their fresh bath decisions use distinct method seed domains.',
-            'Baseline decisions and historical timings are reused exactly; no new baseline cloud or timing replicate is drawn.',
-            'Per-arm CPU omits shared setup/output overhead; complete observed campaign cost reported separately.'])
+            'Historical comparisons use saved decisions and timings; no new historical baseline cloud or timing replicate is drawn.',
+            'Per-arm CPU is a production-equivalent proxy; total diagnostic execution includes actual passive and physical whole-process CPU, with audits separate.'])
 
 
 if __name__ == '__main__':

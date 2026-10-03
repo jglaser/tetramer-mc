@@ -563,6 +563,39 @@ impl<'p> OligomerMixture<'p> {
             })
             .collect()
     }
+
+    /// Strict per-label terms for callers that must retain numerical failures.
+    /// Zero-weight labels and exact chart seams remain legitimate zero terms.
+    pub fn checked_label_logs(&self, g0: Pose) -> Result<Vec<f64>> {
+        g0.validate()?;
+        self.log_weights
+            .iter()
+            .enumerate()
+            .map(|(label, &weight)| {
+                if weight == f64::NEG_INFINITY {
+                    return Ok(weight);
+                }
+                ensure!(
+                    weight.is_finite(),
+                    "Nonfinite oligomer label {label} weight"
+                );
+                let (map, chart) = self.chart(label);
+                let density = map
+                    .checked_log_density(chart, self.to_chart(label, g0))
+                    .with_context(|| format!("Cannot score oligomer label {label}"))?;
+                if density == f64::NEG_INFINITY {
+                    return Ok(density);
+                }
+                let term = weight + density;
+                ensure!(
+                    term.is_finite(),
+                    "Unrepresentable oligomer label {label} term"
+                );
+                Ok(term)
+            })
+            .collect()
+    }
+
     pub fn log_density(&self, members: &[Pose]) -> f64 {
         log_sum(&self.label_logs(members[0]))
     }
@@ -736,4 +769,120 @@ fn log_sum(values: &[f64]) -> f64 {
         return maximum;
     }
     maximum + values.iter().map(|v| (v - maximum).exp()).sum::<f64>().ln()
+}
+
+#[cfg(test)]
+mod checked_label_tests {
+    use super::*;
+
+    const ORIGIN: Pose = Pose {
+        position: [0.; 3],
+        orientation: [1., 0., 0., 0.],
+    };
+
+    fn map(charts: usize) -> FixedBasinInvolution {
+        FixedBasinInvolution::new(
+            (0..charts)
+                .map(|_| GaussianComponentParameters {
+                    anchor_position: [0.; 3],
+                    anchor_rotation: IDENTITY,
+                    mean: [0.; 6],
+                    covariance: std::array::from_fn(|i| {
+                        std::array::from_fn(|j| if i == j { 1. } else { 0. })
+                    }),
+                    weight: 1. / charts as f64,
+                })
+                .collect(),
+            1.,
+            0.,
+            vec![BasinPair {
+                first: 0,
+                second: 0,
+                weight: 1.,
+            }],
+        )
+        .unwrap()
+    }
+
+    fn mixture(map: &FixedBasinInvolution) -> OligomerMixture<'_> {
+        OligomerMixture {
+            map,
+            inverted: vec![false, true],
+            offsets: vec![ORIGIN],
+            key: vec![],
+            anchors: vec![ORIGIN],
+            fused_map: Some(self::map(1)),
+            fused: vec![FusedComponent {
+                first: 0,
+                second: 1,
+                mismatch: 0.,
+                center: ORIGIN,
+            }],
+            log_weights: vec![0.3_f64.ln(), 0.4_f64.ln(), 0.3_f64.ln()],
+            singles: 2,
+            fit_candidates: 0,
+            hard_checks: 0,
+            build_seconds: [0.; 3],
+        }
+    }
+
+    #[test]
+    fn two_neighbor_singleton_checked_labels_cover_single_reciprocal_and_fused() {
+        let map = map(2);
+        let mixture = mixture(&map);
+        let p = Pose {
+            position: [1., -2., 0.5],
+            orientation: quaternion(cayley([0.2, 0.4, -0.1])),
+        };
+        let terms = mixture.checked_label_logs(p).unwrap();
+        assert_eq!(terms.len(), 3);
+        assert!(terms.iter().all(|v| v.is_finite()));
+        assert_eq!(terms, mixture.label_logs(p));
+        let seam = Pose {
+            orientation: [0., 1., 0., 0.],
+            ..ORIGIN
+        };
+        assert_eq!(
+            mixture.checked_label_logs(seam).unwrap(),
+            vec![f64::NEG_INFINITY; 3]
+        );
+    }
+
+    #[test]
+    fn two_neighbor_singleton_checked_labels_skip_zero_weight_and_propagate_errors() {
+        let map = map(2);
+        let mut mixture = mixture(&map);
+        // The world-space fused chart remains representable. The singles'
+        // huge fixed anchor instead makes their Gaussian quadratics overflow.
+        mixture.anchors[0].position[0] = 1e200;
+        assert!(mixture.checked_label_logs(ORIGIN).is_err());
+        mixture.log_weights[0] = f64::NEG_INFINITY;
+        mixture.log_weights[1] = f64::NEG_INFINITY;
+        let terms = mixture.checked_label_logs(ORIGIN).unwrap();
+        assert_eq!(terms[..2], [f64::NEG_INFINITY; 2]);
+        assert!(terms[2].is_finite());
+        let invalid = Pose {
+            orientation: [0.; 4],
+            ..ORIGIN
+        };
+        assert!(mixture.checked_label_logs(invalid).is_err());
+        for weight in [f64::NAN, f64::INFINITY] {
+            mixture.log_weights[0] = weight;
+            assert!(mixture.checked_label_logs(ORIGIN).is_err());
+        }
+    }
+
+    #[test]
+    fn two_neighbor_singleton_checked_labels_reject_weighted_sum_overflow() {
+        let map = map(2);
+        let mut mixture = mixture(&map);
+        mixture.log_weights[0] = -f64::MAX;
+        let tail = Pose {
+            position: [1e154, 0., 0.],
+            ..ORIGIN
+        };
+        assert!(map.checked_log_density(0, tail).unwrap().is_finite());
+        assert_eq!(mixture.label_logs(tail)[0], f64::NEG_INFINITY);
+        assert!(mixture.checked_label_logs(tail).is_err());
+    }
 }

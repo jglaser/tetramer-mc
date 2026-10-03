@@ -12,13 +12,16 @@ use crate::{
     bounded_singleton_path::{Budget, bounded_path, bounded_singleton},
     capped_dimer::FixedDimerContext,
     depletion::GateOptions,
+    docking::DockingProposal,
     factorized_dimer::FactorizedDimerProposal,
     geometry::SphereTree,
     math::Pose,
+    oligomer_proposal::OligomerConfig,
     rigid_subset::RigidSubset,
     simulation::spherical_local_pose,
     singleton_path::SingletonPath,
     spherical::Container,
+    two_neighbor_singleton::TwoNeighborSingleton,
 };
 use anyhow::{Result, ensure};
 use rand::{RngExt, distr::Open01, rngs::StdRng};
@@ -122,6 +125,114 @@ impl FixedLabelUpdates<'_> {
         record["bath"] = json!(bath);
         record["log_u"] = json!(log_u);
         record["log_acceptance_ratio"] = json!(bath.log_weight);
+        record["accepted"] = json!(accepted);
+        record["status"] = json!("completed");
+        if accepted {
+            state[member] = new;
+        }
+        Ok(())
+    }
+
+    /// Update one fixed mobile label using a complete defensive two-neighbor
+    /// catalogue. The other mobile label and the fixed anchor guide the move;
+    /// every nonmoving body enters the physical hard and depletion tests.
+    ///
+    /// Rebuilding from the current spectators prevents a stale conditional
+    /// proposal. The finite hard-conditioning cap has the same success factor
+    /// in both directions; only the complete G(old)/G(new) correction enters
+    /// the one many-body bath decision. Alternating member slots preserves the
+    /// same two-mobile target, without requiring either contact to survive.
+    pub fn two_neighbor_singleton(
+        &self,
+        state: &mut [Pose],
+        member_slot: usize,
+        atlas: &DockingProposal,
+        config: &OligomerConfig,
+        uniform_half_width: f64,
+        trial_cap: usize,
+        proposal_rng: &mut StdRng,
+        bath_rng: &mut StdRng,
+        accept_rng: &mut StdRng,
+        budget: &mut Budget,
+        record: &mut Value,
+    ) -> Result<()> {
+        ensure!(member_slot < 2, "invalid singleton member slot");
+        ensure!(
+            self.members[0] != self.members[1]
+                && self.members.iter().all(|&i| i < state.len())
+                && self.anchor < state.len()
+                && !self.members.contains(&self.anchor),
+            "invalid fixed singleton labels"
+        );
+        let member = self.members[member_slot];
+        let neighbors = [self.members[1 - member_slot], self.anchor];
+        let old = state[member];
+        *record = json!({"kind":"two_neighbor_singleton", "member":member,
+            "neighbors":neighbors, "old":old, "accepted":false, "status":"in_progress"});
+        budget.check_cpu()?;
+        let proposal = match TwoNeighborSingleton::new(
+            atlas,
+            self.core,
+            self.wall,
+            state,
+            member,
+            neighbors,
+            uniform_half_width,
+            trial_cap,
+            config,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                record["proposal_failure"] =
+                    json!({"stage":"catalogue", "error":error.to_string()});
+                return Err(error);
+            }
+        };
+        let outcome = match proposal.propose(proposal_rng, old) {
+            Ok(value) => value,
+            Err(error) => {
+                record["proposal_failure"] = json!(error);
+                anyhow::bail!("two-neighbor singleton proposal failure");
+            }
+        };
+        record["proposal"] = json!(outcome);
+        budget.check_cpu()?;
+        let Some(new) = outcome.candidate else {
+            record["status"] = json!("proposal_self_loop");
+            return Ok(());
+        };
+        let correction = outcome.complete_log_correction()?;
+        record["complete_log_correction"] = log_value(correction);
+        record["proposed"] = json!(new);
+        let gate = RigidSubset::new(self.core, state, &[member], member, new, self.rd)?;
+        ensure!(
+            gate.hard_valid(Some(self.wall), [0.; 3]),
+            "singleton hard predicates disagree"
+        );
+        let bath = match bounded_singleton(
+            &gate,
+            bath_rng,
+            self.lambda,
+            self.activity,
+            self.envelope,
+            budget,
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                record["bath_failure"] = json!(error);
+                anyhow::bail!("bounded two-neighbor singleton bath failure");
+            }
+        };
+        let log_ratio = correction + bath.log_weight;
+        ensure!(
+            log_ratio.is_finite() || log_ratio == f64::NEG_INFINITY,
+            "invalid singleton MH ratio"
+        );
+        let log_u = accept_rng.sample::<f64, _>(Open01).ln();
+        let accepted = log_u < log_ratio.min(0.);
+        record["bath"] = json!(bath);
+        record["log_u"] = json!(log_u);
+        record["log_acceptance_ratio"] = log_value(log_ratio);
         record["accepted"] = json!(accepted);
         record["status"] = json!("completed");
         if accepted {
@@ -346,6 +457,220 @@ mod tests {
             },
         }
     }
+    #[test]
+    fn two_neighbor_singleton_matches_one_proposal_bath_and_decision() -> Result<()> {
+        let core = sphere(0.45);
+        let ex = sphere(0.6);
+        let wall = Container::new(50., &core)?;
+        let e = engine(&core, &ex, &wall);
+        let atlas = atlas();
+        let config = OligomerConfig::default();
+        let old = state();
+        let proposal =
+            TwoNeighborSingleton::new(&atlas, &core, &wall, &old, 0, [1, 2], 4., 64, &config)?;
+        let outcome = proposal
+            .propose(&mut StdRng::seed_from_u64(901), old[0])
+            .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        let new = outcome
+            .candidate
+            .expect("synthetic proposal has a feasible candidate");
+        let gate = RigidSubset::new(&core, &old, &[0], 0, new, e.rd)?;
+        let mut expected_budget = budget();
+        let bath = bounded_singleton(
+            &gate,
+            &mut StdRng::seed_from_u64(902),
+            e.lambda,
+            e.activity,
+            e.envelope,
+            &mut expected_budget,
+        )
+        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        let ratio = outcome.complete_log_correction()? + bath.log_weight;
+        let u = StdRng::seed_from_u64(903).sample::<f64, _>(Open01).ln();
+        let accepted = u < ratio.min(0.);
+        let mut actual = old.clone();
+        let mut actual_budget = budget();
+        let mut record = Value::Null;
+        e.two_neighbor_singleton(
+            &mut actual,
+            0,
+            &atlas,
+            &config,
+            4.,
+            64,
+            &mut StdRng::seed_from_u64(901),
+            &mut StdRng::seed_from_u64(902),
+            &mut StdRng::seed_from_u64(903),
+            &mut actual_budget,
+            &mut record,
+        )?;
+        assert_eq!(record["proposal"], json!(outcome));
+        assert_eq!(record["bath"], json!(bath));
+        assert_eq!(record["log_acceptance_ratio"], json!(ratio));
+        assert_eq!(record["accepted"], accepted);
+        assert_eq!(actual[0], if accepted { new } else { old[0] });
+        assert_eq!(&actual[1..], &old[1..]);
+        assert_eq!(
+            (actual_budget.raw, actual_budget.retained),
+            (expected_budget.raw, expected_budget.retained)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn two_neighbor_singleton_zero_cap_preserves_all_streams() -> Result<()> {
+        let core = sphere(0.45);
+        let ex = sphere(0.6);
+        let wall = Container::new(50., &core)?;
+        let e = engine(&core, &ex, &wall);
+        let atlas = atlas();
+        let mut s = state();
+        let old = s.clone();
+        let mut streams = [11, 12, 13].map(StdRng::seed_from_u64);
+        let [p, b, a] = &mut streams;
+        let mut record = Value::Null;
+        let mut work = budget();
+        e.two_neighbor_singleton(
+            &mut s,
+            1,
+            &atlas,
+            &OligomerConfig::default(),
+            4.,
+            0,
+            p,
+            b,
+            a,
+            &mut work,
+            &mut record,
+        )?;
+        assert_eq!(s, old);
+        assert_eq!(record["status"], "proposal_self_loop");
+        assert!(record.get("bath").is_none());
+        assert_eq!((work.raw, work.retained), (0, 0));
+        for (rng, seed) in streams.iter_mut().zip([11, 12, 13]) {
+            assert_eq!(
+                rng.random::<u64>(),
+                StdRng::seed_from_u64(seed).random::<u64>()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn two_neighbor_singleton_bath_failure_retains_state_and_partial_trace() -> Result<()> {
+        let core = sphere(0.45);
+        let ex = sphere(0.6);
+        let wall = Container::new(50., &core)?;
+        let mut e = engine(&core, &ex, &wall);
+        e.lambda = 1000.;
+        e.activity = 1.;
+        let atlas = atlas();
+        let mut s = state();
+        let old = s.clone();
+        let mut record = Value::Null;
+        let mut work = budget();
+        work.limits.raw_per_leg = 0;
+        let mut accept = StdRng::seed_from_u64(903);
+        assert!(
+            e.two_neighbor_singleton(
+                &mut s,
+                0,
+                &atlas,
+                &OligomerConfig::default(),
+                4.,
+                64,
+                &mut StdRng::seed_from_u64(901),
+                &mut StdRng::seed_from_u64(902),
+                &mut accept,
+                &mut work,
+                &mut record
+            )
+            .is_err()
+        );
+        assert_eq!(s, old);
+        assert_eq!(record["accepted"], false);
+        assert!(record.get("proposal").is_some());
+        assert!(
+            record["bath_failure"]["failed_progress"]["gate"]["raw_points"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(
+            accept.random::<u64>(),
+            StdRng::seed_from_u64(903).random::<u64>()
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn two_neighbor_singleton_alternating_restart_rebuilds_same_conditionals() -> Result<()> {
+        let core = sphere(0.45);
+        let ex = sphere(0.6);
+        let wall = Container::new(50., &core)?;
+        let e = engine(&core, &ex, &wall);
+        let atlas = atlas();
+        let config = OligomerConfig::default();
+        let evolve =
+            |s: &mut Vec<Pose>, work: &mut Budget, start: u64, end: u64| -> Result<Vec<Value>> {
+                let mut records = Vec::new();
+                for block in start..=end {
+                    for attempt in 0..4 {
+                        let seed = block * 100 + attempt * 3;
+                        let mut row = Value::Null;
+                        e.local(
+                            s,
+                            (attempt % 2) as usize,
+                            0.08,
+                            2.,
+                            &mut StdRng::seed_from_u64(seed),
+                            &mut StdRng::seed_from_u64(seed + 1),
+                            &mut StdRng::seed_from_u64(seed + 2),
+                            work,
+                            &mut row,
+                        )?;
+                        records.push(row);
+                    }
+                    let seed = block * 100 + 20;
+                    let mut row = Value::Null;
+                    e.two_neighbor_singleton(
+                        s,
+                        (block % 2) as usize,
+                        &atlas,
+                        &config,
+                        4.,
+                        32,
+                        &mut StdRng::seed_from_u64(seed),
+                        &mut StdRng::seed_from_u64(seed + 1),
+                        &mut StdRng::seed_from_u64(seed + 2),
+                        work,
+                        &mut row,
+                    )?;
+                    records.push(row);
+                }
+                Ok(records)
+            };
+        let mut full = state();
+        let mut whole_budget = budget();
+        let whole = evolve(&mut full, &mut whole_budget, 1, 12)?;
+        let mut split = state();
+        let mut part_budget = budget();
+        let mut parts = evolve(&mut split, &mut part_budget, 1, 5)?;
+        split = serde_json::from_slice(&serde_json::to_vec(&split)?)?;
+        let mut restored_budget = budget();
+        restored_budget.raw = part_budget.raw;
+        restored_budget.retained = part_budget.retained;
+        parts.extend(evolve(&mut split, &mut restored_budget, 6, 12)?);
+        assert_eq!(parts, whole);
+        assert_eq!(split, full);
+        assert_eq!(split[2], state()[2]);
+        assert_eq!(
+            (whole_budget.raw, whole_budget.retained),
+            (restored_budget.raw, restored_budget.retained)
+        );
+        Ok(())
+    }
+
     #[test]
     fn local_can_detach_and_preserves_spectators() -> Result<()> {
         let core = sphere(0.45);

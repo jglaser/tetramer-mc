@@ -335,6 +335,35 @@ impl FixedBasinInvolution {
         -0.5 * z.iter().map(|x| x * x).sum::<f64>() - 3. * (2. * PI).ln() - log_volume
     }
 
+    /// Strict chart density for callers that must retain numerical failures.
+    /// Only the exact Cayley half-turn seam has legitimate zero density;
+    /// invalid inputs and unrepresentable chart arithmetic are errors.
+    pub fn checked_log_density(&self, chart_index: usize, pose: Pose) -> Result<f64> {
+        pose.validate()?;
+        let chart = self
+            .charts
+            .get(chart_index)
+            .ok_or_else(|| anyhow::anyhow!("Chart index out of range"))?;
+        let q = quaternion(matmul(
+            rotation(pose.orientation),
+            transpose(chart.parameters.anchor_rotation),
+        ));
+        ensure!(
+            q.iter().all(|x| x.is_finite()),
+            "Unrepresentable relative chart rotation"
+        );
+        if q[0] == 0. {
+            return Ok(f64::NEG_INFINITY);
+        }
+        let z = self.encode(chart_index, pose)?;
+        let (_, log_volume) = self.decode_and_log_volume(chart_index, z)?;
+        let square = z.iter().map(|x| x * x).sum::<f64>();
+        ensure!(square.is_finite(), "Unrepresentable chart quadratic");
+        let density = -0.5 * square - 3. * (2. * PI).ln() - log_volume;
+        ensure!(density.is_finite(), "Unrepresentable chart log density");
+        Ok(density)
+    }
+
     /// Pure deterministic transformation. Numerical seams and invalid traces
     /// return errors; callers must never retry until a valid pose is obtained.
     pub fn apply(&self, old: Pose, trace: &BasinTrace) -> Result<BasinStep> {
@@ -438,4 +467,97 @@ pub fn cross_chart_step(
         log_auxiliary_ratio,
         log_correction,
     })
+}
+
+#[cfg(test)]
+mod checked_density_tests {
+    use super::*;
+    use crate::math::IDENTITY;
+
+    fn map() -> FixedBasinInvolution {
+        FixedBasinInvolution::new(
+            vec![GaussianComponentParameters {
+                anchor_position: [0.; 3],
+                anchor_rotation: IDENTITY,
+                mean: [0.; 6],
+                covariance: std::array::from_fn(|i| {
+                    std::array::from_fn(|j| if i == j { 1. } else { 0. })
+                }),
+                weight: 1.,
+            }],
+            1.,
+            0.,
+            vec![BasinPair {
+                first: 0,
+                second: 0,
+                weight: 1.,
+            }],
+        )
+        .unwrap()
+    }
+
+    fn pose(position: [f64; 3]) -> Pose {
+        Pose {
+            position,
+            orientation: [1., 0., 0., 0.],
+        }
+    }
+
+    #[test]
+    fn two_neighbor_singleton_checked_density_agrees_for_finite_scores() {
+        let map = map();
+        for p in [
+            pose([0.; 3]),
+            pose([1e150, -2., 3.]),
+            map.decode(0, [0.4, -1.1, 2., 0.3, 0.7, -0.2]).unwrap(),
+        ] {
+            let checked = map.checked_log_density(0, p).unwrap();
+            assert!(checked.is_finite());
+            assert_eq!(checked, map.log_density(0, p));
+        }
+    }
+
+    #[test]
+    fn two_neighbor_singleton_checked_density_only_exact_seam_is_zero() {
+        let map = map();
+        let mut p = pose([0.; 3]);
+        p.orientation = [0., 1., 0., 0.];
+        assert_eq!(map.checked_log_density(0, p).unwrap(), f64::NEG_INFINITY);
+        // No epsilon seam: a representable nearby tail is scored, while an
+        // unrepresentable quadratic at a still nonzero scalar is fatal.
+        p.orientation[0] = 1e-8;
+        assert!(map.checked_log_density(0, p).unwrap().is_finite());
+        p.orientation[0] = 1e-200;
+        assert!(map.checked_log_density(0, p).is_err());
+    }
+
+    #[test]
+    fn two_neighbor_singleton_checked_density_rejects_inputs_and_quadratic_overflow() {
+        let map = map();
+        assert!(map.checked_log_density(1, pose([0.; 3])).is_err());
+        assert!(
+            map.checked_log_density(0, pose([f64::NAN, 0., 0.]))
+                .is_err()
+        );
+        let mut invalid = pose([0.; 3]);
+        invalid.orientation = [0.; 4];
+        assert!(map.checked_log_density(0, invalid).is_err());
+        let huge = pose([1e200, 0., 0.]);
+        assert!(map.encode(0, huge).is_ok());
+        assert_eq!(map.log_density(0, huge), f64::NEG_INFINITY);
+        assert!(map.checked_log_density(0, huge).is_err());
+    }
+
+    #[test]
+    fn two_neighbor_singleton_checked_density_propagates_encode_and_decode_errors() {
+        let mut map = map();
+        map.charts[0].parameters.anchor_position[0] = -1e308;
+        assert!(map.checked_log_density(0, pose([1e308, 0., 0.])).is_err());
+        map.charts[0].parameters.anchor_position[0] = 0.;
+        // Fault injection isolates decoder error propagation after encoding
+        // succeeds; ordinary constructors forbid this invalid determinant.
+        map.charts[0].log_determinant = f64::NAN;
+        assert!(map.encode(0, pose([0.; 3])).is_ok());
+        assert!(map.checked_log_density(0, pose([0.; 3])).is_err());
+    }
 }

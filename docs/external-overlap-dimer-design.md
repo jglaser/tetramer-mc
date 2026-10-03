@@ -609,3 +609,80 @@ factorizing a joint dimer redraw. A singleton's catalogue must be rebuilt when
 the other mobile body changes. Larger root-guided assembly runs are not
 justified by the present result. Native finite-system assembly remains
 unresolved; the original-condition contact-weight work continues separately.
+
+### Balance contract for the next singleton control
+
+For one elementary update, freeze the other mobile body and all spectators as
+context C. Construct the singleton catalogue from an exact identity internal
+offset, the two fixed guide poses, the spectators and the wall. The moving
+body's old pose is used only to score its density, never to build the catalogue.
+Let G_C = α U_C + (1−α) M_C be the **complete** normalized proposal, with a fixed
+translation cube and normalized Haar orientation for U_C. The default α is 0.5.
+The implemented cube is in the fixed external anchor's body frame, matching
+the dimer control's defensive support; its pose is recorded with every outcome.
+Let D_C denote hard-core and wall feasibility, without a native or contact
+constraint, and p_C = ∫ G_C(y) 1_D_C(y) dy.
+
+Redrawing the whole mixture at each of at most K trials gives successful
+subdensity
+
+\[
+ q_K(y\mid x,C)=G_C(y)\mathbf1_{D_C}(y)
+                 \sum_{r=0}^{K-1}(1-p_C)^r.
+\]
+
+The remaining probability is a self-loop. Since C is unchanged during this
+single-body move, the finite-cap factor is identical in both directions and
+cancels. The proposal correction is exactly log G_C(x) − log G_C(y). Evaluate
+both mixture branches and all catalogue components at both endpoints,
+irrespective of which branch generated the candidate. Do not use learned-only
+densities after drawing from the defensive mixture, or retain a chosen branch
+while retrying. Geometric rejection consumes one trial; decoding or nonfinite
+density failures are fatal, with the attempted trace retained.
+
+One full many-body `bounded_singleton` bath evaluation and one MH decision
+must follow a successful proposal, with this correction included once. A bath
+rejection ends the elementary update; it is not a new proposal trial. The
+old state is retained on every rejection or failure. A zero-density source
+has zero reverse proposal flow and cannot accept a move from this kernel.
+
+Alternate the two fixed mobile labels while retaining the existing local
+schedule. Each conditional elementary kernel is reversible; their deterministic
+composition preserves the physical target but need not be reversible as a
+whole sweep. Rebuild the catalogue when the conditioning body moves. A future
+all-mobile implementation must invalidate it whenever any catalogue input
+changes, including spectators or the wall. A long-lived cached catalogue
+depending on obsolete neighbors would define a different algorithm.
+
+### Implemented singleton control and validation
+
+`src/two_neighbor_singleton.rs` implements the fixed-context proposal.
+`FixedLabelUpdates::two_neighbor_singleton` in `src/evolving_dimer.rs` rebuilds
+it from the current state, applies exactly one full many-body singleton bath
+gate and commits only an accepted pose. It introduces no contact-preservation
+or native-label predicate. The current implementation rebuilds on every call;
+any later cache must use the full immutable conditioning context.
+
+Both the raw branch draw and complete mixture density are retained for every
+begun trial, including failed geometry and fatal arithmetic. The new checked
+chart/mixture scoring APIs distinguish exact Cayley-seam zeros from numerical
+failures. Existing scorers and production entry points retain their behavior.
+
+The source-bound validation contains **21 passing synthetic tests**: 12 library,
+scoring and physical-integration tests plus nine external proposal tests.
+It covers source-independent construction, changed-neighbor reconstruction,
+complete mixture scoring and retry RNG replay, transformed-anchor defensive
+support, all-spectator/wall checks, unconstrained detachment, cap-zero and
+zero-reverse-flow cases, and fatal scoring with a retained attempt. Integration
+checks compare one proposal/bath/decision against a direct reconstruction,
+preserve state and the acceptance RNG after a physical failure, and reproduce
+an alternating-label trajectory exactly across restart.
+
+Receipt: `results/two-neighbor-singleton-validation-20261003/validation.json`,
+SHA256 `2c918899ef56eb65d031af8c89d17b868bf8dfdeb255eb03358984caf3c8d6fc`.
+The isolated validation build used four Cargo jobs and one test thread; the
+production executable was not rebuilt. An initial external test fixture used
+an unsupported RNG clone operation; its failed receipt remains recorded and
+the fixture now reconstructs the same stream from its seed. No protein poses,
+clouds or native labels were queried for this validation. A matched protein
+campaign for this control is **not yet allocated or launched**.

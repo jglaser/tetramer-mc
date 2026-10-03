@@ -46,3 +46,4 @@ pub mod rigid_subset;
 
 pub mod bounded_singleton_path;
 pub mod evolving_dimer;
+pub mod two_neighbor_singleton;

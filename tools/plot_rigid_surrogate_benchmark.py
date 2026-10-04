@@ -189,7 +189,7 @@ def plot(root,output):
                 for x,arm in enumerate(ARMS):
                     missing=[str(r['job']['stream']) for r in group if r['job']['arm']==arm and r[name] is None]
                     if missing:
-                        ax.text(x,-.21,'undefined: '+','.join(missing),transform=ax.get_xaxis_transform(),
+                        ax.text(x,-.21,'undefined\n'+','.join(missing),transform=ax.get_xaxis_transform(),
                             ha='center',va='top',fontsize=8,color='#555555',clip_on=False)
                 ax.set_xticks(range(len(ARMS)),LABELS);ax.set_xlim(-.3,len(ARMS)-.7)
                 ax.grid(axis='y',alpha=.2);ax.spines[['top','right']].set_visible(False)
@@ -207,6 +207,10 @@ def plot(root,output):
         for col,(name,_,_) in enumerate(METRICS):
             defined=[r[name] for r in rows if r[name] is not None]
             if name.endswith('fraction'):axes[0,col].set_ylim(-.025,1.025)
+            elif name=='external_edge_presence_ess_per_cpu' and defined and min(defined)>0:
+                axes[0,col].set_yscale('log')
+                axes[0,col].set_ylim(.6*min(defined),1.4*max(defined))
+                axes[0,col].set_title(METRICS[col][2]+' · log scale',fontsize=10,pad=13)
             else:
                 maximum=max(defined) if defined else None
                 upper=1.12*maximum if maximum is not None and maximum>0 else 1.
@@ -216,9 +220,10 @@ def plot(root,output):
         handles=[Line2D([0],[0],color=colors[s],marker=markers[s],lw=.9,label=f'Stream {s}') for s in range(4)]
         fig.legend(handles=handles,loc='upper center',bbox_to_anchor=(.5,.935),ncol=4,frameon=False)
         fig.subplots_adjust(left=.075,right=.985,top=.825,bottom=.25,hspace=.58,wspace=.29)
-        fig.text(.075,.06,'Saved production metrics; rates use full sampler CPU, including warmup and rejected work.\n'
+        fig.text(.075,.045,'Saved production metrics; rates use full sampler CPU, including warmup and rejected work.\n'
             'Lines join matching streams across arms; starts are separate. Undefined ESS is not zero.\n'
             'Whole-fingerprint ESS may reflect unique local contact labels; it does not certify independent basins.\n'
+            'Rare-contact presence ESS can be high after a single occupied frame; read alongside returns and occupancies.\n'
             'Conditional growth-state test: 2 mobile + 262 fixed tetramers, rd 1.4 Å, z 0.0275 Å⁻³. No native-stability inference.',fontsize=10,va='bottom')
         fig.savefig(output/'contact-efficiency.png',dpi=180,facecolor='white')
         fig.savefig(output/'contact-efficiency.svg',facecolor='white');plt.close(fig)

@@ -20,6 +20,7 @@ use tetramer_mc::{
     docking::{DockingMethod, DockingProposal},
     evolving_dimer::FixedLabelUpdates,
     factorized_dimer::{FactorizedDimerCaps, FactorizedDimerOrder, FactorizedDimerProposal},
+    flexible_surrogate_chain::FlexibleSurrogateKernel,
     geometry::{Shape, SphereTree},
     math::{Pose, norm, sub},
     oligomer_proposal::OligomerConfig,
@@ -268,6 +269,9 @@ fn surrogate_arm(arm: &str) -> bool {
         "rigid_surrogate_1" | "rigid_surrogate_8" | "rigid_surrogate_flat8"
     )
 }
+fn flexible_surrogate_arm(arm: &str) -> bool {
+    matches!(arm, "flexible_m1" | "flexible_m8" | "flexible_flat8")
+}
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
 enum SurrogateScales {
@@ -287,9 +291,9 @@ struct SurrogatePolicy {
 impl SurrogatePolicy {
     fn config(&self, plan: &Value, arm: &str) -> Result<RigidSurrogateConfig> {
         let (inner_steps, guidance_strength) = match arm {
-            "rigid_surrogate_1" => (1, 1.),
-            "rigid_surrogate_8" => (8, 1.),
-            "rigid_surrogate_flat8" => (8, 0.),
+            "rigid_surrogate_1" | "flexible_m1" => (1, 1.),
+            "rigid_surrogate_8" | "flexible_m8" => (8, 1.),
+            "rigid_surrogate_flat8" | "flexible_flat8" => (8, 0.),
             _ => anyhow::bail!("surrogate policy on another arm"),
         };
         let (translation_std, rotation_std_degrees) = match self.proposal_scales {
@@ -337,10 +341,33 @@ fn surrogate_policy(plan: &Value, arm: &str) -> Result<Option<SurrogatePolicy>> 
 fn surrogate_role(role: &str) -> String {
     format!("rigid_surrogate/{role}")
 }
+fn flexible_surrogate_policy(plan: &Value, arm: &str) -> Result<Option<SurrogatePolicy>> {
+    if !flexible_surrogate_arm(arm) {
+        ensure!(
+            plan.get("flexible_surrogate_policy").is_none(),
+            "flexible surrogate policy on another arm"
+        );
+        return Ok(None);
+    }
+    let policy: SurrogatePolicy = serde_json::from_value(
+        plan.get("flexible_surrogate_policy")
+            .context("flexible arm requires explicit flexible_surrogate_policy")?
+            .clone(),
+    )?;
+    ensure!(
+        policy.schema == "flexible-surrogate-policy-v1",
+        "unknown flexible surrogate policy"
+    );
+    policy.config(plan, arm)?;
+    Ok(Some(policy))
+}
+fn flexible_surrogate_role(role: &str) -> String {
+    format!("flexible_surrogate/{role}")
+}
 fn rows_per_block(arm: &str) -> u64 {
     if arm == "local" {
         5
-    } else if surrogate_arm(arm) {
+    } else if surrogate_arm(arm) || flexible_surrogate_arm(arm) {
         7 // Four locals, durable begun/outcome rows, retained block.
     } else {
         6
@@ -398,6 +425,32 @@ fn surrogate_contract(
         "proposal_rng_role":surrogate_role("proposal"),
         "inner_accept_rng_role":surrogate_role("inner_accept"),
         "bath_rng_role":surrogate_role("bath"),"accept_rng_role":surrogate_role("accept"),
+        "local_schedule":"canonical members [0,1,0,1]; shared unchanged local RNG roles",
+        "collective_slots_per_block":1,"physical_decisions_per_nonidentity_endpoint":1,
+        "identity_endpoint":"retained self-loop without bath",
+        "inner_rejections":"consume a step and retain current state",
+        "outer_correction":"S(old)-S(new)","journal_rows_per_block":7})
+}
+fn flexible_surrogate_contract(
+    engine: &FixedLabelUpdates<'_>,
+    policy: &SurrogatePolicy,
+    config: RigidSurrogateConfig,
+    bank: &Value,
+    meta: &Value,
+    point_count: usize,
+    point_volume: f64,
+) -> Value {
+    json!({"schema":"evolving-dimer-flexible-surrogate-v1","policy":policy,"effective_config":config,
+        "members":engine.members,"fixed_spectators":"all other labels",
+        "selection_probabilities":[0.5,0.5],
+        "inner_selection":"independent fair random scan each step",
+        "physical_path":"fair-order two-singleton path; intermediate is not hard-filtered",
+        "cloud":bank,"cloud_reuse":"identical frozen body-frame points for both members; no extra draws",
+        "raw_count":meta["raw_count"],"points_per_body":point_count,"point_volume":point_volume,
+        "point_weight":"raw_box_volume/raw_count","wall_center":[0.,0.,0.],
+        "proposal_rng_role":flexible_surrogate_role("proposal"),
+        "inner_accept_rng_role":flexible_surrogate_role("inner_accept"),
+        "bath_rng_role":flexible_surrogate_role("bath"),"accept_rng_role":flexible_surrogate_role("accept"),
         "local_schedule":"canonical members [0,1,0,1]; shared unchanged local RNG roles",
         "collective_slots_per_block":1,"physical_decisions_per_nonidentity_endpoint":1,
         "identity_endpoint":"retained self-loop without bath",
@@ -707,6 +760,10 @@ fn validate_binding(args: &Args, plan: &Value) -> Result<Value> {
         plan.get("surrogate_policy").is_none() || args.mode == "run",
         "surrogate arms reuse frozen preparation; new preparation is forbidden"
     );
+    ensure!(
+        plan.get("flexible_surrogate_policy").is_none() || args.mode == "run",
+        "flexible arms reuse frozen preparation; new preparation is forbidden"
+    );
     for job in plan["jobs"].as_array().context("jobs")? {
         let arm = job["arm"].as_str().context("arm")?;
         if singleton_policy(plan, arm)?.is_some() {
@@ -719,6 +776,12 @@ fn validate_binding(args: &Args, plan: &Value) -> Result<Value> {
             ensure!(
                 args.mode == "run",
                 "surrogate arms reuse frozen preparation; new preparation is forbidden"
+            );
+        }
+        if flexible_surrogate_policy(plan, arm)?.is_some() {
+            ensure!(
+                args.mode == "run",
+                "flexible arms reuse frozen preparation; new preparation is forbidden"
             );
         }
     }
@@ -892,12 +955,14 @@ fn run(args: &Args, plan: &Value, binding: &Value, geometry: &Geometry) -> Resul
     ensure!(
         ["local", "unguided", "m4", "root_m4", "two_root_m4"].contains(&arm)
             || singleton_arm(arm)
-            || surrogate_arm(arm),
+            || surrogate_arm(arm)
+            || flexible_surrogate_arm(arm),
         "unknown arm"
     );
     singleton_policy(plan, arm)?;
     two_root_policy(plan, arm)?;
     surrogate_policy(plan, arm)?;
+    flexible_surrogate_policy(plan, arm)?;
     let parent = PathBuf::from(plan["output"].as_str().context("output")?);
     fs::create_dir_all(&parent)?;
     let output = parent.join(format!("job-{job_id:03}"));
@@ -940,8 +1005,10 @@ fn run_inner(
     let singleton = singleton_policy(plan, arm)?;
     two_root_policy(plan, arm)?;
     let surrogate = surrogate_policy(plan, arm)?;
+    let flexible = flexible_surrogate_policy(plan, arm)?;
     let surrogate_config = surrogate
         .as_ref()
+        .or(flexible.as_ref())
         .map(|p| p.config(plan, arm))
         .transpose()?;
     let config_hash = hash_file(&args.config)?;
@@ -975,7 +1042,7 @@ fn run_inner(
         let meta = bound(&bank["metadata"])?.json()?;
         let low: [f64; 3] = serde_json::from_value(meta["low"].clone())?;
         let high: [f64; 3] = serde_json::from_value(meta["high"].clone())?;
-        let point_volume = if surrogate.is_some() {
+        let point_volume = if surrogate.is_some() || flexible.is_some() {
             Some(surrogate_point_volume(
                 &meta,
                 usize_at(&plan["cloud"], "raw_count")?,
@@ -1028,7 +1095,7 @@ fn run_inner(
             })
             .context("missing prepared start")?;
         let record = bound(&start["record"])?.json()?;
-        if singleton.is_some() || surrogate.is_some() {
+        if singleton.is_some() || surrogate.is_some() || flexible.is_some() {
             if let Some(ledger) = start.get("ledger") {
                 bound(ledger)?.read()?;
             }
@@ -1121,8 +1188,22 @@ fn run_inner(
         if let Some(policy) = &surrogate {
             let (points, point_volume) = surrogate_cloud.as_ref().unwrap();
             initial["prepared_manifest"] = binding["prepared_manifest"].clone();
-            initial["prepared_start"] = reused_start;
+            initial["prepared_start"] = reused_start.clone();
             initial["surrogate_contract"] = surrogate_contract(
+                &engine,
+                policy,
+                surrogate_config.unwrap(),
+                bank.unwrap(),
+                meta.as_ref().unwrap(),
+                points.len(),
+                *point_volume,
+            );
+        }
+        if let Some(policy) = &flexible {
+            let (points, point_volume) = surrogate_cloud.as_ref().unwrap();
+            initial["prepared_manifest"] = binding["prepared_manifest"].clone();
+            initial["prepared_start"] = reused_start;
+            initial["flexible_surrogate_contract"] = flexible_surrogate_contract(
                 &engine,
                 policy,
                 surrogate_config.unwrap(),
@@ -1142,7 +1223,7 @@ fn run_inner(
             .hard_valid(),
         "invalid evolving start"
     );
-    let proposal = if singleton.is_none() && surrogate.is_none() {
+    let proposal = if singleton.is_none() && surrogate.is_none() && flexible.is_none() {
         Some(geometry.proposal(plan)?)
     } else {
         None
@@ -1270,34 +1351,69 @@ fn run_inner(
                 point_volume: *point_volume,
                 config,
             };
-            let mut prng = rng(master, ci, init, stream, block, &surrogate_role("proposal"));
-            let mut irng = rng(
-                master,
-                ci,
-                init,
-                stream,
-                block,
-                &surrogate_role("inner_accept"),
-            );
-            let mut brng = rng(master, ci, init, stream, block, &surrogate_role("bath"));
-            let mut arng = rng(master, ci, init, stream, block, &surrogate_role("accept"));
+            let role = |name| {
+                if flexible.is_some() {
+                    flexible_surrogate_role(name)
+                } else {
+                    surrogate_role(name)
+                }
+            };
+            let mut prng = rng(master, ci, init, stream, block, &role("proposal"));
+            let mut irng = rng(master, ci, init, stream, block, &role("inner_accept"));
+            let mut brng = rng(master, ci, init, stream, block, &role("bath"));
+            let mut arng = rng(master, ci, init, stream, block, &role("accept"));
             // A begun row survives a fatal/resource interruption. An incomplete
             // block is an auditable tail, never an ordinary rejected slot to retry.
-            journal.durable_line(&json!({"kind":"rigid_surrogate_attempt_begun",
+            let begun = if flexible.is_some() {
+                json!({"kind":"flexible_surrogate_attempt_begun",
+                    "status":"begun","block":block,"members":engine.members,
+                    "config":config,"old":engine.selected(&state),
+                    "raw":budget.raw,"bath_retained":budget.retained,
+                    "sampler_cpu_seconds":cpu_seconds()-budget.started})
+            } else {
+                json!({"kind":"rigid_surrogate_attempt_begun",
                 "status":"begun","block":block,"members":engine.members,
                 "handle":engine.members[0],"config":config,"old":engine.selected(&state),
                 "raw":budget.raw,"bath_retained":budget.retained,
-                "sampler_cpu_seconds":cpu_seconds()-budget.started}))?;
+                "sampler_cpu_seconds":cpu_seconds()-budget.started})
+            };
+            journal.durable_line(&begun)?;
             let mut record = Value::Null;
-            let result = kernel.step(
-                &mut state,
-                &mut prng,
-                &mut irng,
-                &mut brng,
-                &mut arng,
-                &mut budget,
-                &mut record,
-            );
+            let result = if flexible.is_some() {
+                FlexibleSurrogateKernel {
+                    core: engine.core,
+                    exclusion: engine.exclusion,
+                    wall: Some(engine.wall),
+                    wall_center: [0.; 3],
+                    members: engine.members,
+                    rd: engine.rd,
+                    activity: engine.activity,
+                    lambda: engine.lambda,
+                    envelope: engine.envelope,
+                    body_points: points,
+                    point_volume: *point_volume,
+                    config,
+                }
+                .step(
+                    &mut state,
+                    &mut prng,
+                    &mut irng,
+                    &mut brng,
+                    &mut arng,
+                    &mut budget,
+                    &mut record,
+                )
+            } else {
+                kernel.step(
+                    &mut state,
+                    &mut prng,
+                    &mut irng,
+                    &mut brng,
+                    &mut arng,
+                    &mut budget,
+                    &mut record,
+                )
+            };
             record["block"] = json!(block);
             record["retained"] = json!(engine.selected(&state));
             record["sampler_cpu_seconds"] = json!(cpu_seconds() - budget.started);
@@ -1453,6 +1569,114 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn synthetic_flexible_surrogate_policy() -> Value {
+        json!({"schema":"flexible-surrogate-policy-v1","proposal_scales":{"source":"local"}})
+    }
+    #[test]
+    fn flexible_surrogate_policy_is_explicit_and_does_not_change_existing_arms() -> Result<()> {
+        let policy = synthetic_flexible_surrogate_policy();
+        let local = json!({"translation_std_A":0.2,"rotation_std_degrees":1.});
+        for (arm, steps, strength) in [
+            ("flexible_m1", 1, 1.),
+            ("flexible_m8", 8, 1.),
+            ("flexible_flat8", 8, 0.),
+        ] {
+            assert!(flexible_surrogate_policy(&json!({"local":local}), arm).is_err());
+            let plan = json!({"local":local,"flexible_surrogate_policy":policy});
+            let config = flexible_surrogate_policy(&plan, arm)?
+                .unwrap()
+                .config(&plan, arm)?;
+            assert_eq!(config.inner_steps, steps);
+            assert_eq!(config.guidance_strength, strength);
+            assert_eq!(config.translation_std, 0.2);
+            assert_eq!(config.rotation_std_degrees, 1.);
+            assert_eq!(rows_per_block(arm), 7);
+            assert!(surrogate_policy(&plan, arm)?.is_none());
+            for bad in [
+                Value::Null,
+                json!({}),
+                synthetic_surrogate_policy(),
+                json!({"schema":"flexible-surrogate-policy-v1","proposal_scales":{"source":"local","translation_std_A":0.1}}),
+                json!({"schema":"flexible-surrogate-policy-v1","proposal_scales":{"source":"local"},"inner_steps":2}),
+            ] {
+                assert!(
+                    flexible_surrogate_policy(
+                        &json!({"local":local,"flexible_surrogate_policy":bad}),
+                        arm
+                    )
+                    .is_err()
+                );
+            }
+            let mut overridden = plan.clone();
+            overridden["flexible_surrogate_policy"]["proposal_scales"] = json!({"source":"frozen_override","translation_std_A":0.5,"rotation_std_degrees":6.});
+            let config = flexible_surrogate_policy(&overridden, arm)?
+                .unwrap()
+                .config(&overridden, arm)?;
+            assert_eq!(
+                (config.translation_std, config.rotation_std_degrees),
+                (0.5, 6.)
+            );
+            overridden["flexible_surrogate_policy"]["proposal_scales"]["translation_std_A"] =
+                json!(-1.);
+            assert!(flexible_surrogate_policy(&overridden, arm).is_err());
+            let mut mixed = plan;
+            mixed["surrogate_policy"] = synthetic_surrogate_policy();
+            assert!(surrogate_policy(&mixed, arm).is_err());
+        }
+        for arm in [
+            "local",
+            "unguided",
+            "m4",
+            "root_m4",
+            "two_root_m4",
+            "singleton_two_neighbor",
+            "singleton_two_neighbor_unfused",
+            "rigid_surrogate_1",
+            "rigid_surrogate_8",
+            "rigid_surrogate_flat8",
+        ] {
+            assert!(flexible_surrogate_policy(&json!({}), arm)?.is_none());
+            assert!(
+                flexible_surrogate_policy(&json!({"flexible_surrogate_policy":policy}), arm)
+                    .is_err()
+            );
+            assert!(
+                flexible_surrogate_policy(&json!({"flexible_surrogate_policy":null}), arm).is_err()
+            );
+        }
+        Ok(())
+    }
+    #[test]
+    fn flexible_surrogate_roles_are_shared_only_within_the_new_family() {
+        for init in ["source", "proposal_prepared"] {
+            for block in 1..=8 {
+                let values: Vec<_> = ["proposal", "inner_accept", "bath", "accept"]
+                    .into_iter()
+                    .map(|role| {
+                        rng(77, 0, init, 0, block, &flexible_surrogate_role(role)).random::<u64>()
+                    })
+                    .collect();
+                for i in 0..values.len() {
+                    for j in 0..i {
+                        assert_ne!(values[i], values[j]);
+                    }
+                }
+                for role in ["proposal", "inner_accept", "bath", "accept"] {
+                    assert_eq!(
+                        flexible_surrogate_role(role),
+                        format!("flexible_surrogate/{role}")
+                    );
+                    for prior in [surrogate_role(role), format!("local/0/{role}")] {
+                        assert_ne!(
+                            rng(77, 0, init, 0, block, &flexible_surrogate_role(role))
+                                .random::<u64>(),
+                            rng(77, 0, init, 0, block, &prior).random::<u64>()
+                        );
+                    }
+                }
+            }
+        }
+    }
     fn synthetic_surrogate_policy() -> Value {
         json!({"schema":"rigid-surrogate-policy-v1","proposal_scales":{"source":"local"}})
     }
@@ -1957,7 +2181,32 @@ mod tests {
         }
         Ok(())
     }
+    #[test]
+    fn flexible_surrogate_all_arms_and_starts_replay_checkpoint_and_preserve_fatal_tails()
+    -> Result<()> {
+        for arm in ["flexible_m1", "flexible_m8", "flexible_flat8"] {
+            root_arm_restart(arm)?;
+        }
+        Ok(())
+    }
     fn root_arm_restart(arm: &str) -> Result<()> {
+        let flexible = flexible_surrogate_arm(arm);
+        let any_surrogate = surrogate_arm(arm) || flexible;
+        let policy_key = if flexible {
+            "flexible_surrogate_policy"
+        } else {
+            "surrogate_policy"
+        };
+        let begun_kind = if flexible {
+            "flexible_surrogate_attempt_begun"
+        } else {
+            "rigid_surrogate_attempt_begun"
+        };
+        let outcome_kind = if flexible {
+            "flexible_surrogate_chain"
+        } else {
+            "rigid_surrogate_chain"
+        };
         let dir = std::env::temp_dir().join(format!("{arm}-restart-{}", std::process::id()));
         fs::create_dir(&dir)?;
         let geometry = synthetic_geometry()?;
@@ -1970,8 +2219,8 @@ mod tests {
             .into_iter()
             .flat_map(f64::to_le_bytes)
             .collect::<Vec<_>>();
-        let raw_count = if surrogate_arm(arm) { 2 } else { 1 };
-        if surrogate_arm(arm) {
+        let raw_count = if any_surrogate { 2 } else { 1 };
+        if any_surrogate {
             raw.extend([0.0f64, 0., 0.].into_iter().flat_map(f64::to_le_bytes));
         }
         fs::write(&raw_path, &raw)?;
@@ -2029,6 +2278,9 @@ mod tests {
                 if surrogate_arm(arm) {
                     value["surrogate_policy"] = synthetic_surrogate_policy();
                 }
+                if flexible {
+                    value["flexible_surrogate_policy"] = synthetic_flexible_surrogate_policy();
+                }
                 value
             };
             let full_plan = plan_for(dir.join(format!("{init}-full")));
@@ -2082,13 +2334,28 @@ mod tests {
             let actual = rows(&split_out.join("trajectory.jsonl"))?;
             assert_eq!(actual, rows(&full_out.join("trajectory.jsonl"))?);
             assert_eq!(actual.len() as u64, 1 + 8 * rows_per_block(arm));
-            if surrogate_arm(arm) {
-                let contract = &actual[0]["surrogate_contract"];
-                let config = surrogate_policy(&full_plan, arm)?
-                    .unwrap()
-                    .config(&full_plan, arm)?;
+            if any_surrogate {
+                let contract = &actual[0][if flexible {
+                    "flexible_surrogate_contract"
+                } else {
+                    "surrogate_contract"
+                }];
+                let policy = if flexible {
+                    flexible_surrogate_policy(&full_plan, arm)?
+                } else {
+                    surrogate_policy(&full_plan, arm)?
+                };
+                let config = policy.unwrap().config(&full_plan, arm)?;
                 assert_eq!(contract["members"], json!([0, 1]));
-                assert_eq!(contract["handle"], 0);
+                if flexible {
+                    assert!(contract.get("handle").is_none());
+                    assert_eq!(contract["selection_probabilities"], json!([0.5, 0.5]));
+                    assert_eq!(contract["schema"], "evolving-dimer-flexible-surrogate-v1");
+                    assert_eq!(contract["proposal_rng_role"], "flexible_surrogate/proposal");
+                    assert!(actual[0].get("surrogate_contract").is_none());
+                } else {
+                    assert_eq!(contract["handle"], 0);
+                }
                 assert_eq!(contract["cloud"], actual[0]["cloud"]);
                 assert_eq!(contract["raw_count"], 2);
                 assert_eq!(contract["points_per_body"], 1);
@@ -2104,11 +2371,40 @@ mod tests {
                     let begun = &actual[base + 4];
                     let row = &actual[base + 5];
                     let retained = &actual[base + 6];
-                    assert_eq!(begun["kind"], "rigid_surrogate_attempt_begun");
+                    assert_eq!(begun["kind"], begun_kind);
                     assert_eq!(begun["old"], row["old"]);
-                    assert_eq!(row["kind"], "rigid_surrogate_chain");
+                    assert_eq!(row["kind"], outcome_kind);
                     assert_eq!(row["members"], json!([0, 1]));
-                    assert_eq!(row["handle"], 0);
+                    if flexible {
+                        assert!(row.get("handle").is_none());
+                        assert_eq!(row["selection_probabilities"], json!([0.5, 0.5]));
+                        assert_eq!(row["budget_before"]["raw"], begun["raw"]);
+                        assert_eq!(row["budget_before"]["retained"], begun["bath_retained"]);
+                        assert_eq!(row["budget_after"]["raw"], retained["raw"]);
+                        assert_eq!(row["budget_after"]["retained"], retained["retained"]);
+                        if row["status"] == "completed" {
+                            assert_eq!(row["bath"]["legs"].as_array().unwrap().len(), 2);
+                            let order = row["bath"]["ordered_members"].as_array().unwrap();
+                            let first = order[0].as_u64().unwrap() as usize;
+                            assert_eq!(order[1], 1 - first);
+                            assert_eq!(
+                                row["bath"]["intermediate_selected"][first],
+                                row["proposed"][first]
+                            );
+                            assert_eq!(
+                                row["bath"]["intermediate_selected"][1 - first],
+                                row["old"][1 - first]
+                            );
+                            let bath = row["bath"]["aggregate"]["log_weight"].as_f64().unwrap();
+                            let correction = row["complete_log_correction"].as_f64().unwrap();
+                            assert_eq!(
+                                row["log_acceptance_ratio"].as_f64().unwrap(),
+                                bath + correction
+                            );
+                        }
+                    } else {
+                        assert_eq!(row["handle"], 0);
+                    }
                     assert_eq!(row["config"], json!(config));
                     assert_eq!(row["steps"].as_array().unwrap().len(), config.inner_steps);
                     assert_eq!(row["retained"], retained["selected"]);
@@ -2127,8 +2423,17 @@ mod tests {
                     }
                     for step in row["steps"].as_array().unwrap() {
                         assert!(step["retained"].is_array());
+                        if flexible {
+                            let slot = step["selected_slot"].as_u64().unwrap() as usize;
+                            assert!(slot < 2);
+                            assert_eq!(step["selected_label"], slot);
+                            assert_eq!(step["proposed"][1 - slot], step["old"][1 - slot]);
+                            if step["accepted"] == false {
+                                assert_eq!(step["retained"], step["old"]);
+                            }
+                        }
                     }
-                    if arm == "rigid_surrogate_flat8" {
+                    if arm == "rigid_surrogate_flat8" || arm == "flexible_flat8" {
                         assert_eq!(row["complete_log_correction"], 0.);
                         assert_eq!(row["old_score"]["log_surrogate"], 0.);
                     }
@@ -2187,14 +2492,11 @@ mod tests {
             for key in ["counts", "raw", "retained", "blocks", "complete", "job"] {
                 assert_eq!(a[key], b[key]);
             }
-            if surrogate_arm(arm) {
+            if any_surrogate {
                 // At the same initial state the shared four local updates have
                 // exactly the old local-only control's records and RNG draws.
                 let mut control_plan = plan_for(dir.join(format!("{init}-local-control")));
-                control_plan
-                    .as_object_mut()
-                    .unwrap()
-                    .remove("surrogate_policy");
+                control_plan.as_object_mut().unwrap().remove(policy_key);
                 control_plan["jobs"][0]["arm"] = json!("local");
                 control_plan["allocation"]["warmup_blocks"] = json!(0);
                 control_plan["allocation"]["production_blocks"] = json!(1);
@@ -2210,7 +2512,7 @@ mod tests {
                     rows(&dir.join(format!("{init}-local-control/job-000/trajectory.jsonl")))?;
                 assert_eq!(&actual[1..5], &control[1..5]);
             }
-            if arm == "rigid_surrogate_flat8" && init == "source" {
+            if (arm == "rigid_surrogate_flat8" || arm == "flexible_flat8") && init == "source" {
                 let tail_plan = plan_for(dir.join("begun-tail"));
                 let tail_config = dir.join("begun-tail.json");
                 save(&tail_config, &tail_plan)?;
@@ -2231,7 +2533,7 @@ mod tests {
                     cp["journal_rows"].as_u64().unwrap(),
                     cp["journal_sha256"].as_str().unwrap(),
                 )?;
-                journal.durable_line(&json!({"kind":"rigid_surrogate_attempt_begun",
+                journal.durable_line(&json!({"kind":begun_kind,
                     "block":2,"status":"begun","old":cp["selected"]}))?;
                 drop(journal);
                 let tail_hash = hash_file(&tail_journal)?;
@@ -2253,7 +2555,7 @@ mod tests {
                     let mut control_plan = plan_for(control_output.clone());
                     control_plan["local"] =
                         json!({"translation_std_A":0.,"rotation_std_degrees":0.});
-                    control_plan["surrogate_policy"]["proposal_scales"] = json!({
+                    control_plan[policy_key]["proposal_scales"] = json!({
                         "source":"frozen_override","rotation_std_degrees":0.,
                         "translation_std_A":match scenario {"hard_rejected"=>1e6,"identity"=>0.,_=>0.1}});
                     control_plan["allocation"]["warmup_blocks"] = json!(0);
@@ -2281,9 +2583,9 @@ mod tests {
                     );
                     let output = control_output.join("job-000");
                     let records = rows(&output.join("trajectory.jsonl"))?;
-                    assert_eq!(records[5]["kind"], "rigid_surrogate_attempt_begun");
+                    assert_eq!(records[5]["kind"], begun_kind);
                     let outcome = &records[6];
-                    assert_eq!(outcome["kind"], "rigid_surrogate_chain");
+                    assert_eq!(outcome["kind"], outcome_kind);
                     assert_eq!(outcome["old"], records[5]["old"]);
                     assert_eq!(outcome["retained"], outcome["old"]);
                     assert_eq!(outcome["accepted"], false);

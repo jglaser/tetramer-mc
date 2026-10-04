@@ -15,6 +15,7 @@ pub mod dimer_tree_proposal;
 pub mod docking;
 pub mod factorized_dimer;
 pub mod flexible_subset;
+pub mod flexible_surrogate_chain;
 pub mod geometry;
 pub mod gca_overlap_diagnostic;
 pub mod initialization;

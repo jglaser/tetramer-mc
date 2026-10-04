@@ -148,6 +148,11 @@ retain every rejected state, compare initializations, and report independent
 contact samples per CPU. Pair-label selection in an all-mobile assembly system
 still requires its own reversible rule.
 
+The [all-mobile integration audit](flexible-surrogate-all-mobile-design.md)
+specifies a corrected neighbor selector, separates attempt-count scaling from
+spectator-search cost, and records why the existing frozen body-frame cloud
+can be reused. This design is not yet a production option.
+
 Evidence under `results/flexible-surrogate-reference-20261004/`:
 
 - Numerical validation receipt: `validation.json`, SHA256

@@ -75,6 +75,15 @@ attempts. It does not separate a proposal penalty from a bath penalty; that
 requires a declared reduction of the saved factors. Rejected intermediate
 geometric trials may still contribute cost before the feasible candidate.
 
+The passed initial-state reference identifies a native internal motif for 9/24
+and two native external contacts incident to 24. Persistence of this state may
+therefore reflect strong physical binding, rather than unwanted misregistration.
+Zero departures alone do not diagnose inefficient sampling: transition rates
+need not be equal between unequally occupied regions. Independent conditional
+weights and the saved gate factors are needed to distinguish rare physical
+returns from poor proposals. The different preparations have not established
+equilibrium agreement.
+
 The predeclared native audit was launched on all 128 completed trajectories at
 `/vast/xvg/tetramer-mc-runs/conditional-native-registry-audit-20261004`, with one
 worker, 36,000 CPU seconds, 72,000 wall seconds and 16 GiB memory. It retains all

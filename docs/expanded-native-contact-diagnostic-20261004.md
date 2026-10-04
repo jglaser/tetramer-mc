@@ -162,6 +162,14 @@ exhaustion explanation for these retained ideal oligomers. Actual thermal
 clearance and statistical weight remain to be tested before attributing the
 growth stall to sampling or thermodynamics.
 
+The subsequent [fixed-point clearance audit](native-extension-clearance-20261004.md)
+has now tested all 7,207 site-disjoint slots in the measured endpoints. Only
+one of the four quartets' 52 cooperative points is fully hard-clear; the other
+51 clash with the quartet itself, with sub-Ångström penetration. Both seeds
+retain several open points. This narrows the next test to ideal-component
+clearance and nearby incoming poses before claiming that cooperative
+rearrangement is required. Point counts do not measure basin weights.
+
 The [procedure and source](../results/native-oligomer-extension-design-20261004/PROCEDURE.md)
 record the predeclared inventory and limits. Twelve synthetic controls passed,
 including an independent finite-grid oracle, inverse composition, aliases,

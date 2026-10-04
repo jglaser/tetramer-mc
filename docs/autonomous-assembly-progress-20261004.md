@@ -264,3 +264,11 @@ the geometric margins to 2.85e-14 Å. Thus the new trajectory labels do not
 reclassify the completed regional mass contrast. This resolves a definition
 ambiguity, not the remaining convergence or full-vessel mass questions; see
 the [updated regional report](native-class-physical-results-20261004.md).
+
+The [native-extension clearance audit](native-extension-clearance-20261004.md)
+completed all 113 components and 7,207 site-disjoint points, with no Monte Carlo
+draws. Only one of 52 cooperative quartet points is hard-clear; 51 clash with
+their own observed quartet. Both seeds retain open cooperative points. The
+sub-Ångström gaps motivate a controlled ideal-component comparison and nearby
+pose feasibility checks, not a physical instability conclusion. Nineteen
+synthetic tests and an independent full-output arithmetic reduction passed.

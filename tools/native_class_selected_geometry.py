@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Separately bounded, selected full-interval audit of fresh physical v7 rows.
+"""Separately bounded, selected full-interval audit of physical v6/v7 rows.
 
 No work runs on import. ``select(plan)`` is arithmetic/metadata only. Its result
 must be written to a fresh file and hash-bound as ``selection`` in an external
@@ -11,11 +11,14 @@ from file timestamps. No preparation here allocates or launches protein work.
 
 Plans otherwise use the endpoint labeler's population/definition/reference_region/
 strata/observer_setup/source_sha256/runtime/limits fields, plus target, algebra,
-labels and output:{receipt,journal,failure}. Additional strict limits are
+labels and output:{receipt,journal,failure}. V6 plans also bind the endpoint
+pass's external compiled_native and shape_compatibility references. Strict limits are
 max_full_geometry_queries<=20 and max_axis_queries<=60. Selected IDs are exactly
 16 unconditional IDs plus at most one largest Qz contributor per decision region,
 ties by lowest ID, deduplicated, no replacement for empty regions. Original full
 row byte offsets/hashes are bound; no truncated or renumbered pseudo-population.
+The explicit v6 path reconstructs only strict hard-free H and proposal algebra;
+native/contact labels remain the separate independent endpoint pass's evidence.
 """
 from __future__ import annotations
 
@@ -40,13 +43,19 @@ import native_class_physical_labels as endpoints
 import native_class_line_physical_algebra_audit as streaming
 import native_class_line_physical_reference as full
 from analyze_mobile_native_pocket import local_sources
-from native_class_line_weight_row import validate_row
 
 require, read, sha, close = streaming.require, streaming.read, streaming.sha, streaming.close
+physical = full.physical
 SCHEMA = 'native-class-selected-full-geometry-v1'
 PLAN_SCHEMA = 'native-class-selected-full-geometry-plan-v1'
 PRESELECTION_SCHEMA = 'native-class-unconditional-audit-ids-v1'
 SELECTION_SCHEMA = 'native-class-selected-full-row-bindings-v1'
+
+
+def source_schema(context):
+    schema = context['manifest']['schema']
+    require(schema in (physical.SCHEMA, full.SCHEMA), 'Unsupported selected physical source schema')
+    return schema
 
 
 def preselection(population, samples, seed):
@@ -117,7 +126,7 @@ def _select(context, plan, budget=None):
             require(row is not None and label is not None and type(attempt) is dict
                     and type(attempt.get('draw')) is int and attempt == dict(draw=index, state='begin'),
                     'Missing/reordered all-attempt input')
-            value = validate_row(row, expected_draw=index, manifest=context['manifest'], region=context['region'])
+            value = streaming.validate_row(row, expected_draw=index, manifest=context['manifest'], region=context['region'])
             regions = statistics.label_regions(label, row, value, streams[0].last['sha256'])
             entry = dict(draw=index, sample_record=dict(streams[0].last), label_record=dict(streams[2].last))
             if index in unconditional: retained[index] = entry
@@ -136,7 +145,7 @@ def _select(context, plan, budget=None):
     for value in maxima.values():
         if value is not None: retained[value['draw']] = value['row']
     reasons = selected_inventory(unconditional, maxima)
-    return dict(schema=SELECTION_SCHEMA, population=plan['population'],
+    return dict(schema=SELECTION_SCHEMA, source_schema=source_schema(context), population=plan['population'],
         target_and_regions_sha256=context['target_and_regions_sha256'], unconditional_denominator=count,
         preselection=plan['preselection'], algebra=plan['algebra'], labels=plan['labels'],
         decision_maxima={key: None if value is None else {k: value[k] for k in ('draw', 'log_weight')}
@@ -214,13 +223,21 @@ def frozen_line_observer(observer, compiled, classifier_binding, bind):
 def audit_selected_row(row, label, context, recon, budget):
     """Reuse the unpruned full reference, never the saved-interval evaluator."""
     index = row['draw']; u = np.asarray(row['latent'])
-    accounting = validate_row(row, expected_draw=index, manifest=context['manifest'], region=context['region'])
-    result = budget.query('full_geometry', index,
-        lambda: full.compact_density(recon, u, row['native_class_line_density']))
-    require(not result.get('conditioning_disabled') and len(result['axes']) == 3,
+    schema = source_schema(context); hard_only = schema == physical.SCHEMA
+    accounting = streaming.validate_row(row, expected_draw=index, manifest=context['manifest'], region=context['region'])
+    if hard_only:
+        result = budget.query('full_geometry', index,
+            lambda: physical.compact_density(recon, u, row['hard_free_line_density'], geometry='full'))
+    else:
+        result = budget.query('full_geometry', index,
+            lambda: full.compact_density(recon, u, row['native_class_line_density']))
+    require(not result.get('conditioning_disabled') and [axis['axis'] for axis in result['axes']] == [0, 1, 2],
             'Selected full geometry needs all three active line axes')
     close(row['log_proposal_density'], result['log_density'], 'Full physical proposal q differs', atol=2e-7, rtol=1e-11)
-    generated = full.line.audit_draw(row['native_class_line_draw'], recon, u, result)
+    if hard_only:
+        generated = dict(inverse_error=physical.audit_draw(row, recon, result), endpoint_error=0.)
+    else:
+        generated = full.line.audit_draw(row['native_class_line_draw'], recon, u, result)
     raw, position, rotation, jac = recon.decode(u)
     close(row['pose']['position'], position, 'Full physical position differs')
     close(full.line.pose_arrays(row['pose'])[1], rotation, 'Full physical orientation differs')
@@ -230,17 +247,41 @@ def audit_selected_row(row, label, context, recon, budget):
         coordinate = recon.raw(u)[axis['axis']]
         if 'segment' in axis and axis['segment'][0] <= coordinate <= axis['segment'][1]:
             memberships += 1
-            require(full.line.contains(axis['hard_free_intervals'], coordinate) == label['hard_valid'],
+            # v6 strips isolated feasible points from the positive-measure
+            # proposal support. They still belong to the strict physical H set.
+            intervals = (axis.get('zero_measure_feasible_points', axis['intervals']) if hard_only
+                         else axis['hard_free_intervals'])
+            require(physical.line.contains(intervals, coordinate) == label['hard_valid'],
                     'Full H membership differs from independent endpoint')
-            if label['applicable']:
+            if not hard_only and label['applicable']:
                 require(full.line.contains(axis['native_intervals'], coordinate) == label['native'],
                         'Full native membership differs from complete endpoint classifier')
                 require(full.line.contains(axis['exclusion_contact_intervals'], coordinate) == label['exclusion_contact'],
                         'Full exclusion membership differs from independent endpoint')
     if math.isfinite(accounting['z']): require(memberships == 3, 'Contributing endpoint lacks full line membership')
-    return dict(draw=index, axes=3, membership_axes=memberships,
+    return dict(draw=index, source_schema=schema, axes=3, membership_axes=memberships,
+        hard_line_geometry_certified=True, native_line_geometry_certified=not hard_only,
+        exclusion_contact_line_geometry_certified=not hard_only,
         interval_endpoints=max(result['interval_error'], generated['endpoint_error']),
         inverse_cdf=generated['inverse_error'], log_proposal_density=result['log_density'])
+
+
+def build_reconstructor(context, endpoint_context, bind):
+    """One explicit schema path; constructors perform no selected line query."""
+    schema = source_schema(context)
+    require(endpoint_context['source_schema'] == schema, 'Endpoint/source schema differs')
+    root = context['root']
+    guide, shape = [read(root/'provenance'/name) for name in ('importance-guide.json', 'shape.json')]
+    if schema == physical.SCHEMA:
+        recon = physical.line.Reconstructor(context['region'], guide, context['config'], shape)
+        bridge = dict(mode='v6 hard-free reference; no native/contact line observer',
+            additional_observer_setup_queries=0, native_line_geometry_certified=False,
+            exclusion_contact_line_geometry_certified=False)
+    else:
+        observer, bridge = frozen_line_observer(endpoint_context['observer'],
+            endpoint_context['compiled_native'], endpoint_context['classifier_binding'], bind)
+        recon = full.line.Reconstructor(context['region'], guide, context['config'], shape, observer, use_tree=False)
+    return recon, bridge
 
 
 def run(plan_path, *, plan_sha256):
@@ -252,7 +293,7 @@ def run(plan_path, *, plan_sha256):
     paths = {key: Path(plan['output'][key]).resolve() for key in ('receipt', 'journal', 'failure')}
     require(len(set(paths.values())) == 3 and all(not p.exists() and p.parent.is_dir() for p in paths.values()),
             'Fresh distinct outputs with existing parents required')
-    budget = None; completed = []; active = None; source_bindings = {}; phase = 'metadata'
+    budget = None; completed = []; active = None; source_bindings = {}; phase = 'metadata'; schema = None
     def interrupted(signum, _frame): raise SystemExit(128+signum)
     require(all(signal.getitimer(timer) == (0., 0.) for timer in (signal.ITIMER_REAL, signal.ITIMER_PROF)),
             'Existing process timer is unsupported')
@@ -279,6 +320,7 @@ def run(plan_path, *, plan_sha256):
             require(runtime == plan['runtime'], 'Frozen selected runtime differs')
             for path, digest in runtime['file_sha256'].items(): bindings.bind(path, digest)
             context = _metadata(plan, bindings)
+            schema = source_schema(context)
             selection = read(bindings.reference(plan['selection']))
             require(selection == _select(context, plan, budget), 'Fresh full-row selection differs')
             review = read(bindings.reference(plan['review']))
@@ -302,12 +344,9 @@ def run(plan_path, *, plan_sha256):
             require(endpoint_context['target_and_regions_sha256'] == context['target_and_regions_sha256'],
                     'Endpoint setup target differs')
             setup_before = dict(budget.setup_calls)
-            observer, observer_bridge = frozen_line_observer(endpoint_context['observer'],
-                read(context['root']/'provenance/compiled-native.json'), endpoint_context['classifier_binding'], bindings.bind)
+            recon, observer_bridge = build_reconstructor(context, endpoint_context, bindings.bind)
             require(dict(budget.setup_calls) == setup_before, 'Interface bridge repeated observer setup')
-            emit(dict(state='frozen_observer_interface_bound', bridge=observer_bridge))
-            recon = full.line.Reconstructor(context['region'], read(context['root']/'provenance/importance-guide.json'),
-                context['config'], read(context['root']/'provenance/shape.json'), observer, use_tree=False)
+            emit(dict(state='selected_reconstructor_bound', source_schema=schema, bridge=observer_bridge))
             original_axis = recon.reconstruct_axis
             def axis(u, axis, use_tree=None):
                 require(use_tree in (None, False), 'Selected reference must remain unpruned')
@@ -326,13 +365,20 @@ def run(plan_path, *, plan_sha256):
             require(not (context['root']/'failure.json').exists(), 'Producer failure appeared during selected audit')
             require(budget.calls['full_geometry'] == count and budget.calls['axis'] == 3*count,
                     'Incomplete selected geometry allocation')
-            receipt = dict(schema=SCHEMA, complete=True, passed=True, full_geometry_selected_rows=count,
+            receipt = dict(schema=SCHEMA, source_schema=schema, complete=True, passed=True, full_geometry_selected_rows=count,
                 all_row_full_geometry_certified=False, original_attempt_denominator=context['manifest']['samples'],
                 target_and_regions_sha256=context['target_and_regions_sha256'], population=plan['population'],
                 selection=plan['selection'], preselection=plan['preselection'], review=plan['review'],
                 algebra=plan['algebra'], labels=plan['labels'], rows=completed, input_sha256=bindings.files,
                 source_sha256=source_bindings, runtime=runtime, query_counts=dict(budget.calls),
                 observer_setup_counts=dict(budget.setup_calls), observer_interface_bridge=observer_bridge,
+                native_identity_origin=endpoint_context['native_identity_origin'],
+                compiled_native_binding=endpoint_context['compiled_native_binding'],
+                shape_compatibility_binding=endpoint_context['shape_compatibility_binding'],
+                hard_line_geometry_certified=True,
+                native_line_geometry_certified=schema == full.SCHEMA,
+                exclusion_contact_line_geometry_certified=schema == full.SCHEMA,
+                final_region_labels='Bound independent endpoint label receipt; never guide intervals.',
                 execution_plan_sha256=plan_sha256,
                 cpu_seconds=time.process_time()-budget.started, wall_seconds=time.monotonic()-budget.wall,
                 new_pose_draws=0, new_Poisson_clouds=0, retries=0, replacements=0,
@@ -342,7 +388,7 @@ def run(plan_path, *, plan_sha256):
                       'unseen mass, convergence and assembly remain unresolved.')
             emit(dict(state='finished', full_geometry_selected_rows=count))
         except BaseException as error:
-            failure = dict(schema=SCHEMA, complete=False, passed=False, phase=phase, draw=active,
+            failure = dict(schema=SCHEMA, source_schema=schema, complete=False, passed=False, phase=phase, draw=active,
                 completed_rows=len(completed), error_type=type(error).__name__, error=str(error),
                 query_counts={} if budget is None else dict(budget.calls),
                 observer_setup_counts={} if budget is None else dict(budget.setup_calls),

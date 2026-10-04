@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded streaming physical endpoint labels for completed v7 populations.
+"""Bounded streaming physical endpoint labels for completed v6/v7 populations.
 
 This is an execution tool, not a preparation or launch controller. It requires
 an externally frozen, hash-bound plan before opening the physical geometry.
@@ -31,7 +31,6 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 import native_class_line_physical_algebra_audit as infrastructure
-from native_class_line_weight_row import validate_row
 from native_class_line_reference import compare_compiled_definition, pose_arrays
 from hard_free_line_reference import Reconstructor as EndpointReference
 from analyze_mobile_native_pocket import local_sources
@@ -49,6 +48,47 @@ PLAN_SCHEMA = 'native-class-physical-label-plan-v1'
 SHAPE_SHA = 'c7442034e7ffa4627b67c57a81117f0e9bc2d389ecf956a83dac2a5e915554c9'
 REGION_SHA = '924648f4d9db473045397c300b3b4af7ccde8cfda1b1703a6899239ec12e2f02'
 QUERY_ROLES = ('capture', 'atomic', 'native', 'contact')
+
+
+def validate_row(row, **kwargs):
+    """Use the genuine producer schema; v6 rows are never renamed to v7."""
+    return infrastructure.validate_row(row, **kwargs)
+
+
+def native_identity(root, plan, manifest, config, shape, bind):
+    """Bind a native observer separately from a native-blind v6 producer."""
+    schema = manifest['schema']
+    if schema == infrastructure.full.SCHEMA:
+        provenance = manifest['compiled_native']
+        compiled_path = bind(root/'provenance/compiled-native.json', provenance['compiled_sha256'])
+        report = provenance['shape_compatibility']
+        report_binding = None
+        origin = 'producer_compiled_native'
+        require(plan['definition']['sha256'] == provenance['source_definition_sha256'],
+                'Frozen native definition differs from producer')
+    elif schema == 'importance-latent-region-normalizer-v6':
+        require('compiled_native' not in manifest,
+                'Native-blind v6 producer must not carry compiled native identity')
+        require(type(plan.get('compiled_native')) is dict and type(plan.get('shape_compatibility')) is dict,
+                'v6 labels require externally bound compiled native and shape compatibility')
+        compiled_path = bind(plan['compiled_native']['path'], plan['compiled_native']['sha256'])
+        report_path = bind(plan['shape_compatibility']['path'], plan['shape_compatibility']['sha256'])
+        report = read(report_path)
+        report_binding = dict(path=str(report_path), sha256=sha(report_path))
+        origin = 'external_analysis_plan'
+    else:
+        raise ValueError('Unsupported physical-label source schema')
+    compiled = read(compiled_path)
+    compiled_binding = dict(path=str(compiled_path), sha256=sha(compiled_path))
+    require(compiled['source_definition_sha256'] == plan['definition']['sha256'],
+            'Compiled observer source definition differs from frozen analysis plan')
+    require(compiled['fixed_poses'] == config['fixed_poses'] == manifest['physical_fixed_neighbors'],
+            'Compiled observer scaffold differs from physical source')
+    witness = infrastructure.full.validate_shape_witness(compiled, shape, report,
+        compiled_binding['sha256'], manifest['shape_sha256'])
+    return dict(source_schema=schema, native_identity_origin=origin, compiled_native=compiled,
+                compiled_native_binding=compiled_binding, shape_compatibility_binding=report_binding,
+                shape_witness=witness)
 
 
 class EndpointCore:
@@ -217,8 +257,9 @@ class BoundedLines(infrastructure.JsonLines):
 
 
 def _load_context(root, plan, bind, emit, budget):
-    # _provenance performs static atom-bijection and geometry-free chart checks;
-    # it does not construct the line Reconstructor or query any endpoints.
+    # _provenance performs schema-specific geometry-free chart checks. v7 also
+    # has a producer-native atom bijection; v6 has no producer native identity.
+    # Neither constructs the line Reconstructor nor queries any endpoints.
     manifest, summary, region, config, law, witness = infrastructure._provenance(root, bind)
     require(manifest['shape_sha256'] == SHAPE_SHA and manifest['region_sha256'] == REGION_SHA,
             'Only the unchanged repaired-shape protein R4 target is authorized')
@@ -230,12 +271,11 @@ def _load_context(root, plan, bind, emit, budget):
     require(strata == STRATA, 'Original fixed strata changed')
     certificate = wall_certificate(shape, config)
     definition_path = bind(plan['definition']['path'], plan['definition']['sha256'])
+    identity = native_identity(root, plan, manifest, config, shape, bind)
     _, descriptor, target_id = target_identity(dict(
         region=dict(path=str(root/'provenance/region.json'), sha256=manifest['region_sha256']),
         old_r5_region=plan['reference_region'], native_definition=plan['definition']),
         SimpleNamespace(reference=lambda ref: bind(ref['path'], ref['sha256'])))
-    require(plan['definition']['sha256'] == manifest['compiled_native']['source_definition_sha256'],
-            'Frozen native definition differs from producer')
     inventory = observer_setup_inventory(definition_path)
     require(plan['observer_setup'] == inventory, 'Frozen observer setup inventory differs')
     budget.check(); emit(dict(state='native_setup_begin', inventory=inventory))
@@ -243,8 +283,7 @@ def _load_context(root, plan, bind, emit, budget):
     budget.check(); emit(dict(state='native_setup_complete', counts=dict(budget.setup_calls)))
     validate_classifier_target(config, manifest['shape_sha256'], observer.definition, definition_path)
     for name, digest in binding['input_sha256'].items(): bind(observer.root/name, digest)
-    compiled = read(root/'provenance/compiled-native.json')
-    compare_compiled_definition(compiled, observer)
+    compare_compiled_definition(identity['compiled_native'], observer)
     require(binding['definition_sha256'] == plan['definition']['sha256'], 'Observer binding changed')
     budget.check(); emit(dict(state='endpoint_setup_begin'))
     core = EndpointCore(shape, config['fixed_poses'])
@@ -252,9 +291,9 @@ def _load_context(root, plan, bind, emit, budget):
     budget.check(); emit(dict(state='endpoint_setup_complete'))
     return dict(manifest=manifest, summary=summary, region=region, config=config, law=law,
                 reference=reference, strata=strata, observer=observer, contact=contact, core=core,
-                classifier_binding=binding, shape_witness=witness, wall_certificate=certificate,
+                classifier_binding=binding, physical_input_witness=witness, wall_certificate=certificate,
                 target_and_regions_sha256=target_id, target_descriptor=descriptor,
-                observer_setup_inventory=inventory)
+                observer_setup_inventory=inventory, **identity)
 
 
 def classify_row(row, index, context, budget, sample_digest):
@@ -321,7 +360,7 @@ def run(plan_path, *, plan_sha256):
     for path in paths.values():
         require(not path.exists() and path.parent.is_dir(), 'Output must be new with an existing parent')
     bindings, source_bindings, readers = {}, {}, []
-    begun = completed = 0; active = None; phase = 'metadata'; context = None; runtime = None
+    begun = completed = 0; active = None; phase = 'metadata'; context = None; runtime = None; manifest = None
     ledger = paths['journal'].open('x'); labels = None
     def emit(value):
         ledger.write(json.dumps(value, allow_nan=False)+'\n'); ledger.flush(); os.fsync(ledger.fileno())
@@ -361,7 +400,10 @@ def run(plan_path, *, plan_sha256):
         context = _load_context(root, plan, bind, emit, budget)
         emit(dict(state='inputs_bound', samples=count, input_sha256=bindings, source_sha256=source_bindings,
                   runtime=runtime, classifier_binding=context['classifier_binding'],
-                  shape_witness=context['shape_witness'], wall_certificate=context['wall_certificate']))
+                  shape_witness=context['shape_witness'], wall_certificate=context['wall_certificate'],
+                  source_schema=context['source_schema'], native_identity_origin=context['native_identity_origin'],
+                  compiled_native_binding=context['compiled_native_binding'],
+                  shape_compatibility_binding=context['shape_compatibility_binding']))
         maximum = budget.limits['max_record_bytes']
         samples, attempts = BoundedLines(root/'samples.jsonl', maximum), BoundedLines(root/'attempts.jsonl', maximum)
         readers.extend((samples, attempts)); labels = paths['labels'].open('xb'); label_hash = hashlib.sha256()
@@ -397,6 +439,10 @@ def run(plan_path, *, plan_sha256):
         require(not (root/'failure.json').exists(), 'Producer failure appeared during pass')
         budget.check()
         result = dict(schema=SCHEMA, complete=True, passed=True, samples=count, seed=manifest['seed'],
+            source_schema=context['source_schema'], native_identity_origin=context['native_identity_origin'],
+            compiled_native_binding=context['compiled_native_binding'],
+            shape_compatibility_binding=context['shape_compatibility_binding'],
+            physical_input_witness=context['physical_input_witness'],
             root=str(root), manifest_sha256=plan['population']['manifest_sha256'],
             samples_sha256=plan['population']['samples_sha256'], attempts_sha256=plan['population']['attempts_sha256'],
             labels=dict(path=str(paths['labels']), sha256=label_hash.hexdigest()),
@@ -423,6 +469,10 @@ def run(plan_path, *, plan_sha256):
                      error_type=type(exc).__name__, error=str(exc), input_stream_context=[r.last for r in readers])
         if not ledger.closed: emit(event); ledger.close()
         failure = dict(schema=SCHEMA, complete=False, passed=False, **event, input_sha256=bindings,
+                       source_schema=None if manifest is None else manifest.get('schema'),
+                       native_identity_origin=None if context is None else context['native_identity_origin'],
+                       compiled_native_binding=None if context is None else context['compiled_native_binding'],
+                       shape_compatibility_binding=None if context is None else context['shape_compatibility_binding'],
                        source_sha256=source_bindings, runtime=runtime,
                        query_counts={} if budget is None else dict(budget.calls),
                        observer_setup_counts={} if budget is None else dict(budget.setup_calls),

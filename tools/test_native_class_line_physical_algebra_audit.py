@@ -446,5 +446,52 @@ audit.audit(Path(sys.argv[1]), output=Path(sys.argv[2]))
             self.assertFalse(output.exists())
 
 
+class HardFreeDispatchTests(unittest.TestCase):
+    def make_population(self, root):
+        from test_hard_free_line_physical_reference import fixture as hard_fixture
+        root.mkdir()
+        region, guide, config, shape, rows, manifest, summary = hard_fixture(root)
+        manifest.update(resume_supported=False,
+            attempt_journal='attempts.jsonl; begin record before each draw; no retries')
+        save(root/'manifest.json', manifest)
+        summary['manifest'] = manifest; save(root/'summary.json', summary)
+        return region, rows, manifest, summary
+
+    def test_v6_audit_keeps_real_schema_and_all_zeros_without_atom_initialization(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'population'; _, rows, manifest, summary = self.make_population(root)
+            original = (root/'manifest.json').read_bytes(); samples = (root/'samples.jsonl').read_bytes()
+            with (mock.patch.object(audit.physical.line.Reconstructor, '__init__',
+                                    side_effect=AssertionError('No H atom/tree constructor')),
+                  mock.patch.object(audit.line.NativeLineReference, '__init__',
+                                    side_effect=AssertionError('No native line constructor'))):
+                result = audit.audit(root, output=Path(tmp)/'audit.json')
+            self.assertTrue(result['passed']); self.assertEqual(result['source_schema'], audit.hard_input.SCHEMA)
+            self.assertEqual(result['all_rows_algebra'], 3); self.assertEqual(result['finite_count'], 1)
+            self.assertEqual(result['estimate']['draws'], 3)
+            self.assertEqual(result['native_identity_origin'], 'not_present_in_v6_producer')
+            self.assertIsNone(result['native_source_identity'])
+            self.assertFalse(result['stream_contract']['declared_in_producer_manifest'])
+            self.assertEqual(result['independently_checked_distinct_role_keys'], 9)
+            self.assertAlmostEqual(result['estimate']['logQ'], summary['estimates']['region']['logQ'])
+            self.assertEqual((root/'manifest.json').read_bytes(), original)
+            self.assertEqual((root/'samples.jsonl').read_bytes(), samples)
+            self.assertFalse(result['geometry_certified'])
+
+    def test_v6_failure_retains_original_begun_draw_and_unknown_schema_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'population'; _, rows, manifest, summary = self.make_population(root)
+            rows[1]['backmapped_latent'][0] += .3
+            jsonlines(root/'samples.jsonl', rows); summary['samples_sha256'] = sha(root/'samples.jsonl')
+            save(root/'summary.json', summary); output = Path(tmp)/'audit.json'
+            with self.assertRaises(ValueError): audit.audit(root, output=output)
+            failure = audit.read(output.with_suffix('.failure.json'))
+            self.assertEqual((failure['draw'], failure['begun_rows'], failure['completed_rows']), (1, 2, 1))
+            self.assertFalse(output.exists())
+            with self.assertRaises(ValueError): audit.audit(root, output=output)
+        with self.assertRaisesRegex(ValueError, 'Unsupported physical producer schema'):
+            audit.validate_manifest({'schema': 'invented-v8'}, {})
+
+
 if __name__ == '__main__':
     unittest.main()

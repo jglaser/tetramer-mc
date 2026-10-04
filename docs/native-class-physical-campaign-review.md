@@ -448,18 +448,61 @@ Independent implementation review is recorded in
 These are implementation checks, not fresh protein geometry evidence or
 all-row certification.
 
-Before a primary physical campaign can be frozen, resolve a concrete format
-compatibility gap: the optimized existing H normalizer emits v6, whereas the
-new class-line algebra, endpoint and selected-geometry workers admit v7.
-The comparison needs an explicit v6 path using the existing H reference and
-common physical labels/statistics. Relabeling v6 as v7 is invalid; substituting
-the v7 H-only diagnostic would preserve its unnecessary class-geometry cost
-and would not provide the intended optimized-H runtime control.
+The optimized existing H normalizer emits v6. Its explicit compatibility path
+is now implemented below; the v7 H-only diagnostic still incurs unnecessary
+class-geometry cost and is not the intended optimized-H runtime control.
 
-The remaining work is that compatibility path, a frozen population preparer and
+The remaining work is a frozen population preparer and
 failure-draining lifecycle controller, and a final admission layer joining all
 algebra, endpoint, selected-geometry and population receipts. All 18 original
 proposal jobs must finish successfully before the one-time cost summary and
 fresh physical allocation. The selected receipt alone opens no convergence,
 full-vessel or assembly gate. A primary-only 16-population comparison cannot
 close the separate population-size, defensive-mixture and intensity checks.
+
+## Explicit optimized-H v6 input and common physical analysis
+
+`tools/hard_free_physical_input.py` now supplies v6 provenance, scalar accounting
+and all-row proposal algebra. It preserves the actual hard-free manifest,
+branches and traces: no v7 relabeling, synthetic class channels or claim that
+the producer contained native geometry. The v6 role-key receipt identifies the
+existing source convention as reconstructed rather than manifest-declared;
+neither schema's derived keys prove actual RNG execution or independence.
+
+The algebra path shares pure chart and Gaussian numerical helpers and reuses
+the existing H density/inverse-CDF reference on saved intervals. It constructs
+no atoms, search trees or native observers. Empty positive-measure H unions
+can omit isolated feasible tangent points; those axes do not decide physical
+hard validity. Their ambiguity is counted, while independent endpoint checks
+remain authoritative. Selected full-H reconstruction retains the strict
+tangent points and keeps proposal support distinct from physical feasibility.
+
+The endpoint plan for v6 additionally requires `compiled_native` and
+`shape_compatibility` as separate `{path, sha256}` references. Both must match
+the original definition, repaired shape and fixed scaffold. Receipts expose
+`native_identity_origin=external_analysis_plan`, `compiled_native_binding`
+and `shape_compatibility_binding`; the population consumer rechecks these
+bindings and identities. V7 retains its producer-native provenance. Native,
+contact-without-entry, old-R5 intersection/remainder and unbound definitions
+are common to both arms and come from the independent endpoint pass.
+
+Selected geometry now dispatches by the actual producer format. V6 certifies
+only the selected hard-free line intervals and proposal density; v7 also
+checks its native/contact line intervals. Both retain the same 16 unconditional
+plus at most four maximum-contributor row allocation, one full-density call
+and three unpruned axis queries per row, and all original attempted denominators.
+Neither selected audit replaces the independent endpoint classifications.
+
+The integrated source-bound validation passed **69 synthetic tests** in five
+modules on one CPU, with an unchanged archived closure of 64 source files.
+Receipt: `results/physical-v6-v7-bridge-validation-20261004/validation.json`,
+SHA256 `267485b1821528bad100c4a98d64cb6559b3076f77a3c97dd0153aeb6f14e4cc`.
+The tests cover genuine v6 records, uniform/conditioned/fallback density,
+inverse coordinates and Jacobians, cloud arithmetic, invalid zeros, tangent
+ambiguity, missing or tampered external identities, selected query limits,
+failure preservation, and identical regional statistics for matched synthetic
+v6/v7 weights. No protein row, new pose or Poisson cloud was evaluated.
+Independent source review identified the tangent and shape-witness binding
+issues; both were fixed before this passing suite. Existing scientific jobs
+use their frozen code and are unchanged. Physical convergence and assembly
+remain unresolved.

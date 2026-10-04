@@ -35,7 +35,7 @@ def ref(path):
     return dict(path=str(Path(path).resolve()), sha256=streaming.sha(path))
 
 
-def fixture(base, counts=(4,), *, scales=None):
+def fixture(base, counts=(4,), *, scales=None, schemas=None):
     base = Path(base).resolve(); common = base/'common'; common.mkdir()
     shape = dict(synthetic=True, atoms=[]); save(common/'shape.json', shape)
     shape_sha = streaming.sha(common/'shape.json')
@@ -54,6 +54,9 @@ def fixture(base, counts=(4,), *, scales=None):
         _, descriptor, target_id = adapter.target_identity(target, adapter.Bindings())
     arms = []; all_rows = {}
     for arm_index, count in enumerate(counts):
+        source_schema = full.SCHEMA if schemas is None else schemas[arm_index]
+        hard_free = source_schema == streaming.hard_input.SCHEMA
+        assert hard_free or source_schema == full.SCHEMA
         arm = dict(id=f'arm{arm_index}', samples=8, populations=[])
         for p in range(count):
             root = base/f'a{arm_index}-p{p}'; root.mkdir(); prov = root/'provenance'; prov.mkdir()
@@ -61,9 +64,18 @@ def fixture(base, counts=(4,), *, scales=None):
             manifest, _, source = synthetic_rows(activity=.035)
             manifest.update(samples=8, seed=seed, resume_supported=False,
                             compiled_native=dict(source_definition_sha256=target['native_definition']['sha256']))
+            if hard_free:
+                manifest.update(schema=streaming.hard_input.SCHEMA,
+                    guide_schema=streaming.hard_input.GUIDE_SCHEMA,
+                    proposal_kind=streaming.hard_input.PROPOSAL_KIND)
+                for name in ('compiled_native', 'density_trace_contract', 'random_stream_contract',
+                             'class_scope', 'failure_trace_contract'):
+                    manifest.pop(name, None)
             manifest.pop('maximum_original_q')
+            manifest['physical_fixed_neighbors'] = region['physical_fixed_neighbors']
             for name, value, key in [('region.json', region, 'region_sha256'),
-                        ('shape.json', shape, 'shape_sha256'), ('input-config.json', {}, 'config_sha256'),
+                        ('shape.json', shape, 'shape_sha256'),
+                        ('input-config.json', {'fixed_poses': region['physical_fixed_neighbors']}, 'config_sha256'),
                         ('importance-guide.json', {}, 'importance_guide_sha256'),
                         ('source-bundle.json', {'synthetic': True}, 'source_bundle_sha256')]:
                 save(prov/name, value); manifest[key] = streaming.sha(prov/name)
@@ -83,10 +95,15 @@ def fixture(base, counts=(4,), *, scales=None):
                     row['log_importance_weight'] += math.log(scale)
                 else:
                     row.update(log_hard_weight=None, log_importance_weight=None, clouds=[])
+                if hard_free:
+                    row['proposal_branch'] = 'hard-free-line'
+                    row['hard_free_line_draw'] = row.pop('native_class_line_draw')
+                    row.pop('native_class_line_density', None)
+                    row['hard_free_line_density'] = {'conditioning_disabled': True}
                 rows.append(row)
             save(root/'manifest.json', manifest); lines(root/'samples.jsonl', rows)
             lines(root/'attempts.jsonl', [dict(draw=i, state='begin') for i in range(8)])
-            checked = [adapter.weights.validate_row(row, expected_draw=i, manifest=manifest, region=region)
+            checked = [streaming.validate_row(row, expected_draw=i, manifest=manifest, region=region)
                        for i, row in enumerate(rows)]
             counters = adapter.Counter()
             for value in checked: counters.update(value['counters'])
@@ -101,6 +118,7 @@ def fixture(base, counts=(4,), *, scales=None):
             inputs = {str(path): streaming.sha(path) for path in input_paths}
             sources = {str(Path(__file__).resolve()): streaming.sha(__file__)}
             algebra = dict(schema=streaming.SCHEMA, complete=True, passed=True, seed=seed, samples=8,
+                source_schema=source_schema,
                 root=str(root), all_rows_algebra=8, geometry_certified=False, physical_contact_labels_certified=False,
                 input_sha256=inputs, source_sha256=sources, runtime=dict(synthetic_receipt=True),
                 counts=dict(counters), estimate=estimate, hard_region=hard,
@@ -119,6 +137,7 @@ def fixture(base, counts=(4,), *, scales=None):
                     contact=dict(exclusion_contact=contact, synthetic=True) if i < 4 else None))
             lines(root/'labels.jsonl', labels)
             label_receipt = dict(schema=adapter.LABEL_SCHEMA, complete=True, passed=True, seed=seed, samples=8,
+                source_schema=source_schema,
                 manifest_sha256=streaming.sha(root/'manifest.json'), samples_sha256=summary['samples_sha256'],
                 attempts_sha256=summary['attempts_sha256'], labels=ref(root/'labels.jsonl'),
                 target_and_regions_sha256=target_id, input_sha256=inputs, source_sha256=sources,
@@ -128,6 +147,19 @@ def fixture(base, counts=(4,), *, scales=None):
                 region_sha256=descriptor['region_sha256'], reference_region_sha256=descriptor['old_r5_region_sha256'],
                 shape_sha256=descriptor['shape_sha256'], definition_sha256=descriptor['native_definition_sha256'],
                 strata_sha256=descriptor['strata_sha256'])
+            if hard_free:
+                # Fabricated analysis-native authority, deliberately absent
+                # from the genuine v6 producer manifest in this fixture.
+                path = root/'external-compiled-native.json'
+                save(path, dict(source_definition_sha256=descriptor['native_definition_sha256'],
+                    source_input_sha256={'tetramer-shape.json': shape_sha},
+                    fixed_poses=region['physical_fixed_neighbors']))
+                report_path = root/'external-shape-witness.json'
+                save(report_path, dict(compiled_sha256=streaming.sha(path), expected_shape_sha256=shape_sha,
+                                       compatible=True, synthetic=True))
+                label_receipt.update(native_identity_origin='external_analysis_plan', compiled_native_binding=ref(path),
+                    shape_compatibility_binding=ref(report_path),
+                    input_sha256=dict(inputs, **{str(p): streaming.sha(p) for p in (path, report_path)}))
             save(root/'label-receipt.json', label_receipt)
             arm['populations'].append(dict(id=f'p{p:02}', seed=seed, directory=str(root),
                 manifest=ref(root/'manifest.json'), summary=ref(root/'summary.json'),
@@ -159,6 +191,51 @@ def change_labels(plan_path, plan, mutate):
 
 
 class AdapterTests(unittest.TestCase):
+    def test_v6_and_v7_common_physical_statistics_without_relabeling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, plan, _ = fixture(tmp, (4, 4), schemas=(streaming.hard_input.SCHEMA, full.SCHEMA))
+            result = run(path, plan)
+            for kind in ('Qz', 'Q0'):
+                a = result['arms']['arm0']['estimates'][kind]['primary']
+                b = result['arms']['arm1']['estimates'][kind]['primary']
+                self.assertEqual(a['row_diagnostics'], b['row_diagnostics'])
+                self.assertEqual(a['population_statistics']['free_energy_contrast'],
+                                 b['population_statistics']['free_energy_contrast'])
+            for index, schema in enumerate((streaming.hard_input.SCHEMA, full.SCHEMA)):
+                self.assertTrue(all(p['source_schema'] == schema for p in result['arms'][f'arm{index}']['populations']))
+                self.assertEqual(streaming.read(plan['arms'][index]['populations'][0]['manifest']['path'])['schema'], schema)
+            self.assertFalse(result['physical_campaign_gate_open'])
+
+    def test_v6_requires_external_native_identity_and_matching_receipt_schema(self):
+        for mutation in ('schema', 'origin', 'definition', 'binding', 'missing_witness',
+                         'unbound_witness', 'wrong_witness', 'scaffold'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmp:
+                path, plan, _ = fixture(tmp, schemas=(streaming.hard_input.SCHEMA,))
+                slot = plan['arms'][0]['populations'][0]; p = Path(slot['labels']['path'])
+                receipt = streaming.read(p)
+                if mutation == 'schema': receipt.pop('source_schema')
+                elif mutation == 'origin': receipt['native_identity_origin'] = 'producer_compiled_native'
+                elif mutation == 'binding': receipt['input_sha256'].pop(receipt['compiled_native_binding']['path'])
+                elif mutation == 'missing_witness': receipt.pop('shape_compatibility_binding')
+                elif mutation == 'unbound_witness': receipt['input_sha256'].pop(receipt['shape_compatibility_binding']['path'])
+                elif mutation == 'wrong_witness':
+                    witness = Path(receipt['shape_compatibility_binding']['path']); value = streaming.read(witness)
+                    value['compiled_sha256'] = '0'*64; save(witness, value)
+                    receipt['shape_compatibility_binding'] = ref(witness)
+                    receipt['input_sha256'][str(witness)] = streaming.sha(witness)
+                else:
+                    native = Path(receipt['compiled_native_binding']['path']); value = streaming.read(native)
+                    if mutation == 'definition': value['source_definition_sha256'] = '0'*64
+                    else: value['fixed_poses'] = [{'different': True}]
+                    save(native, value)
+                    receipt['compiled_native_binding'] = ref(native); receipt['input_sha256'][str(native)] = streaming.sha(native)
+                    witness = Path(receipt['shape_compatibility_binding']['path']); value = streaming.read(witness)
+                    value['compiled_sha256'] = streaming.sha(native); save(witness, value)
+                    receipt['shape_compatibility_binding'] = ref(witness)
+                    receipt['input_sha256'][str(witness)] = streaming.sha(witness)
+                save(p, receipt); slot['labels'] = ref(p); save(path, plan)
+                with self.assertRaises(ValueError): run(path, plan)
+
     def test_four_and_eight_denominators_covariance_partitions_and_free_energy(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, plan, rows = fixture(tmp, (4, 8))

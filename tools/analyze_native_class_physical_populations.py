@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arithmetic-only regional statistics for completed, separately labelled v7 rows.
+"""Arithmetic-only regional statistics for separately labelled v6/v7 rows.
 
 This is a downstream adapter, not a label producer, geometry auditor, allocation
 or launcher. ``analyze(plan_path)`` consumes a hash-bound JSON plan with ``target``
@@ -24,7 +24,7 @@ are null on noncontributing attempts. Applicable labels preserve full observer
 objects; native/contact projections must agree with them. The old-R5 partition
 is radius <= 5 AND original q > 1 AND old capture, computed here.
 
-All attempted denominators survive, and the scalar v7 validator verifies J/q and
+All attempted denominators survive, and each producer's validator verifies J/q and
 the LINEAR two-cloud mean. No saved guide interval is a physical label. All-row
 algebra and labels still do not discharge selected full-interval geometry,
 spatial-Poisson/envelope, unseen-mass, full-vessel or assembly obligations. This
@@ -260,6 +260,8 @@ def label_regions(label, row, accounting, sample_hash):
 
 def check_receipt(receipt, root, manifest, summary, target_id, kind, bindings, descriptor):
     require(receipt['complete'] is True and receipt['passed'] is True, 'Incomplete '+kind+' receipt')
+    require(receipt.get('source_schema', streaming.full.SCHEMA) == manifest['schema'],
+            'Receipt producer schema differs')
     require(type(receipt['samples']) is int and receipt['samples'] == manifest['samples']
             and type(receipt['seed']) is int and receipt['seed'] == manifest['seed'], 'Receipt allocation differs')
     for key in ('samples_sha256', 'attempts_sha256'):
@@ -290,6 +292,30 @@ def check_receipt(receipt, root, manifest, summary, target_id, kind, bindings, d
                               ('definition_sha256', descriptor['native_definition_sha256']),
                               ('shape_sha256', descriptor['shape_sha256'])]:
             require(receipt[key] == expected, 'Independent label scope differs '+key)
+        if manifest['schema'] == streaming.hard_input.SCHEMA:
+            require(receipt.get('native_identity_origin') == 'external_analysis_plan',
+                    'v6 physical labels need independently bound analysis-native provenance')
+            reference = receipt['compiled_native_binding']
+            path = bindings.reference(reference)
+            require(receipt['input_sha256'].get(str(path)) == reference['sha256'],
+                    'External native geometry was not bound by the endpoint pass')
+            compiled = streaming.read(path)
+            require(compiled['source_definition_sha256'] == descriptor['native_definition_sha256']
+                    and compiled['source_input_sha256']['tetramer-shape.json'] == descriptor['shape_sha256'],
+                    'External native geometry targets different physical labels')
+            report_ref = receipt.get('shape_compatibility_binding')
+            require(type(report_ref) is dict, 'Missing external shape-compatibility binding')
+            report_path = bindings.reference(report_ref)
+            require(receipt['input_sha256'].get(str(report_path)) == report_ref['sha256'],
+                    'External shape witness was not bound by the endpoint pass')
+            report = streaming.read(report_path)
+            require(report['compiled_sha256'] == reference['sha256']
+                    and report['expected_shape_sha256'] == descriptor['shape_sha256']
+                    and report['compatible'] is True, 'External shape witness identity differs')
+            config_path = root/'provenance/input-config.json'
+            config = streaming.read(bindings.bind(config_path, manifest['config_sha256']))
+            require(compiled['fixed_poses'] == config['fixed_poses'] == manifest['physical_fixed_neighbors'],
+                    'External native observer scaffold differs')
 
 
 def consume_population(slot, samples, region, descriptor, target_id, bindings):
@@ -302,15 +328,17 @@ def consume_population(slot, samples, region, descriptor, target_id, bindings):
     require(type(manifest['samples']) is int and manifest['samples'] == samples
             and type(slot['seed']) is int and manifest['seed'] == slot['seed'], 'Population allocation differs')
     require(manifest['region_sha256'] == descriptor['region_sha256']
-            and manifest['shape_sha256'] == descriptor['shape_sha256']
-            and manifest['compiled_native']['source_definition_sha256'] == descriptor['native_definition_sha256'],
+            and manifest['shape_sha256'] == descriptor['shape_sha256'],
             'Population target/classifier identity differs')
+    streaming.validate_manifest(manifest, region)
+    if manifest['schema'] == streaming.full.SCHEMA:
+        require(manifest['compiled_native']['source_definition_sha256'] == descriptor['native_definition_sha256'],
+                'Producer native definition differs')
     for filename, key in [('region.json', 'region_sha256'), ('shape.json', 'shape_sha256'),
                           ('input-config.json', 'config_sha256'), ('importance-guide.json', 'importance_guide_sha256'),
                           ('source-bundle.json', 'source_bundle_sha256')]:
         bindings.bind(root/'provenance'/filename, manifest[key])
     require(streaming.read(root/'provenance/region.json') == region, 'Population domain differs')
-    weights.validate_manifest(manifest, region)
     for filename, key in [('samples.jsonl', 'samples_sha256'), ('attempts.jsonl', 'attempts_sha256')]:
         bindings.bind(root/filename, summary[key])
     algebra, labels = (streaming.read(bindings.reference(slot[key])) for key in ('algebra', 'labels'))
@@ -329,7 +357,7 @@ def consume_population(slot, samples, region, descriptor, target_id, bindings):
             require(row is not None and attempt is not None and label is not None, 'Missing unconditional stream row')
             require(type(attempt.get('draw')) is int and attempt == dict(draw=index, state='begin'),
                     'Missing/reordered attempted draw journal')
-            value = weights.validate_row(row, expected_draw=index, manifest=manifest, region=region)
+            value = streaming.validate_row(row, expected_draw=index, manifest=manifest, region=region)
             selected = label_regions(label, row, value, streams[0].last['sha256'])
             anomalies += int(label['applicable'] and label['native'] and not label['exclusion_contact'])
             keys, bins = keys_for(row, selected, region)
@@ -351,7 +379,7 @@ def consume_population(slot, samples, region, descriptor, target_id, bindings):
         require((observed['logQ'] is None) == (audited['logQ'] is None), 'Audit zero mass differs')
         if observed['logQ'] is not None: close(observed['logQ'], audited['logQ'], 'Audit linear mean differs')
     cpu = weights._finite(summary['sampler_cpu_seconds'], 'sampler CPU', 0.)
-    return moments, dict(id=slot['id'], seed=slot['seed'], draws=samples,
+    return moments, dict(id=slot['id'], source_schema=manifest['schema'], seed=slot['seed'], draws=samples,
         unconditional_denominator=samples, counters=dict(counters), branches=dict(branches),
         stratum_attempts=dict(bin_counts), sampler_cpu_seconds=cpu,
         native_entry_unbound_anomalies=anomalies, classifier_contact_consistency_passed=anomalies == 0,
@@ -536,7 +564,7 @@ def analyze(plan_path):
             'Bind and complete the separately declared selected full-interval geometry audit.',
             'Retain spatial-Poisson/envelope/RNG implementation evidence.',
             'Resolve all material strata, historical discrepancies, population-size/intensity sensitivities and unseen-contact remainder.'],
-        scope='Fresh v7 arithmetic adapter; all attempted denominators and stages remain separate. No full physical convergence or assembly certification.')
+        scope='Explicit v6/v7 arithmetic adapter; all attempted denominators and stages remain separate. No full physical convergence or assembly certification.')
 
 
 def main():

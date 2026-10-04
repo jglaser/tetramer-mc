@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Stream all saved v7 attempts through proposal and estimator algebra.
+"""Stream saved v6 hard-free or v7 class attempts through their own algebra.
 
 No poses/clouds are generated and no atom overlap, native classifier or atom
 search tree is evaluated. Saved H/native/exclusion unions are inputs to the
-proposal algebra, not independently measured physical labels. Static shape
-bijection validation is performed once without overlap queries. This receipt
+proposal algebra, not independently measured physical labels. For v7, static
+shape bijection validation is performed once without overlap queries; v6 has
+no producer-native geometry to certify. This receipt
 cannot replace independently allocated geometry or final contact-label audits.
 """
 from __future__ import annotations
@@ -30,6 +31,7 @@ import scipy
 import native_class_line_algebra_reference as algebra
 import native_class_line_physical_reference as full
 import native_class_line_weight_row as weights
+import hard_free_physical_input as hard_input
 
 physical, line = full.physical, algebra.line
 require, close = physical.require, physical.close
@@ -41,6 +43,7 @@ SOURCE_NAMES = (
     'native_class_line_reference.py', 'hard_free_line_reference.py',
     'analyze_contact_line_audit.py', 'native_contact_regions.py',
     'analyze_native_region_reference.py', 'analyze_basin_normalizers.py',
+    'hard_free_physical_input.py',
 )
 OBLIGATIONS = [
     'Saved H/native/exclusion base unions are not independently reconstructed here.',
@@ -134,8 +137,39 @@ def runtime_identity():
                 scope='Python executable and package initializer bytes plus versions/platform; not a hash of every system/shared library')
 
 
+def input_backend(manifest):
+    """Select the actual producer schema; never rewrite rows or manifests."""
+    if manifest.get('schema') == full.SCHEMA:
+        return weights
+    require(manifest.get('schema') == hard_input.SCHEMA, 'Unsupported physical producer schema')
+    return hard_input
+
+
+def validate_manifest(manifest, region):
+    return input_backend(manifest).validate_manifest(manifest, region)
+
+
+def validate_row(row, *, expected_draw, manifest, region):
+    return input_backend(manifest).validate_row(row, expected_draw=expected_draw,
+                                               manifest=manifest, region=region)
+
+
+def stream_contract(manifest):
+    if manifest['schema'] == full.SCHEMA:
+        return full.validate_stream_contract(manifest)
+    require(manifest['schema'] == hard_input.SCHEMA, 'Unsupported stream schema')
+    return dict(hash_domain='tetramer-uniform-latent-region-v1',
+        key_fields=['master seed u64 little endian', 'draw u64 little endian',
+                    'cloud index u64 little endian', 'role UTF-8 bytes'],
+        proposal_role='latent', proposal_cloud_index=0, physical_cloud_role='cloud',
+        physical_cloud_indices=[0, 1], declared_in_producer_manifest=False,
+        scope='Reconstruct the existing v6 source convention; derived role keys do not prove actual RNG execution or independence.')
+
+
 def _provenance(root, bind):
     manifest = read(bind(root/'manifest.json'))
+    if manifest.get('schema') == hard_input.SCHEMA:
+        return hard_input.provenance(root, bind)
     summary = read(bind(root/'summary.json'))
     require(manifest['schema'] == full.SCHEMA and manifest['guide_schema'] == full.GUIDE_SCHEMA
             and manifest['proposal_kind'] == full.PROPOSAL_KIND, 'Wrong v7 physical class-guide schema')
@@ -183,6 +217,8 @@ def _provenance(root, bind):
 
 
 def _check_row(row, index, manifest, region, config, law):
+    if manifest.get('schema') == hard_input.SCHEMA:
+        return hard_input.check_row(row, index, manifest, region, config, law)
     accounting = weights.validate_row(row, expected_draw=index, manifest=manifest, region=region)
     u = algebra.finite_array(row['latent'], (6,), 'latent coordinate')
     result = law.evaluate_saved(u, row['native_class_line_density'])
@@ -320,7 +356,7 @@ def audit(root, *, output, journal=None):
         require(type(cpu) in (int, float) and math.isfinite(cpu) and cpu >= 0, 'Invalid sampler CPU')
         for path, digest in bindings.items(): require(sha(path) == digest, 'Input/source/runtime changed during audit '+path)
         require(not (root/'failure.json').exists(), 'Producer failure appeared during audit')
-        result = dict(schema=SCHEMA, complete=True, passed=True, root=str(root), seed=manifest['seed'],
+        result = dict(schema=SCHEMA, source_schema=manifest['schema'], complete=True, passed=True, root=str(root), seed=manifest['seed'],
             samples=count, all_rows_algebra=count, independently_reconstructed_geometry_rows=0,
             geometry_certified=False, physical_contact_labels_certified=False, full_geometry_row_ids=[],
             finite_count=estimate['nonzero'], estimate=estimate, hard_region=hard_estimate,
@@ -329,11 +365,12 @@ def audit(root, *, output, journal=None):
             input_sha256=bindings, source_sha256=source_bindings, runtime=runtime,
             samples_sha256=summary['samples_sha256'], attempts_sha256=summary['attempts_sha256'],
             executable_sha256=manifest['executable_sha256'], source_bundle_sha256=manifest['source_bundle_sha256'],
-            native_source_identity=manifest['compiled_native'], setup_static_validation=witness,
+            native_source_identity=manifest.get('compiled_native'), setup_static_validation=witness,
+            native_identity_origin='producer_compiled_native' if manifest['schema'] == full.SCHEMA else 'not_present_in_v6_producer',
             native_source_files_reopened=False, chart_factor_validation=law.chart_factor_validation,
             sampler_cpu_seconds=cpu, analysis_cpu_seconds=time.process_time()-started,
             wall_seconds=time.monotonic()-wall, retained_numeric_bytes=z.nbytes+h.nbytes+pairs.nbytes,
-            stream_contract=full.validate_stream_contract(manifest),
+            stream_contract=stream_contract(manifest),
             independently_checked_distinct_role_keys=3*count,
             role_key_scope='Three distinct derived role keys per exact attempted ID; unique input tuples across rows, without claiming actual random-stream independence.',
             new_pose_draws=0, new_Poisson_clouds=0, input_unchanged_after_audit=True,

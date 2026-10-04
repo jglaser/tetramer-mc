@@ -71,8 +71,8 @@ stream in both arms has 4,608 attempts, zero accepted moves and zero proposal
 self-loops. Each attempt reached a hard/wall-valid candidate and was rejected
 by the joint proposal-density and Poisson-bath acceptance gate. This rules out
 cap exhaustion or zero source support as the final rejection cause for these
-attempts. It does not separate a proposal penalty from a bath penalty; that
-requires a declared reduction of the saved factors. Rejected intermediate
+attempts. Those aggregate counts alone do not separate a proposal penalty from
+a bath penalty. Rejected intermediate
 geometric trials may still contribute cost before the feasible candidate.
 
 The passed initial-state reference identifies a native internal motif for 9/24
@@ -83,6 +83,54 @@ need not be equal between unequally occupied regions. Independent conditional
 weights and the saved gate factors are needed to distinguish rare physical
 returns from poor proposals. The different preparations have not established
 equilibrium agreement.
+
+### Saved acceptance factors
+
+The subsequent bounded reduction completed successfully on all 16 context-2
+singleton chains: **73,728 attempts and 221,810 inner trials**, with no new
+geometry, bath draws or MC replay. The context was selected after observing its
+lack of accepted source moves; every chain and attempt within that follow-up
+allocation was then fixed before journal inspection. This is a development
+diagnostic, not an independent equilibrium estimate.
+
+Write the previously audited saved identity as `T = C + B`, where
+`C = log G(old) - log G(new)` is the complete proposal correction and `B` is
+the realized Poisson-bath log factor. Positive values favor the trial. The
+following ranges are **per-stream production medians**, not physical free energies
+or confidence intervals:
+
+| Moving member | Proposal `C` | Bath `B` | Combined `T` |
+|---|---:|---:|---:|
+| 9 | +19.5 to +23.3 | −54.4 to −51.8 | −34.9 to −29.1 |
+| 24 | about +26.9 | −101.2 to −98.4 | −74.4 to −71.6 |
+
+The proposal correction is favorable for 92.4% and 99.0% of source-production
+candidates for members 9 and 24, respectively. Every source-production bath
+factor is negative. Learned inner draws pass geometry only 4.87% and 1.73% of
+the time; consequently 92.1% and 97.1% of final candidates come from the uniform
+branch. These mostly uniform escape attempts lose favorable exclusion overlap.
+An adverse proposal-density correction is not their dominant obstruction.
+
+No fused target label was drawn in any of the 221,810 inner trials. All 32
+matched fused/unfused stratum summaries are identical. The saved schema does not
+contain catalogue screening or eligible-fusion counts, so this does not identify
+why fusion was unused. Missing compatible basins and rejection of approximate
+component means remain hypotheses, not findings.
+
+This result does not motivate an immediate correlated-transport campaign in
+this native-bound context. Retain it as a native-retention control and use the
+other contexts' native-registry audit to identify an appropriate reorganization
+target. Any future comparison of independent and correlated proposals must use
+matched kernels; repeating correlated trials until feasible generally needs an
+additional state-dependent normalization correction.
+
+The reduction used 71.34 CPU seconds and 129.02 worker wall seconds (131.06
+seconds including the enclosing child lifecycle). Five synthetic tests passed
+before the frozen run. The
+[complete factor summary](../results/trapped-singleton-gate-diagnostic-20261004/analysis/summary.json)
+has SHA `fcac797822e76837ef91813f6bf74fe14ebf74b45624a9482a3cd61b854d717e`;
+the [per-stream interpretation](../results/trapped-singleton-gate-diagnostic-20261004/supplemental-result.json)
+has SHA `a6a4dce8bd89e7a88d68c6eb3da6cd0631786cd38a784ec22e5ee68167bb7fb7`.
 
 The predeclared native audit was launched on all 128 completed trajectories at
 `/vast/xvg/tetramer-mc-runs/conditional-native-registry-audit-20261004`, with one

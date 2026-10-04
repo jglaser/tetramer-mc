@@ -109,6 +109,49 @@ class NativePairCandidateTests(unittest.TestCase):
         exact = candidate.NativePairCandidates(members, [pose([0, 0, 0])], 0.)
         self.assertEqual(exact.candidate_pairs([pose([0, 0, 0])]*2), [(0, 1)])
 
+    def test_rotated_member_boundary_survives_body_zero_recentering(self):
+        # A world-x displacement places the centroid near a face of the tree's
+        # infinity-norm neighborhood, while the mandatory predicate below uses
+        # all four noncentered members in the anchor frame, without a centroid.
+        model = candidate.NativePairCandidates(self.members, self.motifs, 2.)
+        origins = ([350., -200., 70.],
+                   [2.**35+.125, -2.**34+.375, 2.**33+.625],
+                   [-2.**35+.375, 2.**34+.125, -2.**33+.625])
+        steps = (-128, -16, -1, 0, 1, 16, 128)
+        for rotation in ([.8, .3, -.1], [-.2, .7, .6]):
+            anchor = pose([17., -31., 20.], rotation)
+            anchor['orientation'] = (np.asarray(anchor['orientation'])*(1.+5e-9)).tolist()
+            boundary = compose(anchor, self.motifs[0])
+            boundary['position'][0] += 2.
+            boundary['orientation'] = (-np.asarray(boundary['orientation'])*(1.-5e-9)).tolist()
+            observed_sides, represented_positions = set(), set()
+            for ulps in steps:
+                moving = copy.deepcopy(boundary)
+                for _ in range(abs(ulps)):
+                    moving['position'][0] = float(np.nextafter(moving['position'][0],
+                        math.inf if ulps > 0 else -math.inf))
+                represented_positions.add(moving['position'][0])
+                near_pair_passes = (0, 1) in oracle(self.members, self.motifs, [anchor, moving], 2.)
+                observed_sides.add(near_pair_passes)
+                for origin in origins:
+                    with self.subTest(rotation=rotation, ulps=ulps, body_zero=origin):
+                        # Body 0 and body 2 are mobile. Moving body 0 changes the
+                        # numerical tree origin but not the tested (1, 2) pair.
+                        state = [pose(origin, [.1, -.3, .2]), anchor, moving,
+                                 pose([600., -400., 700.], [.4, .1, -.2])]
+                        expected = oracle(self.members, self.motifs, state, 2.)
+                        self.assertEqual((1, 2) in expected, near_pair_passes)
+                        full = set(model.candidate_pairs(state))
+                        mobile = set(model.candidate_pairs(state, mobile_labels=[0, 2]))
+                        self.assertLessEqual(expected, full)
+                        self.assertLessEqual({p for p in expected if {0, 2}.intersection(p)}, mobile)
+                        # The large centering offset must exercise usable finite
+                        # arithmetic, not make an all-pairs fallback pass vacuously.
+                        self.assertNotIn((2, 3), full)
+                        self.assertNotIn((2, 3), mobile)
+            self.assertEqual(len(represented_positions), len(steps))
+            self.assertEqual(observed_sides, {False, True})
+
     def test_empty_duplicate_and_copied_catalogues(self):
         empty = candidate.NativePairCandidates(self.members, [], 2.)
         self.assertEqual(empty.candidate_pairs([pose([0, 0, 0])]*2), [])

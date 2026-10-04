@@ -190,6 +190,16 @@ the authenticated compact result is
 `results/native-pair-initial-audit-20261004/reviewed-result.json`, SHA256
 `c57887df18c62e4e4726b0869509c83eb8d906eb546bd3dac522eb65358b48d7`.
 
+One further synthetic test covers 42 combined numerical boundary scenarios:
+rotated, noncentered members; representable offsets on both sides of the
+all-member threshold; quaternion normalization; and large changes of body 0,
+which supplies the numerical tree origin. The independent all-member oracle
+found no missed pair in full or mobile-only searches; distant-pair exclusions
+also verify that the test does not pass through an all-pairs fallback. The
+production filter is unchanged. Receipt:
+`results/native-pair-candidates-boundary-validation-20261004/validation.json`,
+SHA256 `7746e3bc6bd2c5a5d4730e8017ddcc79a41135f891fc58cfaf9168f84f909bcf`.
+
 The result can show whether a move accesses distinct native registrations more
 efficiently in these conditional environments. It cannot establish converged
 equilibrium weights, finite-system assembly stability or physical kinetic rates.

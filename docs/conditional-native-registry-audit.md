@@ -181,6 +181,33 @@ suite. Receipt:
 `results/conditional-native-worker-validation-20261004/validation.json`, SHA256
 `514d2b260bb25675853b53a06e314b711341f2d6e87f996d7cb30b6240e983fb`.
 
+### Comparisons across proposal arms and initial conditions
+
+[The pure comparison reducer](../tools/conditional_native_comparisons.py) uses
+the saved per-chain summaries. It reads no trajectories and repeats no ESS
+estimation or geometry. The worker's final report includes 32 groups of four
+streams (context, arm and initialization), 192 matched arm contrasts, and 16
+initialization comparisons (context and arm). Each contrast retains the full
+sampler CPU denominator and propagates undefined ESS. The native ESS here is
+for edge/motif presence vectors; the separate contact analysis supplies whole
+contact-fingerprint ESS. They are different diagnostics.
+
+Initialization reports compare equally weighted four-stream categorical
+occupancy means, and retain all 16 cross-start and six within-start distances
+for each start. These pairwise distances share chains and are **not independent
+replicates**. Total variation applies to categorical environment probabilities;
+overlapping edge/motif marginals are compared with maximum absolute differences.
+No conditional targets are pooled, trajectories concatenated, or equal forward
+and reverse event rates required.
+
+Constant/empty histories, undefined ESS and absence of nonempty resolved returns
+remain explicit. Agreement of means does not hide streams stuck in different
+environments; identical all-empty histories do not establish mixing or important
+region coverage. Eight synthetic comparison tests and the two updated streaming
+pipeline tests passed with an unchanged 61-file source closure. Receipt:
+`results/conditional-native-comparisons-validation-20261004/validation.json`,
+SHA256 `e22f197675240d55425bed4474804a78d8754dadf5617d0e906d01f64d0b5251`.
+
 ### Initial-state differential check
 
 [The bounded reference worker](../tools/audit_native_pair_candidates.py) checks

@@ -23,6 +23,7 @@ import time
 
 import bind_conditional_native_audit as binding
 from conditional_native_metrics import iter_authenticated_endpoints, native_metrics
+from conditional_native_comparisons import reduce_native_comparisons
 from conditional_native_observer import ConditionalNativeObserver, canonical
 from native_class_physical_labels import load_bounded_classifier
 from run_native_class_physical_campaign import read, require, sha, write, verify_plan as verify_execution
@@ -296,12 +297,15 @@ def run(plan_path, digest, out):
                 and budget.calls['production_endpoints'] == plan['allocation']['production_endpoints']
                 and budget.calls['checkpoint_endpoints'] == plan['allocation']['checkpoint_endpoints']
                 and all(budget.calls[r+'_begun'] == budget.calls[r+'_completed'] for r in ROLES), 'Incomplete native audit inventory')
+            comparisons = reduce_native_comparisons(results)
+            budget.check()
             require(sha(plan_path) == digest and binding.runtime() == plan['runtime'], 'Native plan/runtime changed')
             for path, expected_sha in plan['input_sha256'].items(): require(sha(path) == expected_sha, 'Native audit input changed')
             require(binding.source_closure() == plan['source_sha256'], 'Native audit source changed')
             files[str(out/'attempts.jsonl')] = sha(out/'attempts.jsonl')
             report = dict(schema=SCHEMA, complete=True, passed=True, plan_sha256=digest, allocation=plan['allocation'],
                 chains=results, contexts=context_reports, query_counts=dict(budget.calls), setup_counts=dict(budget.setup_calls),
+                comparisons=comparisons,
                 native_identity=native_identity, native_setup_cpu_seconds=setup_cpu,
                 inherited_preparation_costs=plan['inherited_preparation_costs'],
                 analysis_cpu_seconds=time.process_time()-started, analysis_wall_seconds=time.monotonic()-wall,

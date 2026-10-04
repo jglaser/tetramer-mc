@@ -85,9 +85,14 @@ class NativeWorkerPipelineTests(unittest.TestCase):
             stack.enter_context(mock.patch.object(worker.binding, 'source_closure', return_value=plan['source_sha256']))
             stack.enter_context(mock.patch.object(worker.binding, 'checkpoint_blocks', return_value=[2, 4]))
             stack.enter_context(mock.patch.object(worker, 'live_authority'))
+            comparison = stack.enter_context(mock.patch.object(worker, 'reduce_native_comparisons',
+                return_value={'synthetic_reducer': True}))
             stack.enter_context(mock.patch.object(worker, 'load_bounded_classifier',
                 return_value=(ToyNative(fail=fail), {'synthetic': True})))
-            return worker.run(root/'audit-plan.json', worker.sha(root/'audit-plan.json'), root/'analysis')
+            result = worker.run(root/'audit-plan.json', worker.sha(root/'audit-plan.json'), root/'analysis')
+            comparison.assert_called_once_with(result['chains'])
+            self.assertEqual(result['comparisons'], {'synthetic_reducer': True})
+            return result
 
     def test_complete_streaming_pipeline_preserves_residence_and_cost_denominator(self):
         with tempfile.TemporaryDirectory() as directory:

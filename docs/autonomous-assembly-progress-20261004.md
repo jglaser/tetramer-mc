@@ -25,6 +25,10 @@ has not yet generalized to the blind proposal. The
 [construction and balance argument](context-relaxed-atlas.md) separate this
 work-limit failure from physical steric impossibility. Direct scoring at the
 actual centers, with a smaller neighbor search, is the next geometry diagnostic.
+The exported model's density evaluation has passed 524 frozen-panel comparisons
+between production Rust and independent Python, with maximum log-density
+disagreement `2.27e-13`. This checks finite-panel arithmetic, not mixing or
+physical occupancy; reciprocal-origin center coverage remains incomplete.
 
 ## Completed original-condition regional weights
 

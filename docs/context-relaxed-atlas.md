@@ -314,3 +314,55 @@ were performed. The independent terminal report SHA-256 is
 `f365c24ef868fb88e734d50fa9e80a340c85a76bc150c08387dd8f554ebb1b59`.
 See [the probe documentation](proposal-density-probe.md) for the separate
 direct/map factor conventions and limitations.
+
+## Avoiding a complete refit at every mobile-particle attempt
+
+There is a smaller reversible construction to test after geometric feasibility
+is understood. This is a design, not an implemented production kernel.
+Keep the original frozen virtual-branch law `p_b g_b^0(x)` for label selection,
+and define `G^0(x)=sum_b p_b g_b^0(x)`. Select the ordered labels by
+
+\[
+s(i,j\mid x,C)=\frac{p_i g_i^0(x)}{G^0(x)}p_j.
+\]
+
+Only then construct the two adjusted charts `h_i(C)` and `h_j(C)`, with the
+same deterministic rule for each label regardless of its role. Apply the
+existing extended Gaussian-noise involution between those charts. The inverse
+exchanges the labels and uses the returned inverse noise. If `step.log_correction`
+is its noise-density/Jacobian correction, the additional selection correction
+is
+
+\[
+\log g_j^0(y)-\log g_i^0(x)+\log G^0(x)-\log G^0(y).
+\]
+
+Equivalently compute `log responsibility_j(y) + log p_i -
+log responsibility_i(x) - log p_j` from the original weighted branch scores.
+The weights cancel in the first expression. Add this to the map correction
+and the validated physical bath correction, with any remaining outer-selection
+factor. The existing posterior shortcut containing only the two `log G`
+terms is insufficient: its cancellation assumes the selection and transport
+charts coincide.
+
+This needs at most two context-dependent refits and two evaluations of the
+original atlas, without an adjusted full-mixture sum or a quadratic table of
+chart pairs. `DockingProposal::branch_log_densities` supplies the original
+**map-factor** scores; do not substitute direct-model factors. Two single-chart
+`FixedBasinInvolution` objects can use `cross_chart_step`. For a first test,
+each adjusted virtual branch is an ordinary physical-pose chart, matching
+the exporter. Exact reciprocal branches remain in the original label law;
+do not invert an already decoded inverse-origin child a second time.
+
+The adjustment of the source chart must be identical to its adjustment when
+used as a destination. Current-pose warm starts, role-dependent fitting,
+success-filtered labels and wall-time-dependent fallbacks are not covered.
+The outside context stays fixed during this elementary kernel; optimization
+defines chart parameters rather than projecting a sampled state, so it adds
+no optimizer Jacobian. The existing chart/noise Jacobian is still required.
+
+Original responsibilities may poorly match the adjusted charts. Therefore
+reducing construction cost does not guarantee acceptance or contact mixing.
+Before protein use, test reverse reconstruction and correction antisymmetry,
+then reference stationary distributions with deliberately incorrect
+corrections as controls. Retain the separate uniform component.

@@ -1,0 +1,168 @@
+{
+  "schema": "two-leg-poisson-validation-v1",
+  "complete": true,
+  "passed": true,
+  "error": null,
+  "source_before": {
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ConditionalPoisson.lean": "8945b49e5a6c5d8f8e673b1dea1dd9cc4bd7ba86e3d2b1b39bfb56f4cff004c5",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/CountGate.lean": "7ea576a144c76c5d9b4b6a4c5ceeb137ffce9c4ed09d296084992c8ef764131a",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/FixedLengthSurrogate.lean": "e439eaa81fb83294e6cc1c9ac484356eb64038907398294e4129ef757cd07b2a",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/PairFlowPoisson.lean": "247cc12297fc9bd2d678573185a313a9f00d10b48192516b77b47948df6bda19",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Poisson.lean": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/TwoLegPoisson.lean": "6d32a0a6d9c192fc02aadc1c149062669f0b8c2668481560c93b67b5b1d9ba62",
+    "/home/xvg/tetramer-mc/formal/TwoLegPoissonAudit.lean": "926b9d6acb3c2e4e919d9d634a2c4587a42b8dbc3c1a9bac5bd8ce095db30574",
+    "/home/xvg/tetramer-mc/formal/lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "/home/xvg/tetramer-mc/formal/lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "/home/xvg/tetramer-mc/formal/lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434",
+    "/home/xvg/tetramer-mc/results/two-leg-poisson-validation-20261004/run.py": "4a842286c9239039c0a8d35fa548e5c7b57456d026d09a6d5f101290d7ddeec3"
+  },
+  "source_after": {
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ConditionalPoisson.lean": "8945b49e5a6c5d8f8e673b1dea1dd9cc4bd7ba86e3d2b1b39bfb56f4cff004c5",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/CountGate.lean": "7ea576a144c76c5d9b4b6a4c5ceeb137ffce9c4ed09d296084992c8ef764131a",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/FixedLengthSurrogate.lean": "e439eaa81fb83294e6cc1c9ac484356eb64038907398294e4129ef757cd07b2a",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/PairFlowPoisson.lean": "247cc12297fc9bd2d678573185a313a9f00d10b48192516b77b47948df6bda19",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Poisson.lean": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/TwoLegPoisson.lean": "6d32a0a6d9c192fc02aadc1c149062669f0b8c2668481560c93b67b5b1d9ba62",
+    "/home/xvg/tetramer-mc/formal/TwoLegPoissonAudit.lean": "926b9d6acb3c2e4e919d9d634a2c4587a42b8dbc3c1a9bac5bd8ce095db30574",
+    "/home/xvg/tetramer-mc/formal/lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "/home/xvg/tetramer-mc/formal/lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "/home/xvg/tetramer-mc/formal/lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434",
+    "/home/xvg/tetramer-mc/results/two-leg-poisson-validation-20261004/run.py": "4a842286c9239039c0a8d35fa548e5c7b57456d026d09a6d5f101290d7ddeec3"
+  },
+  "runs": [
+    {
+      "argv": [
+        ".elan/bin/lake",
+        "build",
+        "ReversibleSampling.TwoLegPoisson"
+      ],
+      "returncode": 0,
+      "child_started": true,
+      "child_drained": true,
+      "log": {
+        "path": "/home/xvg/tetramer-mc/results/two-leg-poisson-validation-20261004/command-0.log",
+        "sha256": "f4b5c8daa1bd7cc882104a06a59c50887e4609aa5508d309a97201a23d03392a"
+      }
+    },
+    {
+      "argv": [
+        ".elan/bin/lake",
+        "env",
+        "lean",
+        "-j1",
+        "TwoLegPoissonAudit.lean"
+      ],
+      "returncode": 0,
+      "child_started": true,
+      "child_drained": true,
+      "log": {
+        "path": "/home/xvg/tetramer-mc/results/two-leg-poisson-validation-20261004/command-1.log",
+        "sha256": "eca9e49b5970ab8ab3bae008d53561ae8079a9184392db831bbe08abf0a785ab"
+      }
+    }
+  ],
+  "proof_declarations_axiom_audited": 18,
+  "axioms": {
+    "ReversibleSampling.traceGate_measurable": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.traceGate_le_one": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.traceGate_flow": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.traceGate_balance": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.traceGate_correct": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.reverseTwoLeg_involutive": [
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegMass_normalized": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegMass_finite": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegMass_zero_changes": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegFactor_aggregate": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLeg_count_factor": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLeg_gate_term": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegLaw_normalized": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegLaw_finite": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegLaw_measurable": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLegAcceptance_eq_traceGate": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.twoLeg_poisson_correct": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.fixed_surrogate_twoLeg_correct": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ]
+  },
+  "lean": "4.24.0",
+  "mathlib_commit": "f897ebcf72cd16f89ab4577d0c826cd14afaafc7",
+  "cpu_affinity": [
+    0
+  ],
+  "wall_seconds": 15.450837922049686,
+  "scope": "Countable auxiliary-trace gate and fair-order two-leg Poisson balance; fixed surrogate endpoint correction. Geometry, exact count sampling, RNG, floating point, hard predicates, inner-kernel reversibility and runtime caps remain implementation obligations. No mixing or assembly claim."
+}

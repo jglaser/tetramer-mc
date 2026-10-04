@@ -58,11 +58,12 @@ volume has only zero counts on its support, so no volume ratio is needed.
 Reversing the two legs and summing their log factors gives the endpoint physical
 flow identity. Both initial and final states obey the physical hard constraints.
 
-The existing Lean fixed-power theorem applies to this flexible state space once
-the random-scan kernel's reversibility is established. Its concrete single-count
-Poisson endpoint theorem does not itself discharge the two-leg auxiliary-order
-specialization. Geometry, count-law execution, floating point and the mapping
-from Rust to the mathematical kernel remain explicit implementation obligations.
+The Lean fixed-power theorem applies to this flexible state space once
+the random-scan kernel's reversibility is established. The new checked
+[two-leg bridge](../formal/TwoLegPoisson.md) discharges the fair-order count-law
+specialization and derives invariance under the single endpoint correction.
+Geometry, count-law execution, floating point and the mapping from Rust to the
+mathematical kernel remain explicit implementation obligations.
 
 ## Validation boundary
 

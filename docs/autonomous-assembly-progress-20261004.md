@@ -293,8 +293,28 @@ objective evaluation passed. The solve used 2.38 CPU seconds.
 
 This weakens the hypothesis that extension usually requires simultaneous
 motion of the existing quartet at these historical endpoints. It does not
-measure allowed proposal volume or physical binding weight. The next fixed
-control compares identical untruncated Gaussian kernels about the original
-and adjusted centers, retaining all 52 slots and every invalid draw. It remains
-native-informed and separate from geometry-only discovery and the running
-original-condition physical-weight sensitivity campaign.
+measure allowed proposal volume or physical binding weight.
+
+The [paired Gaussian control](native-extension-gaussian-coverage-20261004.md)
+has subsequently completed 26,624 candidates: four populations of 64 paired
+draws at each of the same 52 slots. At unchanged kernel width, full-environment
+hard-clear intended-native coverage rises from **2.95% to 15.00%**, a 5.08-fold
+increase. The paired difference is +12.05 percentage points with a four-population
+95% t half-width of 0.83 points. Quartet-only coverage rises from 4.09% to 24.05%.
+The 17 initially spectator-blocked slots have no full-environment successes
+in either arm. Every invalid draw is retained; the full independent replay of
+26,624 candidates, 93,184 journal events, poses, densities and scalar predicates
+passed. The coverage calculation used 257.30 CPU seconds, plus the previously
+measured 2.38 CPU seconds for center optimization. This is a geometric proposal
+gain, not a physical acceptance or contact-mixing speedup.
+
+A [geometry-only context-relaxed atlas exporter](context-relaxed-atlas.md) is
+now implemented and passed 15 synthetic tests with independent review. It
+preserves all original Gaussians and exact reciprocal branches, appending
+explicitly normalized ordinary Gaussian children whose centers are adjusted
+using outside atomic geometry. No native classifier or current moving pose
+enters that adjustment. The physical sampler must retain the complete proposal
+correction and defensive component. The native-informed coverage result does
+not establish this exporter's protein performance; a separately frozen
+application to the blind atlas is the next construction test. Original-condition
+physical-weight sensitivity calculations remain separate and active.

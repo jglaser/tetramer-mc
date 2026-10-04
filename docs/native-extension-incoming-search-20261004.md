@@ -87,14 +87,16 @@ contact discovery. The spectator-limited results identify a separate obstruction
 in this saved environment, without proving that spectator motion is necessary
 for every nearby incoming pose.
 
-The next **controlled Gaussian-coverage comparison is pending**: compare the
-original and saved adjusted centers with the same frozen covariance and
-coordinate measure, retaining all 52 slots, invalid draws and unconditional
-denominators. It should report quartet-only and full-environment native coverage
-separately, preserve the two unresolved slots and initially open control, and
-include construction costs as well as evaluation costs. Such a comparison
-would test whether the accessible points occupy enough proposal mass to improve
-sampling; it would still not estimate the depletant-weighted physical ensemble.
+The [controlled Gaussian-coverage comparison](native-extension-gaussian-coverage-20261004.md)
+has now completed all 26,624 candidates with the same frozen covariance and
+paired latent draws at both centers. All 52 slots, invalid draws and
+unconditional denominators are retained. Full-environment intended-native
+coverage increases from **393/13,312 (2.95%) to 1,997/13,312 (15.00%)**;
+quartet-only coverage rises from 4.09% to 24.05%. An independent coordinate,
+density and accounting audit passed. This measures probability under the
+specified Gaussian kernel, not the depletant-weighted physical ensemble or MC
+acceptance. Geometry-only construction and a corrected physical sampling
+comparison remain necessary.
 
 ## Reproducible artifacts
 

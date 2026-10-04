@@ -7,10 +7,11 @@ for each virtual branch. A deterministic core-overlap minimization moves each
 new chart's center. The optimizer never receives the current moving pose or a
 native-contact classifier.
 
-This is a preparation prototype, not a production MC change. Validation below
-uses synthetic spheres only. No protein configurations have been transformed,
-scored or sampled by this exporter, and no assembly claim follows from it.
-The objective uses core geometry; it does not optimize depletion volume.
+This is a preparation prototype, not a production MC change. Synthetic
+validation and one fixed protein-context construction are complete. That
+construction moved only a small fraction of the blind atlas's probability
+mass; no MC or assembly claim follows from it. The objective uses core
+geometry; it does not optimize depletion volume.
 
 ## The exported law
 
@@ -227,12 +228,8 @@ motion-bound edge, synthetic sphere clearance, and failure-prefix retention.
 The independent density reader is frozen alongside the tested sources.
 
 These tests establish a small asset-construction implementation, not an MC
-stationarity test. A future protein execution needs a separately frozen
-allocation after review of the incoming-center coverage control. A possible
-first allocation is one declared outside context, all 2048 original virtual
-branches, and at most 131,072 objective evaluations, with 32,768 pairs per
-branch and one worker. The synthetic validation did not execute that protein
-calculation; its allocation and input provenance are frozen separately.
+stationarity test. The separately frozen protein construction below used all
+2048 virtual branches without success filtering.
 
 Before a conditional efficiency benchmark, validate the exported model through
 the production loader and matched sphere/depletion references, with full
@@ -246,3 +243,56 @@ Revisitable choices are the core-only objective versus a cheap depletion
 guide, the fixed width, trust radii, per-branch budgets and parent/child mass.
 Changing them may improve practical coverage; none removes the requirement
 for an explicit normalized proposal and the correct physical acceptance law.
+
+## First protein construction: mostly budget-limited
+
+`results/context-relaxed-atlas-quartet1-preparation-20261004-v2/` contains the
+completed allocation, journal and exported model. It used all 264 fixed bodies
+of the saved blind-growth endpoint, anchor 16, and a new incoming label 264.
+The endpoint is from the historical 1.4 Å, activity 0.04 Å⁻³, 500 μM run;
+this is not an original-condition physical calculation. Selection of this
+quartet context was native-informed. The actual center construction received
+only the blind atlas and core geometry, with no native labels or constraints.
+
+Construction took **190.12 CPU seconds / 191.09 wall seconds**, with 16,744
+objective evaluations. All original parents were retained and all 2048
+children were exported. The independent arithmetic/event audit is in
+`results/context-relaxed-atlas-quartet1-audit-20261004/`.
+
+| Branch result | Number | Source probability mass |
+|---|---:|---:|
+| Pair-list cap; original center retained | 1651 | 85.945% |
+| Optimizer status fallback | 197 | 6.959% |
+| Evaluation cap fallback | 124 | 4.278% |
+| Completed optimizer | 76 | 2.817% |
+| Of these, changed/improved centers | 18 | 0.571% |
+
+A cap is a work-limit observation, not a certificate of a hard clash. Fourteen
+other branches have better admissible intermediate objectives recorded in
+their histories but were returned to their original centers by the declared
+failure policy; these represent another 0.571% of source mass. The completed
+model has not been retrospectively changed to use those evaluations.
+
+The unchanged-center control matters because adding narrow children changes
+the proposal even when no center moves. Let `H_0` use identical child weights
+and widths but all original centers, and let `H_1` be the actual export. Since
+only 18 centers changed, coupling the identical component labels gives
+
+\[
+\|H_1-H_0\|_{\rm TV}\leq 0.0057100863.
+\]
+
+With half parent retention and half uniform defense, the corresponding full
+proposal difference is at most **0.0014275216**, or **0.143 percentage points**
+in any event's absolute proposal probability. This is an upper bound relative
+to the same-width unrelaxed-child control, not relative to the original atlas.
+It does not bound relative improvement of rare events, mixing, or physical
+weights. The audit's `changed-center-mass.json` records the exact weight
+arithmetic and matching center checks.
+
+The preceding native-informed incoming-center control achieved a 5.08-fold
+geometric coverage gain (see
+[its report](native-extension-gaussian-coverage-20261004.md)). This blind
+construction has not established an analogous gain. Density checks and a
+diagnostic separating conservative pair-list work from actual center clashes
+come before promotion into an assembly sampler.

@@ -83,9 +83,14 @@ reconstructing the conditional generation traces and world-pose densities.
 
 ## Admission to a physical campaign
 
-An independent full-wall sphere/depletion **normalization** reference remains
-required for this new adapter; the 160-attempt wiring test has no stochastic
-mass-precision gate. Existing completed hard-free vessel references
+The independent full-wall sphere/depletion **normalization** reference completed
+16,384 attempts and failed its fixed nonzero-activity contact precision gate.
+Exact, Poisson-weighted and hard companions share the discrepancy; the saved
+contributions identify sparse defensive coverage outside R4. All individual-row
+audits passed. The [completed result and variance diagnosis](native-class-sphere-normalization-20261004.md)
+retain the failure, allocation and proposed geometric improvement. The adapter
+is not yet admitted to the protein vessel campaign. The 160-attempt wiring test
+has no stochastic mass-precision gate. Existing completed hard-free vessel references
 are reused as evidence for their original implementation; they do not test the
 new class-to-vessel wiring.
 

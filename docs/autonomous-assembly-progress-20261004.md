@@ -79,8 +79,15 @@ with source capture retained as a proposal property. Seven Rust controls,
 thirteen Python controls, a 160-attempt sphere CLI reference, and independent
 reconstruction of every saved CLI row passed. This removes a format/geometry
 adapter gap; it does not change the integration target or authorize a physical
-conclusion. A larger analytic normalization reference and the current regional
-campaign's explicit admission checks remain. See the
+conclusion. The subsequent 16,384-attempt analytic sphere reference completed
+but failed its contact point-accuracy check at nonzero activity. Exact and
+Poisson weights share the discrepancy, and contact importance ESS is only about
+74 per activity. A saved-row diagnostic locates most variability outside R4,
+where a small number of uniform-cube draws carry large weights. The
+[reference report](native-class-sphere-normalization-20261004.md) preserves the
+failed gate and develops an optional normalized wall-envelope proposal; no
+finished allocation is extended. The regional campaign's explicit admission
+checks also remain. See the
 [implementation and validation record](native-class-full-vessel-guide.md).
 
 The native observer must first establish what the completed surrogate trials

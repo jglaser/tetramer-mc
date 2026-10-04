@@ -172,6 +172,14 @@ prefixes. The test run made no protein geometry queries. The adapter requires
 the completed 72-chain contact/arithmetic report first; it observes only the
 internal pair and makes no external-native or cycle-consistency claim.
 
+The completion-gated contact handoff passed fifteen tests in
+`results/partner-atlas-analysis-preparation-20261004/validation/validation.json`.
+The subsequent native handoff passed fourteen in
+`results/partner-atlas-native-preparation-20261004/validation/validation.json`
+(SHA256 `045e1bc6aa122d6fcfdb2479e11386dd85f00f0ecdf2b5519fb0967a084b735a`).
+Both real prerequisite checks refused premature preparation. These are staged
+tools, not already dispatched observers or completed scientific analyses.
+
 ## Decisions after completion
 
 Show every stream and both starts. Repeated native entry, exit and return from

@@ -134,7 +134,9 @@ inventory admission, rejected residence, multilabel caching, full-CPU metrics
 and failure-prefix preservation. It requires the completed contact/arithmetic
 observer first and reuses sixteen cached native controls without reading their
 old trajectories. The contact-analysis handoff passed fifteen tests and refuses
-incomplete allocations. Neither observer has classified this running campaign.
+incomplete allocations. The subsequent native handoff passed fourteen tests
+and refuses dispatch before that contact analysis completes. Neither observer
+has classified this running campaign.
 The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
 records the balance argument and retains a direct physical control.
 

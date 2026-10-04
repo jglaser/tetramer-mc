@@ -2,6 +2,7 @@
 //! finite-system assembly. No adaptive selection, basin filtering or retries
 //! after an outer null/failure. Every elementary attempt and retained block is
 //! journaled; independent named streams give deterministic graceful continuation.
+#![recursion_limit = "256"]
 use anyhow::{Context, Result, ensure};
 use clap::Parser;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -272,6 +273,12 @@ fn surrogate_arm(arm: &str) -> bool {
 fn flexible_surrogate_arm(arm: &str) -> bool {
     matches!(arm, "flexible_m1" | "flexible_m8" | "flexible_flat8")
 }
+fn partner_atlas_arm(arm: &str) -> bool {
+    matches!(
+        arm,
+        "partner_atlas_direct" | "partner_atlas_m1" | "partner_atlas_m8" | "partner_atlas_flat8"
+    )
+}
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
 enum SurrogateScales {
@@ -291,9 +298,11 @@ struct SurrogatePolicy {
 impl SurrogatePolicy {
     fn config(&self, plan: &Value, arm: &str) -> Result<RigidSurrogateConfig> {
         let (inner_steps, guidance_strength) = match arm {
-            "rigid_surrogate_1" | "flexible_m1" => (1, 1.),
-            "rigid_surrogate_8" | "flexible_m8" => (8, 1.),
-            "rigid_surrogate_flat8" | "flexible_flat8" => (8, 0.),
+            "rigid_surrogate_1" | "flexible_m1" | "partner_atlas_direct" | "partner_atlas_m1" => {
+                (1, 1.)
+            }
+            "rigid_surrogate_8" | "flexible_m8" | "partner_atlas_m8" => (8, 1.),
+            "rigid_surrogate_flat8" | "flexible_flat8" | "partner_atlas_flat8" => (8, 0.),
             _ => anyhow::bail!("surrogate policy on another arm"),
         };
         let (translation_std, rotation_std_degrees) = match self.proposal_scales {
@@ -364,10 +373,33 @@ fn flexible_surrogate_policy(plan: &Value, arm: &str) -> Result<Option<Surrogate
 fn flexible_surrogate_role(role: &str) -> String {
     format!("flexible_surrogate/{role}")
 }
+fn partner_atlas_policy(plan: &Value, arm: &str) -> Result<Option<SurrogatePolicy>> {
+    if !partner_atlas_arm(arm) {
+        ensure!(
+            plan.get("partner_atlas_policy").is_none(),
+            "partner atlas policy on another arm"
+        );
+        return Ok(None);
+    }
+    let policy: SurrogatePolicy = serde_json::from_value(
+        plan.get("partner_atlas_policy")
+            .context("partner atlas arm requires explicit partner_atlas_policy")?
+            .clone(),
+    )?;
+    ensure!(
+        policy.schema == "partner-atlas-policy-v1",
+        "unknown partner atlas policy"
+    );
+    policy.config(plan, arm)?;
+    Ok(Some(policy))
+}
+fn partner_atlas_role(role: &str) -> String {
+    format!("partner_atlas/{role}")
+}
 fn rows_per_block(arm: &str) -> u64 {
     if arm == "local" {
         5
-    } else if surrogate_arm(arm) || flexible_surrogate_arm(arm) {
+    } else if surrogate_arm(arm) || flexible_surrogate_arm(arm) || partner_atlas_arm(arm) {
         7 // Four locals, durable begun/outcome rows, retained block.
     } else {
         6
@@ -456,6 +488,46 @@ fn flexible_surrogate_contract(
         "identity_endpoint":"retained self-loop without bath",
         "inner_rejections":"consume a step and retain current state",
         "outer_correction":"S(old)-S(new)","journal_rows_per_block":7})
+}
+fn partner_atlas_contract(
+    engine: &FixedLabelUpdates<'_>,
+    policy: &SurrogatePolicy,
+    config: RigidSurrogateConfig,
+    bank: &Value,
+    meta: &Value,
+    point_count: usize,
+    point_volume: f64,
+    plan: &Value,
+    geometry: &Geometry,
+    direct: bool,
+) -> Value {
+    json!({"schema":"evolving-dimer-partner-atlas-v1","policy":policy,"effective_config":config,
+        "members":engine.members,"fixed_spectators":"all other labels",
+        "selection_probabilities":[0.5,0.5],"mode_probabilities":{"partner_atlas":0.25,"local":0.75},
+        "inner_selection":"independent fair random scan each step",
+        "atlas":plan["atlas"],"original_atlas":plan["original_atlas"],
+        "atlas_method":geometry.model.method(),"atlas_correlation":geometry.model.correlation(),
+        "atlas_uniform_probability":geometry.model_uniform_probability,
+        "atlas_cube":geometry.model_cube,"atlas_center":geometry.model_center,
+        "atlas_chart_count":geometry.model.member_chart_parts().0.chart_count(),
+        "atlas_angular_length":geometry.model.angular_length(),"atlas_periodic":geometry.model.is_periodic(),
+        "atlas_pool":"current unselected member only; handle0 of the selected singleton",
+        "atlas_branch_correction":"retained uniform/involution branch; complete learned member density and expanded-map correction",
+        "uniform_reverse_support":"immutable source and generated encoded candidate checked by kernel",
+        "physical_path":"fair-order two-singleton path; intermediate is not hard-filtered",
+        "cloud":bank,"cloud_reuse":"identical frozen body-frame points for both members; no extra draws",
+        "raw_count":meta["raw_count"],"points_per_body":point_count,"point_volume":point_volume,
+        "point_weight":"raw_box_volume/raw_count","wall_center":[0.,0.,0.],
+        "proposal_rng_role":partner_atlas_role("proposal"),
+        "inner_accept_rng_role":partner_atlas_role("inner_accept"),
+        "bath_rng_role":partner_atlas_role("bath"),"accept_rng_role":partner_atlas_role("accept"),
+        "local_schedule":"canonical members [0,1,0,1]; shared unchanged local RNG roles",
+        "collective_slots_per_block":1,"physical_decisions_per_nonidentity_endpoint":1,
+        "identity_endpoint":"retained self-loop without bath",
+        "inner_rejections":"consume a step and retain current state",
+        "inner_filter":!direct,"inner_correction":if direct {"none; no inner score or acceptance draw"} else {"S(new)-S(old)+proposal_log_reverse_forward"},
+        "outer_correction":if direct {"proposal_log_reverse_forward"} else {"S(old)-S(new)"},
+        "journal_rows_per_block":7})
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -620,6 +692,9 @@ struct Geometry {
     wall: Container,
     state: Vec<Pose>,
     model: DockingProposal,
+    model_cube: [f64; 3],
+    model_center: [f64; 3],
+    model_uniform_probability: f64,
     load_cpu_seconds: f64,
 }
 impl Geometry {
@@ -644,16 +719,19 @@ impl Geometry {
         let wall = Container::new(radius, &core)?;
         validate_state(&core, &wall, &state)?;
         let bytes = bound(&plan["atlas"])?.read()?;
+        let model_cube = [2. * (radius + core.bound); 3];
+        let model_center = [0.; 3];
+        let model_uniform_probability = 0.1;
         let model = DockingProposal::new(
             FrozenRelativePoseProposal::from_json_str_open(
                 std::str::from_utf8(&bytes)?,
-                [2. * (radius + core.bound); 3],
-                0.1,
+                model_cube,
+                model_uniform_probability,
                 &shape_file.sha256,
             )?,
             DockingMethod::PosteriorInvolution,
             0.,
-            [0.; 3],
+            model_center,
         )?;
         Ok(Self {
             core,
@@ -661,6 +739,9 @@ impl Geometry {
             wall,
             state,
             model,
+            model_cube,
+            model_center,
+            model_uniform_probability,
             load_cpu_seconds: cpu_seconds() - started,
         })
     }
@@ -764,6 +845,10 @@ fn validate_binding(args: &Args, plan: &Value) -> Result<Value> {
         plan.get("flexible_surrogate_policy").is_none() || args.mode == "run",
         "flexible arms reuse frozen preparation; new preparation is forbidden"
     );
+    ensure!(
+        plan.get("partner_atlas_policy").is_none() || args.mode == "run",
+        "partner atlas arms reuse frozen preparation; new preparation is forbidden"
+    );
     for job in plan["jobs"].as_array().context("jobs")? {
         let arm = job["arm"].as_str().context("arm")?;
         if singleton_policy(plan, arm)?.is_some() {
@@ -782,6 +867,12 @@ fn validate_binding(args: &Args, plan: &Value) -> Result<Value> {
             ensure!(
                 args.mode == "run",
                 "flexible arms reuse frozen preparation; new preparation is forbidden"
+            );
+        }
+        if partner_atlas_policy(plan, arm)?.is_some() {
+            ensure!(
+                args.mode == "run",
+                "partner atlas arms reuse frozen preparation; new preparation is forbidden"
             );
         }
     }
@@ -956,13 +1047,15 @@ fn run(args: &Args, plan: &Value, binding: &Value, geometry: &Geometry) -> Resul
         ["local", "unguided", "m4", "root_m4", "two_root_m4"].contains(&arm)
             || singleton_arm(arm)
             || surrogate_arm(arm)
-            || flexible_surrogate_arm(arm),
+            || flexible_surrogate_arm(arm)
+            || partner_atlas_arm(arm),
         "unknown arm"
     );
     singleton_policy(plan, arm)?;
     two_root_policy(plan, arm)?;
     surrogate_policy(plan, arm)?;
     flexible_surrogate_policy(plan, arm)?;
+    partner_atlas_policy(plan, arm)?;
     let parent = PathBuf::from(plan["output"].as_str().context("output")?);
     fs::create_dir_all(&parent)?;
     let output = parent.join(format!("job-{job_id:03}"));
@@ -1006,9 +1099,11 @@ fn run_inner(
     two_root_policy(plan, arm)?;
     let surrogate = surrogate_policy(plan, arm)?;
     let flexible = flexible_surrogate_policy(plan, arm)?;
+    let partner = partner_atlas_policy(plan, arm)?;
     let surrogate_config = surrogate
         .as_ref()
         .or(flexible.as_ref())
+        .or(partner.as_ref())
         .map(|p| p.config(plan, arm))
         .transpose()?;
     let config_hash = hash_file(&args.config)?;
@@ -1042,7 +1137,7 @@ fn run_inner(
         let meta = bound(&bank["metadata"])?.json()?;
         let low: [f64; 3] = serde_json::from_value(meta["low"].clone())?;
         let high: [f64; 3] = serde_json::from_value(meta["high"].clone())?;
-        let point_volume = if surrogate.is_some() || flexible.is_some() {
+        let point_volume = if surrogate.is_some() || flexible.is_some() || partner.is_some() {
             Some(surrogate_point_volume(
                 &meta,
                 usize_at(&plan["cloud"], "raw_count")?,
@@ -1095,7 +1190,7 @@ fn run_inner(
             })
             .context("missing prepared start")?;
         let record = bound(&start["record"])?.json()?;
-        if singleton.is_some() || surrogate.is_some() || flexible.is_some() {
+        if singleton.is_some() || surrogate.is_some() || flexible.is_some() || partner.is_some() {
             if let Some(ledger) = start.get("ledger") {
                 bound(ledger)?.read()?;
             }
@@ -1202,7 +1297,7 @@ fn run_inner(
         if let Some(policy) = &flexible {
             let (points, point_volume) = surrogate_cloud.as_ref().unwrap();
             initial["prepared_manifest"] = binding["prepared_manifest"].clone();
-            initial["prepared_start"] = reused_start;
+            initial["prepared_start"] = reused_start.clone();
             initial["flexible_surrogate_contract"] = flexible_surrogate_contract(
                 &engine,
                 policy,
@@ -1211,6 +1306,23 @@ fn run_inner(
                 meta.as_ref().unwrap(),
                 points.len(),
                 *point_volume,
+            );
+        }
+        if let Some(policy) = &partner {
+            let (points, point_volume) = surrogate_cloud.as_ref().unwrap();
+            initial["prepared_manifest"] = binding["prepared_manifest"].clone();
+            initial["prepared_start"] = reused_start;
+            initial["partner_atlas_contract"] = partner_atlas_contract(
+                &engine,
+                policy,
+                surrogate_config.unwrap(),
+                bank.unwrap(),
+                meta.as_ref().unwrap(),
+                points.len(),
+                *point_volume,
+                plan,
+                geometry,
+                arm == "partner_atlas_direct",
             );
         }
         journal.line(&initial)?;
@@ -1223,11 +1335,12 @@ fn run_inner(
             .hard_valid(),
         "invalid evolving start"
     );
-    let proposal = if singleton.is_none() && surrogate.is_none() && flexible.is_none() {
-        Some(geometry.proposal(plan)?)
-    } else {
-        None
-    };
+    let proposal =
+        if singleton.is_none() && surrogate.is_none() && flexible.is_none() && partner.is_none() {
+            Some(geometry.proposal(plan)?)
+        } else {
+            None
+        };
     let warmup = usize_at(&plan["allocation"], "warmup_blocks")?;
     let total = warmup + usize_at(&plan["allocation"], "production_blocks")?;
     ensure!(completed <= total, "checkpoint block exceeds allocation");
@@ -1352,7 +1465,9 @@ fn run_inner(
                 config,
             };
             let role = |name| {
-                if flexible.is_some() {
+                if partner.is_some() {
+                    partner_atlas_role(name)
+                } else if flexible.is_some() {
                     flexible_surrogate_role(name)
                 } else {
                     surrogate_role(name)
@@ -1364,7 +1479,14 @@ fn run_inner(
             let mut arng = rng(master, ci, init, stream, block, &role("accept"));
             // A begun row survives a fatal/resource interruption. An incomplete
             // block is an auditable tail, never an ordinary rejected slot to retry.
-            let begun = if flexible.is_some() {
+            let begun = if partner.is_some() {
+                json!({"kind":"partner_atlas_attempt_begun",
+                    "status":"begun","block":block,"members":engine.members,
+                    "inner_filter":arm != "partner_atlas_direct",
+                    "config":config,"old":engine.selected(&state),
+                    "raw":budget.raw,"bath_retained":budget.retained,
+                    "sampler_cpu_seconds":cpu_seconds()-budget.started})
+            } else if flexible.is_some() {
                 json!({"kind":"flexible_surrogate_attempt_begun",
                     "status":"begun","block":block,"members":engine.members,
                     "config":config,"old":engine.selected(&state),
@@ -1379,8 +1501,8 @@ fn run_inner(
             };
             journal.durable_line(&begun)?;
             let mut record = Value::Null;
-            let result = if flexible.is_some() {
-                FlexibleSurrogateKernel {
+            let result = if flexible.is_some() || partner.is_some() {
+                let flexible_kernel = FlexibleSurrogateKernel {
                     core: engine.core,
                     exclusion: engine.exclusion,
                     wall: Some(engine.wall),
@@ -1393,16 +1515,40 @@ fn run_inner(
                     body_points: points,
                     point_volume: *point_volume,
                     config,
+                };
+                if arm == "partner_atlas_direct" {
+                    flexible_kernel.step_partner_atlas_direct(
+                        &geometry.model,
+                        &mut state,
+                        &mut prng,
+                        &mut irng,
+                        &mut brng,
+                        &mut arng,
+                        &mut budget,
+                        &mut record,
+                    )
+                } else if partner.is_some() {
+                    flexible_kernel.step_partner_atlas(
+                        &geometry.model,
+                        &mut state,
+                        &mut prng,
+                        &mut irng,
+                        &mut brng,
+                        &mut arng,
+                        &mut budget,
+                        &mut record,
+                    )
+                } else {
+                    flexible_kernel.step(
+                        &mut state,
+                        &mut prng,
+                        &mut irng,
+                        &mut brng,
+                        &mut arng,
+                        &mut budget,
+                        &mut record,
+                    )
                 }
-                .step(
-                    &mut state,
-                    &mut prng,
-                    &mut irng,
-                    &mut brng,
-                    &mut arng,
-                    &mut budget,
-                    &mut record,
-                )
             } else {
                 kernel.step(
                     &mut state,
@@ -1569,6 +1715,95 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn synthetic_partner_atlas_policy() -> Value {
+        json!({"schema":"partner-atlas-policy-v1","proposal_scales":{"source":"local"}})
+    }
+    #[test]
+    fn partner_atlas_policy_is_explicit_and_keeps_fixed_controls() -> Result<()> {
+        let local = json!({"translation_std_A":0.2,"rotation_std_degrees":1.});
+        for (arm, steps, strength) in [
+            ("partner_atlas_direct", 1, 1.),
+            ("partner_atlas_m1", 1, 1.),
+            ("partner_atlas_m8", 8, 1.),
+            ("partner_atlas_flat8", 8, 0.),
+        ] {
+            let plan =
+                json!({"local":local,"partner_atlas_policy":synthetic_partner_atlas_policy()});
+            assert!(partner_atlas_policy(&json!({"local":local}), arm).is_err());
+            let config = partner_atlas_policy(&plan, arm)?
+                .unwrap()
+                .config(&plan, arm)?;
+            assert_eq!(
+                (config.inner_steps, config.guidance_strength),
+                (steps, strength)
+            );
+            assert_eq!(
+                (config.translation_std, config.rotation_std_degrees),
+                (0.2, 1.)
+            );
+            assert_eq!(rows_per_block(arm), 7);
+            assert!(surrogate_policy(&plan, arm)?.is_none());
+            assert!(flexible_surrogate_policy(&plan, arm)?.is_none());
+            for bad in [
+                Value::Null,
+                synthetic_flexible_surrogate_policy(),
+                json!({"schema":"partner-atlas-policy-v1","proposal_scales":{"source":"local"},"mode_probability":0.5}),
+                json!({"schema":"partner-atlas-policy-v1","proposal_scales":{"source":"local"},"inner_steps":2}),
+                json!({"schema":"partner-atlas-policy-v1","proposal_scales":{"source":"frozen_override","translation_std_A":-1.,"rotation_std_degrees":1.}}),
+            ] {
+                assert!(
+                    partner_atlas_policy(&json!({"local":local,"partner_atlas_policy":bad}), arm)
+                        .is_err()
+                );
+            }
+        }
+        for arm in [
+            "local",
+            "unguided",
+            "m4",
+            "root_m4",
+            "two_root_m4",
+            "singleton_two_neighbor",
+            "singleton_two_neighbor_unfused",
+            "rigid_surrogate_1",
+            "rigid_surrogate_8",
+            "rigid_surrogate_flat8",
+            "flexible_m1",
+            "flexible_m8",
+            "flexible_flat8",
+        ] {
+            assert!(partner_atlas_policy(&json!({}), arm)?.is_none());
+            assert!(
+                partner_atlas_policy(
+                    &json!({"partner_atlas_policy":synthetic_partner_atlas_policy()}),
+                    arm
+                )
+                .is_err()
+            );
+        }
+        Ok(())
+    }
+    #[test]
+    fn partner_atlas_rng_roles_are_separate_and_restart_by_block() {
+        for init in ["source", "proposal_prepared"] {
+            for role in ["proposal", "inner_accept", "bath", "accept"] {
+                let draw =
+                    |block| rng(77, 0, init, 0, block, &partner_atlas_role(role)).random::<u64>();
+                assert_eq!(
+                    (1..=8).map(draw).collect::<Vec<_>>(),
+                    (1..=3).chain(4..=8).map(draw).collect::<Vec<_>>()
+                );
+                assert_eq!(partner_atlas_role(role), format!("partner_atlas/{role}"));
+                for prior in [
+                    surrogate_role(role),
+                    flexible_surrogate_role(role),
+                    format!("local/0/{role}"),
+                ] {
+                    assert_ne!(draw(1), rng(77, 0, init, 0, 1, &prior).random::<u64>());
+                }
+            }
+        }
+    }
     fn synthetic_flexible_surrogate_policy() -> Value {
         json!({"schema":"flexible-surrogate-policy-v1","proposal_scales":{"source":"local"}})
     }
@@ -2159,6 +2394,9 @@ mod tests {
             wall,
             state: vec![pose(0.6), pose(1.2), pose(0.)],
             model,
+            model_cube: [100.; 3],
+            model_center: [0.; 3],
+            model_uniform_probability: 0.1,
             load_cpu_seconds: 0.,
         })
     }
@@ -2189,20 +2427,41 @@ mod tests {
         }
         Ok(())
     }
+    #[test]
+    fn partner_atlas_all_arms_and_starts_replay_checkpoint() -> Result<()> {
+        for arm in [
+            "partner_atlas_direct",
+            "partner_atlas_m1",
+            "partner_atlas_m8",
+            "partner_atlas_flat8",
+        ] {
+            root_arm_restart(arm)?;
+        }
+        Ok(())
+    }
     fn root_arm_restart(arm: &str) -> Result<()> {
+        let partner = partner_atlas_arm(arm);
         let flexible = flexible_surrogate_arm(arm);
-        let any_surrogate = surrogate_arm(arm) || flexible;
-        let policy_key = if flexible {
+        let any_surrogate = surrogate_arm(arm) || flexible || partner;
+        let policy_key = if partner {
+            "partner_atlas_policy"
+        } else if flexible {
             "flexible_surrogate_policy"
         } else {
             "surrogate_policy"
         };
-        let begun_kind = if flexible {
+        let begun_kind = if partner {
+            "partner_atlas_attempt_begun"
+        } else if flexible {
             "flexible_surrogate_attempt_begun"
         } else {
             "rigid_surrogate_attempt_begun"
         };
-        let outcome_kind = if flexible {
+        let outcome_kind = if arm == "partner_atlas_direct" {
+            "flexible_partner_atlas_direct"
+        } else if partner {
+            "flexible_partner_atlas_chain"
+        } else if flexible {
             "flexible_surrogate_chain"
         } else {
             "rigid_surrogate_chain"
@@ -2281,6 +2540,10 @@ mod tests {
                 if flexible {
                     value["flexible_surrogate_policy"] = synthetic_flexible_surrogate_policy();
                 }
+                if partner {
+                    value["partner_atlas_policy"] = synthetic_partner_atlas_policy();
+                    value["atlas"] = json!({"synthetic":"the fixed model in synthetic_geometry"});
+                }
                 value
             };
             let full_plan = plan_for(dir.join(format!("{init}-full")));
@@ -2335,24 +2598,64 @@ mod tests {
             assert_eq!(actual, rows(&full_out.join("trajectory.jsonl"))?);
             assert_eq!(actual.len() as u64, 1 + 8 * rows_per_block(arm));
             if any_surrogate {
-                let contract = &actual[0][if flexible {
+                let contract = &actual[0][if partner {
+                    "partner_atlas_contract"
+                } else if flexible {
                     "flexible_surrogate_contract"
                 } else {
                     "surrogate_contract"
                 }];
-                let policy = if flexible {
+                let policy = if partner {
+                    partner_atlas_policy(&full_plan, arm)?
+                } else if flexible {
                     flexible_surrogate_policy(&full_plan, arm)?
                 } else {
                     surrogate_policy(&full_plan, arm)?
                 };
                 let config = policy.unwrap().config(&full_plan, arm)?;
                 assert_eq!(contract["members"], json!([0, 1]));
-                if flexible {
+                if flexible || partner {
                     assert!(contract.get("handle").is_none());
                     assert_eq!(contract["selection_probabilities"], json!([0.5, 0.5]));
-                    assert_eq!(contract["schema"], "evolving-dimer-flexible-surrogate-v1");
-                    assert_eq!(contract["proposal_rng_role"], "flexible_surrogate/proposal");
+                    assert_eq!(
+                        contract["schema"],
+                        if partner {
+                            "evolving-dimer-partner-atlas-v1"
+                        } else {
+                            "evolving-dimer-flexible-surrogate-v1"
+                        }
+                    );
+                    assert_eq!(
+                        contract["proposal_rng_role"],
+                        if partner {
+                            "partner_atlas/proposal"
+                        } else {
+                            "flexible_surrogate/proposal"
+                        }
+                    );
                     assert!(actual[0].get("surrogate_contract").is_none());
+                    if partner {
+                        assert_eq!(contract["atlas"], full_plan["atlas"]);
+                        assert_eq!(contract["atlas_cube"], json!(geometry.model_cube));
+                        assert_eq!(contract["atlas_center"], json!(geometry.model_center));
+                        assert_eq!(
+                            contract["atlas_uniform_probability"],
+                            geometry.model_uniform_probability
+                        );
+                        assert_eq!(contract["atlas_method"], json!(geometry.model.method()));
+                        assert_eq!(contract["atlas_correlation"], geometry.model.correlation());
+                        assert_eq!(
+                            contract["atlas_chart_count"],
+                            geometry.model.member_chart_parts().0.chart_count()
+                        );
+                        assert_eq!(
+                            contract["atlas_angular_length"],
+                            geometry.model.angular_length()
+                        );
+                        assert_eq!(contract["atlas_periodic"], false);
+                        assert_eq!(contract["inner_filter"], arm != "partner_atlas_direct");
+                        assert!(actual[0].get("flexible_surrogate_contract").is_none());
+                    }
                 } else {
                     assert_eq!(contract["handle"], 0);
                 }
@@ -2375,7 +2678,7 @@ mod tests {
                     assert_eq!(begun["old"], row["old"]);
                     assert_eq!(row["kind"], outcome_kind);
                     assert_eq!(row["members"], json!([0, 1]));
-                    if flexible {
+                    if flexible || partner {
                         assert!(row.get("handle").is_none());
                         assert_eq!(row["selection_probabilities"], json!([0.5, 0.5]));
                         assert_eq!(row["budget_before"]["raw"], begun["raw"]);
@@ -2401,6 +2704,17 @@ mod tests {
                                 row["log_acceptance_ratio"].as_f64().unwrap(),
                                 bath + correction
                             );
+                            if partner {
+                                let expected = if arm == "partner_atlas_direct" {
+                                    row["steps"][0]["proposal_log_reverse_forward"]
+                                        .as_f64()
+                                        .unwrap()
+                                } else {
+                                    row["old_score"]["log_surrogate"].as_f64().unwrap()
+                                        - row["proposed_score"]["log_surrogate"].as_f64().unwrap()
+                                };
+                                assert_eq!(correction, expected);
+                            }
                         }
                     } else {
                         assert_eq!(row["handle"], 0);
@@ -2423,7 +2737,7 @@ mod tests {
                     }
                     for step in row["steps"].as_array().unwrap() {
                         assert!(step["retained"].is_array());
-                        if flexible {
+                        if flexible || partner {
                             let slot = step["selected_slot"].as_u64().unwrap() as usize;
                             assert!(slot < 2);
                             assert_eq!(step["selected_label"], slot);
@@ -2431,9 +2745,38 @@ mod tests {
                             if step["accepted"] == false {
                                 assert_eq!(step["retained"], step["old"]);
                             }
+                            if partner && step["mode"] == "partner_atlas" {
+                                assert_eq!(step["partner_slot"], 1 - slot);
+                                assert_eq!(step["partner_label"], 1 - slot);
+                                assert_eq!(step["partner_pose"], step["old"][1 - slot]);
+                            }
+                            if partner
+                                && arm != "partner_atlas_direct"
+                                && step["status"] == "completed"
+                            {
+                                assert_eq!(
+                                    step["log_acceptance_ratio"].as_f64().unwrap(),
+                                    step["proposed_score"]["log_surrogate"].as_f64().unwrap()
+                                        - step["old_score"].as_f64().unwrap()
+                                        + step["proposal_log_reverse_forward"].as_f64().unwrap()
+                                );
+                            }
                         }
                     }
-                    if arm == "rigid_surrogate_flat8" || arm == "flexible_flat8" {
+                    if arm == "partner_atlas_direct" {
+                        assert!(row.get("old_score").is_none());
+                        assert!(row.get("proposed_score").is_none());
+                        assert!(row.get("inner_counts").is_none());
+                        assert_eq!(row["proposal_counts"]["attempted"], 1);
+                        for step in row["steps"].as_array().unwrap() {
+                            assert!(step.get("log_u").is_none());
+                            assert!(step.get("old_score").is_none());
+                        }
+                    }
+                    if arm == "rigid_surrogate_flat8"
+                        || arm == "flexible_flat8"
+                        || arm == "partner_atlas_flat8"
+                    {
                         assert_eq!(row["complete_log_correction"], 0.);
                         assert_eq!(row["old_score"]["log_surrogate"], 0.);
                     }
@@ -2512,7 +2855,11 @@ mod tests {
                     rows(&dir.join(format!("{init}-local-control/job-000/trajectory.jsonl")))?;
                 assert_eq!(&actual[1..5], &control[1..5]);
             }
-            if (arm == "rigid_surrogate_flat8" || arm == "flexible_flat8") && init == "source" {
+            if (arm == "rigid_surrogate_flat8"
+                || arm == "flexible_flat8"
+                || arm == "partner_atlas_flat8")
+                && init == "source"
+            {
                 let tail_plan = plan_for(dir.join("begun-tail"));
                 let tail_config = dir.join("begun-tail.json");
                 save(&tail_config, &tail_plan)?;
@@ -2551,6 +2898,11 @@ mod tests {
                 assert!(tail_output.join("failure.json").exists());
                 assert!(!tail_output.join("terminal.json").exists());
                 for scenario in ["hard_rejected", "identity", "fatal_bath"] {
+                    // An atlas branch can move even with zero local scales; only
+                    // the fatal-budget fixture applies to the mixed kernel.
+                    if partner && scenario != "fatal_bath" {
+                        continue;
+                    }
                     let control_output = dir.join(scenario);
                     let mut control_plan = plan_for(control_output.clone());
                     control_plan["local"] =

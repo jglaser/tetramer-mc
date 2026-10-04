@@ -116,6 +116,19 @@ The independent sphere stationarity reference completed 32,768 calls using all
 Deliberately omitting or reversing the proposal correction produced measurable
 stationarity failures. This [validation](partner-atlas-reference.md#completed-result-and-independent-audit)
 supports the next conditional protein test; it does not measure mixing per CPU.
+The conditional example now supports direct, guided m1, guided m8 and flat8
+partner-atlas arms. An isolated release build passed all fifteen kernel tests
+and all 23 example tests, including restarts and preservation of the original
+local schedule. The bound model is the existing geometry-only FFT atlas, with
+zero transport correlation and its defensive uniform branch; it supplies no
+new native prior. The matched 32-chain campaign is now running at
+`/vast/xvg/tetramer-mc-runs/partner-atlas-dimer-context0-20261004`, with one
+worker, two reused initializations and four streams per arm. Eight completed
+local controls are the primary comparison; 32 additional completed controls
+remain contextual. All sixteen observer/preparation tests passed. The
+147,488 retained endpoints will receive contact and separate instantaneous
+native-label analyses only after the full allocation completes. No protein
+efficiency result is available yet.
 The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
 records the balance argument and retains a direct physical control.
 

@@ -288,8 +288,9 @@ consistent efficiency advantage, so guided-versus-flat alone is insufficient.
 The existing pointwise delayed-acceptance inequality still applies to m1.
 
 The optional methods `FlexibleSurrogateKernel::step_partner_atlas` and
-`step_partner_atlas_direct` are implemented. Production defaults, examples,
-executable and run allocations are unchanged. No protein benchmark has been
+`step_partner_atlas_direct` are implemented. Production defaults and executable
+are unchanged; the conditional example now has four explicit optional arms.
+No protein benchmark has been
 launched. Six focused tests and all nine existing flexible-kernel tests pass:
 the conditional map's inverse trace and asymmetric proposal correction,
 uniform reverse support, hard/score/null accounting, fixed horizons, fatal-state

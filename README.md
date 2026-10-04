@@ -160,6 +160,11 @@ checks the complete proposal density and its cost before adding a sampling kerne
 Its [completed saved-pose comparison](docs/contact-arc-score-results.md) finds
 insufficient improvement over the original Gaussian guide to justify its cost.
 These proposal results do not settle the physical model.
+The [next physical contact comparison](docs/native-class-physical-campaign-review.md)
+now has a tested workflow that freezes inputs and independent populations,
+retains failed attempts, and joins proposal, geometry and statistical checks.
+Its actual preparation awaits the completed class-line proposal audit; it does
+not yet establish converged contact weights or assembly stability.
 The [finite-system design validator](docs/finite-assembly-contract.md)
 checks the separate N=12/N=24, initialization, model and equal-volume boundary
 comparisons without launching a campaign; unfilled preparations remain incomplete.

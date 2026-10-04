@@ -452,9 +452,9 @@ The optimized existing H normalizer emits v6. Its explicit compatibility path
 is now implemented below; the v7 H-only diagnostic still incurs unnecessary
 class-geometry cost and is not the intended optimized-H runtime control.
 
-The remaining work is a frozen population preparer and
-failure-draining lifecycle controller, and a final admission layer joining all
-algebra, endpoint, selected-geometry and population receipts. All 18 original
+The population preparer, failure-draining lifecycle controller and final
+evidence join are now implemented in the workflow below. Actual campaign
+preparation remains pending: all 18 original
 proposal jobs must finish successfully before the one-time cost summary and
 fresh physical allocation. The selected receipt alone opens no convergence,
 full-vessel or assembly gate. A primary-only 16-population comparison cannot
@@ -506,3 +506,108 @@ Independent source review identified the tangent and shape-witness binding
 issues; both were fixed before this passing suite. Existing scientific jobs
 use their frozen code and are unchanged. Physical convergence and assembly
 remain unresolved.
+
+## Frozen workflow from sampling through evidence admission
+
+The new workflow has four orchestration modules. They reuse the validated
+physical workers above and do not change any assembly kernel or physical law:
+
+| Module | Responsibility |
+|---|---|
+| `prepare_native_class_physical_campaign.py` | Admit completed prerequisites, copy exact producer/source/input bytes, freeze allocation, independent seeds, audit IDs, limits and execution commands. |
+| `run_native_class_physical_campaign.py` | Execute the frozen commands sequentially with one worker; retain every attempt and stop after failure. |
+| `native_class_physical_stage.py` | Bind outputs as they become available and materialize only the already-declared downstream analysis plans. |
+| `admit_native_class_physical_campaign.py` | Join completed evidence and report remaining statistical issues without repeating classification, sampling or row analysis. |
+
+Preparation requires the original 18-job proposal audit and its one-time cost
+summary, the pinned optimized-H and class-sampler reference evidence, and the
+passing v6/v7 bridge validation. The fixed physical target is unchanged. A
+separate preparation review binds the chosen scope, historical failed-stratum
+inventory, storage and time budgets, and the deterministic plan-materialization
+policy. This is an input to the freeze, not a request to modify previous
+allocations. Root-level preparation failures preserve the partial directory;
+the completion receipt is published last. A partially prepared directory
+cannot be dispatched.
+
+The primary-only scope contains eight independent 16,384-attempt populations
+per arm, 262,144 attempts total, and up to 320 selected full-geometry rows.
+It provides the first prospective cost/coverage comparison; population-size,
+defensive-mixture and cloud-intensity sensitivity remain explicitly unfinished.
+The separately supported full scope freezes all 40 populations in the table
+above before any draw. Neither mode silently expands after inspecting results.
+The two exact validated producer executables are retained: the optimized v6 H
+normalizer is not replaced by the v7 H-only diagnostic.
+
+For each population the execution order is producer, all-row algebra,
+independent endpoint labels, deterministic selection, and selected full
+geometry. Population statistics run only after every declared population has
+completed those stages. The final evidence join is outside that controller,
+after its completion; putting it inside would make its completion requirement
+circular. A statistically unresolved report is a successful completed analysis,
+not a reason to discard or rerun a population.
+
+Future output hashes cannot exist at the initial freeze. The stage worker
+therefore substitutes only bound predecessor outputs into immutable plan
+templates. It authenticates the predecessor's attempt, process, exit and
+success receipts and verifies its own parent PID, process birth time and active
+frozen allocation. Proposal parameters, target, strata, limits and unconditional
+audit IDs remain fixed. The contributor selection stays exactly 16 unconditional
+IDs plus at most one maximum per decision region; the selection object itself
+is unchanged, with a separate completion/review record. The final join accepts
+the existing selected worker's authenticated all-attempt scan rather than
+rescanning scientific rows to rediscover its maxima.
+
+The controller retains the literal argument vector, including the Python
+virtual-environment path. Its canonical interpreter target and bytes are bound
+separately; resolving the executable path before invocation can otherwise lose
+virtual-environment package discovery. All workers have one numerical thread,
+declared CPU/wall/address-space limits, exclusive output files and no retry or
+resume path. Failure or interruption terminates the owned process group,
+allows bounded cleanup, then escalates and reaps if necessary. Existing growth
+jobs and the original audit use their own frozen code and are unaffected.
+
+Successful evidence admission certifies that the declared implementation checks
+finished and refer to the same populations. It lists regional precision,
+importance-weight and material/historical-stratum issues from the existing
+statistics artifact. It does not turn an unobserved region into zero mass,
+remove a failed population, bound unseen contact mass, establish the full-vessel
+measure or decide assembly stability.
+
+The integrated orchestration validation passed **42 synthetic tests** on one
+CPU, with an unchanged, archived closure of 76 source files. It covers both
+allocation modes, partial preparation, copied-byte corruption, independent
+seed selection, literal executable paths, bounded child cleanup, source/input
+tampering, live controller identity, deterministic handoffs and exact final
+evidence admission. Receipt:
+`results/native-class-physical-workflow-validation-20261004/validation.json`,
+SHA256 `4263debb0261bdd3ac1854bd9429c0fd2fd95ecb87fb58cda786979c91553091`.
+Tests used temporary synthetic metadata and tiny child processes. They did not
+prepare or launch a real physical campaign, observe protein geometry or draw
+depletant clouds. The preceding 69-test bridge receipt remains separate.
+
+A subsequent metadata hardening requires a completed, explicitly
+`retention_only` historical inventory and binds its provenance review. The two
+affected tests (inventory validation and primary/full materialization) passed
+on one CPU; comparison lists and statistical thresholds remain unchanged.
+Receipt:
+`results/native-class-physical-history-hardening-validation-20261004/validation.json`,
+SHA256 `758dff7cac4eb7b0ef8314cc5b187aabf372bf8c765c8785498d47f870929649`.
+Only the preparer and its test changed from the 42-test source snapshot.
+
+The historical watchlist carries 131 distinct region–stratum labels and 639
+source-linked issue records from five saved aggregate reports. It includes
+material within-arm Qz/Q0 quality issues as well as archived comparison
+failures, so its count and scope differ from the earlier 58 specific comparison
+failures. Its explicit `retention_only` policy preserves these diagnostics in
+future reports without making every expanded entry a new pass/fail criterion.
+The original comparison, Qz/Q0 kind and reason remain in its evidence records.
+Completeness is relative to those five reports and their declared materiality
+rules; it neither bounds unseen regions nor establishes zero nonmaterial mass.
+The immutable watchlist is
+`results/native-class-historical-strata-review-20261004/historical-watchlist.json`
+(SHA256 `0703d0452fd428800c2997b04d1954270865640718e159e0845a8d347f81a935`).
+Its `provenance-review.json` authenticates the archived protocols, cross-report
+input hashes and R4/R5/native partition identities. Historical comparison rules
+are retained as recorded, including their use of log-scale standard errors;
+they are not relabeled as the newer linear-mass comparisons. This derivation
+copies the entries and evidence unchanged and recalculates no statistical mass.

@@ -677,3 +677,45 @@ remainder/support assessment. Primary-only execution leaves the declared
 population-size and proposal/cloud sensitivity obligations open. The
 preparer does not prepare or launch anything automatically when this screen
 finishes.
+
+## Completed-metadata classifier/contact review
+
+The pending postrun handoff now preserves a diagnostic omitted from the
+archived admission's compact summary: `native_entry_unbound_anomalies` and
+`classifier_contact_consistency_passed`. The original label pass and population
+statistics already record these fields. This is a reporting correction; the
+running campaign, region definitions, native labels and statistical masses are
+unchanged.
+
+After the original 81 stages and technical admission complete, the handoff
+reads the already bound statistics metadata. It checks the exact admitted
+population/draw/schema inventory and target identity, integer anomaly and
+contributing counts, and agreement of population/arm flags. Missing or malformed
+records fail explicitly. Its `classifier_contact_review` is retained in
+`smc-comparison.json`, including nonzero anomaly counts. Such counts require
+classifier/contact review before interpretation; they are not automatically a
+geometry bug or physical-instability result. Native labels are not filtered or
+changed, and the historical comparison can finish with the warning visible.
+Zero anomalies do not establish statistical convergence or support coverage.
+
+The revised one-off wrapper is
+`results/native-class-physical-postrun-preparation-20261004/handoff.py`.
+Its 21 combined synthetic handoff/SMC tests passed on one CPU in 16.56 CPU
+seconds, with an unchanged closure of 55 files. The fixtures cover zero/nonzero
+counts, inconsistent/missing flags, missing/repeated populations, denominator
+and target mismatches, and retention of unchanged masses, failed statistical
+checks and closed physical gates in the final report. No physical rows,
+geometry or new samples were evaluated. Validation receipt:
+
+`results/native-class-physical-postrun-preparation-20261004/validation-04/validation.json`
+
+SHA256 `b2681fd49408f57dc124113883144570fa5652c0f67202294b2709d3064ca9bb`.
+The earlier receipts remain intact, and `ready.json` now points to this revised
+validation. Actual postrun preparation and launch remain gated on all original
+jobs completing and draining.
+
+Technical admission still does not supply a quantitative unseen-contact bound
+or a scientific advance decision. In particular, `native_remainder` is native
+mass **inside R4 outside old-R5 support**, not the vessel's remaining mass.
+Population-size, defensive-probability and cloud-intensity comparisons remain
+separate obligations. Full-vessel and finite-assembly gates remain closed.

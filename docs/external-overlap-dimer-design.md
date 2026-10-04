@@ -760,3 +760,11 @@ timeout, exact resource/thread limits, prepared-start input coverage, duplicate
 control rejection and exclusive failure handling. Receipt:
 `results/two-neighbor-singleton-observer-wrapper-validation-20261003/validation.json`,
 SHA256 `d946ccd02487cd7e8b6fd7d68c45b87632341be799637f5eb84b8682c37e0410`.
+
+The separate [native-registry follow-on](conditional-native-registry-audit.md)
+will distinguish contact reorganization from changes of registered motifs,
+including registration changes at unchanged partners. Its conservative centroid
+filter and cached passive observer are implemented and synthetically validated;
+the frozen contact analysis and all running kernels remain unchanged. Production
+native observation requires the completed contact receipts and a separately
+bound allocation over all 128 matched chains.

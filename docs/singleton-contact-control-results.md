@@ -117,6 +117,26 @@ contain catalogue screening or eligible-fusion counts, so this does not identify
 why fusion was unused. Missing compatible basins and rejection of approximate
 component means remain hypotheses, not findings.
 
+Source inspection identifies a useful next diagnostic. The singleton path
+builds the same fused catalogue even when its configured mixture mass is zero.
+It screens cross-anchor atlas means at 8 Å and 60 degrees, fits at most 4,096
+candidate pairs, requires squared whitened mismatch at most 12, tests at most
+256 fitted centers, and retains at most 32 components. The hard screen tests
+the **mean**, before the covariance is constructed. An invalid mean does not
+prove that the resulting Gaussian has no feasible mass. If any components
+survive, their total learned-mixture mass is the configured 0.8; mismatch
+penalties redistribute that mass among them rather than suppressing it globally.
+
+Passive counters should distinguish pair-filter losses, fit failures, center
+collisions, covariance failures and budget truncation. For a context chosen
+after the native audit, the shared source state and four prepared states, with
+either member moving, would require only ten catalogue constructions. At the
+existing caps this allows at most 40,960 fits, 2,560 center checks and 673,280
+core pair-overlap calls with 263 spectators. No proposal attempts, native
+classifications or depletion estimates are needed. This is a proposed diagnostic,
+not a launched allocation. A separate fixed-budget Gaussian probe would be
+needed to measure whether center screening discards useful feasible mass.
+
 This result does not motivate an immediate correlated-transport campaign in
 this native-bound context. Retain it as a native-retention control and use the
 other contexts' native-registry audit to identify an appropriate reorganization

@@ -34,13 +34,63 @@ unlaunched**. Its inert resource/input drafts are preserved in
 `results/native-class-physical-primary-budget-20261004`; a new physical campaign
 should first have a guide with demonstrated access to the missing regions.
 
-The next bounded development diagnosis uses the 40 already audited saved poses
-to distinguish failure of the five fixed coordinates to reach useful lines
-from failure of the one-dimensional conditional geometry. It can assess whether
-additional normalized Gaussian components around those known poses are a useful
-proposal change. These poses are development data; any resulting guide must be
-frozen and evaluated on independent draws with the full density and defensive
-component. Coverage of unseen modes remains a separate obligation.
+## Saved-pose diagnosis and a revised guide
+
+The bounded diagnosis of the 40 already audited saved poses is complete. Each
+of the four known competing-22/62 endpoints has a positive-width target interval
+containing that endpoint on all three translation axes: 12 of 12 lines. Their
+lengths range from 0.0414 to 0.4867 Å. This rules out globally empty line geometry
+as the explanation for the pilot's empty competing lines. The frozen prior
+instead misses useful neighborhoods in the five coordinates retained during a
+line draw. These selected points do not distinguish orientation error from
+error in the other two translations.
+
+The proposed revision preserves all 92 old Gaussian means and covariances, with
+75% of their previous mixture mass, and assigns the remaining 25% equally to
+24 isotropic latent Gaussians. These use eight already known critical poses as
+centers, each at standard deviations 0.05, 0.15 and 0.45. The uniform defensive
+probability remains 0.5. The five class channels, their equal probabilities,
+three translation axes, mass floor and class-to-hard-free-to-unconditional
+fallback remain unchanged. Thus, in exact arithmetic,
+
+\[
+q_{\mathrm{new}}=\tfrac12 U+\tfrac38 C_{\mathrm{old}}
+                  +\tfrac18 C_{\mathrm{added}}
+\geq \tfrac34 q_{\mathrm{old}}.
+\]
+
+The old conditioned component laws do not depend on their mixture weights.
+This is why retaining their parameters also retains their contribution to
+coverage. The full new mixture density must still be evaluated for every draw,
+including fallbacks and points outside the integration region. No target,
+region, native definition or integration measure changes.
+
+With the same conditional estimator noise and a finite old second moment,
+this density bound implies a new importance-weight second moment at most
+4/3 of the old one. The [checked Lean argument and implementation
+obligations](revised-guide-second-moment-bound.md) distinguish this population
+bound from finite-record ESS, runtime efficiency and unseen-mode coverage.
+
+All eight critical centers are training data; there are **zero independent
+critical holdout poses**. Higher density at those centers is not evidence of
+generalization or physical mass. A new, frozen proposal-only pilot will use
+four fresh populations of 128 draws. All 512 attempts receive algebra and
+endpoint checks; 16 unconditional, independently selected IDs per population
+receive the expensive unpruned geometry reference. This selection reduces
+reference cost without selecting favorable outcomes. The historical pilot is
+development context, not a newly randomized matched control.
+
+If either troublesome competing region remains unobserved or its selected
+critical lines remain uniformly empty, the physical-weight campaign stays on
+hold. Conversely, observing access does not establish convergence or bound
+unseen physical mass. The pilot has no Poisson clouds or physical-weight
+estimates and has no automatic sample-size extension.
+
+The completed diagnosis, including the training/holdout distinction, is in
+[findings](../results/native-class-saved-support-diagnosis-20261004/findings-v2.json).
+The revised reference allocation is in the
+[selected-64 pilot recommendation](../results/native-class-saved-support-diagnosis-20261004/pilot-recommendation-selected-v2.json);
+the earlier full-reference recommendation is retained as a superseded draft.
 
 ## Receipts and the reporting correction
 

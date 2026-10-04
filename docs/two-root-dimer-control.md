@@ -147,3 +147,10 @@ and sixteen cached controls without new classification. Its one-worker limits
 are 1,800 CPU seconds, 3,600 wall seconds and 16 GiB. It starts only after all
 eight sampler jobs finish cleanly. No efficiency or assembly conclusion is
 available from this campaign at launch.
+
+The complete eight-chain comparison is now available. It shows no consistent
+efficiency gain and no completed return to a nonempty external environment.
+The [surrogate-chain follow-up](dimer-surrogate-inner-chain.md) records the
+completed comparison, the separate 128-chain native-registry audit, and the
+next validated proposal-building block. The running assembly kernels are
+unchanged.

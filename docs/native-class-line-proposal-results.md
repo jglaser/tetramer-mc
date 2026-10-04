@@ -92,6 +92,46 @@ The revised reference allocation is in the
 [selected-64 pilot recommendation](../results/native-class-saved-support-diagnosis-20261004/pilot-recommendation-selected-v2.json);
 the earlier full-reference recommendation is retained as a superseded draft.
 
+### Implementation and the first launch
+
+The 116-component guide was materialized and all 18 focused synthetic tests
+passed. Independent source review checked the mixture accounting, fixed audit
+selection and preservation of failed attempts. The
+[frozen pilot](../results/native-class-support-pilot-20261004/protocol.json)
+has four 128-draw populations, 64 full references and no Poisson clouds. Its
+execution-plan SHA is
+`61613b40549091e46d5496a9e72559841f613753b34fc6b937419cd212e0be76`.
+
+The first population generated all 128 proposals successfully. The new algebra
+checker then stopped on its first row because it expected `width_contacts=[]`.
+The existing Rust class guide uses one sentinel width and no contact-neighbor
+entries, so its genuine output is `[[]]`. Both saved log densities were finite;
+this was an adapter-format error, not a proposal-density disagreement. No
+independent geometry or endpoint-classification query had begun. The original
+outputs, frozen code and failure receipt are preserved.
+
+The correction changes that exact format check and its synthetic fixture. All
+24 tests, including the six continuation tests, passed. The separately reviewed
+[continuation](../results/native-class-support-recovery-20261004/protocol.json)
+was launched with one worker. Its first stage successfully adopted the complete
+first population byte for byte; it generates only the remaining 384 draws,
+with the original seeds, guide and unconditional audit IDs. The failed run's
+source and receipts remain unchanged. The physical-weight campaign remains on
+hold pending the complete prospective result and its review.
+
+The continuation execution-plan SHA is
+`a847304317aae29967c1aaacc04a12388b34ecbb41af5d4da304e5a8c6d19cee`.
+Its launch controller was PID 1925272, process birth tick 199206093. Current
+progress and any failure are recorded in its `execution` directory. Launch
+and successful byte adoption do not establish completion or scientific access.
+The [validation receipt](../results/native-class-support-recovery-validation-20261004/validation.json)
+has SHA `8e6000f96ade5b4f5c75cde4f514be790390f39739014a04dec1f2c68c0fd471`.
+
+The initial sandbox-local launcher ended before creating any controller claim
+or scientific output. The subsequent host launch is separately recorded in
+the pilot directory; it is the launch that generated the 128 proposals. No
+scientific draws were repeated by that launcher correction.
+
 ## Receipts and the reporting correction
 
 The original auditor reports ordered `rows` and a `counts` object. The old

@@ -103,11 +103,13 @@ checks also remain. See the
 The completed native audit strengthens the case for a long-range change of the
 pair's relative pose: rigid relocation alone preserves it, while the tested
 local flexible chains did not bridge initializations. The next optional kernel
-under implementation applies a single-tetramer reversible atlas map anchored
+now implemented applies a single-tetramer reversible atlas map anchored
 to its other mobile partner, mixed with the same local moves. The partner is
 unchanged during each coordinate proposal, so its conditional forward/reverse
 anchor is identical. This is a hypothesis, not a speedup result or production
-default. The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
+default. Six focused and nine existing kernel tests pass in an isolated build;
+the next independent sphere stationarity reference is being prepared using
+cached IID sources. The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
 records the balance argument and retains a direct physical control.
 
 A standalone defensive pair selector and a checked Lean selection theorem are

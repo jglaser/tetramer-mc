@@ -287,11 +287,25 @@ starts, spectator geometry and outer local schedule. Guidance has shown no
 consistent efficiency advantage, so guided-versus-flat alone is insufficient.
 The existing pointwise delayed-acceptance inequality still applies to m1.
 
-Implementation is underway as an optional conditional-kernel method. Production
-defaults, examples, executable and run allocations are unchanged. No benchmark
-has been launched. Before doing so, check the conditional map's inverse trace,
-uniform support, hard/score rejection accounting, fatal-state atomicity and the
-full correction, then run an independent reference-limit comparison. Assess
+The optional methods `FlexibleSurrogateKernel::step_partner_atlas` and
+`step_partner_atlas_direct` are implemented. Production defaults, examples,
+executable and run allocations are unchanged. No protein benchmark has been
+launched. Six focused tests and all nine existing flexible-kernel tests pass:
+the conditional map's inverse trace and asymmetric proposal correction,
+uniform reverse support, hard/score/null accounting, fixed horizons, fatal-state
+atomicity, direct-versus-delayed corrections and default RNG replay are covered.
+The direct control also passes with unusable score quadrature, verifying that it
+never evaluates that guide or consumes its acceptance RNG. An initial test-only
+private-helper import failed at compilation; its source and failed receipt were
+retained before replacing it with an independent local-move reconstruction.
+[Passing receipt](../results/partner-atlas-validation-20261004/attempt02/validation.json).
+
+The next independent stationarity reference will reuse every one of the 8,192
+previously audited IID sphere source poses, without selecting by prior move
+outcome or redrawing sources. Its direct, guided m1, guided m8 and flat8 arms
+will use fresh proposal/bath streams and retain every rejection. This reference
+is under preparation, not a completed validation or efficiency measurement.
+After that check, assess
 native occupancy and motif exchanges separately by initialization, with full
 CPU and absent-state diagnostics. Atlas coverage, hard destination failures,
 source-tail penalties and noisy bath costs can still defeat this proposal.

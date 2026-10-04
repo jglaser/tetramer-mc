@@ -623,8 +623,30 @@ impl DockingProposal {
         self.model.uniform_weight()
     }
 
+    /// Support of the immutable, world-centered defensive member cube.
+    /// The uniform helper reports a zero correction only when BOTH the source
+    /// and encoded candidate lie in this support. Callers must check reverse
+    /// support themselves; an exterior source is a rejection, not a redraw.
+    pub fn member_uniform_contains(&self, pose: Pose) -> Result<bool> {
+        ensure!(
+            self.method == DockingMethod::PosteriorInvolution && !self.model.is_periodic(),
+            "Member charts need a nonperiodic posterior-involution model"
+        );
+        pose.validate()?;
+        ensure!(
+            (0..3).all(|i| self.center[i].is_finite()
+                && self.cube[i].is_finite()
+                && self.cube[i] > 0.
+                && (self.center[i] - self.cube[i] * 0.5).is_finite()
+                && (self.center[i] + self.cube[i] * 0.5).is_finite()),
+            "Invalid immutable member cube"
+        );
+        Ok((0..3).all(|i| (pose.position[i] - self.center[i]).abs() <= self.cube[i] * 0.5))
+    }
+
     /// Draw the defensive uniform branch without choosing an anchor or drawing
-    /// a branch coin. Its rigid-subset forward/reverse correction is zero.
+    /// a branch coin. The zero correction requires both endpoint handles in
+    /// `member_uniform_contains`; this draw helper does not check the source.
     pub fn draw_member_uniform(&self, rng: &mut StdRng) -> Result<(Option<Pose>, Value)> {
         ensure!(
             self.method == DockingMethod::PosteriorInvolution && !self.model.is_periodic(),

@@ -159,3 +159,25 @@ and protocol SHA256
 No partial native-observer outcome is included here. The completed contact
 results retain the conditional physical scope above and do not decide
 finite-system assembly or native registry.
+
+The completed-only native presentation tool is now implemented in
+`tools/plot_surrogate_internal_native.py`. It shows all 64 chains separately:
+native occupancy and occupied-frame counts, motif-presence ESS per full CPU,
+nonempty returns, all fourteen motif marginals and 32 same-stream initialization
+contrasts. Undefined ESS remains null; positive ESS uses a logarithmic axis.
+It authenticates the drained observer and its frozen input identities before
+reading scalar outcomes, without reopening trajectory journals.
+
+Six synthetic checks passed, including incomplete-result rejection, input and
+source binding, sample/CPU consistency, rare and constant occupancy, and all
+three PNG/SVG renderings. Receipt:
+`results/surrogate-internal-native-plot-validation-20261004/attempt01/validation.json`,
+SHA256 `7e3efde58f3670b8ba6fb42fa2f91bf26d627ec3d6f4ac4f46983aedcf973028`.
+No scientific plot has been generated from the running observer. After its
+complete successful terminal record, use a fresh output directory:
+
+```sh
+/home/xvg/protein-nucleation/.venv/bin/python -B tools/plot_surrogate_internal_native.py \
+  --root /vast/xvg/tetramer-mc-runs/surrogate-internal-native-20261004 \
+  --output /absolute/fresh/native-figure-directory
+```

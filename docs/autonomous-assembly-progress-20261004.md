@@ -8,13 +8,37 @@ The decision conditions remain the repaired rigid tetramer, depletant radius
 1.5 Å, activity 0.035 Å⁻³ and approximately 106.8 μM. The diagnostics below
 have different physical conditions and must remain separate.
 
+## New contact-catalogue finding
+
+A completed supplemental diagnostic changes the interpretation of the old
+growth comparison. Twenty additional hard-valid native monomer-orbit placements
+are missing from the original fourteen-template observer. In the final
+geometry-only endpoint they add 70 contact pairs: 29 → 99, with 40 → 155
+tetramers participating, seed-connected size 8 → 9, and largest separate
+component 2 → 4. The informed endpoint adds 34 pairs: 248 → 282, with seed
+size sixteen and largest separate component ten unchanged. Every expanded
+nontrivial component admits an exact injective monomer-site embedding.
+All 113 components also fit the measured member centers with RMS error below
+0.95 Å using one rigid alignment each. The geometry-only seed component has
+0.225 Å RMS error; its four separate four-tetramer components have 0.164–0.228 Å
+RMS errors. No individual-body relaxation or fitted cell strain was allowed.
+
+The [supplemental report and figure](expanded-native-contact-diagnostic-20261004.md)
+preserve the original counts and all new labels separately. This establishes
+previously missed native registration, not equilibrium assembly. It also means
+that the old physical region “contact without native entry” must not be read
+as proof of nonnative monomer geometry. Running analyses keep their frozen
+region definitions.
+
 ## Completed growth comparison
 
 At radius 1.4 Å, activity 0.04 Å⁻³ and 500 μM, two completed N=264 histories
-share initial poses and the RNG seed. Native-informed proposals grew the
-registered seed from eight to sixteen bodies; the tested native-blind FFT
-proposal retained eight. Separate registered components reached size ten and
-two, respectively. Both histories lasted 100,000 sweeps. Neither is an
+share initial poses and the RNG seed. Under the original fourteen-template
+observer, native-informed proposals grew the registered seed from eight to
+sixteen bodies; the tested native-blind FFT proposal retained eight. Separate
+registered components reached size ten and two, respectively. The expanded
+endpoint counts above supersede those geometric interpretations without
+altering the original history records. Both histories lasted 100,000 sweeps. Neither is an
 independent-start convergence test; neither estimates equilibrium occupancy.
 
 The [growth report](completed-growth-tail-20261004.md) and
@@ -61,8 +85,10 @@ has now completed:
   original 1.5 Å / 0.035 Å⁻³ conditions. Its allocation is sixteen independent
   populations of 16,384 attempted draws: eight per proposal arm, two Poisson
   clouds per valid pose. Invalid draws retain zero weight. All 81 producer and
-  audit stages must finish before the declared postrun comparison. No partial
-  scientific result is reported here.
+  audit stages have now completed and drained. The postrun adapter is being
+  corrected to authenticate each archived source-map namespace; its failed
+  preparations created no analysis jobs or new physical samples. Scientific
+  outcomes await that complete admission and matching SMC comparison.
 - The completed internal-native observer at
   `/vast/xvg/tetramer-mc-runs/surrogate-internal-native-20261004` classifies all
   retained endpoints of 48 completed rigid/flexible chains and reuses sixteen
@@ -139,6 +165,14 @@ and refuses dispatch before that contact analysis completes. Neither observer
 has classified this running campaign.
 The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
 records the balance argument and retains a direct physical control.
+
+A reviewed handoff watcher now waits for completion and controller exit before
+starting the two already validated analyses serially. Twelve synthetic
+lifecycle/deadline tests passed. Its frozen record is
+`results/partner-atlas-autonomous-handoff-20261004/freeze.json`, SHA256
+`fabbcefb49f568ea462bb26cab6acd9bd3a1c334569b216fb5d6eeb438e73457`.
+It adds no physical draws, refuses retries, preserves failures, and waits at
+most six hours; the analysis workers retain their own frozen resource limits.
 
 A standalone defensive pair selector and a checked Lean selection theorem are
 ready for later all-mobile integration. State-dependent pair selection enters

@@ -90,7 +90,54 @@ SHA256 is `fc39a357eae8fb4f018c5803643a3d2e7a1120bc23f87828d5664dcbdc73b7db`.
 
 This finite coverage statement is relative to the seven supplied monomer
 contact classes, not every possible contact definition. Absence of shared sites
-does not establish atomic hard validity. Full atomic checks of the 20 new
-candidates are the next step. The existing 14-label native weights retain
-their original meaning; the additional candidates must be treated as a
-separately defined supplemental region if they pass geometry checks.
+alone does not establish atomic hard validity. The existing 14-label native
+weights retain their original meaning; additional candidates belong to a
+separately defined supplemental region.
+
+![Exact contact construction coverage](../results/unrestricted-native-catalogue-coverage-20261004/figure-v2/catalogue-coverage.png)
+
+Cells enumerate all member/class/member witnesses; repeated numbers denote the
+same exact operation. Cell counts are not statistical weights. The plot reads
+only the completed coverage output. Its first layout is retained separately;
+the second changes spacing without changing the plotted values.
+
+### Completed atomic checks
+
+All 20 additional placements pass the strict hard-atom predicate without
+relaxing their poses, coordinates, or radii. Their minimum surface gaps range
+from 0.036918 to 0.911126 Å, and each has atomic contacts within 2 Å
+(17–851 atom pairs). Sparse spatial-tree queries and exhaustive calculations
+agree on every recorded threshold count. The exhaustive calculation evaluated
+320,640,320 atomic pair distances across the 20 placements; existing catalogue
+geometries were reused rather than reevaluated.
+
+The tetramer reconstruction matches the physical shape exactly. All 112
+member/contact/member constructions agree with their Cartesian transforms;
+the 14 existing catalogue poses serve as coordinate controls. The calculation
+uses serialized proper quaternions and explicitly checks matrix roundoff.
+
+The completed result is
+`results/unrestricted-native-catalogue-geometry-20261004/analysis.json`, with
+receipt SHA256
+`5780f0a8f45b53a7d73f72ad3883c0be7522512d5ea656d6104248ad74c4bda6`.
+The bounded run used 6.421 CPU seconds, one worker and one thread.
+
+All 20 are also necessarily excluded by the old classifier at their exact
+poses. A separate metadata-only assessment compared every placement with all
+14 old templates using the unchanged 15° body-orientation gate and the maximum
+of the four member-center errors (at most 2 Å). None passes both gates for any
+template. All 280 comparisons are retained in
+`results/unrestricted-native-entry-body-gates-20261004/analysis.json`; receipt
+SHA256 is `c12e3fad69683a6ba35f7f1c95d199ad5018c53853ad1256fc7bf75751d846f2`.
+Five synthetic controls passed, including a case distinguishing the maximum
+member error from center-of-mass or mean error. This step made no atom queries.
+
+These are structurally allowed native-monomer contacts, not measured basin
+weights or evidence of equilibrium stability. The completed
+[supplemental endpoint diagnostic](expanded-native-contact-diagnostic-20261004.md)
+finds 34/70 additional contact pairs in the informed/geometry-only endpoints,
+using the unchanged supporting native-residue predicates. All 113 expanded
+components admit exact injective embeddings and have measured member-center
+RMS error below 0.95 Å after one rigid alignment per component. This does not
+prove a complete tetramer packing or equilibrium assembly. Running observers
+and physical-weight regions retain their frozen definitions.

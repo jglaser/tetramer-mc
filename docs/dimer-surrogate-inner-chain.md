@@ -59,6 +59,93 @@ inner chain needs the validated two-singleton bath path, because a common-rigid-
 subset bath gate cannot account for changes in the internal exclusion union.
 No production inner-chain kernel has been implemented by the passive probe.
 
+## Implemented conditional kernel
+
+[`rigid_surrogate_chain.rs`](../src/rigid_surrogate_chain.rs) now supplies the
+fixed-label, fixed-handle rigid-dimer kernel for conditional benchmarks. Each
+inner step proposes an isotropic Gaussian displacement of the handle and an
+independent isotropic Cayley rotation on the left. These proposals are symmetric
+with respect to translation volume and Haar orientation measure. All steps use
+the same scales. The carried member is reconstructed from the **outer source**
+geometry each time, avoiding cumulative distortion of the rigid pair.
+
+The score cloud, spectators, labels and handle are fixed for the whole outer
+attempt. Inner hard failures and MH rejections count toward the fixed horizon.
+The endpoint receives one rigid-union physical Poisson gate and the correction
+`old_score - endpoint_score`. A returned identity is a self-loop without a bath
+draw. The actual physical state changes only after that final decision. A failed
+resource or geometry calculation leaves the original state and a fatal record;
+it is not converted into a physical rejection.
+
+The existing conditional runner adds three opt-in arms:
+
+| Arm | Inner steps | Guidance strength |
+| --- | ---: | ---: |
+| `rigid_surrogate_1` | 1 | 1 |
+| `rigid_surrogate_8` | 8 | 1 |
+| `rigid_surrogate_flat8` | 8 | 0 |
+
+Their explicit policy is
+`{"schema":"rigid-surrogate-policy-v1","proposal_scales":{"source":"local"}}`.
+This uses the same per-step translation and rotation scales as the four existing
+local moves in each block. The eight-step arms have a larger possible net
+displacement; that is precisely why the unguided eight-step control is included.
+The arms reuse the original frozen 16,384-point clouds and prepared starts. They
+do not query native labels or redraw a cloud based on the current contacts.
+
+Each block journals the four local outcomes, a durable collective-attempt start,
+the complete inner path and physical outcome, and the retained state. Checkpoints
+bind the cloud, scales, fixed step count and random-stream roles. An incomplete
+attempt is preserved and stops continuation; it is never silently retried.
+
+The prospective comparison is 24 new chains: three arms, two preparations and
+four streams, each with 512 warmup and 4,096 production blocks. Sixteen completed
+local/`m4` controls are reused once, rather than counted anew for each arm. Arms
+share preparation and stream families, so cross-arm comparisons are paired.
+All observations include rejected endpoints. The primary diagnostics remain
+external contact-fingerprint efficiency per total sampling CPU, completed
+environment exchanges, and agreement across preparations. This allocation is
+conditional on a frozen environment at 1.4 Å and 0.0275 Å⁻³; it cannot establish
+assembly or instability under the original decision conditions.
+
+The implementation validation is recorded in
+`results/rigid-surrogate-validation-20261004-v3/validation.json`: six kernel
+tests, one independent physical-reference test and all 17 runner tests pass.
+The earlier two receipts are preserved: the first stopped at a test-fixture
+literal compile error; the second detected that a tagged unit enum silently
+ignored an unwanted scale override. Using an empty struct variant now makes
+that override fail as intended. Neither failure launched protein sampling.
+
+The physical reference draws 4 × 1,024 independent configurations of a rigid
+two-sphere body near a third sphere. Uniform translation and Haar rotation,
+direct hard/wall predicates, and an independent Poisson-void test give exact
+physical sources. The void region is the moving **union** outside the spectator,
+so this reference includes triple shielding rather than summing pair energies.
+Of the 4,096 sources, 1,530 exercise triple coverage. Each source undergoes one
+actual outer-kernel step in each arm. Twenty paired pose/contact/overlap moments
+pass the predeclared six-standard-error checks. The wrong-sign correction
+control gives mean overlap change 0.33653 with standard error 0.01446, a
+23.3-standard-error discrepancy. This is a sensitive finite-allocation diagnostic,
+not a proof of all observables, floating-point execution, or protein mixing.
+
+Runner tests include disk continuation for every arm and both preparations,
+unchanged initial local updates, raw-versus-retained quadrature normalization,
+all-hard inner paths, identity endpoints, exhausted bath budgets, and preserved
+incomplete journal tails. The production executable is unchanged; only the
+isolated conditional example is built.
+
+The twelve new Python checks also pass: seven independent journal/score/pose
+audits and five campaign-allocation/provenance controls. Receipt:
+`results/rigid-surrogate-python-validation-20261004/validation.json`.
+The fixed 24-chain benchmark was launched with one worker at
+`/vast/xvg/tetramer-mc-runs/rigid-surrogate-dimer-context0-20261004`.
+Its protocol SHA256 is
+`b63fcf01c3183ecb52015530410af93e6e664704eb795adad81e6f83dc838a47`;
+execution-plan SHA256 is
+`5be5ee73baa8b6d051c353ba2d480605638f0dbe23de33599e892aaf3465c8c0`.
+The archived observer is admitted only after all 24 terminal contracts complete
+and their processes are drained. No efficiency outcome is asserted at launch.
+
 ## A fixed-cloud many-body score
 
 Let E0,E1 be the two identical inflated sphere unions of volume v, and S the

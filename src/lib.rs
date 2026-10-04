@@ -44,6 +44,7 @@ pub mod contact_memory;
 pub mod cluster_phase;
 pub mod oligomer_proposal;
 pub mod rigid_subset;
+pub mod rigid_surrogate_chain;
 
 pub mod bounded_singleton_path;
 pub mod evolving_dimer;

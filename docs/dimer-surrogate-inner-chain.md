@@ -153,6 +153,31 @@ kernel, including singular endpoint proposals. The endpoint theorem explicitly
 assumes a finite surrogate measure; the power theorem does not. See the
 [scope and implementation obligations](../formal/FixedLengthSurrogate.md).
 
+The completed-analysis presentation is
+[`plot_rigid_surrogate_benchmark.py`](../tools/plot_rigid_surrogate_benchmark.py).
+It requires the separate analysis controller's successful, drained terminal
+record before loading outcomes. Its fixed panels show whole contact-fingerprint
+ESS, external-edge-presence ESS, completed returns to nonempty external contact
+sets, and external-contact occupancy. All rates use total sampling CPU including
+warmup and rejected work. Starts and all four streams stay separate; an undefined
+ESS is a gap, never zero. A second figure shows between-start differences in
+external contact-set and edge occupancies. It does not recompute statistics or
+read trajectories.
+
+High whole-fingerprint ESS can reflect many distinct local contact labels, while
+low between-start differences can reflect two trajectories that stayed unbound.
+Neither is sufficient alone. The presentation therefore keeps occupancy and
+nonempty returns beside ESS, and makes no native-registry or equilibrium claim.
+Synthetic layout validation, explicitly labeled as synthetic, is stored in
+`results/rigid-surrogate-plot-validation-20261004-v2`; it contains no scientific
+outcomes. After the whole analysis completes, use a fresh output directory:
+
+```sh
+python tools/plot_rigid_surrogate_benchmark.py \
+  --root /vast/xvg/tetramer-mc-runs/rigid-surrogate-dimer-analysis-20261004 \
+  --output results/rigid-surrogate-contact-figure-20261004
+```
+
 ## A fixed-cloud many-body score
 
 Let E0,E1 be the two identical inflated sphere unions of volume v, and S the

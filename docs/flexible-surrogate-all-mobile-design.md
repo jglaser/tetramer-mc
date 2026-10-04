@@ -59,7 +59,9 @@ endpoint, including both changed member poses.
 
 If instead discarding the root and retaining only an unordered pair, the
 selection law is `[g_i(j|X) + g_j(i|X)]/N`. Its correction is different.
-Retaining the root avoids that additional summation. A separate cutoff-only
+That marginal law also requires the ensuing proposal to be independent of
+which root generated the pair. Retaining the root avoids this requirement and
+the additional summation. A separate cutoff-only
 selector with no global fallback would reject endpoints outside its reverse
 neighborhood. A neighborhood broader than exclusion contact can permit contact
 breaking within that support, but a hard cutoff still restricts that channel's
@@ -90,11 +92,13 @@ world-space pair pose. `DimerDepletionSurrogate::evaluate` transforms the same
 points with each candidate member pose. Its score estimates
 
 \[
-S=z\{\lvert E_0\cap E_1\rvert+
+S\approx\gamma z\{\lvert E_0\cap E_1\rvert+
        \lvert(E_0\cup E_1)\cap B\rvert\},
 \]
 
-where `B` is the fixed spectator union during this call. Spectator shielding
+where `gamma` is the frozen guidance strength and `B` is the fixed spectator
+union during this call. In particular, flat guidance has `gamma=0` and `S=0`.
+Spectator shielding
 and the unshielded internal contribution give this union expression without
 discarding many-body overlap. The finite quadrature defines a deterministic
 function of each trial pair. Freezing that **function** does not require its

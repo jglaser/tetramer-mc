@@ -62,6 +62,14 @@ sampling per CPU and agreement between initializations, beyond coarse patch
 motion. Higher native occupancy alone is not an efficiency measure. A short
 record with no return to an appreciably occupied alternative is insufficient.
 
+Interpretation is conditional on the recorded uncertainty and initialization
+differences. More patch motion without improved registry sampling would motivate
+changing the proposal geometry. Improved internal registry with unresolved
+external docking would motivate a separate mobile-neighborhood/docking test;
+this internal observer cannot itself establish absence of external bonds in the
+new chains. Persistent disagreement between starts leaves the conditional
+sampling question open. None of these branches refutes assembly.
+
 This remains the two-mobile conditional target at `rd=1.4 Å`,
 `z=0.0275 Å^-3`, with 262 fixed spectators inherited from the 500 μM growth
 run. It does not decide assembly at `rd=1.5 Å`, `z=0.035 Å^-3` and

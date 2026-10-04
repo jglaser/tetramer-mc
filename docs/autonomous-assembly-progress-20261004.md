@@ -8,6 +8,19 @@ The decision conditions remain the repaired rigid tetramer, depletant radius
 1.5 Å, activity 0.035 Å⁻³ and approximately 106.8 μM. The diagnostics below
 have different physical conditions and must remain separate.
 
+## Completed original-condition regional weights
+
+The independent importance calculation now estimates native-minus-competing
+free energy at **−18.777 ± 0.054** and **−18.772 ± 0.083 kBT** (population-based
+95% half-widths) for its two proposal arms. This is one mobile tetramer against
+two fixed neighbors, restricted to the unchanged R4 region. Main importance
+ESS, contribution concentration, relative error and proposal-agreement checks
+pass. Material strata and new-guide sensitivity studies remain unresolved;
+coverage outside R4 is still required. Both the 81-stage campaign and its
+two-stage postrun completed. The [results and figure](native-class-physical-results-20261004.md)
+locate the remaining SMC discrepancy mainly in the native R4 complement of the old reference region,
+and preserve the existing deterministic bound on unbound mass inside R4.
+
 ## New contact-catalogue finding
 
 A completed supplemental diagnostic changes the interpretation of the old
@@ -85,10 +98,10 @@ has now completed:
   original 1.5 Å / 0.035 Å⁻³ conditions. Its allocation is sixteen independent
   populations of 16,384 attempted draws: eight per proposal arm, two Poisson
   clouds per valid pose. Invalid draws retain zero weight. All 81 producer and
-  audit stages have now completed and drained. The postrun adapter is being
-  corrected to authenticate each archived source-map namespace; its failed
-  preparations created no analysis jobs or new physical samples. Scientific
-  outcomes await that complete admission and matching SMC comparison.
+  audit stages have now completed and drained. The corrected postrun adapter
+  passed 30 tests and completed both analysis stages. Its failed preparations
+  created no analysis jobs or new physical samples. The completed matching
+  comparison and remaining convergence issues are reported above.
 - The completed internal-native observer at
   `/vast/xvg/tetramer-mc-runs/surrogate-internal-native-20261004` classifies all
   retained endpoints of 48 completed rigid/flexible chains and reuses sixteen
@@ -182,9 +195,8 @@ ratio; it cannot be added after committing an endpoint. The
 six-test validation, reference limits and remaining implementation obligations.
 The production sampler does not yet use this selector.
 
-After the full physical campaign completes, reuse the validated postrun
-analysis, preserve every failed stratum, and compare matching linear masses
-with prior estimates. Passing its primary checks alone would not complete the
+The completed postrun preserves every failed stratum and compares matching
+linear masses with prior estimates. Passing its primary checks alone does not complete the
 required population-size/cloud/defensive sensitivity checks or bound the
 unmeasured vessel contribution. The existing N=12/N=24 input bank remains
 prepared, not validated assembly production. Finite-system stability requires

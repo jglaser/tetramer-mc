@@ -114,9 +114,22 @@ following fixed design for a new reference, with fresh independent seeds:
 | 0.4 | 4 | 20,480 |
 
 Total: **131,072 attempts**, two independent clouds per valid pose, unchanged
-radius/regions and lambda/activity ratio 16. This design has not been launched;
-it requires its own frozen execution plan. The completed cube allocation will
-not be extended or rerun to replace its failure.
+radius/regions and lambda/activity ratio 16. The independently reviewed
+preparation and reduction tools passed thirteen focused checks, including
+unequal activity allocations, retained invalid zeros and variance denominators.
+The completed cube allocation will not be extended or rerun to replace its
+failure.
+
+The new reference launched on 4 October at
+`/vast/xvg/tetramer-mc-runs/wall-envelope-vessel-sphere-20261004`, with one worker,
+one thread and seventeen sequential producer/audit/statistics stages. Its
+execution plan SHA256 is
+`4fa24d933702fd8a991c3bec057d52bae628b0fa317564f6cdf8dc889db62f27`.
+The fixed seeds are 6900410001–6900410004 and 6900411001–6900411004.
+Its optimized executable reproduces the Rust source bundle used in the passed
+80-attempt CLI check. No partial scientific result is reported; interpretation
+waits for completion and drainage of the complete allocation.
+[Tool-validation receipt](../results/wall-envelope-tools-validation-20261004/attempt01/validation.json).
 
 Here is the explicit statistical assurance, rather than a budget inferred from
 whether a previous realization happened to pass. For each of the five radial

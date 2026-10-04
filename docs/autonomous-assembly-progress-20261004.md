@@ -51,9 +51,10 @@ The completed sphere reference tests support the corrected kernel's physical
 target; they do not establish protein mixing. These results do not justify
 promoting the current flexible kernel into assembly production.
 
-## Work still running
+## Physical weights and completed native observer
 
-Two separately frozen jobs are active at this checkpoint:
+The independent physical-weight campaign remains active. The native observer
+has now completed:
 
 - The independent physical-weight campaign at
   `/vast/xvg/tetramer-mc-runs/native-class-physical-primary-20261004` uses the
@@ -62,14 +63,18 @@ Two separately frozen jobs are active at this checkpoint:
   clouds per valid pose. Invalid draws retain zero weight. All 81 producer and
   audit stages must finish before the declared postrun comparison. No partial
   scientific result is reported here.
-- The internal-native observer at
+- The completed internal-native observer at
   `/vast/xvg/tetramer-mc-runs/surrogate-internal-native-20261004` classifies all
   retained endpoints of 48 completed rigid/flexible chains and reuses sixteen
-  completed native controls. It has no external-native or cycle observer and
+  completed native controls. All 24 new prepared-start histories have zero
+  production native occupancy; new source-start native observations reach only
+  motif 6. Guided flexible m8 beats flat8 in native-presence ESS/CPU in only one
+  of four source streams. The reused nonlocal m4 reaches additional motifs from
+  some prepared starts. It has no external-native or cycle observer and
   generates no physical samples. Its purpose is to distinguish patch motion
   from native registration, with full sampler CPU as denominator.
 
-Both allocations, failure rules and limits remain fixed. The user's three
+The allocations, failure rules and limits remain fixed. The user's three
 ongoing growth simulations and their production executable are unchanged.
 
 ## Next decisions
@@ -88,21 +93,22 @@ where a small number of uniform-cube draws carry large weights. The
 failed gate. An [optional normalized wall-envelope proposal](wall-envelope-normalizer.md)
 has now been implemented and checked with nine Rust tests, independent Python
 reconstruction and 80 retained toy CLI attempts. A separately calculated
-131,072-attempt future reference has a conservative point-error bound; it has
-not been launched. These are correctness and allocation results, not a measured
+131,072-attempt reference has a conservative point-error bound and has now
+launched with one worker and seventeen fixed stages. The preparation/reduction
+tools passed thirteen additional checks. These are correctness and allocation results, not a measured
 sampling speedup. No finished allocation is extended. The regional campaign's explicit admission
 checks also remain. See the
 [implementation and validation record](native-class-full-vessel-guide.md).
 
-The native observer must first establish what the completed surrogate trials
-actually sampled. A mixture of rigid and single-member *local* steps would
-remain local at the current scales; it is not a demonstrated solution to
-exchange between separated environments. The next candidate under source
-review instead combines an existing long-range, reversible member-chart map
-with local internal rearrangements inside one corrected surrogate chain.
-That is a hypothesis, not a speedup result or an implemented production default.
-Its [prospective construction](mixed-atlas-surrogate-design.md) records the
-inner and outer balance corrections and the useful matched controls.
+The completed native audit strengthens the case for a long-range change of the
+pair's relative pose: rigid relocation alone preserves it, while the tested
+local flexible chains did not bridge initializations. The next optional kernel
+under implementation applies a single-tetramer reversible atlas map anchored
+to its other mobile partner, mixed with the same local moves. The partner is
+unchanged during each coordinate proposal, so its conditional forward/reverse
+anchor is identical. This is a hypothesis, not a speedup result or production
+default. The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
+records the balance argument and retains a direct physical control.
 
 A standalone defensive pair selector and a checked Lean selection theorem are
 ready for later all-mobile integration. State-dependent pair selection enters

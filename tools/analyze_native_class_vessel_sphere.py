@@ -61,7 +61,7 @@ def snapshot_gate_status(live_path, snapshot_path, ledger):
     return value, verify_live_unchanged
 
 
-def authenticated_predecessors(root, output, ledger):
+def authenticated_predecessors(root, output, ledger, analyzer_file=__file__):
     """Require all 16 audited predecessors drained, and this live final worker."""
     # Gate before any population/scientific output is opened.
     plan_path = root/'execution-plan.json'; plan = read(ledger.bind(plan_path))
@@ -80,7 +80,7 @@ def authenticated_predecessors(root, output, ledger):
     require(stat[0] not in ('Z','X') and int(stat[19]) == claim['birth_ticks'], 'Controller process identity changed')
     last = plan['jobs'][16]
     require(last['terminal'] == dict(path=str(output), success_contract='complete_and_passed')
-        and last['argv'] == [sys.executable, '-B', str(Path(__file__).resolve()), '--root', str(root), '--out', str(output)],
+        and last['argv'] == [sys.executable, '-B', str(Path(analyzer_file).resolve()), '--root', str(root), '--out', str(output)],
         'Statistics command/terminal differs')
     driver.verify_plan(plan_path, plan, sha(plan_path))
     terminals = []
@@ -113,15 +113,24 @@ def check_preparation(root, plan, execution, ledger):
         path = (root/relative).resolve(); require(path.is_relative_to(root), 'Unsafe preparation path'); ledger.bind(path,digest)
 
 
-def population(job, plan, audit, ledger, companion_path):
+def population(job, plan, audit, ledger, companion_path, expected_manifest_schema=7):
+    # The caller owns its frozen allocation. Keep zeros and cloud uncertainty
+    # on this population's attempted denominator, also for unequal activity arms.
+    draws = job['samples']
+    require(type(draws) is int and draws >= 2, 'At least two attempted draws required')
+    require(expected_manifest_schema in (7, 8), 'Unsupported sphere manifest schema')
     directory = Path(job['directory']); summary = read(ledger.bind(directory/'summary.json'))
     manifest = read(ledger.bind(directory/'manifest.json'))
     require(summary['complete'] is True and summary['manifest'] == manifest and summary['numerical_nulls'] == 0
-        and manifest['samples'] == summary['samples'] == job['samples'] == DRAWS
+        and manifest['samples'] == summary['samples'] == draws
         and manifest['seed'] == job['seed'] and manifest['activity'] == job['activity']
-        and manifest['cloud_replicates'] == 2 and manifest['schema'] == 7
+        and manifest['cloud_replicates'] == 2 and manifest['schema'] == expected_manifest_schema
         and manifest['executable_sha256'] == plan['executable']['sha256']
         and manifest['source_bundle_sha256'] == plan['source_bundle']['sha256'], 'Wrong sphere population identity')
+    if expected_manifest_schema == 8:
+        require(manifest.get('pre_envelope_schema') == 7
+            and manifest.get('vessel_uniform_schema') == 'one-atom-wall-envelope-v1'
+            and isinstance(manifest.get('vessel_uniform_envelope'), dict), 'Missing sphere wall-envelope law')
     require(audit['schema'] == 'full-vessel-native-class-line-independent-audit-v1' and audit['complete'] is True
         and audit['population'] == str(directory) and audit['manifest'] == manifest
         and audit['new_pose_draws'] == audit['new_Poisson_clouds'] == 0, 'Missing matching independent row audit')
@@ -132,7 +141,7 @@ def population(job, plan, audit, ledger, companion_path):
     import json
     rows = [json.loads(line) for line in sample_path.read_text().splitlines()]
     attempts = [json.loads(line) for line in (directory/'attempts.jsonl').read_text().splitlines()]
-    require(len(rows) == DRAWS and attempts == [dict(draw=i,state='begin') for i in range(DRAWS)], 'Attempted denominator lost')
+    require(len(rows) == draws and attempts == [dict(draw=i,state='begin') for i in range(draws)], 'Attempted denominator lost')
     values = {name:{kind:[] for kind in ('exact','noisy','hard','residual','replica1','replica2','conditional_variance','empirical_cloud_variance')}
               for name in REGIONS}
     negatives = dict(extra_jacobian=[], source_censored=[])
@@ -211,13 +220,13 @@ def population(job, plan, audit, ledger, companion_path):
     statistics_by_region = {}
     for name, series in values.items():
         s = {kind:mean_stats(v) for kind,v in series.items() if kind not in ('conditional_variance','empirical_cloud_variance')}
-        s['known_conditional_residual_SE'] = math.sqrt(math.fsum(series['conditional_variance']))/DRAWS
+        s['known_conditional_residual_SE'] = math.sqrt(math.fsum(series['conditional_variance']))/draws
         s['mean_conditional_cloud_variance'] = statistics.fmean(series['conditional_variance'])
         s['mean_empirical_cloud_variance'] = statistics.fmean(series['empirical_cloud_variance'])
         statistics_by_region[name] = s
     for key,kind in [('total','noisy'),('hard_total','hard')]:
         close(summary['estimates'][key]['log_normalizer'],math.log(statistics_by_region['total'][kind]['mean']), 'Summary all-attempt mean differs')
-    return dict(id=job['id'],activity=job['activity'],population=job['population'],samples=DRAWS,seed=job['seed'],
+    return dict(id=job['id'],activity=job['activity'],population=job['population'],samples=draws,seed=job['seed'],
         regions=statistics_by_region,negative_controls={k:mean_stats(v) for k,v in negatives.items()},counts=counts,
         cloud_diagnostics={name:dict(residual=v[0],known_variance=v[1],z=v[0]/math.sqrt(v[1]) if v[1]>0 else None,
             within_fixed_five_sigma=abs(v[0])<=CRITERIA['cloud_diagnostic_z_limit']*math.sqrt(v[1])+1e-10,

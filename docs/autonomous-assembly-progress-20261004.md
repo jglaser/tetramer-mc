@@ -8,6 +8,24 @@ The decision conditions remain the repaired rigid tetramer, depletant radius
 1.5 Å, activity 0.035 Å⁻³ and approximately 106.8 μM. The diagnostics below
 have different physical conditions and must remain separate.
 
+The newest controlled geometric result is a **5.08-fold increase in proposed
+hard-clear native extensions**, from 2.95% to 15.00%, after small adjustments
+of incoming-particle Gaussian centers. Four independent populations, identical
+kernel widths and all failed draws were retained. This is native-informed
+proposal coverage, not an accepted-move or equilibrium speedup. The
+[coverage report and figure](native-extension-gaussian-coverage-20261004.md)
+show the full allocation, quartet heterogeneity and independent density audit.
+
+A first geometry-only construction retained the complete blind atlas and
+added normalized narrow children centered using the outside core geometry.
+It completed in 190 CPU seconds but changed centers containing only 0.571%
+of source probability mass: 85.945% encountered the static pair-list cap
+before an objective evaluation. Thus the favorable native-informed result
+has not yet generalized to the blind proposal. The
+[construction and balance argument](context-relaxed-atlas.md) separate this
+work-limit failure from physical steric impossibility. Direct scoring at the
+actual centers, with a smaller neighbor search, is the next geometry diagnostic.
+
 ## Completed original-condition regional weights
 
 The independent importance calculation now estimates native-minus-competing

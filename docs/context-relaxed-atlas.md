@@ -296,3 +296,21 @@ geometric coverage gain (see
 construction has not established an analogous gain. Density checks and a
 diagnostic separating conservative pair-list work from actual center clashes
 come before promotion into an assembly sampler.
+
+The fixed-panel density comparison has now passed. The production Rust loader
+and its transport-chart factorization were independently reconstructed in
+Python at the same 131 declared poses, for both source and exported models.
+All 524 comparisons passed the frozen `2e-6` log-density tolerance; largest
+errors were `2.27e-13` for direct densities and `1.42e-14` for transport factors.
+Every scored mixture includes every ordinary and reciprocal branch. The panel
+uses stride-32 parent labels, which are all forward-origin centers; it is not
+an exhaustive check at inverse-origin centers or a global error bound.
+
+The audit is in
+`results/context-relaxed-atlas-density-audit-preparation-20261004/`. It used
+18.255 CPU seconds and 18.899 wall seconds, with all three workers and their
+controller drained. No random draws, geometry predicates or physical updates
+were performed. The independent terminal report SHA-256 is
+`f365c24ef868fb88e734d50fa9e80a340c85a76bc150c08387dd8f554ebb1b59`.
+See [the probe documentation](proposal-density-probe.md) for the separate
+direct/map factor conventions and limitations.

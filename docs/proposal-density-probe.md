@@ -114,3 +114,26 @@ The loader/density path uses linear storage. In contrast,
 branches: 256 MiB of logical pair/CDF payload before allocation capacity,
 charts and temporary duplicate-detection storage. This probe avoids that
 precomputation; it makes no claim about the cost of subsequent MC sampling.
+
+## Completed fixed protein-atlas panel
+
+`results/context-relaxed-atlas-density-audit-preparation-20261004/` binds a
+subsequent 131-pose panel and both complete atlases: 2048 source and 4096
+exported virtual branches. The panel contains 64 source centers (labels
+0, 32, …, 2016), their 64 corresponding child centers, and three synthetic
+relative poses. All centers in this stride are forward-origin; although every
+scored mixture includes inverse branches, the panel does not exhaust their
+center behavior.
+
+All **524 direct/transport, baseline/exported comparisons passed**, with zero
+mismatches at the predeclared absolute log-density tolerance `2e-6`. Maximum
+errors were `2.2737367544323206e-13` (direct) and
+`1.4210854715202004e-14` (transport), the same for both atlases. The complete
+audited execution used **18.255 CPU / 18.899 wall seconds**, with peak RSS
+130864 KiB. Its three children and controller were verified drained. No
+geometry, RNG or physical update was executed, and no retry occurred.
+
+Independent result SHA-256:
+`f365c24ef868fb88e734d50fa9e80a340c85a76bc150c08387dd8f554ebb1b59`.
+Execution summary SHA-256:
+`e4300584e629decdcb9b35fdcbae181eed8e60be324a76636e2ecf2fad29123a`.

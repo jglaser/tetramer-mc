@@ -136,6 +136,99 @@ pub struct FusedComponent {
     pub center: Pose,
 }
 
+/// Passive accounting of the existing catalogue construction, not a search
+/// for additional components. No random numbers or extra geometry are used.
+/// A caller-owned sink preserves this prefix when construction returns an error.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct FusionBuildDiagnostics {
+    pub complete: bool,
+    pub single_labels: usize,
+    pub decoded_means: usize,
+    pub mean_decode_failures: usize,
+    /// All unordered label pairs on different (member, anchor) interfaces.
+    pub possible_interface_pairs: usize,
+    /// Such pairs with two successfully decoded means.
+    pub decoded_interface_pairs: usize,
+    /// Includes pairs skipped by the sorted x-coordinate distance bound.
+    pub distance_rejected_pairs: usize,
+    /// Evaluated only after the full distance test passes, as in `build`.
+    pub angle_rejected_pairs: usize,
+    pub candidate_pairs_before_cap: usize,
+    pub candidates_truncated: usize,
+    pub fit_attempts: usize,
+    /// `fuse` returned None: includes its early residual cutoff, chart encode
+    /// failures and linear-algebra failures. Not a numerical-failure count.
+    pub fit_returned_none: usize,
+    pub fits_above_threshold: usize,
+    pub usable_fits: usize,
+    pub centers_checked: usize,
+    /// Center-level counts are exclusive first failures in traversal order.
+    pub invalid_pose_rejections: usize,
+    pub wall_rejections: usize,
+    pub core_rejections: usize,
+    pub core_overlap_calls: usize,
+    pub information_cholesky_failures: usize,
+    pub covariance_cholesky_failures: usize,
+    pub retained_components: usize,
+    pub requested_fused_mass: f64,
+    pub effective_fused_mass: f64,
+    pub unvisited_fits: usize,
+    pub component_cap_reached: bool,
+    pub hard_check_cap_reached: bool,
+    /// None means all usable fits were visited (including the empty set).
+    pub stopped_by: Option<FusionBuildCap>,
+    /// One record per visited center, never more than max_hard_checks.
+    pub records: Vec<FusionCenterDiagnostic>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FusionBuildCap {
+    Components,
+    HardChecks,
+    ComponentsAndHardChecks,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FusionCenterOutcome {
+    Begun,
+    InvalidPose,
+    OutsideWall,
+    CoreOverlap,
+    InformationNotPositiveDefinite,
+    CovarianceNotPositiveDefinite,
+    Retained,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FusionCenterDiagnostic {
+    pub first: usize,
+    pub second: usize,
+    pub mismatch: f64,
+    pub center: Pose,
+    pub outcome: FusionCenterOutcome,
+    /// Offset/member index of the first geometric failure, if any.
+    pub first_blocking_member: Option<usize>,
+    /// Index in the input spectator slice, not a global particle label.
+    pub first_blocking_spectator: Option<usize>,
+    pub core_overlap_calls: usize,
+}
+
+fn cross_interface_pairs(counts: impl IntoIterator<Item = usize>) -> Result<usize> {
+    let (mut previous, mut pairs) = (0usize, 0usize);
+    for count in counts {
+        pairs = previous
+            .checked_mul(count)
+            .and_then(|n| pairs.checked_add(n))
+            .context("Fusion diagnostic pair count overflow")?;
+        previous = previous
+            .checked_add(count)
+            .context("Fusion diagnostic label count overflow")?;
+    }
+    Ok(pairs)
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct OligomerStep {
     pub handle: Pose,
@@ -232,6 +325,49 @@ impl<'p> OligomerMixture<'p> {
         pool: &[Pose],
         config: &OligomerConfig,
     ) -> Result<Self> {
+        Self::build_impl(
+            proposal, tree, wall, members, spectators, pool, config, None,
+        )
+    }
+
+    /// The same construction with bounded passive accounting. The sink is
+    /// reset before validation and remains incomplete on any returned error.
+    /// This does not change screening, fit initialization, traversal or RNG.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_with_diagnostics(
+        proposal: &'p DockingProposal,
+        tree: &SphereTree,
+        wall: &Container,
+        members: &[Pose],
+        spectators: &[Pose],
+        pool: &[Pose],
+        config: &OligomerConfig,
+        diagnostics: &mut FusionBuildDiagnostics,
+    ) -> Result<Self> {
+        *diagnostics = FusionBuildDiagnostics::default();
+        Self::build_impl(
+            proposal,
+            tree,
+            wall,
+            members,
+            spectators,
+            pool,
+            config,
+            Some(diagnostics),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_impl(
+        proposal: &'p DockingProposal,
+        tree: &SphereTree,
+        wall: &Container,
+        members: &[Pose],
+        spectators: &[Pose],
+        pool: &[Pose],
+        config: &OligomerConfig,
+        mut diagnostics: Option<&mut FusionBuildDiagnostics>,
+    ) -> Result<Self> {
         config.validate()?;
         ensure!(
             !members.is_empty() && !pool.is_empty(),
@@ -263,6 +399,18 @@ impl<'p> OligomerMixture<'p> {
                 Some(mixture.single_to_g0(l, y))
             })
             .collect();
+        if let Some(d) = diagnostics.as_deref_mut() {
+            d.requested_fused_mass = config.multi_contact_mass;
+            d.single_labels = mixture.singles;
+            d.decoded_means = means.iter().filter(|m| m.is_some()).count();
+            d.mean_decode_failures = d.single_labels - d.decoded_means;
+            d.possible_interface_pairs = cross_interface_pairs(means.chunks(nb).map(|c| c.len()))?;
+            d.decoded_interface_pairs = cross_interface_pairs(
+                means
+                    .chunks(nb)
+                    .map(|c| c.iter().filter(|m| m.is_some()).count()),
+            )?;
+        }
         let mut order: Vec<_> = (0..mixture.singles)
             .filter(|&l| means[l].is_some())
             .collect();
@@ -285,22 +433,47 @@ impl<'p> OligomerMixture<'p> {
                     continue;
                 }
                 let d = norm(sub(m1.position, m2.position));
-                if d < config.pair_distance_a && rotation_angle(m1, m2) < angle {
-                    candidates.push((d, l1.min(l2), l1.max(l2)));
+                if d < config.pair_distance_a {
+                    if rotation_angle(m1, m2) < angle {
+                        candidates.push((d, l1.min(l2), l1.max(l2)));
+                    } else if let Some(diagnostics) = diagnostics.as_deref_mut() {
+                        diagnostics.angle_rejected_pairs += 1;
+                    }
                 }
             }
         }
         candidates.sort_by(|a, b| a.0.total_cmp(&b.0).then((a.1, a.2).cmp(&(b.1, b.2))));
+        if let Some(d) = diagnostics.as_deref_mut() {
+            d.candidate_pairs_before_cap = candidates.len();
+            d.distance_rejected_pairs =
+                d.decoded_interface_pairs - d.angle_rejected_pairs - candidates.len();
+            d.candidates_truncated = candidates.len().saturating_sub(config.max_candidates);
+        }
         candidates.truncate(config.max_candidates);
         mixture.fit_candidates = candidates.len();
         mixture.build_seconds[0] = clock.elapsed().as_secs_f64();
         let mut fits = Vec::new();
         for &(_, l1, l2) in &candidates {
-            if let Some((center, information, mismatch)) =
-                mixture.fuse(l1, l2, means[l1].unwrap(), config.max_mismatch)
-                && mismatch <= config.max_mismatch
-            {
-                fits.push((mismatch, l1, l2, center, information));
+            if let Some(d) = diagnostics.as_deref_mut() {
+                d.fit_attempts += 1;
+            }
+            match mixture.fuse(l1, l2, means[l1].unwrap(), config.max_mismatch) {
+                Some((center, information, mismatch)) if mismatch <= config.max_mismatch => {
+                    fits.push((mismatch, l1, l2, center, information));
+                    if let Some(d) = diagnostics.as_deref_mut() {
+                        d.usable_fits += 1;
+                    }
+                }
+                Some(_) => {
+                    if let Some(d) = diagnostics.as_deref_mut() {
+                        d.fits_above_threshold += 1;
+                    }
+                }
+                None => {
+                    if let Some(d) = diagnostics.as_deref_mut() {
+                        d.fit_returned_none += 1;
+                    }
+                }
             }
         }
         fits.sort_by(|a, b| a.0.total_cmp(&b.0).then((a.1, a.2).cmp(&(b.1, b.2))));
@@ -313,25 +486,85 @@ impl<'p> OligomerMixture<'p> {
             if mixture.fused.len() >= config.max_components
                 || mixture.hard_checks >= config.max_hard_checks
             {
+                if let Some(d) = diagnostics.as_deref_mut() {
+                    d.stopped_by = Some(
+                        match (
+                            mixture.fused.len() >= config.max_components,
+                            mixture.hard_checks >= config.max_hard_checks,
+                        ) {
+                            (true, true) => FusionBuildCap::ComponentsAndHardChecks,
+                            (true, false) => FusionBuildCap::Components,
+                            _ => FusionBuildCap::HardChecks,
+                        },
+                    );
+                }
                 break;
             }
             mixture.hard_checks += 1;
+            if let Some(d) = diagnostics.as_deref_mut() {
+                d.centers_checked += 1;
+                d.records.push(FusionCenterDiagnostic {
+                    first: l1,
+                    second: l2,
+                    mismatch,
+                    center,
+                    outcome: FusionCenterOutcome::Begun,
+                    first_blocking_member: None,
+                    first_blocking_spectator: None,
+                    core_overlap_calls: 0,
+                });
+            }
             let bodies: Vec<_> = mixture
                 .offsets
                 .iter()
                 .map(|&u| compose(center, u))
                 .collect();
-            let valid = bodies.iter().all(|&p| {
-                p.validate().is_ok() && wall.contains(p) && {
-                    let placed = Placed::new(p);
-                    !fixed.iter().any(|s| tree.overlaps(&placed, s))
+            let valid = bodies.iter().enumerate().all(|(member, &p)| {
+                if p.validate().is_err() {
+                    if let Some(d) = diagnostics.as_deref_mut() {
+                        d.invalid_pose_rejections += 1;
+                        let record = d.records.last_mut().unwrap();
+                        record.outcome = FusionCenterOutcome::InvalidPose;
+                        record.first_blocking_member = Some(member);
+                    }
+                    return false;
                 }
+                if !wall.contains(p) {
+                    if let Some(d) = diagnostics.as_deref_mut() {
+                        d.wall_rejections += 1;
+                        let record = d.records.last_mut().unwrap();
+                        record.outcome = FusionCenterOutcome::OutsideWall;
+                        record.first_blocking_member = Some(member);
+                    }
+                    return false;
+                }
+                let placed = Placed::new(p);
+                !fixed.iter().enumerate().any(|(spectator, s)| {
+                    if let Some(d) = diagnostics.as_deref_mut() {
+                        d.core_overlap_calls += 1;
+                        d.records.last_mut().unwrap().core_overlap_calls += 1;
+                    }
+                    let overlap = tree.overlaps(&placed, s);
+                    if overlap && let Some(d) = diagnostics.as_deref_mut() {
+                        d.core_rejections += 1;
+                        let record = d.records.last_mut().unwrap();
+                        record.outcome = FusionCenterOutcome::CoreOverlap;
+                        record.first_blocking_member = Some(member);
+                        record.first_blocking_spectator = Some(spectator);
+                    }
+                    overlap
+                })
             });
             if !valid {
                 continue;
             }
             // Chart coordinates are (t - c, L * Cayley), so scale rotations.
             let Some(lower) = cholesky6(&information) else {
+                if let Some(d) = diagnostics.as_deref_mut() {
+                    d.information_cholesky_failures += 1;
+                    d.records.last_mut().unwrap().outcome =
+                        FusionCenterOutcome::InformationNotPositiveDefinite;
+                }
                 continue;
             };
             let mut covariance = [[0.; 6]; 6];
@@ -349,6 +582,11 @@ impl<'p> OligomerMixture<'p> {
                 std::array::from_fn(|j| 0.5 * (covariance[i][j] + covariance[j][i]))
             });
             if cholesky6(&covariance).is_none() {
+                if let Some(d) = diagnostics.as_deref_mut() {
+                    d.covariance_cholesky_failures += 1;
+                    d.records.last_mut().unwrap().outcome =
+                        FusionCenterOutcome::CovarianceNotPositiveDefinite;
+                }
                 continue;
             }
             parameters.push(GaussianComponentParameters {
@@ -365,6 +603,15 @@ impl<'p> OligomerMixture<'p> {
                 mismatch,
                 center,
             });
+            if let Some(d) = diagnostics.as_deref_mut() {
+                d.retained_components += 1;
+                d.records.last_mut().unwrap().outcome = FusionCenterOutcome::Retained;
+            }
+        }
+        if let Some(d) = diagnostics.as_deref_mut() {
+            d.unvisited_fits = d.usable_fits - d.centers_checked;
+            d.component_cap_reached = mixture.fused.len() >= config.max_components;
+            d.hard_check_cap_reached = mixture.hard_checks >= config.max_hard_checks;
         }
         mixture.build_seconds[2] =
             clock.elapsed().as_secs_f64() - mixture.build_seconds[0] - mixture.build_seconds[1];
@@ -399,6 +646,10 @@ impl<'p> OligomerMixture<'p> {
         mixture
             .log_weights
             .extend(fused_logs.iter().map(|w| mass.ln() + w - fused_total));
+        if let Some(d) = diagnostics {
+            d.effective_fused_mass = mass;
+            d.complete = true;
+        }
         Ok(mixture)
     }
 
@@ -884,5 +1135,451 @@ mod checked_label_tests {
         assert!(map.checked_log_density(0, tail).unwrap().is_finite());
         assert_eq!(mixture.label_logs(tail)[0], f64::NEG_INFINITY);
         assert!(mixture.checked_label_logs(tail).is_err());
+    }
+}
+
+#[cfg(test)]
+mod fusion_diagnostic_tests {
+    use super::*;
+    use crate::{
+        docking::DockingMethod,
+        geometry::{Atom, Shape},
+        proposal::FrozenRelativePoseProposal,
+    };
+    use rand::{RngExt, SeedableRng};
+
+    const ORIGIN: Pose = Pose {
+        position: [0.; 3],
+        orientation: [1., 0., 0., 0.],
+    };
+
+    fn pose(x: f64) -> Pose {
+        Pose {
+            position: [x, 0., 0.],
+            ..ORIGIN
+        }
+    }
+
+    fn parameters(n: usize) -> Vec<GaussianComponentParameters> {
+        (0..n)
+            .map(|i| GaussianComponentParameters {
+                anchor_position: [0.05 * i as f64, 0., 0.],
+                anchor_rotation: IDENTITY,
+                mean: [0.; 6],
+                covariance: std::array::from_fn(|i| {
+                    std::array::from_fn(|j| if i == j { 1. } else { 0. })
+                }),
+                weight: 1. / n as f64,
+            })
+            .collect()
+    }
+
+    fn proposal(parameters: Vec<GaussianComponentParameters>) -> DockingProposal {
+        let hash = "a".repeat(64);
+        DockingProposal::new(
+            FrozenRelativePoseProposal::from_components_open(
+                parameters, 1., [100.; 3], 0.1, &hash, &hash,
+            )
+            .unwrap(),
+            DockingMethod::PosteriorInvolution,
+            0.6,
+            [0.; 3],
+        )
+        .unwrap()
+    }
+
+    fn tree() -> SphereTree {
+        SphereTree::new(Shape {
+            name: "synthetic asymmetric union".into(),
+            volume: 0.,
+            atoms: vec![
+                Atom {
+                    center: [0.; 3],
+                    radius: 0.1,
+                },
+                Atom {
+                    center: [0.23, 0.04, 0.],
+                    radius: 0.07,
+                },
+            ],
+        })
+        .unwrap()
+    }
+
+    fn check_accounting(d: &FusionBuildDiagnostics, config: &OligomerConfig) {
+        assert!(d.complete);
+        assert_eq!(d.single_labels, d.decoded_means + d.mean_decode_failures);
+        assert_eq!(
+            d.decoded_interface_pairs,
+            d.distance_rejected_pairs + d.angle_rejected_pairs + d.candidate_pairs_before_cap
+        );
+        assert_eq!(
+            d.candidate_pairs_before_cap,
+            d.fit_attempts + d.candidates_truncated
+        );
+        assert_eq!(
+            d.fit_attempts,
+            d.fit_returned_none + d.fits_above_threshold + d.usable_fits
+        );
+        assert_eq!(d.usable_fits, d.centers_checked + d.unvisited_fits);
+        assert_eq!(
+            d.centers_checked,
+            d.invalid_pose_rejections
+                + d.wall_rejections
+                + d.core_rejections
+                + d.information_cholesky_failures
+                + d.covariance_cholesky_failures
+                + d.retained_components
+        );
+        assert_eq!(d.centers_checked, d.records.len());
+        assert!(d.records.len() <= config.max_hard_checks);
+        assert_eq!(
+            d.core_overlap_calls,
+            d.records
+                .iter()
+                .map(|r| r.core_overlap_calls)
+                .sum::<usize>()
+        );
+        assert!(
+            d.records
+                .iter()
+                .all(|r| r.outcome != FusionCenterOutcome::Begun)
+        );
+        assert_eq!(
+            d.effective_fused_mass,
+            if d.retained_components == 0 {
+                0.
+            } else {
+                config.multi_contact_mass
+            }
+        );
+    }
+
+    #[test]
+    fn fusion_diagnostics_preserve_catalogue_density_proposals_and_rng() {
+        let proposal = proposal(parameters(3));
+        let tree = tree();
+        let wall = Container::new(50., &tree).unwrap();
+        let config = OligomerConfig::default();
+        for members in [vec![ORIGIN], vec![ORIGIN, pose(0.8)]] {
+            let pool = [pose(-0.2), pose(0.25)];
+            let spectators = [pose(10.), pose(-10.)];
+            let ordinary = OligomerMixture::build(
+                &proposal,
+                &tree,
+                &wall,
+                &members,
+                &spectators,
+                &pool,
+                &config,
+            )
+            .unwrap();
+            let mut d = FusionBuildDiagnostics::default();
+            let measured = OligomerMixture::build_with_diagnostics(
+                &proposal,
+                &tree,
+                &wall,
+                &members,
+                &spectators,
+                &pool,
+                &config,
+                &mut d,
+            )
+            .unwrap();
+            check_accounting(&d, &config);
+            assert!(!ordinary.fused.is_empty());
+            assert_eq!(ordinary.log_weights(), measured.log_weights());
+            assert_eq!(ordinary.key(), measured.key());
+            assert_eq!(
+                serde_json::to_value(&ordinary.fused).unwrap(),
+                serde_json::to_value(&measured.fused).unwrap()
+            );
+            assert_eq!(ordinary.fit_candidates(), measured.fit_candidates());
+            assert_eq!(ordinary.hard_checks(), measured.hard_checks());
+            for p in [
+                pose(-0.4),
+                ORIGIN,
+                Pose {
+                    position: [0.2, -0.1, 0.3],
+                    orientation: quaternion(cayley([0.1, 0.2, -0.1])),
+                },
+            ] {
+                assert_eq!(
+                    ordinary.checked_label_logs(p).unwrap(),
+                    measured.checked_label_logs(p).unwrap()
+                );
+            }
+            let (mut a, mut b) = (StdRng::seed_from_u64(173), StdRng::seed_from_u64(173));
+            for _ in 0..24 {
+                if members.len() == 1 {
+                    assert_eq!(
+                        ordinary.draw_singleton_independent(&mut a).unwrap(),
+                        measured.draw_singleton_independent(&mut b).unwrap()
+                    );
+                }
+                let (pa, mut ta) = ordinary
+                    .propose(&mut a, &members, members.len() - 1)
+                    .unwrap();
+                let (pb, mut tb) = measured
+                    .propose(&mut b, &members, members.len() - 1)
+                    .unwrap();
+                // Timing is observational; every pose, label, latent and MH term must match.
+                ta["oligomer"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("build_seconds");
+                tb["oligomer"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("build_seconds");
+                assert_eq!(pa, pb);
+                assert_eq!(ta, tb);
+            }
+            assert_eq!(a.random::<u64>(), b.random::<u64>());
+        }
+    }
+
+    #[test]
+    fn fusion_diagnostics_partition_distance_angle_and_missing_means() {
+        let tree = tree();
+        let wall = Container::new(50., &tree).unwrap();
+        let config = OligomerConfig::default();
+        let proposal = proposal(parameters(2));
+        for (pool, distance, angle) in [
+            ([ORIGIN, pose(20.)], 4, 0),
+            (
+                [
+                    ORIGIN,
+                    Pose {
+                        orientation: [0., 1., 0., 0.],
+                        ..ORIGIN
+                    },
+                ],
+                0,
+                4,
+            ),
+        ] {
+            let mut d = FusionBuildDiagnostics::default();
+            OligomerMixture::build_with_diagnostics(
+                &proposal,
+                &tree,
+                &wall,
+                &[ORIGIN],
+                &[],
+                &pool,
+                &config,
+                &mut d,
+            )
+            .unwrap();
+            check_accounting(&d, &config);
+            assert_eq!(d.possible_interface_pairs, 4);
+            assert_eq!(d.decoded_interface_pairs, 4);
+            assert_eq!(d.distance_rejected_pairs, distance);
+            assert_eq!(d.angle_rejected_pairs, angle);
+            assert_eq!(d.centers_checked, 0);
+        }
+        let mut bad = parameters(1);
+        bad[0].anchor_position[0] = 1e308;
+        bad[0].mean[0] = 1e308;
+        let proposal = self::proposal(bad);
+        let mut d = FusionBuildDiagnostics::default();
+        OligomerMixture::build_with_diagnostics(
+            &proposal,
+            &tree,
+            &wall,
+            &[ORIGIN],
+            &[],
+            &[ORIGIN; 2],
+            &config,
+            &mut d,
+        )
+        .unwrap();
+        check_accounting(&d, &config);
+        assert_eq!(d.mean_decode_failures, 2);
+        assert_eq!(d.possible_interface_pairs, 1);
+        assert_eq!(d.decoded_interface_pairs, 0);
+        assert_eq!(d.fit_attempts, 0);
+    }
+
+    #[test]
+    fn fusion_diagnostics_record_candidate_truncation_and_both_caps() {
+        let proposal = proposal(parameters(3));
+        let tree = tree();
+        let wall = Container::new(50., &tree).unwrap();
+        for (candidates, components, checks, stopped) in [
+            (1, 32, 256, None),
+            (4096, 1, 256, Some(FusionBuildCap::Components)),
+            (4096, 32, 1, Some(FusionBuildCap::HardChecks)),
+            (4096, 1, 1, Some(FusionBuildCap::ComponentsAndHardChecks)),
+        ] {
+            let config = OligomerConfig {
+                max_candidates: candidates,
+                max_components: components,
+                max_hard_checks: checks,
+                ..OligomerConfig::default()
+            };
+            let mut d = FusionBuildDiagnostics::default();
+            OligomerMixture::build_with_diagnostics(
+                &proposal,
+                &tree,
+                &wall,
+                &[ORIGIN],
+                &[],
+                &[ORIGIN; 2],
+                &config,
+                &mut d,
+            )
+            .unwrap();
+            check_accounting(&d, &config);
+            assert_eq!(d.candidate_pairs_before_cap, 9);
+            assert_eq!(d.candidates_truncated, if candidates == 1 { 8 } else { 0 });
+            assert_eq!(d.centers_checked, 1);
+            assert_eq!(d.stopped_by, stopped);
+            assert_eq!(d.unvisited_fits, if candidates == 1 { 0 } else { 8 });
+        }
+    }
+
+    #[test]
+    fn fusion_diagnostics_preserve_first_blocker_and_wall_short_circuit() {
+        let proposal = proposal(parameters(1));
+        let tree = tree();
+        let wall = Container::new(1., &tree).unwrap();
+        let config = OligomerConfig::default();
+        let mut d = FusionBuildDiagnostics::default();
+        let spectators = [pose(10.), ORIGIN, ORIGIN];
+        let mixture = OligomerMixture::build_with_diagnostics(
+            &proposal,
+            &tree,
+            &wall,
+            &[ORIGIN],
+            &spectators,
+            &[ORIGIN; 2],
+            &config,
+            &mut d,
+        )
+        .unwrap();
+        check_accounting(&d, &config);
+        assert!(mixture.fused.is_empty());
+        assert_eq!(d.core_rejections, 1);
+        assert_eq!(d.core_overlap_calls, 2);
+        assert_eq!(d.records[0].first_blocking_member, Some(0));
+        assert_eq!(d.records[0].first_blocking_spectator, Some(1));
+        OligomerMixture::build_with_diagnostics(
+            &proposal,
+            &tree,
+            &wall,
+            &[ORIGIN],
+            &spectators,
+            &[pose(3.); 2],
+            &config,
+            &mut d,
+        )
+        .unwrap();
+        check_accounting(&d, &config);
+        assert_eq!(d.wall_rejections, 1);
+        assert_eq!(d.core_overlap_calls, 0);
+        assert_eq!(d.records[0].outcome, FusionCenterOutcome::OutsideWall);
+        assert_eq!(d.records[0].first_blocking_spectator, None);
+    }
+
+    #[test]
+    fn fusion_diagnostics_separate_returned_none_from_returned_bad_mismatch() {
+        let proposal = proposal(parameters(1));
+        let tree = tree();
+        let wall = Container::new(50., &tree).unwrap();
+        let mut d = FusionBuildDiagnostics::default();
+        let config = OligomerConfig {
+            max_mismatch: 0.1,
+            ..OligomerConfig::default()
+        };
+        OligomerMixture::build_with_diagnostics(
+            &proposal,
+            &tree,
+            &wall,
+            &[ORIGIN],
+            &[],
+            &[ORIGIN, pose(1.)],
+            &config,
+            &mut d,
+        )
+        .unwrap();
+        check_accounting(&d, &config);
+        assert_eq!(d.fits_above_threshold, 1);
+        assert_eq!(d.fit_returned_none, 0);
+        let config = OligomerConfig {
+            pair_angle_degrees: 181.,
+            ..OligomerConfig::default()
+        };
+        OligomerMixture::build_with_diagnostics(
+            &proposal,
+            &tree,
+            &wall,
+            &[ORIGIN],
+            &[],
+            &[
+                ORIGIN,
+                Pose {
+                    orientation: [0., 1., 0., 0.],
+                    ..ORIGIN
+                },
+            ],
+            &config,
+            &mut d,
+        )
+        .unwrap();
+        check_accounting(&d, &config);
+        assert_eq!(d.fit_returned_none, 1);
+        assert_eq!(d.fits_above_threshold, 0);
+    }
+
+    #[test]
+    fn fusion_diagnostics_zero_mass_does_not_skip_construction_and_invalid_config_resets_sink() {
+        let proposal = proposal(parameters(2));
+        let tree = tree();
+        let wall = Container::new(50., &tree).unwrap();
+        let config = OligomerConfig {
+            multi_contact_mass: 0.,
+            ..OligomerConfig::default()
+        };
+        let mut d = FusionBuildDiagnostics::default();
+        let mixture = OligomerMixture::build_with_diagnostics(
+            &proposal,
+            &tree,
+            &wall,
+            &[ORIGIN],
+            &[],
+            &[ORIGIN; 2],
+            &config,
+            &mut d,
+        )
+        .unwrap();
+        check_accounting(&d, &config);
+        assert_eq!(d.retained_components, 4);
+        assert_eq!(d.effective_fused_mass, 0.);
+        assert!(
+            mixture.log_weights()[mixture.singles..]
+                .iter()
+                .all(|v| *v == f64::NEG_INFINITY)
+        );
+        let invalid = OligomerConfig {
+            max_hard_checks: 0,
+            ..config
+        };
+        assert!(
+            OligomerMixture::build_with_diagnostics(
+                &proposal,
+                &tree,
+                &wall,
+                &[ORIGIN],
+                &[],
+                &[ORIGIN; 2],
+                &invalid,
+                &mut d
+            )
+            .is_err()
+        );
+        assert!(!d.complete);
+        assert_eq!(d.centers_checked, 0);
+        assert!(d.records.is_empty());
     }
 }

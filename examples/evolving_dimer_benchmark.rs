@@ -110,15 +110,150 @@ fn rng(master: u64, context: usize, init: &str, stream: usize, block: usize, rol
     );
     StdRng::from_seed(digest.into())
 }
-/// Retain m4's common random numbers; only the extra root threshold gets a
-/// new role. Existing arms keep every original role byte unchanged.
+/// Retain m4's common random numbers. Extra root-threshold and root-order
+/// choices get separate roles; every existing arm keeps its original bytes.
 fn dimer_role(arm: &str, role: &str) -> String {
-    let prefix = if arm == "root_m4" && role != "root_threshold" {
+    let prefix = if (arm == "root_m4" && role != "root_threshold")
+        || (arm == "two_root_m4" && role != "root_order")
+    {
         "m4"
     } else {
         arm
     };
     format!("{prefix}/{role}")
+}
+fn two_root_policy(plan: &Value, arm: &str) -> Result<()> {
+    if arm != "two_root_m4" {
+        ensure!(
+            plan.get("two_root_policy").is_none(),
+            "two-root policy on another arm"
+        );
+    } else {
+        ensure!(
+            plan["two_root_policy"]
+                == json!({
+                    "schema":"two-root-factorized-m4-policy-v1",
+                    "root_probabilities":[0.5,0.5],"selection":"once_per_global_slot",
+                    "internal_threshold_m":4
+                }),
+            "two-root policy differs from the frozen control"
+        );
+    }
+    Ok(())
+}
+fn root_order(master: u64, context: usize, init: &str, stream: usize, block: usize) -> usize {
+    usize::from(
+        rng(
+            master,
+            context,
+            init,
+            stream,
+            block,
+            &dimer_role("two_root_m4", "root_order"),
+        )
+        .random::<bool>(),
+    )
+}
+fn rooted_engine<'a>(
+    canonical: &FixedLabelUpdates<'a>,
+    root_slot: usize,
+    state_len: usize,
+) -> Result<FixedLabelUpdates<'a>> {
+    ensure!(root_slot < 2, "invalid root slot");
+    ensure!(
+        canonical.members[0] != canonical.members[1]
+            && canonical
+                .members
+                .iter()
+                .all(|&i| i < state_len && i != canonical.anchor)
+            && canonical.anchor < state_len,
+        "invalid canonical member/anchor labels"
+    );
+    Ok(FixedLabelUpdates {
+        core: canonical.core,
+        exclusion: canonical.exclusion,
+        wall: canonical.wall,
+        radius: canonical.radius,
+        members: [
+            canonical.members[root_slot],
+            canonical.members[1 - root_slot],
+        ],
+        anchor: canonical.anchor,
+        rd: canonical.rd,
+        activity: canonical.activity,
+        lambda: canonical.lambda,
+        envelope: canonical.envelope,
+    })
+}
+/// A state-independent mixture of the two unchanged fixed-label kernels.
+/// The selected order is retained across every capped trial and the one bath
+/// decision. Library records keep selected-root order; explicit canonical
+/// projections and the outer retained state prevent a label-order ambiguity.
+fn two_root_dimer(
+    canonical: &FixedLabelUpdates<'_>,
+    root_slot: usize,
+    state: &mut [Pose],
+    proposal: &FactorizedDimerProposal<'_>,
+    guide: &AuxiliaryOverlapThreshold<'_>,
+    proposal_rng: &mut StdRng,
+    threshold_rng: &mut StdRng,
+    bath_rng: &mut StdRng,
+    accept_rng: &mut StdRng,
+    budget: &mut Budget,
+    record: &mut Value,
+) -> Result<()> {
+    let mut selected_members = Value::Null;
+    let mut canonical_old = Value::Null;
+    let result = (|| -> Result<()> {
+        let selected = rooted_engine(canonical, root_slot, state.len())?;
+        selected_members = json!(selected.members);
+        canonical_old = json!(canonical.selected(state));
+        selected.dimer(
+            state,
+            proposal,
+            Some(guide),
+            proposal_rng,
+            threshold_rng,
+            bath_rng,
+            accept_rng,
+            budget,
+            record,
+        )
+    })();
+    if record.is_null() {
+        *record =
+            json!({"kind":"factorized_dimer","status":"failed_before_proposal","accepted":false});
+    }
+    record["canonical_members"] = json!(canonical.members);
+    record["selected_members"] = selected_members;
+    record["root_slot"] = json!(root_slot);
+    record["root_order_probability"] = json!(0.5);
+    record["root_order_log_reverse_forward"] = json!(0.);
+    record["root_order_rng_role"] = json!(dimer_role("two_root_m4", "root_order"));
+    record["canonical_old"] = canonical_old;
+    if let Some(poses) = record.get("proposed").and_then(Value::as_array) {
+        // This array is produced by the unchanged successful dimer kernel.
+        let ordered = json!([poses[root_slot], poses[1 - root_slot]]);
+        record["canonical_proposed"] = ordered;
+    }
+    result
+}
+fn two_root_contract(engine: &FixedLabelUpdates<'_>, bank: &Value) -> Value {
+    json!({"schema":"evolving-dimer-two-root-m4-v1","canonical_members":engine.members,
+        "root_orders":[engine.members,[engine.members[1],engine.members[0]]],
+        "root_probabilities":[0.5,0.5],"anchor_label":engine.anchor,
+        "selection":"once_per_global_slot_retained_through_all_retries",
+        "root_order_rng_role":dimer_role("two_root_m4","root_order"),
+        "selection_log_reverse_forward":0.,"cloud":bank,
+        "internal":{"m":4,"point_frame":"selected_mobile_root_body",
+            "threshold_rng_role":dimer_role("two_root_m4","threshold")},
+        "root_guidance":false,"matched_control_arm":"m4",
+        "proposal_rng_role":dimer_role("two_root_m4","proposal"),
+        "bath_rng_role":dimer_role("two_root_m4","bath"),
+        "accept_rng_role":dimer_role("two_root_m4","accept"),
+        "local_schedule":"canonical members [0,1,0,1]; shared unchanged local RNG roles",
+        "retained_and_checkpoint_order":"canonical_members",
+        "proposal_record_order":"selected_members","physical_decisions_per_candidate":1})
 }
 fn singleton_arm(arm: &str) -> bool {
     matches!(
@@ -596,10 +731,11 @@ fn run(args: &Args, plan: &Value, binding: &Value, geometry: &Geometry) -> Resul
     let init = job["initialization"].as_str().context("initialization")?;
     let arm = job["arm"].as_str().context("arm")?;
     ensure!(
-        ["local", "unguided", "m4", "root_m4"].contains(&arm) || singleton_arm(arm),
+        ["local", "unguided", "m4", "root_m4", "two_root_m4"].contains(&arm) || singleton_arm(arm),
         "unknown arm"
     );
     singleton_policy(plan, arm)?;
+    two_root_policy(plan, arm)?;
     let parent = PathBuf::from(plan["output"].as_str().context("output")?);
     fs::create_dir_all(&parent)?;
     let output = parent.join(format!("job-{job_id:03}"));
@@ -640,6 +776,7 @@ fn run_inner(
     arm: &str,
 ) -> Result<()> {
     let singleton = singleton_policy(plan, arm)?;
+    two_root_policy(plan, arm)?;
     let config_hash = hash_file(&args.config)?;
     let binding_hash = hash_file(&args.binding)?;
     let started = cpu_seconds();
@@ -687,7 +824,7 @@ fn run_inner(
                 })
             })
             .collect();
-        let guide = if matches!(arm, "m4" | "root_m4") {
+        let guide = if matches!(arm, "m4" | "root_m4" | "two_root_m4") {
             Some(AuxiliaryOverlapThreshold::new(
                 &geometry.exclusion,
                 points,
@@ -799,6 +936,9 @@ fn run_inner(
         };
         if arm == "root_m4" {
             initial["guidance_contract"] = root_guidance_contract(&engine, bank.unwrap());
+        }
+        if arm == "two_root_m4" {
+            initial["root_order_contract"] = two_root_contract(&engine, bank.unwrap());
         }
         journal.line(&initial)?;
         journal
@@ -941,7 +1081,24 @@ fn run_inner(
             );
             let mut brng = rng(master, ci, init, stream, block, &dimer_role(arm, "bath"));
             let mut arng = rng(master, ci, init, stream, block, &dimer_role(arm, "accept"));
-            let result = if arm == "root_m4" {
+            let result = if arm == "two_root_m4" {
+                // A separate role is consumed exactly once, before the entire
+                // selected kernel, including cap failures and physical rejects.
+                let selected_root = root_order(master, ci, init, stream, block);
+                two_root_dimer(
+                    &engine,
+                    selected_root,
+                    &mut state,
+                    proposal.as_ref().unwrap(),
+                    guide.as_ref().unwrap(),
+                    &mut prng,
+                    &mut trng,
+                    &mut brng,
+                    &mut arng,
+                    &mut budget,
+                    &mut record,
+                )
+            } else if arm == "root_m4" {
                 let mut root_rng = rng(
                     master,
                     ci,
@@ -1044,6 +1201,272 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn synthetic_two_root_policy() -> Value {
+        json!({"schema":"two-root-factorized-m4-policy-v1",
+            "root_probabilities":[0.5,0.5],"selection":"once_per_global_slot","internal_threshold_m":4})
+    }
+    #[test]
+    fn two_root_policy_and_separate_root_role_preserve_control_streams() -> Result<()> {
+        let policy = synthetic_two_root_policy();
+        two_root_policy(&json!({"two_root_policy":policy}), "two_root_m4")?;
+        for arm in [
+            "local",
+            "unguided",
+            "m4",
+            "root_m4",
+            "singleton_two_neighbor",
+            "singleton_two_neighbor_unfused",
+        ] {
+            two_root_policy(&json!({}), arm)?;
+            assert!(two_root_policy(&json!({"two_root_policy":policy}), arm).is_err());
+        }
+        for bad in [Value::Null, json!({}), json!({"schema":"other"})] {
+            assert!(two_root_policy(&json!({"two_root_policy":bad}), "two_root_m4").is_err());
+        }
+        for key in ["root_probabilities", "selection", "internal_threshold_m"] {
+            let mut bad = policy.clone();
+            bad[key] = Value::Null;
+            assert!(two_root_policy(&json!({"two_root_policy":bad}), "two_root_m4").is_err());
+        }
+        let choices: Vec<_> = (1..=64)
+            .map(|block| root_order(77, 0, "source", 2, block))
+            .collect();
+        assert!(choices.contains(&0) && choices.contains(&1));
+        assert_eq!(
+            choices,
+            (1..=19)
+                .chain(20..=64)
+                .map(|block| root_order(77, 0, "source", 2, block))
+                .collect::<Vec<_>>()
+        );
+        for block in 1..=8 {
+            for role in ["proposal", "threshold", "bath", "accept"] {
+                assert_eq!(dimer_role("two_root_m4", role), format!("m4/{role}"));
+                assert_eq!(
+                    rng(77, 0, "source", 2, block, &dimer_role("two_root_m4", role))
+                        .random::<u64>(),
+                    rng(77, 0, "source", 2, block, &dimer_role("m4", role)).random::<u64>()
+                );
+            }
+            assert_eq!(
+                dimer_role("two_root_m4", "root_order"),
+                "two_root_m4/root_order"
+            );
+            assert_ne!(
+                rng(77, 0, "source", 2, block, "two_root_m4/root_order").random::<u64>(),
+                rng(77, 0, "source", 2, block, "m4/proposal").random::<u64>()
+            );
+        }
+        Ok(())
+    }
+    fn two_root_toy_plan() -> Value {
+        json!({"contexts":[{"root":0,"child":1,"anchor":2}],
+            "physical":{"wall_radius":50.,"depletant_radius":0.8,"activity":0.05,"lambda_ratio":64.},
+            "envelope":{"max_cells":63,"max_depth":6,"min_width":0.},
+            "factorized":{"order":"root_first","uniform_half_width":4.,"uniform_probability":0.5,
+                "root_cap":32,"internal_cap":32,"joint_cap":1}})
+    }
+    fn two_root_budget() -> Result<Budget> {
+        Budget::new(Limits {
+            raw_per_leg: 1_000_000,
+            raw_per_outer: 2_000_000,
+            raw_campaign: 20_000_000,
+            retained_per_leg: 1_000_000,
+            retained_per_outer: 2_000_000,
+            retained_campaign: 20_000_000,
+            cpu_seconds: 60.,
+        })
+    }
+    #[test]
+    fn two_root_forced_orders_match_fixed_label_kernels_and_canonical_mapping() -> Result<()> {
+        let geometry = synthetic_geometry()?;
+        let plan = two_root_toy_plan();
+        let engine = geometry.engine(&plan, 0)?;
+        let proposal = geometry.proposal(&plan)?;
+        let guide = AuxiliaryOverlapThreshold::new(&geometry.exclusion, vec![[0.8, 0., 0.]], 4)?;
+        for root in [0, 1] {
+            let reference_engine = rooted_engine(&engine, root, geometry.state.len())?;
+            for seed in 1..=4 {
+                let mut actual = geometry.state.clone();
+                let mut expected = actual.clone();
+                let mut a = Value::Null;
+                let mut b = Value::Null;
+                let streams = || {
+                    (
+                        StdRng::seed_from_u64(seed),
+                        StdRng::seed_from_u64(seed + 100),
+                        StdRng::seed_from_u64(seed + 200),
+                        StdRng::seed_from_u64(seed + 300),
+                    )
+                };
+                let (mut ap, mut at, mut ab, mut aa) = streams();
+                let (mut bp, mut bt, mut bb, mut ba) = streams();
+                let mut budget_a = two_root_budget()?;
+                let mut budget_b = two_root_budget()?;
+                two_root_dimer(
+                    &engine,
+                    root,
+                    &mut actual,
+                    &proposal,
+                    &guide,
+                    &mut ap,
+                    &mut at,
+                    &mut ab,
+                    &mut aa,
+                    &mut budget_a,
+                    &mut a,
+                )?;
+                reference_engine.dimer(
+                    &mut expected,
+                    &proposal,
+                    Some(&guide),
+                    &mut bp,
+                    &mut bt,
+                    &mut bb,
+                    &mut ba,
+                    &mut budget_b,
+                    &mut b,
+                )?;
+                assert_eq!(json!(actual), json!(expected));
+                assert_eq!(actual[2].position, geometry.state[2].position);
+                assert_eq!(a["canonical_members"], json!([0, 1]));
+                assert_eq!(a["selected_members"], json!([root, 1 - root]));
+                assert_eq!(a["members"], a["selected_members"]);
+                assert_eq!(a["canonical_old"], json!(engine.selected(&geometry.state)));
+                assert_eq!(a["root_order_log_reverse_forward"], 0.);
+                assert_eq!(
+                    a["proposal"]["guidance"]["old_count"],
+                    if root == 0 { 1 } else { 0 }
+                );
+                if a["proposed"].is_array() {
+                    assert_eq!(
+                        a["canonical_proposed"],
+                        json!([a["proposed"][root], a["proposed"][1 - root]])
+                    );
+                }
+                for field in [
+                    "canonical_members",
+                    "selected_members",
+                    "root_slot",
+                    "root_order_probability",
+                    "root_order_log_reverse_forward",
+                    "root_order_rng_role",
+                    "canonical_old",
+                    "canonical_proposed",
+                ] {
+                    a.as_object_mut().unwrap().remove(field);
+                }
+                assert_eq!(a, b);
+                assert_eq!(
+                    (budget_a.raw, budget_a.retained),
+                    (budget_b.raw, budget_b.retained)
+                );
+                assert_eq!(
+                    (
+                        ap.random::<u64>(),
+                        at.random::<u64>(),
+                        ab.random::<u64>(),
+                        aa.random::<u64>()
+                    ),
+                    (
+                        bp.random::<u64>(),
+                        bt.random::<u64>(),
+                        bb.random::<u64>(),
+                        ba.random::<u64>()
+                    )
+                );
+            }
+        }
+        Ok(())
+    }
+    #[test]
+    fn two_root_null_fatal_and_invalid_labels_retain_selection_without_mutation() -> Result<()> {
+        let geometry = synthetic_geometry()?;
+        let mut plan = two_root_toy_plan();
+        plan["factorized"]["root_cap"] = json!(0);
+        let engine = geometry.engine(&plan, 0)?;
+        let proposal = geometry.proposal(&plan)?;
+        let guide = AuxiliaryOverlapThreshold::new(&geometry.exclusion, vec![[0.8, 0., 0.]], 4)?;
+        for root in [0, 1] {
+            for fatal in [false, true] {
+                let mut state = geometry.state.clone();
+                let mut record = Value::Null;
+                let mut budget = two_root_budget()?;
+                if fatal {
+                    budget.started = cpu_seconds() - 120.;
+                }
+                let mut a = StdRng::seed_from_u64(1);
+                let mut b = StdRng::seed_from_u64(2);
+                let mut c = StdRng::seed_from_u64(3);
+                let mut d = StdRng::seed_from_u64(4);
+                let result = two_root_dimer(
+                    &engine,
+                    root,
+                    &mut state,
+                    &proposal,
+                    &guide,
+                    &mut a,
+                    &mut b,
+                    &mut c,
+                    &mut d,
+                    &mut budget,
+                    &mut record,
+                );
+                assert_eq!(result.is_err(), fatal);
+                assert_eq!(json!(state), json!(geometry.state));
+                assert_eq!(record["root_slot"], root);
+                assert_eq!(record["canonical_members"], json!([0, 1]));
+                assert_eq!(record["selected_members"], json!([root, 1 - root]));
+                assert_eq!(
+                    record["status"],
+                    if fatal {
+                        "failed_before_proposal"
+                    } else {
+                        "proposal_self_loop"
+                    }
+                );
+                assert!(record.get("bath").is_none());
+                assert!(record.get("log_u").is_none());
+                assert_eq!(a.random::<u64>(), StdRng::seed_from_u64(1).random::<u64>());
+                assert_eq!(b.random::<u64>(), StdRng::seed_from_u64(2).random::<u64>());
+            }
+        }
+        assert!(rooted_engine(&engine, 2, geometry.state.len()).is_err());
+        assert!(rooted_engine(&engine, 0, 1).is_err());
+        let mut bad = rooted_engine(&engine, 0, geometry.state.len())?;
+        bad.members = [0, 0];
+        assert!(rooted_engine(&bad, 0, geometry.state.len()).is_err());
+        bad.members = [0, 2];
+        assert!(rooted_engine(&bad, 0, geometry.state.len()).is_err());
+        bad.members = [2, 0];
+        bad.anchor = 1;
+        let reordered = rooted_engine(&bad, 1, geometry.state.len())?;
+        assert_eq!(reordered.members, [0, 2]);
+        assert_eq!(reordered.anchor, 1);
+        assert_eq!(
+            json!(reordered.selected(&geometry.state)),
+            json!([geometry.state[0], geometry.state[2]])
+        );
+        Ok(())
+    }
+    #[test]
+    fn two_root_prior_mixture_preserves_discrete_balance() {
+        // Exact integer flows: each matrix has denominator12, pi∝[1,2,3].
+        // Their fair mixture has denominator24, with every self-loop retained.
+        let pi = [1, 2, 3];
+        let a = [[6, 6, 0], [3, 9, 0], [0, 0, 12]];
+        let b = [[12, 0, 0], [0, 6, 6], [0, 4, 8]];
+        for i in 0..3 {
+            assert_eq!((0..3).map(|j| a[i][j] + b[i][j]).sum::<i32>(), 24);
+            for j in 0..3 {
+                assert_eq!(pi[i] * a[i][j], pi[j] * a[j][i]);
+                assert_eq!(pi[i] * b[i][j], pi[j] * b[j][i]);
+                assert_eq!(pi[i] * (a[i][j] + b[i][j]), pi[j] * (a[j][i] + b[j][i]));
+            }
+        }
+        // A source-dependent root preference does not inherit cancellation.
+        assert_ne!(pi[0] * (a[0][1] + b[0][1]), pi[1] * (2 * b[1][0]));
+    }
     #[test]
     fn preparation_uses_quaternion_sign_invariant_distance() {
         let a = Pose {
@@ -1162,7 +1585,14 @@ mod tests {
     }
     #[test]
     fn root_arm_frozen_cloud_and_prepared_starts_replay_across_disk_checkpoint() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("root-arm-restart-{}", std::process::id()));
+        root_arm_restart("root_m4")
+    }
+    #[test]
+    fn two_root_frozen_cloud_and_prepared_starts_replay_across_disk_checkpoint() -> Result<()> {
+        root_arm_restart("two_root_m4")
+    }
+    fn root_arm_restart(arm: &str) -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("{arm}-restart-{}", std::process::id()));
         fs::create_dir(&dir)?;
         let geometry = synthetic_geometry()?;
         let pose = |x| Pose {
@@ -1209,7 +1639,7 @@ mod tests {
             .collect();
         for init in ["source", "proposal_prepared"] {
             let plan_for = |output: PathBuf| {
-                json!({
+                let mut value = json!({
                     "master_seed":77,"output":output,"contexts":[{"root":0,"child":1,"anchor":2}],
                     "source_frame":{"synthetic":"frozen_source"},
                     "physical":{"wall_radius":50.,"depletant_radius":0.8,"activity":0.05,"lambda_ratio":64.},
@@ -1221,8 +1651,12 @@ mod tests {
                         "retained_per_leg":1000000,"retained_per_outer":2000000,"retained_campaign":20000000,
                         "cpu_seconds":60.},
                     "allocation":{"warmup_blocks":2,"production_blocks":6},
-                    "jobs":[{"id":0,"context_index":0,"stream":0,"initialization":init,"arm":"root_m4"}]
-                })
+                    "jobs":[{"id":0,"context_index":0,"stream":0,"initialization":init,"arm":arm}]
+                });
+                if arm == "two_root_m4" {
+                    value["two_root_policy"] = synthetic_two_root_policy();
+                }
+                value
             };
             let full_plan = plan_for(dir.join(format!("{init}-full")));
             let split_plan = plan_for(dir.join(format!("{init}-split")));
@@ -1275,28 +1709,52 @@ mod tests {
             let actual = rows(&split_out.join("trajectory.jsonl"))?;
             assert_eq!(actual, rows(&full_out.join("trajectory.jsonl"))?);
             assert_eq!(actual.len(), 49);
-            let contract = &actual[0]["guidance_contract"];
-            assert_eq!(
-                contract["root"]["threshold_rng_role"],
-                "root_m4/root_threshold"
-            );
-            assert_eq!(contract["internal"]["threshold_rng_role"], "m4/threshold");
-            assert_eq!(contract["root"]["point_frame"], "fixed_anchor_body");
-            assert_eq!(contract["internal"]["point_frame"], "mobile_root_body");
-            assert_eq!(contract["cloud"], actual[0]["cloud"]);
-            assert!(
-                actual
+            if arm == "two_root_m4" {
+                let contract = &actual[0]["root_order_contract"];
+                assert_eq!(contract["canonical_members"], json!([0, 1]));
+                assert_eq!(contract["root_order_rng_role"], "two_root_m4/root_order");
+                assert_eq!(
+                    contract["internal"]["point_frame"],
+                    "selected_mobile_root_body"
+                );
+                assert_eq!(contract["cloud"], actual[0]["cloud"]);
+                for block in 1..=8 {
+                    let base = 1 + (block - 1) * 6;
+                    for (attempt, slot) in [0, 1, 0, 1].into_iter().enumerate() {
+                        assert_eq!(actual[base + attempt]["member"], slot);
+                    }
+                    let row = &actual[base + 4];
+                    let root = root_order(77, 0, init, 0, block);
+                    assert_eq!(row["root_slot"], root);
+                    assert_eq!(row["members"], json!([root, 1 - root]));
+                    assert_eq!(row["retained"], actual[base + 5]["selected"]);
+                    assert_eq!(row["proposal"]["root_guidance"], Value::Null);
+                    assert_eq!(row["proposal"]["guidance"]["m"], 4);
+                }
+            } else {
+                let contract = &actual[0]["guidance_contract"];
+                assert_eq!(
+                    contract["root"]["threshold_rng_role"],
+                    "root_m4/root_threshold"
+                );
+                assert_eq!(contract["internal"]["threshold_rng_role"], "m4/threshold");
+                assert_eq!(contract["root"]["point_frame"], "fixed_anchor_body");
+                assert_eq!(contract["internal"]["point_frame"], "mobile_root_body");
+                assert_eq!(contract["cloud"], actual[0]["cloud"]);
+                assert!(
+                    actual.iter().any(
+                        |row| row["kind"] == "factorized_dimer" && row["status"] == "completed"
+                    )
+                );
+                for row in actual
                     .iter()
-                    .any(|row| row["kind"] == "factorized_dimer" && row["status"] == "completed")
-            );
-            for row in actual
-                .iter()
-                .filter(|row| row["kind"] == "factorized_dimer")
-            {
-                assert_eq!(row["proposal"]["root_guidance"]["point_count"], 1);
-                assert_eq!(row["proposal"]["guidance"]["point_count"], 1);
-                assert_eq!(row["proposal"]["root_guidance"]["m"], 4);
-                assert_eq!(row["proposal"]["guidance"]["m"], 4);
+                    .filter(|row| row["kind"] == "factorized_dimer")
+                {
+                    assert_eq!(row["proposal"]["root_guidance"]["point_count"], 1);
+                    assert_eq!(row["proposal"]["guidance"]["point_count"], 1);
+                    assert_eq!(row["proposal"]["root_guidance"]["m"], 4);
+                    assert_eq!(row["proposal"]["guidance"]["m"], 4);
+                }
             }
             let terminal =
                 |path: &Path| -> Result<Value> { Ok(serde_json::from_slice(&fs::read(path)?)?) };

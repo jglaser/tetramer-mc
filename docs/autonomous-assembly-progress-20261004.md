@@ -23,12 +23,35 @@ of source probability mass: 85.945% encountered the static pair-list cap
 before an objective evaluation. Thus the favorable native-informed result
 has not yet generalized to the blind proposal. The
 [construction and balance argument](context-relaxed-atlas.md) separate this
-work-limit failure from physical steric impossibility. Direct scoring at the
-actual centers, with a smaller neighbor search, is the next geometry diagnostic.
+work-limit failure from physical steric impossibility. The subsequent
+[actual-center diagnostic](context-core-score.md) completed all 2,066 scheduled
+scores without candidate caps in 41.37 CPU seconds. Its 473 independently
+checked saved objectives/gaps agree with the earlier implementation. However,
+2,003 of 2,048 parent centers really clash; only 1.832% of source label mass
+has clear centers, increasing to 2.290% in the exported children. These are
+fixed-center label weights, not finite-width proposal probabilities.
 The exported model's density evaluation has passed 524 frozen-panel comparisons
 between production Rust and independent Python, with maximum log-density
 disagreement `2.27e-13`. This checks finite-panel arithmetic, not mixing or
 physical occupancy; reciprocal-origin center coverage remains incomplete.
+
+A saved-coordinate proximity check gives a reason not to interpret every deep
+clash as a poor isolated-pair contact. Twelve labels carrying 13.878% of source
+weight put their origins within 2 Å of an existing quartet member's origin;
+125 labels carrying 19.064% lie within 10 Å of some fixed body. This is an
+occupied-origin signal, not an atomic blocker assignment. The next diagnostic
+should separate anchor, quartet-member and other-body clashes. A practical
+reversible construction can refit only two selected charts per attempt, using
+the original atlas for label selection and retaining the additional selection
+correction. That construction is documented but not yet a production kernel.
+An exact-rational displacement bound, conditional on the saved gap error being
+at most 0.01 Å, screens 95.736% of parent label mass as unrepairable within the
+current 1 Å / 2° box. All previously capped labels screen. Smaller declared
+gap allowances give nearly the same result; the allowance itself is not a
+rigorously established floating-point error bound. Thus the next iteration
+should address destination selection/initialization, rather than increase
+the work budget of the same small search. Larger moves and cooperative
+reorganization remain open, and this is not evidence of thermodynamic failure.
 
 ## Completed original-condition regional weights
 

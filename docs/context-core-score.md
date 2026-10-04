@@ -126,6 +126,61 @@ differences were at most `6.44e-15 Å`. The independent audit also verified all
 Its tolerances were frozen before the geometry run; it issued no new atomic
 queries.
 
+A subsequent saved-coordinate reduction examines nearest fixed **body
+origins**, without atomic queries. Twelve parent labels carrying 13.8776% of
+source weight lie within 2 Å of bodies 77 or 237; all twelve previously hit
+the static pair-list cap. Across the full atlas, the nearest origin belongs
+to anchor 16 for 15.3741% of label mass, another quartet member for 60.9253%,
+and another body for 23.7006%. The 125 labels within 10 Å of any fixed origin
+carry 19.0643% of source weight. This suggests occupied locations contribute
+to the problem. It does not identify the atoms causing a clash, assign native
+registry, or imply that the corresponding isolated pair center is invalid.
+
+The reduction retains all 2048 labels, exact-distance tie handling, fixed bins
+`[0, 2, 5, 10, 20, 40, infinity] Å` and the previous-cap strata. It completed
+and drained in 0.196 CPU seconds; its report is
+`results/context-parent-origin-proximity-20261004/result/report.json`, SHA-256
+`47ef9b369bb08123ef59388ae392c6d4aadea8274137099bf95c36f407ca9ea5`.
+Per-body atomic attribution is still needed before choosing an occupied-site
+avoidance rule or blaming Gaussian centering.
+
+## Can the original small relaxation box repair these centers?
+
+A further saved-data reduction bounds the displacement of **every** incoming
+atom under translation norm at most 1 Å and rotation angle at most 2°.
+It computes an exact-rational upper bound `U=47.9370222092 Å` from the stored
+body coordinates and all parent rotation matrices. Using `sin(u) <= u` and
+`pi < 22/7` gives
+
+\[
+M=1+\frac{22}{630}U=2.67399125175\;\mathrm{Å}.
+\]
+
+If a saved minimum gap has error at most `epsilon`, then
+`saved_gap + epsilon + M < 0` implies that at least one atom-pair overlap
+persists throughout this trust region. This conditional geometric statement
+does not require another atom-pair query. It also does **not** establish a
+rigorous floating-point error bound for the saved gaps.
+
+| Predeclared gap-error allowance | Screened parent labels | Source label mass |
+|---|---:|---:|
+| `1e-6 Å` | 1936/2048 | 95.7525% |
+| `1e-4 Å` | 1936/2048 | 95.7525% |
+| `1e-2 Å` | 1935/2048 | 95.7357% |
+
+All 1651 previously capped parents screen at every allowance. Therefore the
+measured cheaper objective does not justify simply repeating the same small
+repair box at a larger work budget. The next construction needs different
+destination selection, different initialization, or a wider geometric search.
+This does not exclude a finite-width Gaussian's tails, larger pose moves,
+cooperative rearrangements or physical assembly.
+
+The complete fixed-allowance reduction, including all 2048 labels, is in
+`results/context-relaxed-center-displacement-screen-20261004/execution01/`.
+It completed and drained in 0.532 CPU seconds, with no new atom-pair geometry
+or pose transforms. Analysis SHA-256:
+`6807d3d07c851d512c6ed7b8952f34730ed802f114d5a452466103e289b5322b`.
+
 Artifacts:
 
 - [Fixed allocation and protocol](../results/context-relaxed-center-score-preparation-20261004/protocol.json)

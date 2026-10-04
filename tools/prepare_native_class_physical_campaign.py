@@ -15,6 +15,7 @@ for _key in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'RAYO
 import argparse
 import copy
 import hashlib
+import importlib.util
 import math
 from pathlib import Path
 import shutil
@@ -25,6 +26,7 @@ import analyze_native_class_physical_populations as statistics
 import native_class_line_physical_algebra_audit as streaming
 import native_class_physical_labels as labels
 import native_class_selected_geometry as selected
+import admit_native_class_physical_campaign as admission
 from analyze_mobile_native_pocket import local_sources
 from prepare_hard_free_line_fresh import ROOTS, DECLARATIONS, seeds_in
 from run_mobile_posterior_pilot import verify_bundle
@@ -46,6 +48,16 @@ PRODUCERS = {
 }
 GUIDES = {'hard_free': '085e5e9d348698802becc11c1a4b9a5ff5cbc9894e8942e73df8fb15ba48a439',
           'class': 'f14837081dc2fb08873d4617b2d9bac3b56cf55640242a77fe8b5cd968cb329e'}
+ORIGINAL_PROFILE = 'original_92'
+REVISED_PROFILE = 'revised_support_pilot_116'
+REVISED_PINS = dict(
+    guide='13e5c31774c77169d7f4604b2a46b80e84b366ff2172fcef3911fab93286a179',
+    protocol='2cc3e8ae27566b273e8568b7a7bc463bb56c6a842bf7cc6eef959f5a8e9887ef',
+    execution_plan='a847304317aae29967c1aaacc04a12388b34ecbb41af5d4da304e5a8c6d19cee',
+    original_plan='61613b40549091e46d5496a9e72559841f613753b34fc6b937419cd212e0be76',
+    original_failure='4b2f4f311b231bf9dad2d12bafef2cd7d79c6416c03efd4bb7cc76887bc2b855',
+    original_algebra_failure='648cfd1b7856bae27321a907116e33b02c8f201a9ecfc903c523c35599a850e8',
+    retained_summary='6063a2e21f1515a82aa97a788f5c997bdb31a0844c9f259c16fcf834faf913a8')
 COMPILED_SHA = 'dbb3c3e32259f506b9c979ebb9d1fd773cb78507c1f808fd8dd0ed319e2eade4'
 DEFINITION_SHA = '5cf55ebe0c0f78ec6b8cdc745cac938b0fadfa3732e1e1c730864c62c651d7a9'
 OLD_R5_SHA = '76ea65088e302d6b6478ac033af9b67b7cf21cb7cea1f854f70cdcd6db0473ae'
@@ -237,6 +249,182 @@ def _historical_evidence(history, target_id, bindings):
              ('orthant', 55, 'native_remainder')} <= seen, 'Known original failures omitted')
 
 
+def _guide_profile(inputs, guides):
+    """Keep the original law intact; the candidate is one explicitly pinned design."""
+    profile = inputs.get('class_guide_profile', ORIGINAL_PROFILE)
+    require(profile in (ORIGINAL_PROFILE, REVISED_PROFILE), 'Unknown class guide profile')
+    expected = dict(GUIDES)
+    if profile == REVISED_PROFILE: expected['class'] = REVISED_PINS['guide']
+    require(set(guides) == set(expected)
+            and all(inputs['guides'][name]['sha256'] == digest for name, digest in expected.items()),
+            'Unvalidated guide identity')
+    for name, guide in guides.items():
+        require(guide['schema'] == ('defensive-hard-free-line-guide-v1' if name == 'hard_free' else 'defensive-native-class-line-guide-v1')
+                and guide['region_sha256'] == inputs['target']['region']['sha256']
+                and guide['raw_translation_axes'] == [0, 1, 2] and guide['conditional_probability'] == 1.
+                and guide['minimum_conditional_mass'] == 1e-12 and guide['defensive_uniform_shell_probability'] == .5,
+                'Original guide law changed')
+    original, candidate = [guides[name]['gaussian_components'] for name in ('hard_free', 'class')]
+    require(len(original) == 92 and guides['class']['class_channels'] == CHANNELS
+            and guides['class']['compiled_native']['sha256'] == COMPILED_SHA, 'Changed Gaussian mixture/class channels')
+    if profile == ORIGINAL_PROFILE:
+        require(original == candidate, 'Changed Gaussian mixture/class channels')
+        require('candidate_pilot' not in inputs, 'Candidate evidence requires the explicit revised profile')
+        return profile
+    require(len(candidate) == 116, 'Revised guide must have exactly 116 components')
+    total = math.fsum(c['weight'] for c in original)
+    require(math.isfinite(total) and total > 0 and all(math.isfinite(c['weight']) and c['weight'] > 0 for c in original),
+            'Invalid original Gaussian weights')
+    retained = copy.deepcopy(original)
+    for component in retained: component['weight'] = .75*(component['weight']/total)
+    require(candidate[:92] == retained, 'Revised guide changed the exact retained 0.75 design')
+    centers = []
+    for center in range(8):
+        additions = candidate[92+3*center:95+3*center]; mean = additions[0]['mean']; centers.append(tuple(mean))
+        require(len(mean) == 6 and all(type(v) in (int, float) and math.isfinite(v) for v in mean), 'Invalid training center')
+        for addition, width in zip(additions, (.05, .15, .45)):
+            require(addition == dict(weight=.25/24, mean=mean,
+                    covariance=[[width**2 if a == b else 0. for b in range(6)] for a in range(6)]),
+                    'Revised guide changed a fixed center/scale/weight')
+    require(len(set(centers)) == 8, 'Repeated revised training center')
+    return profile
+
+
+def _candidate_recovery(protocol, adoption, terminals, proof):
+    """Authenticate the failed stop and byte adoption, without decoding raw rows."""
+    recovery = protocol['recovery']; root = Path(protocol['root']); old_root = Path(recovery['original_root'])
+    require(recovery['schema'] == 'native-class-support-format-recovery-v1'
+            and recovery['retained_attempts'] == 128 and recovery['new_draws'] == 384
+            and recovery['total_attempts'] == 512 and recovery['scientific_replacements'] == 0
+            and recovery['no_outcome_adaptation'] is True and recovery['allocation_changed'] is False,
+            'Candidate recovery changed the original allocation')
+    old = proof.read(recovery['original_protocol'])
+    originals = {}
+    for key in ('original_plan', 'original_failure', 'original_algebra_failure', 'retained_summary'):
+        require(recovery[key]['sha256'] == REVISED_PINS[key], 'Changed original recovery evidence '+key)
+        originals[key] = proof.read(recovery[key])
+    plan = originals['original_plan']; failure = originals['original_failure']; stopped = originals['original_algebra_failure']
+    require(Path(plan['root']) == old_root and recovery['original_plan']['path'] == str(old_root/'execution-plan.json')
+            and failure['plan_sha256'] == recovery['original_plan']['sha256'] and failure['complete'] is False
+            and failure['failed_job'] == dict(ordinal=1, id='r00-algebra', population='r00', phase='algebra')
+            and failure['unstarted'] == plan['jobs'][2:] and len(failure['completed']) == 1
+            and stopped['active_id'] == 0 and stopped['completed_ids'] == []
+            and stopped['counts'] == stopped['setup_counts'] == {}
+            and stopped['error'] == 'Wrong proposal density/contact format', 'Different original format failure')
+    # Use the original helper at its bound self-path, as required by verify_plan.
+    path = old_root/'code/run_native_class_physical_campaign.py'
+    proof.add_map(plan['files'])
+    require(sha(path) == plan['files'][str(path)], 'Original driver changed')
+    spec = importlib.util.spec_from_file_location('physical_candidate_original_driver', path)
+    driver = importlib.util.module_from_spec(spec); spec.loader.exec_module(driver)
+    require(driver.completed_terminal(old_root, plan, 'r00-producer') == recovery['retained_summary'],
+            'Original retained producer is not authenticated')
+    for key in ('guide', 'config', 'shape', 'region', 'compiled_native', 'definition'):
+        require(protocol[key] == old[key], 'Recovery changed a scientific input '+key)
+    for current, previous in zip(protocol['populations'], old['populations']):
+        require({k:v for k,v in current.items() if k != 'directory'} == {k:v for k,v in previous.items() if k != 'directory'},
+                'Recovery changed seeds or preselected IDs')
+    require(adoption['schema'] == recovery['schema'] and adoption['complete'] is True and adoption['passed'] is True
+            and adoption['protocol_sha256'] == REVISED_PINS['protocol'] and adoption['new_draws'] == 0
+            and adoption['retained_attempts'] == 128 and adoption['sample_rows_parsed'] == adoption['retries'] == 0
+            and adoption['retained_files'] == recovery['retained_files']
+            and adoption['original_summary'] == recovery['retained_summary']
+            and adoption['adopted_summary'] == dict(path=str(root/'queries/r00/summary.json'), sha256=REVISED_PINS['retained_summary'])
+            and terminals.get(adoption['adopted_summary']['path']) == REVISED_PINS['retained_summary'],
+            'Incomplete or changed retained-r00 adoption')
+    proof.add_map(adoption['input_sha256']); proof.reference(adoption['journal'])
+    for name, identity in recovery['retained_files'].items():
+        relative = safe_relative(name)
+        for directory in (Path(recovery['source_directory']), root/'queries/r00'):
+            path = proof.bind(directory/relative, identity['sha256'])
+            require(path.stat().st_size == identity['bytes'] and not path.is_symlink(), 'Retained file size/type changed')
+
+
+def _candidate_access(summary):
+    require(summary['schema'] == 'native-class-support-pilot-summary-v1' and summary['complete'] is True
+            and summary['passed'] is True and summary['protocol_sha256'] == REVISED_PINS['protocol']
+            and summary['new_Poisson_clouds'] == summary['raw_rows_read'] == summary['new_geometry_queries'] == summary['retries'] == 0,
+            'Incomplete candidate proposal reduction')
+    combined = summary['combined']; reports = summary['populations']
+    require([r['id'] for r in reports] == [f'r{i:02}' for i in range(4)]
+            and all(r['attempted'] == 128 and r['selected_reference_rows'] == 16 for r in reports)
+            and combined['attempted_denominator'] == 512 and combined['selected_reference_rows'] == 64,
+            'Candidate screen lost planned unconditional denominators')
+    for region in ('competing22', 'competing62', 'native55'):
+        counts = [r['critical_endpoints'][region] for r in reports]
+        require(all(type(n) is int and 0 <= n <= 128 for n in counts)
+                and combined['critical_endpoints'][region] == sum(counts) > 0,
+                'Candidate has no authenticated critical endpoint access: '+region)
+    for channel in (2, 3, 4):
+        values = [r['target_line_hit_rates'].get(f'channel:{channel}', dict(selected=0, hits=0)) for r in reports]
+        require(all(type(v['selected']) is int and type(v['hits']) is int and 0 <= v['hits'] <= v['selected'] <= 128 for v in values),
+                'Invalid candidate selected-line counts')
+        value = combined['selected_target_line_access'][str(channel)]
+        require(value['selected'] == sum(v['selected'] for v in values)
+                and value['hits'] == sum(v['hits'] for v in values) > 0, 'Candidate critical selected lines remain empty')
+    require(combined['access_screen'] == 'access_observed_requires_review'
+            and all(combined[key] is False for key in ('physical_campaign_gate_open','full_vessel_gate_open','assembly_gate_open'))
+            and combined['training_critical_points'] == 8 and combined['nontraining_critical_holdouts'] == 0,
+            'Proposal access cannot replace physical convergence or claim independent holdouts')
+
+
+def _candidate_evidence(inputs, review, bindings):
+    refs = inputs['candidate_pilot']
+    require(set(refs) == {'protocol','execution_plan','execution_summary','statistics','adoption'}, 'Incomplete candidate evidence inventory')
+    proof = admission.Bindings()
+    for key in ('protocol', 'execution_plan'):
+        require(refs[key]['sha256'] == REVISED_PINS[key], 'Unreviewed candidate '+key)
+    protocol, plan, done, summary, adoption = [proof.read(refs[k]) for k in
+        ('protocol','execution_plan','execution_summary','statistics','adoption')]
+    root = Path(protocol['root'])
+    for key, relative in [('protocol','protocol.json'), ('execution_plan','execution-plan.json'),
+                          ('execution_summary','execution/summary.json'), ('statistics','analysis/statistics.json'),
+                          ('adoption','analysis/r00/adoption.json')]:
+        require(refs[key]['path'] == str(root/relative), 'Candidate evidence path differs: '+key)
+    require(Path(plan['root']) == root and protocol['schema'] == 'native-class-support-pilot-v1'
+            and protocol['guide'] == inputs['guides']['class'] and protocol['guide']['sha256'] == REVISED_PINS['guide']
+            and protocol['total_attempts'] == 512 and protocol['new_draws'] == 384 and protocol['retained_attempts'] == 128
+            and protocol['new_Poisson_clouds'] == protocol['physical_weight_estimates'] == 0
+            and protocol['selected_geometry_rows'] == 64, 'Candidate scope/guide differs')
+    for key, ref in [('region',inputs['target']['region']), ('definition',inputs['target']['native_definition']),
+                     ('shape',inputs['shape']), ('compiled_native',inputs['compiled_native'])]:
+        require(protocol[key]['sha256'] == ref['sha256'], 'Candidate physical target differs: '+key)
+    expected = [f'r{i:02}-{phase}' for i in range(4) for phase in ('producer','algebra','labels','geometry')]+['statistics']
+    require([job['id'] for job in plan['jobs']] == expected, 'Candidate lifecycle allocation differs')
+    terminals = admission.completed_execution(plan, done, refs['execution_plan'], refs['protocol'], proof)
+    require(terminals.get(refs['statistics']['path']) == refs['statistics']['sha256'], 'Unbound candidate statistics terminal')
+    _candidate_recovery(protocol, adoption, terminals, proof)
+    predecessor_refs = {}
+    for population in protocol['populations']:
+        require(population['samples'] == 128, 'Candidate population size differs')
+        hashes = None
+        for phase in ('algebra','labels','geometry'):
+            identity = population['id']+'-'+phase; path = str(root/'analysis'/population['id']/(phase+'.json'))
+            ref = dict(path=path, sha256=terminals[path]); receipt = proof.read(ref); predecessor_refs[identity] = ref
+            ids = population['selected_ids'] if phase == 'geometry' else list(range(128))
+            require(receipt['schema'] == 'native-class-support-pilot-'+phase+'-v1' and receipt['phase'] == phase
+                    and receipt['population'] == population['id'] and receipt['protocol_sha256'] == refs['protocol']['sha256']
+                    and receipt['attempted_records'] == 128 and [r['id'] for r in receipt['rows']] == ids
+                    and receipt['source_sha256'] == protocol['source_sha256'] and receipt['runtime'] == protocol['runtime']
+                    and receipt['new_pose_draws'] == receipt['new_Poisson_clouds'] == receipt['physical_weight_estimates'] == 0,
+                    'Incomplete or mismatched candidate '+phase)
+            proof.add_map(receipt['input_sha256']); proof.reference(receipt['journal'])
+            if phase == 'algebra': hashes = {r['id']:r['sample_record_sha256'] for r in receipt['rows']}
+            else: require(all(r['sample_record_sha256'] == hashes[r['id']] for r in receipt['rows']), 'Candidate row-byte identities differ')
+    require(summary['predecessor_receipts'] == predecessor_refs, 'Candidate reduction omitted an audit')
+    proof.add_map(summary['input_sha256']); _candidate_access(summary)
+    require(review.get('class_guide_profile') == REVISED_PROFILE
+            and review['cost_review'].get('candidate_statistics_sha256') == refs['statistics']['sha256'],
+            'Revised guide/access cost review required')
+    proof.finish()
+    for path, digest in proof.files.items(): bindings.bind(path, digest)
+    return dict(profile=REVISED_PROFILE, evidence=refs, retained_attempts=128, new_draws=384,
+        attempted_denominator=512, selected_reference_rows=64, access_screen='access_observed_requires_review',
+        binary64_weight_retention=protocol['binary64_weight_retention'],
+        physical_campaign_gate_open=False, regional_convergence_established=False,
+        scope='Proposal access permits review only; every fresh physical audit, precision, support and sensitivity obligation remains.')
+
+
 def validate(inputs_path, review_path):
     """Read metadata/source only. Incomplete proposal evidence stops here."""
     bindings = statistics.Bindings()
@@ -286,17 +474,8 @@ def validate(inputs_path, review_path):
             and witness['hard_valid_implication_within_tolerance'] is True,
             'Existing static shape compatibility witness differs')
     guides = {name: read(bindings.reference(ref)) for name, ref in inputs['guides'].items()}
-    require(set(guides) == {'hard_free', 'class'} and all(inputs['guides'][name]['sha256'] == GUIDES[name] for name in GUIDES),
-            'Unvalidated guide identity')
-    for name, guide in guides.items():
-        require(guide['schema'] == ('defensive-hard-free-line-guide-v1' if name == 'hard_free' else 'defensive-native-class-line-guide-v1')
-                and guide['region_sha256'] == inputs['target']['region']['sha256']
-                and guide['raw_translation_axes'] == [0, 1, 2] and guide['conditional_probability'] == 1.
-                and guide['minimum_conditional_mass'] == 1e-12 and guide['defensive_uniform_shell_probability'] == .5
-                and len(guide['gaussian_components']) == 92, 'Original guide law changed')
-    require(guides['hard_free']['gaussian_components'] == guides['class']['gaussian_components']
-            and guides['class']['class_channels'] == CHANNELS
-            and guides['class']['compiled_native']['sha256'] == COMPILED_SHA, 'Changed Gaussian mixture/class channels')
+    profile = _guide_profile(inputs, guides)
+    candidate = _candidate_evidence(inputs, review, bindings) if profile == REVISED_PROFILE else None
     producers = {}
     for name in PRODUCERS:
         item = inputs['producers'][name]
@@ -321,7 +500,7 @@ def validate(inputs_path, review_path):
     return dict(inputs=inputs, review=review, bindings=bindings, region=region, target_id=target_id,
         descriptor=descriptor, config=config, definition=definition, definition_path=definition_path,
         witness=witness, guides=guides, producers=producers, history=history, source=source, runtime=runtime,
-        arms=arms, inputs_path=inputs_path, review_path=review_path)
+        arms=arms, inputs_path=inputs_path, review_path=review_path, candidate=candidate)
 
 
 def prepare(out, inputs_path, review_path):
@@ -378,6 +557,10 @@ def _materialize(out, context, inventory):
     write(common/'strata.json', statistics.STRATA); write(common/'seed-inventory.json', inventory)
     history_ref = copy_file(inputs['historical_failed_strata']['path'], common/'historical-failed-strata.json')
     prerequisite_refs = {name: copy_file(ref['path'], common/'evidence'/(name+'.json')) for name, ref in inputs['prerequisites'].items()}
+    candidate = copy.deepcopy(context.get('candidate'))
+    if candidate is not None:
+        candidate['evidence'] = {name:copy_file(ref['path'], common/'evidence'/('candidate-'+name+'.json'))
+                                 for name,ref in candidate['evidence'].items()}
     producers = {}
     for name, value in context['producers'].items():
         folder = common/'producers'/name
@@ -424,6 +607,9 @@ def _materialize(out, context, inventory):
         selected_geometry_max_rows=20*8*len(arms), selected_geometry_max_axis_queries=60*8*len(arms),
         prior_inputs=bindings.files, launched=False, physical_campaign_gate_open=False, full_vessel_gate_open=False, assembly_gate_open=False,
         scope='Fresh fixed regional comparison. Every attempted draw retained; no retry, extension, refit, pooling or assembly inference.')
+    if candidate is not None:
+        protocol.update(class_guide_profile=REVISED_PROFILE, candidate_pilot=candidate,
+                        class_guide_source=inputs['guides']['class'])
     write(out/'protocol.json', protocol)
     execution = execution_plan(protocol, bound(out/'protocol.json'))
     for path, digest in files.items(): require(sha(path) == digest, 'Frozen closure changed before execution plan publication')

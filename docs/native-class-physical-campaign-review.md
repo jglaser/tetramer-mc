@@ -611,3 +611,38 @@ input hashes and R4/R5/native partition identities. Historical comparison rules
 are retained as recorded, including their use of log-scale standard errors;
 they are not relabeled as the newer linear-mass comparisons. This derivation
 copies the entries and evidence unchanged and recalculates no statistical mass.
+
+The physical preparer now also accepts the explicit input profile
+`class_guide_profile: "revised_support_pilot_116"`. An absent profile retains
+the original 92-component guide pins and protocol format. The new profile pins
+the candidate guide to SHA256
+`13e5c31774c77169d7f4604b2a46b80e84b366ff2172fcef3911fab93286a179`:
+the original 92 means/covariances with weights `0.75 * weight / sum(weights)`,
+plus eight distinct training centers at each of latent scales 0.05, 0.15 and
+0.45, with weight 0.25/24 each. Defensive probability 0.5, all three raw axes,
+five class channels, minimum mass and per-component class → H → unconditional
+fallback stay fixed. The existing pinned physical v7 binary accepts arbitrary
+component counts and uses the same component laws; no binary rebuild is needed.
+
+The explicit profile requires `candidate_pilot` BoundFiles named `protocol`,
+`execution_plan`, `execution_summary`, `statistics` and `adoption`. These must
+authenticate the complete frozen recovery pilot: all 17 clean terminals,
+512 unconditional attempts, all-row algebra and endpoint labels, and the 64
+preselected full geometry checks. Admission preserves the original row-zero
+format failure, authenticates the completed r00 producer and its unchanged
+adopted bytes, and verifies that the other 384 draws kept the original seeds
+and audit IDs. A matching freeze review must name this profile and bind its
+statistics SHA in `cost_review.candidate_statistics_sha256`, alongside the
+existing original diagnostic cost review and its physical-cost uncertainty.
+
+Each of competing22, competing62 and native55 must have a nonzero observed
+endpoint count and a usable selected-line hit in its corresponding channel
+(2, 3 and 4). This permits a separately reviewed physical freeze; it establishes
+neither physical convergence nor generalization beyond the eight training
+centers. There are no nontraining critical holdouts. The fresh physical
+campaign still requires its own two-cloud weights, all-row algebra/labels,
+selected geometry, population statistics, original strata and explicit
+remainder/support assessment. Primary-only execution leaves the declared
+population-size and proposal/cloud sensitivity obligations open. The
+preparer does not prepare or launch anything automatically when this screen
+finishes.

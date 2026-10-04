@@ -2,6 +2,7 @@
 from __future__ import annotations
 import copy
 import json
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -131,7 +132,170 @@ def materialization_context(base, scope='primary_only'):
         arms=prepare.arm_design(scope), inputs_path=Path(inputs_ref['path']), review_path=Path(review_ref['path']))
 
 
+def candidate_fixture(base):
+    """Seventeen synthetic terminals and a real archived-helper lifecycle join."""
+    old_root, root = base/'original', base/'recovery'
+    shared = save(base/'common.json', dict(synthetic=True))
+    common = {key:shared for key in ('guide','config','shape','region','compiled_native','definition')}
+    populations = [dict(id=f'r{i:02}', samples=128, seed=10+i, audit_seed=20+i,
+        selected_ids=list(range(16)), directory=str(root/'queries'/f'r{i:02}')) for i in range(4)]
+    old = dict(common, populations=[dict(p,directory=str(old_root/'queries'/p['id'])) for p in populations])
+    old_ref = save(old_root/'protocol.json', old)
+    driver = old_root/'code/run_native_class_physical_campaign.py'; driver.parent.mkdir(parents=True)
+    driver.write_bytes(Path(prepare.admission.runner.__file__).read_bytes())
+    python = str(Path(sys.executable).absolute())
+    base_files = {r['path']:r['sha256'] for r in (shared,prepare.bound(driver),prepare.bound(Path(python).resolve()))}
+
+    def job(root, identity, pop, phase):
+        path = root/'queries'/pop/'summary.json' if phase == 'producer' else root/'analysis'/pop/(phase+'.json')
+        if phase == 'statistics': path=root/'analysis/statistics.json'
+        return dict(id=identity, population=pop, phase=phase, argv=[python,'-B','synthetic-never-execute',identity],
+            terminal=dict(path=str(path),success_contract='complete' if phase in ('producer','statistics') else 'complete_and_passed'),
+            cpu_limit_seconds=1,wall_limit_seconds=1,address_space_limit_bytes=1024)
+    old_jobs = [job(old_root,f'r{i:02}-{phase}',f'r{i:02}',phase) for i in range(4)
+                for phase in ('producer','algebra','labels','geometry')]+[job(old_root,'statistics','all','statistics')]
+    old_plan = dict(schema=prepare.admission.EXECUTION_SCHEMA,root=str(old_root),maximum_workers=1,threads=1,
+        files=base_files,jobs=old_jobs,executable_resolutions={python:str(Path(python).resolve())})
+    old_plan_ref = save(old_root/'execution-plan.json',old_plan)
+
+    def completed(root, plan_ref, jobs, terminals, files):
+        records=[]
+        for index,(entry,ref) in enumerate(zip(jobs,terminals)):
+            record=dict(**{k:entry[k] for k in ('id','population','phase','argv')},terminal=ref,
+                success_contract=entry['terminal']['success_contract'],child_started=True,child_drained=True,returncode=0,
+                success=True,error=None,timeout=False,retries=0,replacements=0,pid=100+index,birth_ticks=1000+index)
+            folder=prepare.admission.runner.job_directory(root,index,entry)
+            save(folder/'success.json',record);save(folder/'exit.json',record);save(folder/'attempt.json',dict(job=entry))
+            save(folder/'process.json',{k:record[k] for k in ('id','pid','birth_ticks','argv')});records.append(record)
+        save(root/'execution/claim.json',dict(schema=prepare.admission.EXECUTION_SCHEMA,plan_sha256=plan_ref['sha256'],
+            maximum_workers=1,threads=1,retries=0,replacements=0))
+        return dict(schema=prepare.admission.EXECUTION_SCHEMA,complete=True,passed=True,plan_sha256=plan_ref['sha256'],
+            files=files,completed=records,active=None,unstarted=[],failure=None,retries=0,replacements=0,maximum_workers=1,threads=1)
+    summary = dict(complete=True,samples=128)
+    old_summary=save(old_root/'queries/r00/summary.json',summary)
+    adopted=save(root/'queries/r00/summary.json',summary)
+    old_status=completed(old_root,old_plan_ref,old_jobs[:1],[old_summary],base_files)
+    failure=save(old_root/'execution/failure.json',dict(plan_sha256=old_plan_ref['sha256'],complete=False,
+        failed_job=dict(ordinal=1,id='r00-algebra',population='r00',phase='algebra'),
+        completed=old_status['completed'],unstarted=old_jobs[2:]))
+    algebra_failure=save(old_root/'analysis/r00/algebra.failure.json',dict(active_id=0,completed_ids=[],counts={},setup_counts={},
+        error='Wrong proposal density/contact format'))
+    inventory={'summary.json':dict(sha256=old_summary['sha256'],bytes=Path(old_summary['path']).stat().st_size)}
+    recovery=dict(schema='native-class-support-format-recovery-v1',original_root=str(old_root),original_protocol=old_ref,
+        original_plan=old_plan_ref,original_failure=failure,original_algebra_failure=algebra_failure,
+        retained_summary=old_summary,retained_files=inventory,source_directory=str(old_root/'queries/r00'),
+        retained_attempts=128,new_draws=384,total_attempts=512,scientific_replacements=0,no_outcome_adaptation=True,allocation_changed=False)
+    source={'synthetic.py':shared['sha256']}; runtime=dict(synthetic=True)
+    protocol=dict(common,schema='native-class-support-pilot-v1',root=str(root),populations=populations,
+        total_attempts=512,new_draws=384,retained_attempts=128,new_Poisson_clouds=0,physical_weight_estimates=0,
+        selected_geometry_rows=64,recovery=recovery,source_sha256=source,runtime=runtime,
+        binary64_weight_retention=dict(original_component_retention_min=.75))
+    protocol_ref=save(root/'protocol.json',protocol)
+    jobs=[job(root,f'r{i:02}-{phase}',f'r{i:02}',phase) for i in range(4)
+          for phase in ('producer','algebra','labels','geometry')]+[job(root,'statistics','all','statistics')]
+    files=dict(base_files); files[protocol_ref['path']]=protocol_ref['sha256']
+    plan=dict(schema=prepare.admission.EXECUTION_SCHEMA,root=str(root),maximum_workers=1,threads=1,files=files,jobs=jobs)
+    plan_ref=save(root/'execution-plan.json',plan)
+    refs={}; terminals=[]
+    for entry in jobs[:-1]:
+        pop,phase=entry['population'],entry['phase']
+        if phase=='producer': value=summary
+        else:
+            ids=range(16 if phase=='geometry' else 128)
+            value=dict(schema='native-class-support-pilot-'+phase+'-v1',complete=True,passed=True,phase=phase,population=pop,
+                protocol_sha256=protocol_ref['sha256'],attempted_records=128,
+                rows=[dict(id=i,sample_record_sha256=f'{i:064x}') for i in ids],source_sha256=source,runtime=runtime,
+                input_sha256={shared['path']:shared['sha256']},journal=shared,new_pose_draws=0,new_Poisson_clouds=0,physical_weight_estimates=0)
+        ref=save(entry['terminal']['path'],value);terminals.append(ref)
+        if phase!='producer':refs[entry['id']]=ref
+    reports=[dict(id=p['id'],attempted=128,selected_reference_rows=16,
+        critical_endpoints=dict(competing22=1,competing62=1,native55=1),
+        target_line_hit_rates={f'channel:{c}':dict(selected=2,hits=1) for c in (2,3,4)}) for p in populations]
+    combined=dict(attempted_denominator=512,selected_reference_rows=64,critical_endpoints=dict(competing22=4,competing62=4,native55=4),
+        selected_target_line_access={str(c):dict(selected=8,hits=4) for c in (2,3,4)},
+        access_screen='access_observed_requires_review',physical_campaign_gate_open=False,full_vessel_gate_open=False,
+        assembly_gate_open=False,training_critical_points=8,nontraining_critical_holdouts=0)
+    statistics=save(root/'analysis/statistics.json',dict(schema='native-class-support-pilot-summary-v1',complete=True,passed=True,
+        protocol_sha256=protocol_ref['sha256'],new_Poisson_clouds=0,raw_rows_read=0,new_geometry_queries=0,retries=0,
+        populations=reports,combined=combined,predecessor_receipts=refs,input_sha256={shared['path']:shared['sha256']}))
+    terminals.append(statistics)
+    status=save(root/'execution/summary.json',completed(root,plan_ref,jobs,terminals,files))
+    adoption=save(root/'analysis/r00/adoption.json',dict(schema=recovery['schema'],complete=True,passed=True,
+        protocol_sha256=protocol_ref['sha256'],new_draws=0,retained_attempts=128,sample_rows_parsed=0,retries=0,
+        retained_files=inventory,original_summary=old_summary,adopted_summary=adopted,
+        input_sha256={shared['path']:shared['sha256']},journal=shared))
+    inputs=dict(guides={'class':shared},target=dict(region=shared,native_definition=shared),shape=shared,compiled_native=shared,
+        candidate_pilot=dict(protocol=protocol_ref,execution_plan=plan_ref,execution_summary=status,statistics=statistics,adoption=adoption))
+    review=dict(class_guide_profile=prepare.REVISED_PROFILE,cost_review=dict(candidate_statistics_sha256=statistics['sha256']))
+    pins=dict(guide=shared['sha256'],protocol=protocol_ref['sha256'],execution_plan=plan_ref['sha256'],
+        original_plan=old_plan_ref['sha256'],original_failure=failure['sha256'],original_algebra_failure=algebra_failure['sha256'],
+        retained_summary=old_summary['sha256'])
+    return inputs,review,pins
+
+
 class PreparationTests(unittest.TestCase):
+    def test_candidate_profile_requires_exact_retained_and_added_design(self):
+        original=[dict(weight=1/92,mean=[float(i)]*6,covariance=[[float(a==b) for b in range(6)] for a in range(6)]) for i in range(92)]
+        common=dict(region_sha256='a'*64,raw_translation_axes=[0,1,2],conditional_probability=1.,
+                    minimum_conditional_mass=1e-12,defensive_uniform_shell_probability=.5,gaussian_components=original)
+        guides=dict(hard_free=dict(common,schema='defensive-hard-free-line-guide-v1'),
+            **{'class':dict(common,schema='defensive-native-class-line-guide-v1',class_channels=prepare.CHANNELS,
+                           compiled_native=dict(sha256=prepare.COMPILED_SHA))})
+        inputs=dict(guides={k:dict(sha256=v) for k,v in prepare.GUIDES.items()},target=dict(region=dict(sha256='a'*64)))
+        self.assertEqual(prepare._guide_profile(inputs,guides),prepare.ORIGINAL_PROFILE)
+        components=copy.deepcopy(original)
+        for c in components:c['weight']=.75*(c['weight']/math.fsum(v['weight'] for v in original))
+        components += [dict(weight=.25/24,mean=[float(i)]*6,
+            covariance=[[width**2 if a==b else 0. for b in range(6)] for a in range(6)]) for i in range(8) for width in (.05,.15,.45)]
+        guides['class']['gaussian_components']=components
+        with self.assertRaisesRegex(ValueError,'Changed Gaussian'):prepare._guide_profile(inputs,guides)
+        inputs.update(class_guide_profile=prepare.REVISED_PROFILE);inputs['guides']['class']['sha256']=prepare.REVISED_PINS['guide']
+        self.assertEqual(prepare._guide_profile(inputs,guides),prepare.REVISED_PROFILE)
+        for index,field in [(0,'weight'),(0,'mean'),(94,'covariance'),(115,'weight')]:
+            bad=copy.deepcopy(guides);bad['class']['gaussian_components'][index][field]=0
+            with self.subTest(index=index,field=field),self.assertRaises(ValueError):prepare._guide_profile(inputs,bad)
+
+    def test_completed_candidate_authenticates_all_terminals_and_retained_bytes(self):
+        for change in (None,'missing_job','process','row_hash','adoption','raw_copy'):
+            with self.subTest(change=change),tempfile.TemporaryDirectory() as d:
+                base=Path(d);inputs,review,pins=candidate_fixture(base);refs=inputs['candidate_pilot']
+                if change=='missing_job':
+                    value=prepare.read(refs['execution_summary']['path']);value['completed'].pop()
+                    refs['execution_summary']=save(refs['execution_summary']['path'],value)
+                if change=='process':
+                    path=base/'recovery/execution/jobs/005-r01-algebra/process.json';value=prepare.read(path);value['birth_ticks']+=1;save(path,value)
+                if change=='row_hash':
+                    path=base/'recovery/analysis/r01/labels.json';value=prepare.read(path);value['rows'][0]['sample_record_sha256']='f'*64;save(path,value)
+                if change=='adoption':
+                    value=prepare.read(refs['adoption']['path']);value['retained_attempts']=127;refs['adoption']=save(refs['adoption']['path'],value)
+                if change=='raw_copy':save(base/'recovery/queries/r00/summary.json',dict(complete=True,samples=127))
+                with patch.dict(prepare.REVISED_PINS,pins,clear=True),patch.object(prepare.subprocess,'Popen',side_effect=AssertionError('science')):
+                    if change:
+                        with self.assertRaises(ValueError):prepare._candidate_evidence(inputs,review,prepare.statistics.Bindings())
+                    else:
+                        result=prepare._candidate_evidence(inputs,review,prepare.statistics.Bindings())
+                        self.assertEqual(result['attempted_denominator'],512);self.assertEqual(result['selected_reference_rows'],64)
+                        self.assertFalse(result['physical_campaign_gate_open']);self.assertFalse(result['regional_convergence_established'])
+
+    def test_candidate_access_requires_each_endpoint_and_line_without_promoting_precision(self):
+        with tempfile.TemporaryDirectory() as d:
+            inputs,_,pins=candidate_fixture(Path(d));summary=prepare.read(inputs['candidate_pilot']['statistics']['path'])
+            with patch.dict(prepare.REVISED_PINS,pins,clear=True):
+                prepare._candidate_access(summary)
+                for region in ('competing22','competing62','native55'):
+                    bad=copy.deepcopy(summary)
+                    for p in bad['populations']:p['critical_endpoints'][region]=0
+                    bad['combined']['critical_endpoints'][region]=0
+                    with self.subTest(region=region),self.assertRaisesRegex(ValueError,'endpoint access'):prepare._candidate_access(bad)
+                for channel in (2,3,4):
+                    bad=copy.deepcopy(summary)
+                    for p in bad['populations']:p['target_line_hit_rates'][f'channel:{channel}']['hits']=0
+                    bad['combined']['selected_target_line_access'][str(channel)]['hits']=0
+                    with self.subTest(channel=channel),self.assertRaisesRegex(ValueError,'remain empty'):prepare._candidate_access(bad)
+                for key,value in [('attempted_denominator',511),('physical_campaign_gate_open',True),('nontraining_critical_holdouts',1)]:
+                    bad=copy.deepcopy(summary);bad['combined'][key]=value
+                    with self.subTest(key=key),self.assertRaises(ValueError):prepare._candidate_access(bad)
+
     def test_historical_inventory_requires_complete_retention_only_and_binds_provenance(self):
         with tempfile.TemporaryDirectory() as d:
             base = Path(d); target_id = 'd'*64
@@ -226,6 +390,8 @@ class PreparationTests(unittest.TestCase):
                 self.assertEqual(protocol['historical_failed_strata']['sha256'], context['inputs']['historical_failed_strata']['sha256'])
                 self.assertEqual(prepare.read(protocol['historical_failed_strata']['path']), context['history'])
                 self.assertEqual(protocol['gates'], prepare.statistics.GATES)
+                self.assertNotIn('class_guide_profile',protocol)
+                self.assertNotIn('candidate_pilot',protocol)
                 for comparison in protocol['comparisons']:
                     self.assertEqual(comparison['historical_failed_strata'], context['history']['entries'])
                 seeds = []
@@ -248,6 +414,32 @@ class PreparationTests(unittest.TestCase):
                 self.assertNotIn(str(out/'protocol.json'), protocol['files'])
                 self.assertFalse((out/'execution').exists())
                 with self.assertRaisesRegex(ValueError, 'Fresh campaign'): prepare.prepare(out, context['inputs_path'], context['review_path'])
+
+    def test_revised_profile_materializes_evidence_without_changing_physical_gates(self):
+        with tempfile.TemporaryDirectory() as d:
+            base=Path(d);context=materialization_context(base/'source');out=base/'campaign'
+            candidate=save(base/'candidate.json',dict(synthetic=True,complete=True))
+            context['bindings'].reference(candidate)
+            context['inputs'].update(class_guide_profile=prepare.REVISED_PROFILE,guides={'class':candidate})
+            context['candidate']=dict(profile=prepare.REVISED_PROFILE,evidence={k:candidate for k in
+                ('protocol','execution_plan','execution_summary','statistics','adoption')},
+                attempted_denominator=512,selected_reference_rows=64,physical_campaign_gate_open=False,
+                regional_convergence_established=False,access_screen='access_observed_requires_review')
+            with patch.object(prepare,'validate',return_value=context),patch.object(prepare,'seed_inventory',return_value={'seeds':[]}), \
+                 patch.object(prepare.labels,'observer_setup_inventory',return_value={'synthetic_metadata_only':True}), \
+                 patch.object(prepare.subprocess,'Popen',side_effect=AssertionError('scientific launch')):
+                prepare.prepare(out,context['inputs_path'],context['review_path'])
+            protocol=prepare.read(out/'protocol.json')
+            self.assertEqual(protocol['class_guide_profile'],prepare.REVISED_PROFILE)
+            self.assertEqual(protocol['class_guide_source'],candidate)
+            self.assertEqual(protocol['total_attempts'],262144)
+            self.assertEqual(protocol['gates'],prepare.statistics.GATES)
+            self.assertEqual(protocol['selected_geometry_max_rows'],320)
+            self.assertFalse(protocol['physical_campaign_gate_open'])
+            self.assertFalse(protocol['candidate_pilot']['regional_convergence_established'])
+            for ref in protocol['candidate_pilot']['evidence'].values():
+                self.assertEqual(ref['sha256'],candidate['sha256'])
+                self.assertEqual(protocol['files'][ref['path']],ref['sha256'])
 
     def test_embedded_source_archive_validation_is_metadata_only(self):
         with tempfile.TemporaryDirectory() as d:

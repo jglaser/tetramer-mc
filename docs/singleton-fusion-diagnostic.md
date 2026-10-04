@@ -105,3 +105,56 @@ directory. Its manifest binds the full states, shape, model, coordinate frame,
 construction inventory, caps and compiled-source witnesses. A bounded controller
 must supply the process CPU, wall-time and memory limits; the CLI does not
 select a trajectory frame or start a simulation.
+
+## Completed context-0 result
+
+All ten constructions completed in 0.527 CPU seconds, without a pose draw,
+depletant cloud, native query or core-overlap call. **None retained a fused
+component.** Nine constructors produced no candidate pair after the mean
+distance/angle screen. The source state with member 27 moving admitted five
+pairs, all of which returned no fit. That return category includes the early
+residual cutoff and does not identify a numerical failure. No candidate reached
+center validity, collision, covariance or component-cap checks.
+
+Each constructor has 4,194,304 possible cross-interface label pairs. These are
+combinatorial counts, not that many geometry queries: the existing sorted
+spatial search skips distant pairs. At source-27, 203 pairs pass distance and
+five pass angle. At prepared-1-27, nine pass distance and none pass angle.
+The other eight constructors have no pair passing distance.
+
+Consequently, removing center-collision rejection cannot help these particular
+initial catalogues. This does not identify what happens later along a trajectory
+or in the other three environments.
+
+Arithmetic bounds further separate incompatible neighborhoods from an overly
+narrow atlas. The maximum distance of a zero-latent atlas mean from its anchor
+is 70.3694 Å; reciprocal inversion preserves that distance. Fixed neighbors
+farther apart than `2 * 70.3694 + 8 = 148.7389 Å` cannot produce a pair passing
+the present mean-distance screen. Five of these ten constructions satisfy this
+exclusion bound. This is a bound on **means**, not Gaussian support.
+
+The hard shape is contained in an origin-centered sphere of radius 49.4870 Å.
+At the conditional test's depletant radius 1.4 Å, simultaneous exclusion overlap
+with both fixed neighbors requires their centers to be at most
+`4 * (49.4870 + 1.4) = 203.5481 Å` apart. For member 27 in prepared states 2
+and 3, their separations are 212.624 and 216.920 Å, respectively. Thus those two
+fixed neighborhoods cannot support simultaneous contacts even with a broader
+pose map. The bound does not establish feasibility in the remaining cases.
+These conclusions use a 1e-8 Å exclusion margin; no additional geometry
+predicate was evaluated.
+
+The useful next question is which **geometrically compatible fixed neighbor
+pairs** admit complementary poses. Neighbor selection based solely on the
+unchanged spectators can preserve the forward/reverse selection probability;
+selection based on the moving particle's current contacts needs its full
+selection correction. Neither change is implemented by this passive diagnostic.
+The two-neighbor benchmark's fallback behavior must not be interpreted as a
+physical failure of multi-contact binding.
+
+Reproducible evidence is in `results/singleton-fusion-context0-20261004`:
+the authenticated reduction is `review.json` (SHA
+`a777aad74a9be5c276698c0e099fa5452740d6a176114252b9fa7f9a8a0e3eb8`),
+with `distance-bounds.json` recording all ten separations and the necessary
+bounds. Six additional preparer tests passed before execution; the complete
+initial audit and original prepared-state files are bound in the manifest's
+preparation closure.

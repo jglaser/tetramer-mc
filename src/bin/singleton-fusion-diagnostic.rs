@@ -14,7 +14,7 @@ use tetramer_mc::{
     docking::{DockingMethod, DockingProposal},
     geometry::{Shape, SphereTree},
     math::{Pose, norm},
-    oligomer_proposal::{FusionBuildDiagnostics, OligomerConfig, OligomerMixture},
+    oligomer_proposal::{FusionBuildDiagnostics, FusionFitPolicy, OligomerConfig, OligomerMixture},
     proposal::FrozenRelativePoseProposal,
     simulation::{Config, cpu_seconds, hash_bytes, hash_file},
     spherical::Container,
@@ -106,6 +106,10 @@ struct Manifest {
     states: Vec<NamedState>,
     constructions: Vec<Construction>,
     oligomer: OligomerConfig,
+    /// Omitted v1 fields preserve the historical fitter. This is a passive
+    /// diagnostic policy, not a change to any production assembly kernel.
+    #[serde(default)]
+    fit_policy: FusionFitPolicy,
     caps: Caps,
     witness: Witness,
 }
@@ -400,7 +404,7 @@ fn construct(
         .map(|(_, &p)| p)
         .collect();
     let pool = c.neighbors.map(|i| poses[i]);
-    let _mixture = OligomerMixture::build_with_diagnostics(
+    let _mixture = OligomerMixture::build_with_fit_diagnostics(
         &loaded.model,
         &loaded.core,
         &loaded.wall,
@@ -408,6 +412,7 @@ fn construct(
         &spectators,
         &pool,
         &m.oligomer,
+        m.fit_policy,
         diagnostics,
     )?;
     Ok(())
@@ -430,7 +435,8 @@ where
         emit(
             journal,
             &json!({"state":"begin","ordinal":ordinal,"construction":c,
-            "members":[IDENTITY],"spectator_labels":spectator_labels,"context":m.context}),
+            "members":[IDENTITY],"spectator_labels":spectator_labels,"context":m.context,
+            "fit_policy":m.fit_policy}),
         )?;
         totals.constructions_begun += 1;
         let mut diagnostics = FusionBuildDiagnostics::default();
@@ -448,7 +454,7 @@ where
         emit(
             journal,
             &json!({"state":if success {"complete"} else {"failed"},"ordinal":ordinal,"construction":c,
-            "diagnostics":diagnostics,"spectator_labels":spectator_labels,"totals":totals,
+            "fit_policy":m.fit_policy,"diagnostics":diagnostics,"spectator_labels":spectator_labels,"totals":totals,
             "cpu_seconds":cpu_seconds()-started,"error":result.as_ref().err().map(|e|format!("{e:#}")),
             "counter_limits_passed":counters_valid}),
         )?;
@@ -498,7 +504,8 @@ fn run(args: Args) -> Result<()> {
     let result = (|| -> Result<()> {
         emit(
             &mut journal,
-            &json!({"state":"started","schema":SCHEMA,"manifest_sha256":args.manifest_sha256}),
+            &json!({"state":"started","schema":SCHEMA,"manifest_sha256":args.manifest_sha256,
+            "fit_policy":m.fit_policy}),
         )?;
         ensure!(
             hash_bytes(BUNDLE) == m.witness.compiled_source_bundle_sha256
@@ -517,7 +524,8 @@ fn run(args: Args) -> Result<()> {
             &mut journal,
             &json!({"state":"inputs_verified","input_sha256":inputs.files,"pose_count":loaded.states.values().next().unwrap().len(),
             "coordinate_frame":m.coordinate_frame,"wall_center":m.wall_center,"wall_radius":loaded.wall.radius,
-            "atlas_loading":{"periodic":false,"uniform_weight":0.1,"correlation":0.},"caps":m.caps}),
+            "atlas_loading":{"periodic":false,"uniform_weight":0.1,"correlation":0.},"caps":m.caps,
+            "fit_policy":m.fit_policy}),
         )?;
         execute(&m, &loaded, &mut journal, &mut totals, construct)?;
         inputs.recheck()?;
@@ -527,22 +535,27 @@ fn run(args: Args) -> Result<()> {
         let recheck_error = inputs.recheck().err().map(|e| format!("{e:#}"));
         emit(
             &mut journal,
-            &json!({"state":"failed","error":format!("{error:#}"),"totals":totals,"input_recheck_error":recheck_error}),
+            &json!({"state":"failed","error":format!("{error:#}"),"totals":totals,"input_recheck_error":recheck_error,
+            "fit_policy":m.fit_policy}),
         )?;
         save_new(
             &args.out.join("failure.json"),
             &json!({"schema":"singleton-fusion-diagnostic-failure-v1","complete":false,
-            "manifest_sha256":args.manifest_sha256,"error":format!("{error:#}"),"totals":totals,
+            "manifest_sha256":args.manifest_sha256,"fit_policy":m.fit_policy,"error":format!("{error:#}"),"totals":totals,
             "input_sha256":inputs.files,"input_recheck_error":recheck_error,"attempts_sha256":hash_file(&journal_path)?,
             "retries":0,"new_pose_draws":0,"new_Poisson_clouds":0}),
         )?;
         return Err(error);
     }
-    emit(&mut journal, &json!({"state":"finished","totals":totals}))?;
+    emit(
+        &mut journal,
+        &json!({"state":"finished","fit_policy":m.fit_policy,"totals":totals}),
+    )?;
     save_new(
         &args.out.join("summary.json"),
         &json!({"schema":"singleton-fusion-diagnostic-v1","complete":true,"passed":true,
         "context":m.context,"manifest_sha256":args.manifest_sha256,"witness":m.witness,"totals":totals,
+        "fit_policy":m.fit_policy,
         "input_sha256":inputs.files,"attempts_sha256":hash_file(&journal_path)?,"cpu_seconds":cpu_seconds()-started,
         "new_pose_draws":0,"new_Poisson_clouds":0,"native_queries":0,"contact_graph_queries":0,"density_queries":0,
         "scope":"Passive exact singleton catalogue construction at explicitly bound states; no sampling or scientific mixing conclusion"}),
@@ -639,6 +652,7 @@ mod tests {
                 },
             ],
             oligomer: OligomerConfig::default(),
+            fit_policy: FusionFitPolicy::EarlyAbort,
             caps: Caps {
                 constructions: 2,
                 fits: 8192,
@@ -652,6 +666,38 @@ mod tests {
             },
         };
         Ok(Fixture { root, manifest })
+    }
+    #[test]
+    fn singleton_fusion_fit_policy_defaults_and_strict_deserialization() -> Result<()> {
+        let fixture = fixture()?;
+        let mut legacy = serde_json::to_value(&fixture.manifest)?;
+        legacy.as_object_mut().unwrap().remove("fit_policy");
+        let omitted: Manifest = serde_json::from_value(legacy.clone())?;
+        assert_eq!(omitted.fit_policy, FusionFitPolicy::EarlyAbort);
+        validate_manifest(&omitted)?;
+        for (name, expected) in [
+            ("early_abort", FusionFitPolicy::EarlyAbort),
+            ("full_iterations", FusionFitPolicy::FullIterations),
+        ] {
+            let mut explicit = legacy.clone();
+            explicit["fit_policy"] = json!(name);
+            let parsed: Manifest = serde_json::from_value(explicit.clone())?;
+            assert_eq!(parsed.fit_policy, expected);
+            validate_manifest(&parsed)?;
+            assert_eq!(serde_json::to_value(parsed)?, explicit);
+        }
+        for invalid in [
+            json!(null),
+            json!("full"),
+            json!("EarlyAbort"),
+            json!(1),
+            json!({}),
+        ] {
+            let mut value = legacy.clone();
+            value["fit_policy"] = invalid;
+            assert!(serde_json::from_value::<Manifest>(value).is_err());
+        }
+        Ok(())
     }
     #[test]
     fn singleton_fusion_manifest_rejects_frame_neighbor_inventory_and_budget_drift() -> Result<()> {
@@ -748,7 +794,9 @@ mod tests {
             .collect::<std::result::Result<_, _>>()?;
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["state"], "begin");
+        assert_eq!(rows[0]["fit_policy"], "early_abort");
         assert_eq!(rows[1]["state"], "failed");
+        assert_eq!(rows[1]["fit_policy"], "early_abort");
         assert_eq!(rows[1]["diagnostics"]["core_overlap_calls"], 2);
         assert_eq!(rows[1]["spectator_labels"], json!([1, 2]));
         Ok(())
@@ -756,28 +804,64 @@ mod tests {
     #[test]
     fn singleton_fusion_passive_cli_completes_only_declared_synthetic_constructions() -> Result<()>
     {
-        let fixture = fixture()?;
-        let path = fixture.root.join("manifest.json");
-        save_new(&path, &fixture.manifest)?;
-        run(Args {
-            manifest: path.clone(),
-            manifest_sha256: hash_file(&path)?,
-            out: fixture.manifest.output.clone(),
-        })?;
-        let summary: Value =
-            serde_json::from_slice(&fs::read(fixture.manifest.output.join("summary.json"))?)?;
-        assert_eq!(summary["totals"]["constructions_completed"], 2);
-        assert_eq!(summary["new_pose_draws"], 0);
-        assert_eq!(summary["native_queries"], 0);
-        assert_eq!(summary["density_queries"], 0);
-        assert!(
+        for policy in [None, Some("early_abort"), Some("full_iterations")] {
+            let fixture = fixture()?;
+            let path = fixture.root.join("manifest.json");
+            let mut value = serde_json::to_value(&fixture.manifest)?;
+            match policy {
+                Some(name) => value["fit_policy"] = json!(name),
+                None => {
+                    value.as_object_mut().unwrap().remove("fit_policy");
+                }
+            }
+            save_new(&path, &value)?;
+            let manifest_bytes = fs::read(&path)?;
             run(Args {
                 manifest: path.clone(),
                 manifest_sha256: hash_file(&path)?,
-                out: fixture.manifest.output.clone()
-            })
-            .is_err()
-        );
+                out: fixture.manifest.output.clone(),
+            })?;
+            let summary: Value =
+                serde_json::from_slice(&fs::read(fixture.manifest.output.join("summary.json"))?)?;
+            let effective = policy.unwrap_or("early_abort");
+            assert_eq!(summary["fit_policy"], effective);
+            assert_eq!(summary["totals"]["constructions_completed"], 2);
+            assert_eq!(summary["new_pose_draws"], 0);
+            assert_eq!(summary["native_queries"], 0);
+            assert_eq!(summary["density_queries"], 0);
+            assert_eq!(fs::read(&path)?, manifest_bytes);
+            assert_eq!(
+                fs::read(fixture.manifest.output.join("provenance/manifest.json"))?,
+                manifest_bytes
+            );
+            let rows: Vec<Value> =
+                fs::read_to_string(fixture.manifest.output.join("attempts.jsonl"))?
+                    .lines()
+                    .map(serde_json::from_str)
+                    .collect::<std::result::Result<_, _>>()?;
+            let complete: Vec<_> = rows
+                .iter()
+                .filter(|row| row["state"] == "complete")
+                .collect();
+            assert_eq!(complete.len(), 2);
+            for row in complete {
+                assert_eq!(row["fit_policy"], effective);
+                let fits = row["diagnostics"]["fit_records"].as_array().unwrap();
+                assert!(!fits.is_empty());
+                assert_eq!(
+                    fits.len() as u64,
+                    row["diagnostics"]["fit_attempts"].as_u64().unwrap()
+                );
+            }
+            assert!(
+                run(Args {
+                    manifest: path.clone(),
+                    manifest_sha256: hash_file(&path)?,
+                    out: fixture.manifest.output.clone()
+                })
+                .is_err()
+            );
+        }
         Ok(())
     }
 }

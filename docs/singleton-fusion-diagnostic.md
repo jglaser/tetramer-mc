@@ -243,3 +243,79 @@ The complete preparation, four manifests, execution journals and authenticated
 reduction are in `results/singleton-alternative-fusion-context0-20261004`.
 Its execution-plan SHA is
 `d351e0d791602a0b410e527748958188ae235469524d78ff033549ab5a80acb1`.
+
+## Completed bounded fitting comparison
+
+The diagnostic API now supports `early_abort` (the unchanged default) and
+`full_iterations`. The second policy removes only the residual-based early
+exit; both retain sixteen optimizer iterations, twelve line-search trials per
+iteration, the final mismatch threshold of 12 and all existing geometry/cap
+rules. Production assembly entry points still use the original policy.
+Compact per-fit records observe existing residual evaluations, termination
+stage, encoding errors and finite/nonfinite arithmetic without adding a
+residual evaluation, geometry predicate or random draw.
+
+```mermaid
+flowchart TD
+    A[Same fixed neighbors and atlas candidate pair] --> B[Same Gauss–Newton steps]
+    B --> C{After two iterations: mismatch above 120?}
+    C -- Default policy --> D[Record early cutoff]
+    C -- Full-iterations policy --> E[Continue within original iteration budget]
+    E --> F{Final mismatch at most 12?}
+    F -- Yes --> G[Existing center and covariance checks]
+    F -- No --> H[Record above-threshold fit]
+    D --> I[Complete normalized proposal retains its other components]
+    H --> I
+```
+
+All five anchors, five states and both moving labels were tested under both
+policies: **100 constructors in ten serial jobs**. Every original diagnostic
+key/value matched for all 50 default-policy constructors. The old compiled
+source archives authenticate the two edited Rust files; the historical binary,
+states and results were retained. The new build has its own source witness.
+
+| Result | Default early abort | Full bounded fit |
+| --- | ---: | ---: |
+| Candidate fits | 34 | 34 |
+| Early residual exits | 34 | 0 |
+| Line-search stalls | 0 | 28 |
+| Iteration limits reached | 0 | 6 |
+| Fits above final threshold | 0 (returned early) | 34 |
+| Usable / retained fused components | 0 / 0 | 0 / 0 |
+| Residual evaluations | 918 | 6,374 |
+| Encoding errors / core-overlap queries | 0 / 0 | 0 / 0 |
+
+Full-fit mismatches range from **1,550.818 to 15,028.337**, far above 12. Median
+relative reduction is 0.0131%; the largest is 2.465%. The whole ten-job
+diagnostic used 5.037 CPU seconds including loading; summed constructor-only
+timings were 0.263 versus 0.349 seconds. These are construction costs, not
+sampling-speed measurements.
+
+![Paired fit mismatches and relative reductions](../results/singleton-fit-policy-comparison-20261004/fit-policy-comparison.png)
+
+For these candidate pairs, removing the early abort is not a useful fix.
+The current fixed-neighbor charts are poorly compatible on their fitted
+Gaussian scales. Line-search stalls and a finite iteration cap are not global
+minimum certificates, so the result does not rule out a better initialization,
+broader proposal, different neighbors or cooperative rearrangement. These
+whitened residuals are **proposal diagnostics, not physical free energies**.
+Neither atlas support nor physical binding weights have been measured here.
+The next sampling decision should address proposal breadth or movable-neighbor
+geometry instead of spending more iterations on this same fit.
+
+Eleven library tests, five CLI tests and six preparer tests passed. The tests
+cover default catalogue/density/seeded-proposal equivalence, no additional
+residual evaluations, bounded continuation, distinct failure stages, explicit
+nonfinite serialization, immutable inputs and complete historical allocations.
+The release binary was built offline in `target-validation-fusion-fit`; the
+production executable remains unchanged. Build and test evidence is in
+`results/singleton-fit-validation-20261004` and
+`results/singleton-fit-preparer-validation-20261004`.
+
+The completed paired comparison, reduction source, per-fit records and plot are
+in `results/singleton-fit-policy-comparison-20261004`. Its authenticated
+`review.json` SHA is
+`3b74ba75ee8a54030ac8c04e07bfa9304e764b32909cd676b1356b0e41058fef`.
+The independent physical-weight campaign and native-registry trajectory audit
+remain separate calculations; this result changes neither their estimates nor
+the unresolved finite-system assembly verdict.

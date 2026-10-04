@@ -136,12 +136,146 @@ pub struct FusedComponent {
     pub center: Pose,
 }
 
+/// Diagnostic comparison only. Production entry points retain EarlyAbort.
+/// FullIterations removes only the existing large-residual early exit; all
+/// iteration, line-search, screening and component limits remain identical.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FusionFitPolicy {
+    #[default]
+    EarlyAbort,
+    FullIterations,
+}
+
+/// JSON-safe observation of existing arithmetic, without converting infinities
+/// or NaNs into nulls or changing how the fitter handles them.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum FusionFitValue {
+    Finite(f64),
+    PositiveInfinity,
+    NegativeInfinity,
+    Nan,
+}
+impl From<f64> for FusionFitValue {
+    fn from(value: f64) -> Self {
+        if value.is_finite() {
+            Self::Finite(value)
+        } else if value.is_nan() {
+            Self::Nan
+        } else if value.is_sign_positive() {
+            Self::PositiveInfinity
+        } else {
+            Self::NegativeInfinity
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FusionFitTermination {
+    Begun,
+    InitialEncodeFailure,
+    JacobianEncodeFailure,
+    FinalJacobianEncodeFailure,
+    NormalCholeskyFailure,
+    EarlyResidualCutoff,
+    LineSearchStalled,
+    TinyStep,
+    IterationLimit,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FusionFitDisposition {
+    Begun,
+    ReturnedNone,
+    AboveThreshold,
+    Usable,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FusionFitStage {
+    Initial,
+    Jacobian,
+    LineSearch,
+    FinalJacobian,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FusionFitEncodeFailure {
+    pub stage: FusionFitStage,
+    /// Zero-based optimizer iteration; absent outside the iteration loop.
+    pub iteration: Option<usize>,
+    /// Finite-difference coordinate and sign, if applicable.
+    pub coordinate: Option<usize>,
+    pub direction: Option<i8>,
+    /// Zero-based attempted line-search trial, if applicable.
+    pub trial: Option<usize>,
+    pub label: usize,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FusionFitDiagnostic {
+    pub first: usize,
+    pub second: usize,
+    pub start_chi2: Option<FusionFitValue>,
+    pub final_chi2: Option<FusionFitValue>,
+    /// Iterations whose Jacobian was begun; the early cutoff is checked first.
+    pub iterations: usize,
+    pub accepted_steps: usize,
+    /// Actual halvings, including the last unsuccessful line-search trial.
+    pub backtracks: usize,
+    pub line_search_trials: usize,
+    pub residual_evaluations: usize,
+    pub jacobian_evaluations: usize,
+    pub encode_failures: usize,
+    /// Includes recoverable trial failures, without storing an unbounded log.
+    pub last_encode_failure: Option<FusionFitEncodeFailure>,
+    pub nonfinite_objectives: usize,
+    pub nonfinite_jacobians: usize,
+    pub nonfinite_gradients: usize,
+    pub nonfinite_steps: usize,
+    /// Normal loop stop, retained even if the final Jacobian then fails.
+    pub iteration_stop: Option<FusionFitTermination>,
+    pub termination: FusionFitTermination,
+    pub disposition: FusionFitDisposition,
+}
+impl FusionFitDiagnostic {
+    fn new(first: usize, second: usize) -> Self {
+        Self {
+            first,
+            second,
+            start_chi2: None,
+            final_chi2: None,
+            iterations: 0,
+            accepted_steps: 0,
+            backtracks: 0,
+            line_search_trials: 0,
+            residual_evaluations: 0,
+            jacobian_evaluations: 0,
+            encode_failures: 0,
+            last_encode_failure: None,
+            nonfinite_objectives: 0,
+            nonfinite_jacobians: 0,
+            nonfinite_gradients: 0,
+            nonfinite_steps: 0,
+            iteration_stop: None,
+            termination: FusionFitTermination::Begun,
+            disposition: FusionFitDisposition::Begun,
+        }
+    }
+}
+
 /// Passive accounting of the existing catalogue construction, not a search
 /// for additional components. No random numbers or extra geometry are used.
 /// A caller-owned sink preserves this prefix when construction returns an error.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct FusionBuildDiagnostics {
     pub complete: bool,
+    pub fit_policy: FusionFitPolicy,
     pub single_labels: usize,
     pub decoded_means: usize,
     pub mean_decode_failures: usize,
@@ -156,6 +290,10 @@ pub struct FusionBuildDiagnostics {
     pub candidate_pairs_before_cap: usize,
     pub candidates_truncated: usize,
     pub fit_attempts: usize,
+    /// One record per attempted fit, never more than max_candidates. Recorded
+    /// only by build_with_fit_diagnostics; the existing APIs remain passive
+    /// aggregate-only diagnostics with their original construction policy.
+    pub fit_records: Vec<FusionFitDiagnostic>,
     /// `fuse` returned None: includes its early residual cutoff, chart encode
     /// failures and linear-algebra failures. Not a numerical-failure count.
     pub fit_returned_none: usize,
@@ -313,6 +451,209 @@ fn cholesky_solve(l: &Mat6, b: Vec6) -> Vec6 {
     x
 }
 
+/// The original bounded Gauss-Newton arithmetic, factored only so synthetic
+/// residuals can test exit accounting without invoking protein geometry.
+fn fit_pose_residual(
+    start: Pose,
+    limit: f64,
+    policy: FusionFitPolicy,
+    mut diagnostic: Option<&mut FusionFitDiagnostic>,
+    residual: impl Fn(Pose) -> std::result::Result<[f64; 12], (usize, String)>,
+) -> Option<(Pose, Mat6, f64)> {
+    let evaluate = |g: Pose,
+                    stage: FusionFitStage,
+                    iteration: Option<usize>,
+                    coordinate: Option<usize>,
+                    direction: Option<i8>,
+                    trial: Option<usize>,
+                    diagnostic: &mut Option<&mut FusionFitDiagnostic>| {
+        if let Some(d) = diagnostic.as_deref_mut() {
+            d.residual_evaluations += 1;
+        }
+        match residual(g) {
+            Ok(r) => Some(r),
+            Err((label, error)) => {
+                if let Some(d) = diagnostic.as_deref_mut() {
+                    d.encode_failures += 1;
+                    d.last_encode_failure = Some(FusionFitEncodeFailure {
+                        stage,
+                        iteration,
+                        coordinate,
+                        direction,
+                        trial,
+                        label,
+                        error,
+                    });
+                }
+                None
+            }
+        }
+    };
+    let chi2 = |r: &[f64; 12]| r.iter().map(|x| x * x).sum::<f64>();
+    let jacobian = |c: Pose,
+                    stage: FusionFitStage,
+                    iteration: Option<usize>,
+                    diagnostic: &mut Option<&mut FusionFitDiagnostic>| {
+        if let Some(d) = diagnostic.as_deref_mut() {
+            d.jacobian_evaluations += 1;
+            // This reason applies only if one of the existing encodes fails.
+            d.termination = if stage == FusionFitStage::FinalJacobian {
+                FusionFitTermination::FinalJacobianEncodeFailure
+            } else {
+                FusionFitTermination::JacobianEncodeFailure
+            };
+        }
+        let mut j = [[0.; 6]; 12];
+        for k in 0..6 {
+            let h = if k < 3 { 1e-5 } else { 1e-6 };
+            let mut delta = [0.; 6];
+            delta[k] = h;
+            let plus = evaluate(
+                perturb(c, delta),
+                stage,
+                iteration,
+                Some(k),
+                Some(1),
+                None,
+                diagnostic,
+            )?;
+            delta[k] = -h;
+            let minus = evaluate(
+                perturb(c, delta),
+                stage,
+                iteration,
+                Some(k),
+                Some(-1),
+                None,
+                diagnostic,
+            )?;
+            for r in 0..12 {
+                j[r][k] = (plus[r] - minus[r]) / (2. * h);
+            }
+        }
+        if let Some(d) = diagnostic.as_deref_mut() {
+            d.nonfinite_jacobians += usize::from(j.iter().flatten().any(|x| !x.is_finite()));
+        }
+        Some(j)
+    };
+    let normal = |j: &[[f64; 6]; 12]| -> Mat6 {
+        std::array::from_fn(|a| std::array::from_fn(|b| (0..12).map(|r| j[r][a] * j[r][b]).sum()))
+    };
+    let result = (|| {
+        let mut center = start;
+        if let Some(d) = diagnostic.as_deref_mut() {
+            d.termination = FusionFitTermination::InitialEncodeFailure;
+        }
+        let mut r = evaluate(
+            center,
+            FusionFitStage::Initial,
+            None,
+            None,
+            None,
+            None,
+            &mut diagnostic,
+        )?;
+        let mut value = chi2(&r);
+        if let Some(d) = diagnostic.as_deref_mut() {
+            d.start_chi2 = Some(value.into());
+            d.final_chi2 = Some(value.into());
+            d.nonfinite_objectives += usize::from(!value.is_finite());
+        }
+        let mut stop = FusionFitTermination::IterationLimit;
+        for iteration in 0..16 {
+            // This is the only arithmetic/control-flow difference between
+            // policies. The original production guard remains unchanged.
+            if policy == FusionFitPolicy::EarlyAbort && iteration >= 2 && value > 10. * limit {
+                if let Some(d) = diagnostic.as_deref_mut() {
+                    d.termination = FusionFitTermination::EarlyResidualCutoff;
+                }
+                return None;
+            }
+            if let Some(d) = diagnostic.as_deref_mut() {
+                d.iterations += 1;
+            }
+            let j = jacobian(
+                center,
+                FusionFitStage::Jacobian,
+                Some(iteration),
+                &mut diagnostic,
+            )?;
+            if let Some(d) = diagnostic.as_deref_mut() {
+                d.termination = FusionFitTermination::NormalCholeskyFailure;
+            }
+            let lower = cholesky6(&normal(&j))?;
+            let gradient: Vec6 =
+                std::array::from_fn(|a| -(0..12).map(|k| j[k][a] * r[k]).sum::<f64>());
+            let mut delta = cholesky_solve(&lower, gradient);
+            if let Some(d) = diagnostic.as_deref_mut() {
+                d.nonfinite_gradients += usize::from(gradient.iter().any(|x| !x.is_finite()));
+                d.nonfinite_steps += usize::from(delta.iter().any(|x| !x.is_finite()));
+            }
+            let mut improved = false;
+            for trial_index in 0..12 {
+                let trial = perturb(center, delta);
+                if let Some(d) = diagnostic.as_deref_mut() {
+                    d.line_search_trials += 1;
+                }
+                if let Some(tr) = evaluate(
+                    trial,
+                    FusionFitStage::LineSearch,
+                    Some(iteration),
+                    None,
+                    None,
+                    Some(trial_index),
+                    &mut diagnostic,
+                ) {
+                    let trial_value = chi2(&tr);
+                    if let Some(d) = diagnostic.as_deref_mut() {
+                        d.nonfinite_objectives += usize::from(!trial_value.is_finite());
+                    }
+                    if trial_value <= value {
+                        center = trial;
+                        r = tr;
+                        // Preserve the original second evaluation and order.
+                        value = chi2(&tr);
+                        improved = true;
+                        if let Some(d) = diagnostic.as_deref_mut() {
+                            d.accepted_steps += 1;
+                            d.final_chi2 = Some(value.into());
+                        }
+                        break;
+                    }
+                }
+                delta = delta.map(|x| 0.5 * x);
+                if let Some(d) = diagnostic.as_deref_mut() {
+                    d.backtracks += 1;
+                }
+            }
+            if !improved {
+                stop = FusionFitTermination::LineSearchStalled;
+                break;
+            }
+            if delta.iter().map(|x| x * x).sum::<f64>() < 1e-24 {
+                stop = FusionFitTermination::TinyStep;
+                break;
+            }
+        }
+        if let Some(d) = diagnostic.as_deref_mut() {
+            d.iteration_stop = Some(stop);
+        }
+        let j = jacobian(center, FusionFitStage::FinalJacobian, None, &mut diagnostic)?;
+        if let Some(d) = diagnostic.as_deref_mut() {
+            d.termination = stop;
+        }
+        Some((center, normal(&j), value))
+    })();
+    if let Some(d) = diagnostic {
+        d.disposition = match result {
+            None => FusionFitDisposition::ReturnedNone,
+            Some((_, _, mismatch)) if mismatch <= limit => FusionFitDisposition::Usable,
+            Some(_) => FusionFitDisposition::AboveThreshold,
+        };
+    }
+    result
+}
+
 impl<'p> OligomerMixture<'p> {
     /// `members` in fixed label order (the first is g0), `pool` the fixed
     /// anchors, `spectators` every non-member body (hard-core screen only).
@@ -326,7 +667,16 @@ impl<'p> OligomerMixture<'p> {
         config: &OligomerConfig,
     ) -> Result<Self> {
         Self::build_impl(
-            proposal, tree, wall, members, spectators, pool, config, None,
+            proposal,
+            tree,
+            wall,
+            members,
+            spectators,
+            pool,
+            config,
+            FusionFitPolicy::EarlyAbort,
+            false,
+            None,
         )
     }
 
@@ -353,6 +703,41 @@ impl<'p> OligomerMixture<'p> {
             spectators,
             pool,
             config,
+            FusionFitPolicy::EarlyAbort,
+            false,
+            Some(diagnostics),
+        )
+    }
+
+    /// Opt-in bounded fitter comparison for the standalone diagnostic. This
+    /// records existing fit evaluations without additional geometry or RNG.
+    /// Production build entry points do not expose the alternative policy.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_with_fit_diagnostics(
+        proposal: &'p DockingProposal,
+        tree: &SphereTree,
+        wall: &Container,
+        members: &[Pose],
+        spectators: &[Pose],
+        pool: &[Pose],
+        config: &OligomerConfig,
+        policy: FusionFitPolicy,
+        diagnostics: &mut FusionBuildDiagnostics,
+    ) -> Result<Self> {
+        *diagnostics = FusionBuildDiagnostics {
+            fit_policy: policy,
+            ..FusionBuildDiagnostics::default()
+        };
+        Self::build_impl(
+            proposal,
+            tree,
+            wall,
+            members,
+            spectators,
+            pool,
+            config,
+            policy,
+            true,
             Some(diagnostics),
         )
     }
@@ -366,6 +751,8 @@ impl<'p> OligomerMixture<'p> {
         spectators: &[Pose],
         pool: &[Pose],
         config: &OligomerConfig,
+        fit_policy: FusionFitPolicy,
+        record_fit_diagnostics: bool,
         mut diagnostics: Option<&mut FusionBuildDiagnostics>,
     ) -> Result<Self> {
         config.validate()?;
@@ -457,7 +844,22 @@ impl<'p> OligomerMixture<'p> {
             if let Some(d) = diagnostics.as_deref_mut() {
                 d.fit_attempts += 1;
             }
-            match mixture.fuse(l1, l2, means[l1].unwrap(), config.max_mismatch) {
+            let fit_diagnostic = if record_fit_diagnostics {
+                diagnostics.as_deref_mut().map(|d| {
+                    d.fit_records.push(FusionFitDiagnostic::new(l1, l2));
+                    d.fit_records.last_mut().unwrap()
+                })
+            } else {
+                None
+            };
+            match mixture.fuse(
+                l1,
+                l2,
+                means[l1].unwrap(),
+                config.max_mismatch,
+                fit_policy,
+                fit_diagnostic,
+            ) {
                 Some((center, information, mismatch)) if mismatch <= config.max_mismatch => {
                     fits.push((mismatch, l1, l2, center, information));
                     if let Some(d) = diagnostics.as_deref_mut() {
@@ -733,71 +1135,31 @@ impl<'p> OligomerMixture<'p> {
     }
 
     /// Minimize both labels' squared whitened residuals over g0, starting at
-    /// the first label's implied mean. Returns the center, the information
-    /// matrix in (translation, Cayley) coordinates and the residual.
-    /// Fits still above ten times `limit` after two steps are abandoned.
-    fn fuse(&self, l1: usize, l2: usize, start: Pose, limit: f64) -> Option<(Pose, Mat6, f64)> {
+    /// the first label's implied mean. Default policy preserves the original
+    /// early large-residual exit; the diagnostic policy changes only that exit.
+    fn fuse(
+        &self,
+        l1: usize,
+        l2: usize,
+        start: Pose,
+        limit: f64,
+        policy: FusionFitPolicy,
+        diagnostic: Option<&mut FusionFitDiagnostic>,
+    ) -> Option<(Pose, Mat6, f64)> {
         let nb = self.nb();
-        let residual = |g: Pose| -> Option<[f64; 12]> {
-            let z1 = self.map.encode(l1 % nb, self.to_single(l1, g)).ok()?;
-            let z2 = self.map.encode(l2 % nb, self.to_single(l2, g)).ok()?;
-            Some(std::array::from_fn(
+        fit_pose_residual(start, limit, policy, diagnostic, |g| {
+            let z1 = self
+                .map
+                .encode(l1 % nb, self.to_single(l1, g))
+                .map_err(|error| (l1, error.to_string()))?;
+            let z2 = self
+                .map
+                .encode(l2 % nb, self.to_single(l2, g))
+                .map_err(|error| (l2, error.to_string()))?;
+            Ok(std::array::from_fn(
                 |k| if k < 6 { z1[k] } else { z2[k - 6] },
             ))
-        };
-        let chi2 = |r: &[f64; 12]| r.iter().map(|x| x * x).sum::<f64>();
-        let jacobian = |c: Pose| -> Option<[[f64; 6]; 12]> {
-            let mut j = [[0.; 6]; 12];
-            for k in 0..6 {
-                let h = if k < 3 { 1e-5 } else { 1e-6 };
-                let mut d = [0.; 6];
-                d[k] = h;
-                let plus = residual(perturb(c, d))?;
-                d[k] = -h;
-                let minus = residual(perturb(c, d))?;
-                for r in 0..12 {
-                    j[r][k] = (plus[r] - minus[r]) / (2. * h);
-                }
-            }
-            Some(j)
-        };
-        let normal = |j: &[[f64; 6]; 12]| -> Mat6 {
-            std::array::from_fn(|a| {
-                std::array::from_fn(|b| (0..12).map(|r| j[r][a] * j[r][b]).sum())
-            })
-        };
-        let mut center = start;
-        let mut r = residual(center)?;
-        let mut value = chi2(&r);
-        for iteration in 0..16 {
-            if iteration >= 2 && value > 10. * limit {
-                return None;
-            }
-            let j = jacobian(center)?;
-            let lower = cholesky6(&normal(&j))?;
-            let gradient: Vec6 =
-                std::array::from_fn(|a| -(0..12).map(|k| j[k][a] * r[k]).sum::<f64>());
-            let mut delta = cholesky_solve(&lower, gradient);
-            let mut improved = false;
-            for _ in 0..12 {
-                let trial = perturb(center, delta);
-                if let Some(tr) = residual(trial)
-                    && chi2(&tr) <= value
-                {
-                    center = trial;
-                    r = tr;
-                    value = chi2(&tr);
-                    improved = true;
-                    break;
-                }
-                delta = delta.map(|x| 0.5 * x);
-            }
-            if !improved || delta.iter().map(|x| x * x).sum::<f64>() < 1e-24 {
-                break;
-            }
-        }
-        let j = jacobian(center)?;
-        Some((center, normal(&j), value))
+        })
     }
 
     /// Per-label log terms w_l q_l(g0); their log-sum is log G_O(g0).
@@ -1581,5 +1943,300 @@ mod fusion_diagnostic_tests {
         assert!(!d.complete);
         assert_eq!(d.centers_checked, 0);
         assert!(d.records.is_empty());
+    }
+
+    #[test]
+    fn fusion_fit_diagnostics_preserve_default_catalogue_density_and_seeded_draws() {
+        let proposal = proposal(parameters(3));
+        let tree = tree();
+        let wall = Container::new(50., &tree).unwrap();
+        let config = OligomerConfig::default();
+        assert_eq!(FusionFitPolicy::default(), FusionFitPolicy::EarlyAbort);
+        assert_eq!(
+            serde_json::to_value(FusionFitPolicy::default()).unwrap(),
+            "early_abort"
+        );
+        assert!(serde_json::from_str::<FusionFitPolicy>("\"unbounded\"").is_err());
+        for members in [vec![ORIGIN], vec![ORIGIN, pose(0.8)]] {
+            let pool = [pose(-0.2), pose(0.25)];
+            let spectators = [pose(10.), pose(-10.)];
+            let mut old = FusionBuildDiagnostics::default();
+            let ordinary = OligomerMixture::build_with_diagnostics(
+                &proposal,
+                &tree,
+                &wall,
+                &members,
+                &spectators,
+                &pool,
+                &config,
+                &mut old,
+            )
+            .unwrap();
+            let mut diagnostic = FusionBuildDiagnostics::default();
+            let traced = OligomerMixture::build_with_fit_diagnostics(
+                &proposal,
+                &tree,
+                &wall,
+                &members,
+                &spectators,
+                &pool,
+                &config,
+                FusionFitPolicy::EarlyAbort,
+                &mut diagnostic,
+            )
+            .unwrap();
+            check_accounting(&diagnostic, &config);
+            assert!(old.fit_records.is_empty());
+            assert_eq!(diagnostic.fit_records.len(), diagnostic.fit_attempts);
+            assert!(diagnostic.fit_records.len() <= config.max_candidates);
+            let mut old_json = serde_json::to_value(&old).unwrap();
+            let mut traced_json = serde_json::to_value(&diagnostic).unwrap();
+            old_json.as_object_mut().unwrap().remove("fit_records");
+            traced_json.as_object_mut().unwrap().remove("fit_records");
+            assert_eq!(old_json, traced_json);
+            for (disposition, count) in [
+                (
+                    FusionFitDisposition::ReturnedNone,
+                    diagnostic.fit_returned_none,
+                ),
+                (
+                    FusionFitDisposition::AboveThreshold,
+                    diagnostic.fits_above_threshold,
+                ),
+                (FusionFitDisposition::Usable, diagnostic.usable_fits),
+            ] {
+                assert_eq!(
+                    diagnostic
+                        .fit_records
+                        .iter()
+                        .filter(|r| r.disposition == disposition)
+                        .count(),
+                    count
+                );
+            }
+            for record in &diagnostic.fit_records {
+                assert_ne!(record.termination, FusionFitTermination::Begun);
+                assert!(record.iterations <= 16 && record.backtracks <= 16 * 12);
+                assert!(record.residual_evaluations <= 1 + 16 * (12 + 12) + 12);
+            }
+            assert_eq!(ordinary.log_weights(), traced.log_weights());
+            assert_eq!(
+                serde_json::to_value(&ordinary.fused).unwrap(),
+                serde_json::to_value(&traced.fused).unwrap()
+            );
+            for p in [ORIGIN, pose(0.4)] {
+                assert_eq!(
+                    ordinary.checked_label_logs(p).unwrap(),
+                    traced.checked_label_logs(p).unwrap()
+                );
+            }
+            let (mut a, mut b) = (StdRng::seed_from_u64(273), StdRng::seed_from_u64(273));
+            for _ in 0..12 {
+                if members.len() == 1 {
+                    assert_eq!(
+                        ordinary.draw_singleton_independent(&mut a).unwrap(),
+                        traced.draw_singleton_independent(&mut b).unwrap()
+                    );
+                }
+                let (pa, mut ta) = ordinary
+                    .propose(&mut a, &members, members.len() - 1)
+                    .unwrap();
+                let (pb, mut tb) = traced.propose(&mut b, &members, members.len() - 1).unwrap();
+                ta["oligomer"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("build_seconds");
+                tb["oligomer"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("build_seconds");
+                assert_eq!(pa, pb);
+                assert_eq!(ta, tb);
+            }
+            assert_eq!(a.random::<u64>(), b.random::<u64>());
+        }
+    }
+
+    fn fit_test_residual(p: Pose) -> [f64; 12] {
+        let mut r = [0.; 12];
+        r[..3].copy_from_slice(&p.position);
+        for k in 0..3 {
+            r[k + 3] = p.orientation[k + 1] / p.orientation[0];
+        }
+        r
+    }
+
+    #[test]
+    fn fusion_fit_diagnostics_early_cutoff_full_iterations_and_no_extra_evaluations() {
+        // Smooth full-rank local model with an irreducible squared residual
+        // 15²=225>120. The x² residual keeps improving beyond two GN steps;
+        // no policy can produce an acceptable <=12 fit for this model.
+        for policy in [FusionFitPolicy::EarlyAbort, FusionFitPolicy::FullIterations] {
+            let calls = std::cell::Cell::new(0usize);
+            let residual = |p| {
+                calls.set(calls.get() + 1);
+                let mut r = fit_test_residual(p);
+                r[0] *= r[0];
+                r[6] = 15.;
+                Ok(r)
+            };
+            let plain = fit_pose_residual(pose(1.), 12., policy, None, residual);
+            let plain_calls = calls.replace(0);
+            let mut record = FusionFitDiagnostic::new(2, 5);
+            let traced = fit_pose_residual(pose(1.), 12., policy, Some(&mut record), residual);
+            assert_eq!(
+                serde_json::to_value(plain).unwrap(),
+                serde_json::to_value(traced).unwrap()
+            );
+            assert_eq!(calls.get(), plain_calls);
+            assert_eq!(record.residual_evaluations, plain_calls);
+            assert_eq!(record.start_chi2, Some(FusionFitValue::Finite(226.)));
+            assert_eq!(record.encode_failures, 0);
+            assert_eq!(record.backtracks, 0);
+            match policy {
+                FusionFitPolicy::EarlyAbort => {
+                    assert!(traced.is_none());
+                    assert_eq!(
+                        record.termination,
+                        FusionFitTermination::EarlyResidualCutoff
+                    );
+                    assert_eq!(record.disposition, FusionFitDisposition::ReturnedNone);
+                    assert_eq!(record.iterations, 2);
+                    assert_eq!(plain_calls, 1 + 2 * (12 + 1));
+                }
+                FusionFitPolicy::FullIterations => {
+                    assert!(traced.unwrap().2 >= 225.);
+                    assert_eq!(record.termination, FusionFitTermination::IterationLimit);
+                    assert_eq!(record.disposition, FusionFitDisposition::AboveThreshold);
+                    assert_eq!(record.iterations, 16);
+                    assert_eq!(plain_calls, 1 + 16 * (12 + 1) + 12);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fusion_fit_diagnostics_encode_stages_and_recoverable_backtracks() {
+        // A zero-residual affine model takes one zero step. Inject failures at
+        // independently counted existing evaluator calls, not extra probes.
+        for (first_failure, last_failure, termination, evaluations) in [
+            (1, 1, FusionFitTermination::InitialEncodeFailure, 1),
+            (2, 2, FusionFitTermination::JacobianEncodeFailure, 2),
+            (15, 15, FusionFitTermination::FinalJacobianEncodeFailure, 15),
+            (14, 25, FusionFitTermination::LineSearchStalled, 37),
+        ] {
+            let calls = std::cell::Cell::new(0usize);
+            let mut record = FusionFitDiagnostic::new(2, 5);
+            let result = fit_pose_residual(
+                ORIGIN,
+                12.,
+                FusionFitPolicy::EarlyAbort,
+                Some(&mut record),
+                |p| {
+                    calls.set(calls.get() + 1);
+                    if (first_failure..=last_failure).contains(&calls.get()) {
+                        Err((5, "synthetic encode failure".into()))
+                    } else {
+                        Ok(fit_test_residual(p))
+                    }
+                },
+            );
+            assert_eq!(record.termination, termination);
+            assert_eq!(record.residual_evaluations, evaluations);
+            assert_eq!(calls.get(), evaluations);
+            assert_eq!(record.encode_failures, last_failure - first_failure + 1);
+            let failure = record.last_encode_failure.unwrap();
+            assert_eq!(failure.label, 5);
+            assert_eq!(failure.error, "synthetic encode failure");
+            if termination == FusionFitTermination::LineSearchStalled {
+                assert!(result.is_some());
+                assert_eq!(record.disposition, FusionFitDisposition::Usable);
+                assert_eq!(record.backtracks, 12);
+                assert_eq!(failure.stage, FusionFitStage::LineSearch);
+                assert_eq!(failure.trial, Some(11));
+            } else {
+                assert!(result.is_none());
+                assert_eq!(record.disposition, FusionFitDisposition::ReturnedNone);
+            }
+        }
+    }
+
+    #[test]
+    fn fusion_fit_diagnostics_cholesky_and_nonfinite_values_are_explicit_json() {
+        let mut record = FusionFitDiagnostic::new(2, 5);
+        assert!(
+            fit_pose_residual(
+                ORIGIN,
+                12.,
+                FusionFitPolicy::EarlyAbort,
+                Some(&mut record),
+                |_| Ok([f64::MAX; 12])
+            )
+            .is_none()
+        );
+        assert_eq!(
+            record.termination,
+            FusionFitTermination::NormalCholeskyFailure
+        );
+        assert_eq!(record.start_chi2, Some(FusionFitValue::PositiveInfinity));
+        assert_eq!(record.final_chi2, record.start_chi2);
+        assert_eq!(record.nonfinite_objectives, 1);
+        assert_eq!(record.residual_evaluations, 13);
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["start_chi2"]["kind"], "positive_infinity");
+        for (value, name) in [
+            (f64::NAN, "nan"),
+            (f64::NEG_INFINITY, "negative_infinity"),
+            (f64::INFINITY, "positive_infinity"),
+        ] {
+            let json = serde_json::to_value(FusionFitValue::from(value)).unwrap();
+            assert_eq!(json["kind"], name);
+            assert!(json.get("value").is_none());
+        }
+    }
+
+    #[test]
+    fn fusion_fit_diagnostics_actual_chart_seam_retains_error_and_labels() {
+        let proposal = proposal(parameters(1));
+        let tree = tree();
+        let wall = Container::new(50., &tree).unwrap();
+        let config = OligomerConfig {
+            pair_angle_degrees: 181.,
+            ..OligomerConfig::default()
+        };
+        let mut diagnostic = FusionBuildDiagnostics::default();
+        OligomerMixture::build_with_fit_diagnostics(
+            &proposal,
+            &tree,
+            &wall,
+            &[ORIGIN],
+            &[],
+            &[
+                ORIGIN,
+                Pose {
+                    orientation: [0., 1., 0., 0.],
+                    ..ORIGIN
+                },
+            ],
+            &config,
+            FusionFitPolicy::EarlyAbort,
+            &mut diagnostic,
+        )
+        .unwrap();
+        check_accounting(&diagnostic, &config);
+        assert_eq!(diagnostic.fit_records.len(), 1);
+        let record = &diagnostic.fit_records[0];
+        assert_eq!((record.first, record.second), (0, 1));
+        assert_eq!(
+            record.termination,
+            FusionFitTermination::InitialEncodeFailure
+        );
+        assert_eq!(record.start_chi2, None);
+        assert_eq!(record.residual_evaluations, 1);
+        let failure = record.last_encode_failure.as_ref().unwrap();
+        assert_eq!(failure.label, 1);
+        assert!(failure.error.contains("Cayley half-turn seam"));
+        assert_eq!(diagnostic.centers_checked, 0);
+        assert_eq!(diagnostic.core_overlap_calls, 0);
     }
 }

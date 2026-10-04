@@ -107,9 +107,14 @@ All eight tests passed with unchanged test-source bytes; see the
 
 ## Prospective nearby-anchor control
 
-This extension is **not implemented or measured**. The decision to implement it
-awaits the bounded alternative-anchor constructor diagnostic: passing the mean
-distance/angle screen alone does not establish a usable fused component.
+This extension is **not implemented or measured**. The completed
+[alternative-anchor diagnostic](singleton-fusion-diagnostic.md) found 29 mean
+pairs but no usable fit across 40 constructors. It therefore does not justify
+this new sampling arm yet. The subsequent bounded fitter comparison found all
+34 fits still above the admission threshold after continuation; all 50 default
+controls reproduced the old results. Changing neighbor selection or fitting longer is therefore
+not the next justified trajectory arm for these contexts. Proposal breadth or
+cooperative changes to neighbor geometry need a separate controlled test.
 
 The smallest arm would retain the other mobile particle as primary neighbor,
 rank its spectator neighbors by center distance with label tie-breaking, and

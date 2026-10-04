@@ -71,6 +71,16 @@ no native labels and uses neither depletion weights nor contact-edge labels.
 The first version supports open/spherical geometry only; periodic image
 conventions require a separate implementation and validation.
 
+[NativeCentroidBound.lean](../formal/NativeCentroidBound.lean) proves the
+residual-mean inequality and the centroid-difference corollary for a finite,
+nonempty set in a real normed vector space. The isolated file compiled with
+pinned Lean 4.24.0/mathlib dependencies; both axiom audits contain only
+`propext`, `Classical.choice`, and `Quot.sound`. The receipt is
+`results/native-centroid-bound-lean-20261004/validation.json`, SHA256
+`b83827c18cb42aea71c6e4d03b90b38077cdd397ad231f30218a47d8b518c1e3`.
+This proves the exact-arithmetic necessary condition, not the numerical guard
+or the spatial-tree implementation.
+
 ## Cached conditional observer
 
 [The passive adapter](../tools/conditional_native_observer.py) keeps the spectator
@@ -125,7 +135,7 @@ Source-bound receipts:
 - `results/conditional-native-pipeline-validation-20261004/validation.json`, SHA256
   `9278d0dde946e732a78d612efee851d841cf9abbec5ee40fdcad139b95cc994c`.
 
-These tests used no protein observations. The native audit has not run. Before
+These tests used no protein observations. The full trajectory audit has not run. Before
 production, bind the completed contact receipts, freeze the endpoint/metrics
 adapter and one-worker resource/query allocation, and include classifier setup
 and fixed-graph queries in durable attempt accounting. Leave partial outputs
@@ -134,6 +144,51 @@ visible and do not replace failed chains. The unpruned pair-query ceiling is
 the candidate and exact-pose caches should reduce actual calls, but their protein
 cost has not been measured. Constructor reference/scaffold work is additional
 and uses the existing bounded setup instrumentation.
+
+### Initial-state differential check
+
+[The bounded reference worker](../tools/audit_native_pair_candidates.py) checks
+the frozen 264-body source and all 16 independently prepared alternative starts.
+The source receives one full all-pair pass (34,716 calls). Each alternative
+receives all 525 pairs incident to either mobile body, reusing source labels only
+for unchanged fixed pairs. The total is **43,116 reference calls**, plus separately
+bounded constructor queries. Every full-classifier positive must survive the
+candidate filter, and every matching motif label is retained. A second classifier
+pass is unnecessary: filtered labels are a subset of this same reference pass.
+
+Seven synthetic tests cover inventories, fixed-label reuse, missing candidates,
+classifier failures, budgets and metadata binding. Their receipt is
+`results/native-pair-initial-audit-validation-20261004/validation.json`, SHA256
+`0a8792f1ae9d817216abf588a52c6a6c6754328feab2c7835faf8496b89b5c70`.
+The real check is frozen in `results/native-pair-initial-audit-20261004` and uses
+the existing single-child controller, one thread, 1,800 CPU seconds, 3,600 wall
+seconds and 16 GiB. It records every begun reference query and fails without a
+replacement on any mismatch. Its execution-plan SHA256 is
+`2c891025364f20094de9aad6f4759a2549f62d49d7e3f220d9e0a422bd13966a`.
+
+This check reuses the saved exact atom-identity and initial hard-validity
+evidence. It does not revalidate those inputs geometrically, read live
+trajectories, calculate depletion, certify unseen endpoints, or measure a
+sampler speedup. It is separate from the eventual complete trajectory audit.
+
+The check completed successfully: all 43,116 reference calls and separately
+bounded setup queries finished in 63.64 CPU seconds (129.90 wall seconds). The
+source retained all **157 native pairs** among **185 candidates**, out of 34,716
+possible pairs. Each of the 16 alternative starts had zero candidates and zero
+native matches among its 525 mobile-related pairs. These observations support
+omitting 99.57% of full pair classifications on this particular initial inventory;
+they are not a measured trajectory-observer or sampler speedup.
+
+The original source's four mobile contexts have, respectively, 0, 1, 3 and 1
+native labels. Only context 2 (bodies 9 and 24) initially has external native
+attachment: two external labels in addition to its internal bond. Contexts 1
+and 3 have an internal native bond only. Keep this distinction in the comparison:
+preserving a native dimer is not the same as registering it with its environment.
+The final summary SHA256 is
+`66a43b08546b0eefca93bde22707c8eb5e5e9fd126684c08cc9cc2e7fb1a4646`;
+the authenticated compact result is
+`results/native-pair-initial-audit-20261004/reviewed-result.json`, SHA256
+`c57887df18c62e4e4726b0869509c83eb8d906eb546bd3dac522eb65358b48d7`.
 
 The result can show whether a move accesses distinct native registrations more
 efficiently in these conditional environments. It cannot establish converged

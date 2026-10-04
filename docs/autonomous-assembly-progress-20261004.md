@@ -110,9 +110,13 @@ now implemented applies a single-tetramer reversible atlas map anchored
 to its other mobile partner, mixed with the same local moves. The partner is
 unchanged during each coordinate proposal, so its conditional forward/reverse
 anchor is identical. This is a hypothesis, not a speedup result or production
-default. Six focused and nine existing kernel tests pass in an isolated build;
-the next independent sphere stationarity reference is being prepared using
-cached IID sources. The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
+default. Six focused and nine existing kernel tests pass in an isolated build.
+The independent sphere stationarity reference completed 32,768 calls using all
+8,192 cached IID sources: all 292 checks and the Python journal audit passed.
+Deliberately omitting or reversing the proposal correction produced measurable
+stationarity failures. This [validation](partner-atlas-reference.md#completed-result-and-independent-audit)
+supports the next conditional protein test; it does not measure mixing per CPU.
+The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
 records the balance argument and retains a direct physical control.
 
 A standalone defensive pair selector and a checked Lean selection theorem are

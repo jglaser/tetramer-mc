@@ -300,12 +300,15 @@ private-helper import failed at compilation; its source and failed receipt were
 retained before replacing it with an independent local-move reconstruction.
 [Passing receipt](../results/partner-atlas-validation-20261004/attempt02/validation.json).
 
-The next independent stationarity reference will reuse every one of the 8,192
-previously audited IID sphere source poses, without selecting by prior move
-outcome or redrawing sources. Its direct, guided m1, guided m8 and flat8 arms
-will use fresh proposal/bath streams and retain every rejection. This reference
-is under preparation, not a completed validation or efficiency measurement.
-After that check, assess
+The independent stationarity reference reused every one of the 8,192 previously
+audited IID sphere source poses, without selecting by prior move outcome or
+redrawing sources. Its direct, guided m1, guided m8 and flat8 arms completed
+32,768 calls using fresh proposal/bath streams, retaining every rejection.
+All 292 checks and the independent Python journal audit passed. The deliberately
+omitted and reversed proposal corrections failed their stationarity controls.
+This [completed reference](partner-atlas-reference.md#completed-result-and-independent-audit)
+supports a conditional protein test; it is not an efficiency measurement.
+Next, assess
 native occupancy and motif exchanges separately by initialization, with full
 CPU and absent-state diagnostics. Atlas coverage, hard destination failures,
 source-tail penalties and noisy bath costs can still defeat this proposal.

@@ -179,6 +179,10 @@ the prepared starts would address the earlier zero-native limitation; a single
 occupied frame or patch flicker would not. Motif-set transitions and relative
 poses distinguish exchanges of registry from repeated visits to the same motif.
 Persistent initialization disagreement remains a sampling limitation.
+Missing returns alone cannot distinguish a poor proposal from negligible
+equilibrium weight. Do not require equal directional rates or frequent returns
+to a region whose physical weight is negligible; that interpretation needs the
+independent weight calculation on a matching target and domain.
 
 Compare native residence and nonconstant apparent ESS per **full sampler CPU**
 against the eight local controls. Compare direct with guided m1 to isolate the

@@ -110,9 +110,9 @@ contract and begun/outcome kinds, extending the roles of
 `analyze_flexible_surrogate_benchmark.{effective_config,validate_inventory,
 surrogate_contract,validate_surrogate,canonical_rows,validate_journal}`. It reuses
 the path, score, local-residence and checkpoint arithmetic with the new arm
-semantics. The separate native stage still needs its explicit new-family
-endpoint and admission adapter;
-its old seven-row reader is not interchangeable merely because row counts match.
+semantics. The separate `analyze_partner_atlas_native.py` now supplies the
+new-family endpoint and admission adapter; its old seven-row reader is not
+interchangeable merely because row counts match.
 Independent partner-reference audit helpers supply expanded proposal correction
 checks, with global labels mapped only after validating the selected pair.
 
@@ -161,3 +161,34 @@ from proposal generation. The saved native plan binds the existing classifier,
 compiled motifs, atom-identity witness and all fifteen dependencies. No native
 label is used for retaining a trajectory, selecting a proposal or choosing a
 sample. Interpretation waits for the complete allocation and its audits.
+
+The native adapter passed eight synthetic tests under
+`results/partner-atlas-native-validation-20261004/attempt01/validation.json`
+(SHA256 `091289bd7801294721cfd05d2f2a8712287458993d875dfb2931450f8f80ce34`).
+They check the 32-new/16-cached join, all four record families, rejected and null
+residence, all matching motif labels, exact-pose caching, query caps, full CPU
+and undefined ESS, completed lifecycle admission, and preservation of failed
+prefixes. The test run made no protein geometry queries. The adapter requires
+the completed 72-chain contact/arithmetic report first; it observes only the
+internal pair and makes no external-native or cycle-consistency claim.
+
+## Decisions after completion
+
+Show every stream and both starts. Repeated native entry, exit and return from
+the prepared starts would address the earlier zero-native limitation; a single
+occupied frame or patch flicker would not. Motif-set transitions and relative
+poses distinguish exchanges of registry from repeated visits to the same motif.
+Persistent initialization disagreement remains a sampling limitation.
+
+Compare native residence and nonconstant apparent ESS per **full sampler CPU**
+against the eight local controls. Compare direct with guided m1 to isolate the
+inner filter, m8 with flat8 to assess guidance, and m8 with direct to assess the
+additional chain work. Include failed candidates and Poisson work. Favor the
+simpler direct move if the inner chain adds no useful sampling. These arms share
+RNG roles and are not additional independent populations.
+
+Consistent internal-registry improvement could justify optional all-mobile
+integration with the existing pair-selection correction. It would not establish
+external contact exchange, assembly, or equilibrium stability. Neither an
+unsuccessful pilot nor a rare return refutes the physical model; the independent
+physical-weight and finite-system checks remain necessary.

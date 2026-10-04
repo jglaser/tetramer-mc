@@ -1,0 +1,2 @@
+'ReversibleSampling.corrected_selection_reversible' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.normalized_corrected_selection_correct' depends on axioms: [propext, Classical.choice, Quot.sound]

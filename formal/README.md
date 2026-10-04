@@ -467,6 +467,23 @@ disk use; these settings affect downloads, not proof checking.
 
 ## Concrete implementation obligations
 
+`SelectionCorrection.lean` supplies the state-dependent selection bridge for
+the [all-mobile flexible-pair design](../docs/flexible-surrogate-all-mobile-design.md).
+If each completed component kernel is reversible for `π.withDensity p_i`,
+choosing its label with probability `p_i(x)` gives a reversible selected flow
+under `π`. A finite sum with `∑ i, p_i(x) = 1` is Markov and invariant under `π`.
+Zero selection probabilities are included. Individual components need not
+preserve `π`, and selection probabilities need not be equal at the endpoints.
+The selection ratio must already be included in each component's correction;
+this theorem does not authorize adding a second decision after a committed move.
+
+The focused commands are `lake build ReversibleSampling.SelectionCorrection`
+and `lake env lean -j1 SelectionCorrectionAudit.lean`. Both passed under the
+existing dependency pins; `selection-correction-validation.json` binds the
+two-theorem standard-axiom audit and source closure. Existing validation receipts
+and the default import target are unchanged. Concrete selection implementation,
+the surrogate-density substitution, geometry and executor remain obligations.
+
 | Checked mathematical bridge | Rust implementation | Obligation still outside Lean |
 |---|---|---|
 | `poisson_depletion_mean`, second moment and relative variance | [`overlap_weight::sample_with_envelope`](../src/overlap_weight.rs) | Envelope coverage, disjoint volume accounting, exact overlap predicates and thinning must give the stated Poisson law. |

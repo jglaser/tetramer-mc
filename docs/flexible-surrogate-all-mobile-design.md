@@ -150,8 +150,15 @@ reversibility under `pi`; null selections/rejections supply the diagonal.
 The component kernel need not independently preserve `pi`. For event clocks,
 replace `p_a` by the bounded rate `a_a` and use the rate-weighted flow.
 
-This substitution and mixture connection are an integration argument, not a
-new separately checked Lean corollary. The older
+The finite normalized selection step is now separately checked in
+`formal/ReversibleSampling/SelectionCorrection.lean`. Its two theorems transfer
+reversibility under `p_a pi` into reversibility of the selected flow under `pi`,
+then show the normalized sum is Markov, reversible and invariant. Zero selection
+probabilities are allowed; endpoint equality of those probabilities and separate
+component invariance under `pi` are not assumptions. The focused build and axiom
+audit passed with only `propext`, `Classical.choice` and `Quot.sound`; the receipt
+is `formal/selection-correction-validation.json`. The concrete surrogate-density
+substitution remains an integration argument. The older
 `measurable_internal_rate_reversible` theorem assumes rate equality along
 transitions and cannot directly justify changing eligibility. Concrete
 geometry, Poisson thinning, inner-kernel reversibility, RNG, floating-point

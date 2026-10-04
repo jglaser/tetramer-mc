@@ -1,0 +1,84 @@
+{
+  "schema": "selection-correction-validation-v1",
+  "complete": true,
+  "passed": true,
+  "error": null,
+  "source_before": {
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ClusterMeasureRates.lean": "0b2fc9774dffc53c701a166a28423b0c88cead3cd2c92549322d58b96b44d596",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Poisson.lean": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/SelectionCorrection.lean": "533163664eea5d4ca9a7dfa88dd0c2b411e6ed1ca46e47af87794ff2adc4a515",
+    "/home/xvg/tetramer-mc/formal/SelectionCorrectionAudit.lean": "635bb44e398322a18d22acfd1bc9cef79fefa37a7f1e5b5021939beb04b422ce",
+    "/home/xvg/tetramer-mc/formal/lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "/home/xvg/tetramer-mc/formal/lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "/home/xvg/tetramer-mc/formal/lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434",
+    "/home/xvg/tetramer-mc/results/selection-correction-validation-20261004/run.py": "e4791bbed135906cada159ed2a6d10d5bc8bf7154f2ea5c17d0d894962b69c4b"
+  },
+  "source_after": {
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ClusterMeasureRates.lean": "0b2fc9774dffc53c701a166a28423b0c88cead3cd2c92549322d58b96b44d596",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/Poisson.lean": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2",
+    "/home/xvg/tetramer-mc/formal/ReversibleSampling/SelectionCorrection.lean": "533163664eea5d4ca9a7dfa88dd0c2b411e6ed1ca46e47af87794ff2adc4a515",
+    "/home/xvg/tetramer-mc/formal/SelectionCorrectionAudit.lean": "635bb44e398322a18d22acfd1bc9cef79fefa37a7f1e5b5021939beb04b422ce",
+    "/home/xvg/tetramer-mc/formal/lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "/home/xvg/tetramer-mc/formal/lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "/home/xvg/tetramer-mc/formal/lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434",
+    "/home/xvg/tetramer-mc/results/selection-correction-validation-20261004/run.py": "e4791bbed135906cada159ed2a6d10d5bc8bf7154f2ea5c17d0d894962b69c4b"
+  },
+  "runs": [
+    {
+      "argv": [
+        ".elan/bin/lake",
+        "build",
+        "ReversibleSampling.SelectionCorrection"
+      ],
+      "returncode": 0,
+      "child_started": true,
+      "child_drained": true,
+      "log": {
+        "path": "/home/xvg/tetramer-mc/results/selection-correction-validation-20261004/command-0.log",
+        "sha256": "3c484ce572633fa389646d9bf1d1d824d06bae68688d778efa0c3f0f036a1fb5"
+      }
+    },
+    {
+      "argv": [
+        ".elan/bin/lake",
+        "env",
+        "lean",
+        "-j1",
+        "SelectionCorrectionAudit.lean"
+      ],
+      "returncode": 0,
+      "child_started": true,
+      "child_drained": true,
+      "log": {
+        "path": "/home/xvg/tetramer-mc/results/selection-correction-validation-20261004/command-1.log",
+        "sha256": "877815c36dad9690c34f940bd09df467521dcddc1f8647f8da226c9b17ad632c"
+      }
+    }
+  ],
+  "proof_declarations_axiom_audited": 2,
+  "axioms": {
+    "ReversibleSampling.corrected_selection_reversible": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.normalized_corrected_selection_correct": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ]
+  },
+  "lean": "4.24.0",
+  "mathlib_commit": "f897ebcf72cd16f89ab4577d0c826cd14afaafc7",
+  "cpu_affinity": [
+    0
+  ],
+  "wall_seconds": 7.976745546096936,
+  "scope": "Finite normalized state-dependent selection of kernels reversible for selection-weighted physical targets. Concrete density substitution, physical correction, geometry, RNG, floating point and executor remain implementation obligations. No mixing or assembly claim."
+}

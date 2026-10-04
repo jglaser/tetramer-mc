@@ -74,6 +74,15 @@ ongoing growth simulations and their production executable are unchanged.
 
 ## Next decisions
 
+The current native-class contact guide can now be evaluated in the full vessel,
+with source capture retained as a proposal property. Seven Rust controls,
+thirteen Python controls, a 160-attempt sphere CLI reference, and independent
+reconstruction of every saved CLI row passed. This removes a format/geometry
+adapter gap; it does not change the integration target or authorize a physical
+conclusion. A larger analytic normalization reference and the current regional
+campaign's explicit admission checks remain. See the
+[implementation and validation record](native-class-full-vessel-guide.md).
+
 The native observer must first establish what the completed surrogate trials
 actually sampled. A mixture of rigid and single-member *local* steps would
 remain local at the current scales; it is not a demonstrated solution to

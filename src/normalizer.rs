@@ -375,6 +375,31 @@ fn run_impl(
         fs::write(options.out.join("provenance/latent-region.json"), region)?;
         fs::write(options.out.join("provenance/latent-guide.json"), guide)?;
     }
+    let class_native_provenance = if let Some(guide) =
+        latent_guide.as_ref().filter(|g| g.is_native_class_line())
+    {
+        let spec: Value = serde_json::from_slice(&guide_source.as_ref().unwrap().1)?;
+        let path = PathBuf::from(
+            spec["compiled_native"]["path"]
+                .as_str()
+                .context("Missing class compiled native path")?,
+        );
+        let bytes = fs::read(path)?;
+        let sha = hash_bytes(&bytes);
+        ensure!(
+            spec["compiled_native"]["sha256"] == sha,
+            "Compiled native changed before vessel archival"
+        );
+        let compiled: Value = serde_json::from_slice(&bytes)?;
+        fs::write(options.out.join("provenance/compiled-native.json"), &bytes)?;
+        Some(json!({"compiled_sha256":sha,
+            "source_definition_sha256":compiled["source_definition_sha256"],
+            "source_input_sha256":compiled["source_input_sha256"],
+            "shape_compatibility":guide.native_shape_compatibility().context("Missing class shape compatibility")?,
+            "geometry_identity_obligation":"Static bijection verified against physical atoms within the declared pair-gap tolerance; floating-point predicates remain implementation obligations"}))
+    } else {
+        None
+    };
     let source = include_str!(concat!(env!("OUT_DIR"), "/source-bundle.json"));
     fs::write(options.out.join("provenance/source-bundle.json"), source)?;
     save(&options.out.join("config.json"), &cfg)?;
@@ -439,12 +464,27 @@ fn run_impl(
             manifest["latent_density_trace"] =
                 json!("complete all-axis intervals, scored once at the world pose");
         }
+        if guide.is_native_class_line() {
+            manifest["schema"] = json!(7);
+            manifest["outer_mixture_schema"] =
+                json!("full-vessel-native-class-line-half-mixture-v1");
+            manifest["latent_guide_schema"] = json!("defensive-native-class-line-guide-v1");
+            manifest["latent_source_capture"]["conditions_guide"] = json!(true);
+            manifest["latent_density_trace"] = json!(
+                "complete all-axis/all-channel intervals with class->hard-free->unconditional fallback; scored once at the world pose"
+            );
+            manifest["compiled_native"] = class_native_provenance
+                .as_ref()
+                .context("Missing class native provenance")?
+                .clone();
+        }
     }
     // All full-wall arms retain the same attempted-draw accounting. This is
     // observation only: no extra draw, proposal, or acceptance branch is added.
     let record_attempts = wall.is_some();
     if record_attempts {
-        manifest["attempt_journal"] = json!("attempts.jsonl; begin before each attempt; no retries");
+        manifest["attempt_journal"] =
+            json!("attempts.jsonl; begin before each attempt; no retries");
         manifest["resume_supported"] = json!(false);
     }
     save(&options.out.join("manifest.json"), &manifest)?;
@@ -454,6 +494,9 @@ fn run_impl(
     let hard_free_line = latent_guide
         .as_ref()
         .is_some_and(PhysicalLatentGuide::is_hard_free_line);
+    let native_class_line = latent_guide
+        .as_ref()
+        .is_some_and(PhysicalLatentGuide::is_native_class_line);
     let mut journal = if record_attempts {
         Some(File::create(options.out.join("attempts.jsonl"))?)
     } else {
@@ -506,11 +549,16 @@ fn run_impl(
             let (candidate, outcome, latent_proposal) = if use_latent {
                 let guide = latent_guide.as_ref().unwrap();
                 let mut rng = stream(options.seed, draw, 0, "latent-pose");
-                if guide.is_hard_free_line() {
+                if guide.is_hard_free_line() || guide.is_native_class_line() {
                     let generated = guide.draw_only(&mut rng)?;
-                    let metadata = json!({"latent":generated.latent,"latent_radius":generated.latent_radius,
-                    "gaussian_component":generated.gaussian_component,
-                    "hard_free_line_draw":generated.hard_free_line_draw});
+                    let mut metadata = json!({"latent":generated.latent,"latent_radius":generated.latent_radius,
+                    "gaussian_component":generated.gaussian_component});
+                    if guide.is_hard_free_line() {
+                        metadata["hard_free_line_draw"] = json!(generated.hard_free_line_draw);
+                    } else {
+                        metadata["native_class_line_draw"] =
+                            json!(generated.native_class_line_draw);
+                    }
                     (Some(generated.pose), None, Some(metadata))
                 } else {
                     let generated = guide.draw(&mut rng)?;
@@ -673,6 +721,11 @@ fn run_impl(
                 if hard_free_line {
                     row["latent_density"]["hard_free_line_density"] =
                         json!(density.hard_free_line_density);
+                    row["latent_density"]["structural_zero"] = json!(density.structural_zero);
+                }
+                if native_class_line {
+                    row["latent_density"]["native_class_line_density"] =
+                        json!(density.native_class_line_density);
                     row["latent_density"]["structural_zero"] = json!(density.structural_zero);
                 }
             }

@@ -24,6 +24,8 @@ pub struct PhysicalGuideDensity {
     pub log_physical_density: f64,
     /// Complete conditional-density trace, present only for the hard-free law.
     pub hard_free_line_density: Option<Value>,
+    /// Complete all-axis, all-channel trace for the native-class line law.
+    pub native_class_line_density: Option<Value>,
     /// An analytic support zero, never a substituted numerical underflow.
     pub structural_zero: bool,
 }
@@ -47,11 +49,13 @@ pub struct PhysicalGuidePoseDraw {
     pub latent_radius: f64,
     pub gaussian_component: Option<usize>,
     pub hard_free_line_draw: Option<Value>,
+    pub native_class_line_draw: Option<Value>,
 }
 
 enum PhysicalGuideLaw {
     Gaussian(ImportanceGuide),
     HardFreeLine(ContactLineGuide),
+    NativeClassLine(ContactLineGuide),
 }
 
 /// Wraps the existing checked chart and full Gaussian-mixture implementation.
@@ -166,24 +170,66 @@ impl PhysicalLatentGuide {
         )?;
         let region_sha256 = hash_bytes(region_raw);
         let guide_data: Value = serde_json::from_slice(guide_raw)?;
-        let guide = if guide_data["schema"] == "defensive-hard-free-line-guide-v1" {
+        let guide = if guide_data["schema"] == "defensive-hard-free-line-guide-v1"
+            || guide_data["schema"] == "defensive-native-class-line-guide-v1"
+        {
+            let native_class = guide_data["schema"] == "defensive-native-class-line-guide-v1";
+            if native_class {
+                // This new wrapper admits only representable categorical
+                // channels. A positive density term whose cumulative draw
+                // interval rounds away or is narrower than one f64 Open01
+                // spacing is an input error, not a support zero.
+                // Keep the existing regional parser and generator unchanged.
+                let channels = guide_data["class_channels"]
+                    .as_array()
+                    .context("Missing native-class channels")?;
+                let probabilities = channels
+                    .iter()
+                    .map(|c| {
+                        let p = c["probability"]
+                            .as_f64()
+                            .context("Invalid class probability")?;
+                        ensure!(p.is_finite() && p > 0., "Invalid class probability");
+                        Ok(p)
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let total: f64 = probabilities.iter().sum();
+                ensure!(
+                    !probabilities.is_empty() && total.is_finite() && total > 0.,
+                    "Invalid class probability total"
+                );
+                let mut cumulative = 0.;
+                for p in probabilities {
+                    let next = cumulative + p / total;
+                    ensure!(
+                        next.is_finite()
+                            && next - cumulative >= f64::EPSILON
+                            && next <= 1.,
+                        "Unrepresentable native-class categorical interval"
+                    );
+                    cumulative = next;
+                }
+                ensure!(
+                    cumulative == 1.,
+                    "Unrepresentable native-class categorical endpoint"
+                );
+            }
             let (vessel, tree) =
-                geometry.context("Hard-free physical guide requires bound geometry")?;
+                geometry.context("Conditional physical guide requires bound geometry")?;
             ensure!(
                 vessel.fixed_poses == physical_fixed_neighbors,
-                "Vessel and hard-free guide physical neighbors differ"
+                "Vessel and conditional guide physical neighbors differ"
             );
             let mut source = vessel.clone();
             source.capture_center = reference_capture_center;
             source.capture_radius = reference_capture_radius;
-            PhysicalGuideLaw::HardFreeLine(ContactLineGuide::from_bytes(
-                guide_raw,
-                &region_sha256,
-                &chart,
-                0.,
-                &source,
-                tree,
-            )?)
+            let line =
+                ContactLineGuide::from_bytes(guide_raw, &region_sha256, &chart, 0., &source, tree)?;
+            if native_class {
+                PhysicalGuideLaw::NativeClassLine(line)
+            } else {
+                PhysicalGuideLaw::HardFreeLine(line)
+            }
         } else {
             PhysicalGuideLaw::Gaussian(ImportanceGuide::from_bytes(guide_raw, &region_sha256)?)
         };
@@ -219,10 +265,20 @@ impl PhysicalLatentGuide {
         match &self.guide {
             PhysicalGuideLaw::Gaussian(g) => g,
             PhysicalGuideLaw::HardFreeLine(g) => &g.base,
+            PhysicalGuideLaw::NativeClassLine(g) => &g.base,
         }
     }
     pub fn is_hard_free_line(&self) -> bool {
         matches!(self.guide, PhysicalGuideLaw::HardFreeLine(_))
+    }
+    pub fn is_native_class_line(&self) -> bool {
+        matches!(self.guide, PhysicalGuideLaw::NativeClassLine(_))
+    }
+    pub fn native_shape_compatibility(&self) -> Option<&Value> {
+        match &self.guide {
+            PhysicalGuideLaw::NativeClassLine(g) => g.class_shape_compatibility(),
+            _ => None,
+        }
     }
     pub fn physical_fixed_neighbors(&self) -> &[Pose] {
         &self.physical_fixed_neighbors
@@ -257,23 +313,35 @@ impl PhysicalLatentGuide {
         // Avoid squared-norm overflow for exterior coordinates.
         let inside = latent.iter().all(|v| v.abs() <= Self::REFERENCE_RADIUS)
             && latent.iter().map(|v| v * v).sum::<f64>() <= Self::REFERENCE_RADIUS.powi(2);
-        let (log_q, hard_free_line_density, structural_zero) = match &self.guide {
-            PhysicalGuideLaw::Gaussian(g) => (
-                g.log_density(latent, inside, self.log_volume),
-                None,
-                g.alpha == 1. && !inside,
-            ),
-            PhysicalGuideLaw::HardFreeLine(g) => {
-                let (q, detail, zero) = g.density_compact_checked(
-                    latent,
-                    inside,
-                    self.log_volume,
-                    &self.chart,
-                    Self::REFERENCE_RADIUS,
-                )?;
-                (q, Some(detail), zero)
-            }
-        };
+        let (log_q, hard_free_line_density, native_class_line_density, structural_zero) =
+            match &self.guide {
+                PhysicalGuideLaw::Gaussian(g) => (
+                    g.log_density(latent, inside, self.log_volume),
+                    None,
+                    None,
+                    g.alpha == 1. && !inside,
+                ),
+                PhysicalGuideLaw::HardFreeLine(g) => {
+                    let (q, detail, zero) = g.density_compact_checked(
+                        latent,
+                        inside,
+                        self.log_volume,
+                        &self.chart,
+                        Self::REFERENCE_RADIUS,
+                    )?;
+                    (q, Some(detail), None, zero)
+                }
+                PhysicalGuideLaw::NativeClassLine(g) => {
+                    let (q, detail, zero) = g.class_density_compact_checked(
+                        latent,
+                        inside,
+                        self.log_volume,
+                        &self.chart,
+                        Self::REFERENCE_RADIUS,
+                    )?;
+                    (q, None, Some(detail), zero)
+                }
+            };
         // A finite non-seam point has positive Gaussian density. If its log
         // density is beyond FP64 range, stop rather than declare it a zero.
         let legitimate_zero = structural_zero;
@@ -293,6 +361,7 @@ impl PhysicalLatentGuide {
             log_physical_jacobian: Some(log_jacobian),
             log_physical_density: log_physical,
             hard_free_line_density,
+            native_class_line_density,
             structural_zero,
         })
     }
@@ -329,6 +398,7 @@ impl PhysicalLatentGuide {
                 log_physical_jacobian: None,
                 log_physical_density: f64::NEG_INFINITY,
                 hard_free_line_density: None,
+                native_class_line_density: None,
                 structural_zero: true,
             });
         }
@@ -360,14 +430,18 @@ impl PhysicalLatentGuide {
     }
 
     pub fn draw_only(&self, rng: &mut StdRng) -> Result<PhysicalGuidePoseDraw> {
-        let (latent, latent_radius, gaussian_component, trace) = match &self.guide {
+        let (latent, latent_radius, gaussian_component, trace, class_trace) = match &self.guide {
             PhysicalGuideLaw::Gaussian(g) => {
                 let (u, r, c) = g.draw(rng, Self::REFERENCE_RADIUS, 0., 1.)?;
-                (u, r, c, None)
+                (u, r, c, None, None)
             }
             PhysicalGuideLaw::HardFreeLine(g) => {
                 let (u, r, c, _) = g.draw(rng, &self.chart, Self::REFERENCE_RADIUS, 0., 1.)?;
-                (u, r, c, Some(g.last_draw.borrow().clone()))
+                (u, r, c, Some(g.last_draw.borrow().clone()), None)
+            }
+            PhysicalGuideLaw::NativeClassLine(g) => {
+                let (u, r, c, _) = g.draw(rng, &self.chart, Self::REFERENCE_RADIUS, 0., 1.)?;
+                (u, r, c, None, Some(g.last_draw.borrow().clone()))
             }
         };
         let (pose, _) = self.decode(latent)?;
@@ -377,6 +451,7 @@ impl PhysicalLatentGuide {
             latent_radius,
             gaussian_component,
             hard_free_line_draw: trace,
+            native_class_line_draw: class_trace,
         })
     }
 }
@@ -409,3 +484,7 @@ mod tests;
 #[cfg(test)]
 #[path = "physical_hard_free_tests.rs"]
 mod hard_free_tests;
+
+#[cfg(test)]
+#[path = "physical_class_line_tests.rs"]
+mod class_line_tests;

@@ -15,8 +15,12 @@ mass agreement alone. The finite-system assembly question remains unresolved.
 Both stages have fresh, disjoint seeds. They are separate estimates. The second
 stage follows successful execution and auditing of the first; its allocation
 does not adapt to observed weights. The preparation provides commands and
-immutable inputs, not an executable production dispatcher or a final stage
-aggregator. Those integrations remain required before launch.
+immutable inputs. The subsequent [dispatcher](../tools/run_full_vessel_comparison.py)
+and [stage aggregator](../tools/compare_full_vessel_stage.py) implement the
+legacy workflow; see [its execution contract](full-vessel-workflow.md).
+The current native-class regional campaign needs a new authenticated preparation
+and an explicit admission predicate using its linear-space uncertainties. Its
+results cannot be passed to the legacy gate by renaming fields.
 
 ## Identical physical measure and complete proposals
 
@@ -95,10 +99,10 @@ IID ESS for resampled descendants, or observations in every subdivision. Audit
 or provenance failures still stop progression. A material independent
 contradiction must be resolved before dispatch.
 
-A future dispatcher must bind the frozen preparation, release-reference record,
-completed regional and both matching SMC comparisons; enforce eight physical
-jobs and 32 total workers; stop launches and drain children on failure; preserve
-all raw outputs without retry; and invoke the frozen audits/partition per job.
+The legacy dispatcher binds the frozen preparation, release-reference record,
+completed regional and both matching SMC comparisons; enforces eight physical
+jobs and 32 total workers; stops launches and drains children on failure;
+preserves all raw outputs without retry; and invokes the frozen audits/partition per job.
 No regional, vessel or scaffold result alone settles mobile finite-system
 assembly.
 

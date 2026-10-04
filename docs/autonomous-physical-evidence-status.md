@@ -87,7 +87,10 @@ Once regional checks and matching-target discrepancies are resolved, the existin
 physical calculation: 16 populations, 2,621,440 attempted draws, baseline versus
 normalized half-mixture, reporting native/contact/unbound and measured-pocket
 complements. It is still **inert**; all 16 population directories lack production
-outputs. Its dispatcher and final-stage integration remain required. A changed
+outputs. The [legacy dispatcher](../tools/run_full_vessel_comparison.py) and
+[stage aggregator](../tools/compare_full_vessel_stage.py) now exist. The newer
+streaming/native-class path still needs an authenticated execution integration
+and a gate using the current linear-space uncertainty contract. A changed
 regional guide needs a new authenticated preparation, not edits to frozen inputs.
 
 No fixed-scaffold answer, favorable or unfavorable, settles finite-system native

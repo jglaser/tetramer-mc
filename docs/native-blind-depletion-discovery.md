@@ -453,11 +453,17 @@ image (the shape changes by 6.3 Å rms under that rotation). As a single pair
 it packs more excluded volume than any native contact (slot 2: 1656–1696 Å³
 after convergence; the best native is 1535 Å³).
 
-At the seed, native lattice sites still win through multiple contacts. In
-the native-informed run at sweep 600, seed newcomers had a median total
+Some observed native seed placements have larger total overlap through multiple
+contacts. In the native-informed run at sweep 600, seed newcomers had a median total
 overlap of 2121 Å³ with their neighbors (maximum 4771), and 6 of 7 exceeded
-the twisted single contact. The disorder is therefore kinetic: at
-z = 0.0275 a twisted contact is worth about 45 kT and never anneals.
+the twisted single contact. These pointwise scores identify a strong competitor
+and suggest trapping as a sampling concern. At z = 0.0275, the isolated-pair
+overlap contributes about 45 kT to the log Boltzmann weight. This is neither a
+basin association free energy nor a measured escape barrier. Comparing a
+multi-neighbor overlap with a single contact does not establish which assemblies
+are thermodynamically stable, or whether the observed disorder is kinetic.
+That requires integrated contact weights and reversible reorganization evidence;
+see the [physical-weight campaign](native-class-physical-campaign-review.md).
 
 **Converged starts.** Rerunning seeded discovery on the same 512 FFT starts
 with 2,000 local search steps and 8,192 score points (otherwise unchanged)
@@ -472,9 +478,11 @@ map accepted 18 learned captures versus 15. It formed 18 native bonds
 between free bodies versus 14, and 14 strong twisted contacts versus 11, at
 the same CPU cost (333 versus 338 s). Convergence thus makes the native
 charts exact but does not change the native-to-twisted ratio (about 1.3).
-Fixing the ordering needs twisted contacts to be reversible (lower
-activity) or a proposal criterion that favors lattice-compatible,
-multi-contact placements.
+Candidate sampling improvements include moves that exchange twisted contacts
+and proposals guided by several neighbors. Lower activity is a separate
+physical-model comparison, not an efficiency improvement at fixed conditions.
+None of these short runs determines whether native order is favored at
+equilibrium.
 
 - `examples/frozen-blind-contact-mixture-512-converged.json` (sha256 prefix
   `fc353bcc0c120297`): source `runs/fft-seeded-discovery-512-converged-20260926/frozen-fit-tempered-z0005/`.

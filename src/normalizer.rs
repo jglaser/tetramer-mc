@@ -5,8 +5,9 @@ use crate::{
     geometry::{Environment, Placed, Shape, SphereTree},
     latent_region::physical_guide::{PhysicalLatentGuide, half_mixture_log_density},
     math::*,
+    normalizer_wall_envelope::AtomWallEnvelope,
     overlap_weight::{self, OverlapEnvelope},
-    proposal::FrozenRelativePoseProposal,
+    proposal::{FrozenRelativePoseProposal, ProposalBranch},
     simulation::{cpu_seconds, hash_bytes, hash_file, save},
     spherical::Container,
 };
@@ -181,13 +182,13 @@ fn stream(seed: u64, draw: u64, cloud: usize, name: &str) -> StdRng {
 }
 
 pub fn run(options: NormalizerOptions) -> Result<Value> {
-    run_impl(options, None, None)
+    run_impl(options, None, None, false)
 }
 
 /// Integrate the full atomic-wall domain, with capture used only as a
 /// conservative proposal/support enclosure. A truncated enclosure is refused.
 pub fn run_with_wall(options: NormalizerOptions, wall: NormalizerWall) -> Result<Value> {
-    run_impl(options, Some(wall), None)
+    run_impl(options, Some(wall), None, false)
 }
 
 /// Integrate the same atomic-wall target using the exact 50/50 mixture of the
@@ -198,14 +199,65 @@ pub fn run_with_wall_and_latent_guide(
     wall: NormalizerWall,
     guide_files: NormalizerLatentGuideFiles,
 ) -> Result<Value> {
-    run_impl(options, Some(wall), Some(guide_files))
+    run_impl(options, Some(wall), Some(guide_files), false)
+}
+
+/// Proposal-only replacement of the vessel uniform cube by a normalized
+/// one-atom wall envelope. All physical predicates remain unchanged.
+pub fn run_with_wall_envelope(
+    options: NormalizerOptions,
+    wall: NormalizerWall,
+    guide_files: Option<NormalizerLatentGuideFiles>,
+) -> Result<Value> {
+    run_impl(options, Some(wall), guide_files, true)
+}
+
+/// Score both branches directly; never subtract the old cube term. Atlas
+/// coordinates are capture-centered and the envelope uses world coordinates.
+fn vessel_anchor_log_density(
+    model: &FrozenRelativePoseProposal,
+    pose: &Pose,
+    anchor: &Pose,
+    capture_center: Vec3,
+    envelope: Option<&AtomWallEnvelope>,
+) -> Result<f64> {
+    let Some(envelope) = envelope else {
+        return model.log_density(pose, anchor);
+    };
+    ensure!(
+        !model.is_periodic(),
+        "Wall envelope requires an open proposal"
+    );
+    pose.validate()?;
+    anchor.validate()?;
+    let inverse_anchor = transpose(rotation(anchor.orientation));
+    let learned = model.relative_log_density(
+        matvec(inverse_anchor, sub(pose.position, anchor.position)),
+        matmul(inverse_anchor, rotation(pose.orientation)),
+    )?;
+    let uniform = envelope.log_density(Pose {
+        position: add(pose.position, capture_center),
+        ..*pose
+    })?;
+    let epsilon = model.uniform_weight();
+    let density = log_add(epsilon.ln() + uniform, (-epsilon).ln_1p() + learned);
+    ensure!(
+        density.is_finite() || density == f64::NEG_INFINITY,
+        "Invalid vessel density"
+    );
+    Ok(density)
 }
 
 fn run_impl(
     options: NormalizerOptions,
     wall_spec: Option<NormalizerWall>,
     guide_files: Option<NormalizerLatentGuideFiles>,
+    use_wall_envelope: bool,
 ) -> Result<Value> {
+    ensure!(
+        !use_wall_envelope || wall_spec.is_some(),
+        "Wall envelope requires an atomic wall"
+    );
     ensure!(
         options.samples > 0 && options.cloud_replicates > 0,
         "Positive sample and cloud counts required"
@@ -247,6 +299,16 @@ fn run_impl(
     let shape_raw = fs::read(&cfg.shape)?;
     let shape_sha = hash_bytes(&shape_raw);
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&shape_raw)?)?;
+    let wall_envelope = if use_wall_envelope {
+        let spec = wall_spec.context("Wall envelope requires an atomic wall")?;
+        Some(AtomWallEnvelope::new(
+            &tree.shape,
+            spec.center,
+            spec.radius,
+        )?)
+    } else {
+        None
+    };
     let guide_source = guide_files
         .as_ref()
         .map(|files| -> Result<_> { Ok((fs::read(&files.region)?, fs::read(&files.guide)?)) })
@@ -479,6 +541,26 @@ fn run_impl(
                 .clone();
         }
     }
+    if let Some(envelope) = &wall_envelope {
+        // Reject legacy audit schemas rather than silently score a cube law.
+        manifest["pre_envelope_schema"] = manifest["schema"].clone();
+        manifest["schema"] = json!(8);
+        manifest["vessel_uniform_schema"] = json!("one-atom-wall-envelope-v1");
+        manifest["vessel_uniform_envelope"] = json!(envelope);
+        manifest["vessel_proposal"] = json!(
+            "epsilon times normalized one-atom-wall/Haar envelope + (1-epsilon) times complete open learned atlas averaged over fixed anchors"
+        );
+        manifest["proposal"] = json!(if latent_guide.is_some() {
+            "0.5 complete wall-envelope vessel density + 0.5 q_D(u(world_pose))/J_D(u(world_pose)); no target truncation or retries"
+        } else {
+            "complete wall-envelope vessel density; no target truncation or retries"
+        });
+        manifest["wall_uniform_stream"] =
+            json!("wall-uniform; independent of original pose and cloud streams");
+        manifest["wall_uniform_generation"] = json!(
+            "Retain existing branch/anchor coins. Replace the uniform cube candidate by one independent envelope draw before physical evaluation; learned candidates unchanged. No retry."
+        );
+    }
     // All full-wall arms retain the same attempted-draw accounting. This is
     // observation only: no extra draw, proposal, or acceptance branch is added.
     let record_attempts = wall.is_some();
@@ -567,8 +649,56 @@ fn run_impl(
                     (Some(generated.pose), None, Some(metadata))
                 }
             } else {
-                let outcome =
+                let mut outcome =
                     model.propose(&mut stream(options.seed, draw, 0, "pose"), &poses, 0)?;
+                if let Some(envelope) = &wall_envelope {
+                    ensure!(
+                        outcome.candidate.is_some() && outcome.null_reason.is_none(),
+                        "Original vessel draw failed before wall-envelope replacement: {:?}",
+                        outcome.null_reason
+                    );
+                    if matches!(outcome.branch, ProposalBranch::Uniform) {
+                        let world =
+                            envelope.draw(&mut stream(options.seed, draw, 0, "wall-uniform"))?;
+                        outcome.candidate = Some(centered(world));
+                        let encoded = outcome.candidate.unwrap();
+                        ensure!(
+                            envelope
+                                .log_density(Pose {
+                                    position: add(encoded.position, cfg.capture_center),
+                                    ..encoded
+                                })?
+                                .is_finite(),
+                            "Wall-envelope coordinate roundtrip lost uniform support; do not redraw"
+                        );
+                        outcome.null_reason = None;
+                    }
+                    let p = outcome
+                        .candidate
+                        .context("Wall-envelope atlas draw produced a numerical null")?;
+                    let anchor = &poses[outcome.anchor_index];
+                    let old = vessel_anchor_log_density(
+                        &model,
+                        &poses[0],
+                        anchor,
+                        cfg.capture_center,
+                        Some(envelope),
+                    )?;
+                    let new = vessel_anchor_log_density(
+                        &model,
+                        &p,
+                        anchor,
+                        cfg.capture_center,
+                        Some(envelope),
+                    )?;
+                    ensure!(
+                        new.is_finite(),
+                        "Generated wall-envelope vessel draw has zero density"
+                    );
+                    outcome.old_log_density = old;
+                    outcome.new_log_density = Some(new);
+                    outcome.log_reverse_forward = Some(old - new);
+                }
                 ensure!(
                     (!reciprocal && wall.is_none() && options.proposal_anchor_index.is_none())
                         || outcome.candidate.is_some(),
@@ -596,7 +726,16 @@ fn run_impl(
                 };
                 let mut total = f64::NEG_INFINITY;
                 for anchor in &poses[1..] {
-                    total = log_add(total, model.log_density(&p, anchor)?);
+                    total = log_add(
+                        total,
+                        vessel_anchor_log_density(
+                            &model,
+                            &p,
+                            anchor,
+                            cfg.capture_center,
+                            wall_envelope.as_ref(),
+                        )?,
+                    );
                 }
                 let density = total - ((poses.len() - 1) as f64).ln();
                 ensure!(
@@ -784,4 +923,118 @@ fn run_impl(
     }
     save(&options.out.join("summary.json"), &summary)?;
     Ok(summary)
+}
+
+#[cfg(test)]
+mod wall_envelope_density_tests {
+    use super::*;
+    use crate::{geometry::Atom, proposal::GaussianComponentParameters};
+    use std::f64::consts::PI;
+
+    fn model(epsilon: f64) -> Result<FrozenRelativePoseProposal> {
+        FrozenRelativePoseProposal::from_components_open(
+            vec![GaussianComponentParameters {
+                anchor_position: [0.; 3],
+                anchor_rotation: IDENTITY,
+                mean: [0.; 6],
+                covariance: std::array::from_fn(|i| {
+                    std::array::from_fn(|j| if i == j { 1. } else { 0. })
+                }),
+                weight: 1.,
+            }],
+            1.,
+            [10.; 3],
+            epsilon,
+            &"0".repeat(64),
+            &"0".repeat(64),
+        )
+    }
+
+    fn pose(t: Vec3) -> Pose {
+        Pose {
+            position: t,
+            orientation: [1., 0., 0., 0.],
+        }
+    }
+
+    fn envelope() -> Result<AtomWallEnvelope> {
+        AtomWallEnvelope::new(
+            &Shape {
+                name: "toy".into(),
+                volume: 0.,
+                atoms: vec![Atom {
+                    center: [0.; 3],
+                    radius: 0.3,
+                }],
+            },
+            [7., -4., 3.],
+            3.,
+        )
+    }
+
+    #[test]
+    fn replacement_uses_complete_sum_and_preserves_exterior_learned_support() -> Result<()> {
+        let model = model(0.4)?;
+        let env = envelope()?;
+        let center = [7., -4., 3.];
+        let volume = 4. * PI * 2.7_f64.powi(3) / 3.;
+        for t in [[0.; 3], [0.2, -0.3, 0.1], [3.5, 0., 0.]] {
+            let p = pose(t);
+            let mut density_sum = 0.;
+            let mut analytic_sum = 0.;
+            for a in [[0.; 3], [0.8, 0., 0.]] {
+                let delta = sub(t, a);
+                // Unit-covariance 6D Normal at c=0 divided by Haar Jacobian
+                // 1/pi² gives exp(-|delta|²/2)/(8*pi).
+                let learned = (-dot(delta, delta) / 2.).exp() / (8. * PI);
+                let expected = 0.6 * learned + if norm(t) <= 2.7 { 0.4 / volume } else { 0. };
+                let actual =
+                    vessel_anchor_log_density(&model, &p, &pose(a), center, Some(&env))?.exp();
+                assert!((actual - expected).abs() < 1e-13 * (1. + expected));
+                density_sum += actual;
+                analytic_sum += expected;
+            }
+            assert!((density_sum / 2. - analytic_sum / 2.).abs() < 1e-13);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn pure_uniform_envelope_has_structural_exterior_zero() -> Result<()> {
+        let model = model(1.)?;
+        let env = envelope()?;
+        let value = vessel_anchor_log_density(
+            &model,
+            &pose([0.; 3]),
+            &pose([0.8, 0., 0.]),
+            [7., -4., 3.],
+            Some(&env),
+        )?;
+        assert!((value + (4. * PI * 2.7_f64.powi(3) / 3.).ln()).abs() < 1e-14);
+        assert_eq!(
+            vessel_anchor_log_density(
+                &model,
+                &pose([3., 0., 0.]),
+                &pose([0.; 3]),
+                [7., -4., 3.],
+                Some(&env)
+            )?,
+            f64::NEG_INFINITY
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn disabled_envelope_is_exact_original_density() -> Result<()> {
+        let model = model(0.4)?;
+        for t in [[0.; 3], [2., 1., -0.5], [6., 0., 0.]] {
+            let p = pose(t);
+            let a = pose([0.8, 0., 0.]);
+            assert_eq!(
+                vessel_anchor_log_density(&model, &p, &a, [7., -4., 3.], None)?,
+                model.log_density(&p, &a)?
+            );
+        }
+        Ok(())
+    }
 }

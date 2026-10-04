@@ -85,8 +85,12 @@ Poisson weights share the discrepancy, and contact importance ESS is only about
 74 per activity. A saved-row diagnostic locates most variability outside R4,
 where a small number of uniform-cube draws carry large weights. The
 [reference report](native-class-sphere-normalization-20261004.md) preserves the
-failed gate and develops an optional normalized wall-envelope proposal; no
-finished allocation is extended. The regional campaign's explicit admission
+failed gate. An [optional normalized wall-envelope proposal](wall-envelope-normalizer.md)
+has now been implemented and checked with nine Rust tests, independent Python
+reconstruction and 80 retained toy CLI attempts. A separately calculated
+131,072-attempt future reference has a conservative point-error bound; it has
+not been launched. These are correctness and allocation results, not a measured
+sampling speedup. No finished allocation is extended. The regional campaign's explicit admission
 checks also remain. See the
 [implementation and validation record](native-class-full-vessel-guide.md).
 

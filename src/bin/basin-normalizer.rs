@@ -35,6 +35,10 @@ struct Cli {
     /// must enclose every feasible center (radius >= R_wall + shape bound).
     #[arg(long)]
     wall_radius: Option<f64>,
+    /// Replace only the uniform cube proposal by a normalized one-atom wall
+    /// envelope; keep the same physical wall/core predicates and target.
+    #[arg(long, requires = "wall_radius")]
+    wall_uniform_envelope: bool,
     /// Complete radius-4 source chart for an untruncated physical-pose guide.
     #[arg(long, requires_all = ["latent_guide", "wall_radius"])]
     latent_region: Option<PathBuf>,
@@ -67,7 +71,13 @@ fn main() -> Result<()> {
     let summary = if let Some(radius) = c.wall_radius {
         let center = c.wall_center.map_or([0.; 3], |v| [v[0], v[1], v[2]]);
         let wall = NormalizerWall { center, radius };
-        if let (Some(region), Some(guide)) = (c.latent_region, c.latent_guide) {
+        if c.wall_uniform_envelope {
+            let guide_files = c
+                .latent_region
+                .zip(c.latent_guide)
+                .map(|(region, guide)| NormalizerLatentGuideFiles { region, guide });
+            normalizer::run_with_wall_envelope(options, wall, guide_files)?
+        } else if let (Some(region), Some(guide)) = (c.latent_region, c.latent_guide) {
             normalizer::run_with_wall_and_latent_guide(
                 options,
                 wall,

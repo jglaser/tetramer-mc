@@ -138,7 +138,9 @@ changing the physical target. For proteins it is an enclosing proposal, not
 uniform sampling of the true allowed region. Any implementation remains optional,
 preserves the old cube law and must have independent density/support checks
 and a separately fixed precision-aware allocation. It is not implemented or
-launched by this report. The current protein populations and their frozen
+launched by this report. It was subsequently implemented as the optional
+[`--wall-uniform-envelope` normalizer proposal](wall-envelope-normalizer.md),
+with separate validation and a variance-based future allocation. The current protein populations and their frozen
 proposal laws remain unchanged.
 
 ## Reproducibility and lifecycle

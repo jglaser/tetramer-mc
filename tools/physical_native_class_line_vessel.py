@@ -169,8 +169,10 @@ def audit_trace(actual,density,guide):
 
 
 def check_rows(config,manifest,rows,vessel,guide):
-    require(manifest['schema']==7 and manifest['outer_mixture_schema']==SCHEMA
+    require((manifest['schema']==7 or manifest['schema']==8 and manifest.get('pre_envelope_schema')==7)
+        and manifest['outer_mixture_schema']==SCHEMA
         and manifest['latent_guide_schema']==line.SCHEMA,'Wrong vessel native-class schema')
+    require(manifest['schema']!=8 or vessel.envelope is not None,'Unaudited vessel uniform envelope')
     evaluated=guide.evaluate_many([r['pose'] for r in rows])
     class Cached:
         def evaluate_many(self,poses):
@@ -216,7 +218,8 @@ def audit(directory, *, definition_path=None, synthetic=False):
     root=Path(directory).resolve();started=time.process_time();ledger=Ledger()
     for p in local_sources(__file__).values():ledger.bind(p)
     manifest=read(ledger.bind(root/'manifest.json'));summary=read(ledger.bind(root/'summary.json'))
-    require(manifest['schema']==7 and manifest['outer_mixture_schema']==SCHEMA and manifest['outer_vessel_probability']==.5,'Wrong outer mixture')
+    require((manifest['schema']==7 or manifest['schema']==8 and manifest.get('pre_envelope_schema')==7)
+        and manifest['outer_mixture_schema']==SCHEMA and manifest['outer_vessel_probability']==.5,'Wrong outer mixture')
     require(summary['complete'] is True and summary['manifest']==manifest and summary['numerical_nulls']==0
         and not(root/'failure.json').exists(),'Incomplete or failed population')
     require(manifest['density_measure']=='Lebesgue center volume times normalized SO(3) Haar measure'
@@ -258,7 +261,7 @@ def audit(directory, *, definition_path=None, synthetic=False):
         and manifest['latent_gaussian_component_count']==guide.guide.count,'Changed guide mixture')
     source=manifest['latent_source_capture']
     require(source['center']==guide.region['capture_center'] and source['radius']==guide.region['capture_radius'],'Changed source capture')
-    vessel=vessel_reference.VesselDensity(config,manifest,read(root/'provenance/model.json'),root/'provenance/source-bundle.json')
+    vessel=vessel_reference.VesselDensity(config,manifest,read(root/'provenance/model.json'),root/'provenance/source-bundle.json',shape=shape)
     density_check=check_rows(config,manifest,rows,vessel,guide)
     generation=vessel_reference.check_generation_metadata(config,manifest,rows,vessel)
     primitive=vessel_reference.check_cloud_envelopes_and_counts(manifest,summary,rows)
@@ -287,6 +290,7 @@ def audit(directory, *, definition_path=None, synthetic=False):
     ledger.recheck()
     return dict(schema='full-vessel-native-class-line-independent-audit-v1',complete=True,population=str(root),manifest=manifest,
         density_audit=density_check,vessel_generation_audit=generation,primitive_count_audit=primitive,wall_audit=wall,
+        **({} if vessel.envelope is None else dict(vessel_uniform_envelope=vessel.envelope.witness)),
         shape_witness=shape_witness,geometry_audit=contact.report(),near_core_boundary_poses=int(near),estimates=estimates,
         source_sha256=ledger.files,samples_sha256=sha(samples),attempts_sha256=sha(attempts),analysis_CPU_seconds=time.process_time()-started,
         new_pose_draws=0,new_Poisson_clouds=0,native_interval_geometry_reconstructed=True,

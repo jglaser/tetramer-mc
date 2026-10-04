@@ -4,6 +4,8 @@
 The legacy auditor remains unchanged. Its generation check is used only for
 vessel-generated rows; full vessel and latent densities are evaluated on ALL
 world poses here. No proposal or weight is changed in the recorded estimator.
+Shared density/generation helpers additionally support explicitly witnessed
+schema-8 envelopes; this module's legacy command-line auditor remains schema 5.
 """
 from __future__ import annotations
 import os
@@ -19,6 +21,7 @@ import shutil
 import sys
 import numpy as np
 from scipy.special import logsumexp
+from scipy.spatial.transform import Rotation
 
 from analyze_basin_normalizers import audit_pose_proposal, audit_wall_domain, moments, paired_noise
 from analyze_mobile_native_pocket import load_classifier, local_sources
@@ -30,6 +33,7 @@ from prepare_deep_far_normalizer_atlas import registration
 from prepare_smc_normalizer_atlas import Density, relative_poses, unwrap_proposal_model
 
 SCHEMA='full-vessel-latent-half-mixture-v1'
+WALL_ENVELOPE_SCHEMA='one-atom-wall-envelope-v1'
 
 
 def log_close(recorded, expected, message):
@@ -112,10 +116,80 @@ class PrunedExclusionContact:
             scope='All attempted densities and atomic-wall predicates remain audited. Only domain-invalid zero-target core/contact checks and strictly certified disjoint anchor checks are pruned. Bounds never certify a contact; minimum gap is null on certificate-only anchors.')
 
 
+class AtomWallEnvelope:
+    """Independent normalized envelope reconstructed from bound shape and wall.
+
+    The caller authenticates the archived shape bytes. The serialized witness
+    cannot choose another atom, radius or wall. Normalized Haar contributes no
+    additional rotational volume factor; at each orientation translation is a
+    unit-Jacobian shift of the same ball. The full atomic wall is still checked
+    separately and is never replaced by this one-atom proposal support.
+    """
+    def __init__(self,shape,wall,witness):
+        def number(x): return type(x) in (int,float) and math.isfinite(x)
+        def vector(x): return isinstance(x,list) and len(x)==3 and all(number(v) for v in x)
+        atoms=shape.get('atoms')
+        require(isinstance(atoms,list) and atoms,'Empty wall-envelope shape')
+        require(all(vector(a.get('center')) and number(a.get('radius')) and a['radius']>0 for a in atoms),
+                'Invalid wall-envelope atom')
+        require(isinstance(wall,dict) and set(wall)=={'center','radius'}
+                and vector(wall['center']) and number(wall['radius']) and wall['radius']>0,
+                'Invalid wall-envelope wall')
+        index=max(range(len(atoms)),key=lambda i:atoms[i]['radius'])
+        atom=atoms[index];radius=wall['radius']-atom['radius']
+        require(math.isfinite(radius) and radius>0,'Wall envelope must have positive radius')
+        log_volume=math.log(4*math.pi/3)+3*math.log(radius)
+        require(math.isfinite(log_volume),'Unrepresentable wall-envelope volume')
+        expected=dict(atom_index=index,atom_center=atom['center'],atom_radius=atom['radius'],
+            wall_center=wall['center'],wall_radius=wall['radius'],envelope_radius=radius,log_volume=log_volume)
+        require(isinstance(witness,dict) and set(witness)==set(expected),'Malformed wall-envelope witness')
+        require(type(witness['atom_index']) is int and witness['atom_index']==index,
+                'Wall-envelope first-largest atom differs')
+        for key in ('atom_center','wall_center'):
+            require(vector(witness[key]) and witness[key]==expected[key],'Wall-envelope witness differs: '+key)
+        for key in ('atom_radius','wall_radius','envelope_radius'):
+            require(number(witness[key]) and witness[key]==expected[key],'Wall-envelope witness differs: '+key)
+        require(number(witness['log_volume']) and math.isclose(witness['log_volume'],log_volume,rel_tol=5e-14,abs_tol=5e-14),
+                'Wall-envelope normalization differs')
+        self.atom_center=np.asarray(atom['center'],float);self.wall_center=np.asarray(wall['center'],float)
+        self.radius=radius;self.log_volume=log_volume;self.witness=copy.deepcopy(expected)
+
+    def evaluate(self,poses):
+        positions=np.asarray([p['position'] for p in poses],float)
+        quaternions=np.asarray([p['orientation'] for p in poses],float)
+        require(positions.shape==(len(poses),3) and quaternions.shape==(len(poses),4)
+                and np.isfinite(positions).all() and np.isfinite(quaternions).all(),
+                'Invalid wall-envelope pose')
+        with np.errstate(over='ignore',invalid='ignore'):
+            squared_norms=np.sum(quaternions*quaternions,axis=1)
+        require(np.all(abs(squared_norms-1.)<=1e-8),'Invalid wall-envelope orientation')
+        rotations=Rotation.from_quat(quaternions[:,[1,2,3,0]]).as_matrix()
+        with np.errstate(over='ignore',invalid='ignore'):
+            displacement=positions+np.einsum('nij,j->ni',rotations,self.atom_center)-self.wall_center
+            # Match Rust's stable hypot norm: squaring can create a false
+            # interior at tiny finite scales or overflow at large ones.
+            distance=np.hypot.reduce(displacement,axis=1)
+        require(np.isfinite(displacement).all() and np.isfinite(distance).all(),
+                'Unrepresentable wall-envelope support query')
+        inside=distance<=self.radius
+        return np.where(inside,-self.log_volume,-np.inf),inside
+
+
 class VesselDensity:
-    """Full original anchor-averaged law, independent of generation branch."""
-    def __init__(self,config,manifest,raw_model,source_bundle=None):
+    """Complete anchor-averaged law with an explicitly selected uniform law."""
+    def __init__(self,config,manifest,raw_model,source_bundle=None,*,shape=None):
         self.config=config;self.manifest=manifest
+        self.envelope=None
+        envelope_fields={'pre_envelope_schema','vessel_uniform_schema','vessel_uniform_envelope'}
+        if manifest.get('schema')==8:
+            require(type(manifest['schema']) is int and type(manifest.get('pre_envelope_schema')) is int
+                    and manifest['pre_envelope_schema'] in (4,7),'Unsupported pre-envelope vessel schema')
+            require(manifest.get('vessel_uniform_schema')==WALL_ENVELOPE_SCHEMA,
+                    'Unknown vessel uniform envelope law')
+            require(shape is not None,'Archived shape required for wall-envelope audit')
+            self.envelope=AtomWallEnvelope(shape,manifest.get('atomic_wall'),manifest.get('vessel_uniform_envelope'))
+        else:
+            require(not envelope_fields.intersection(manifest),'Envelope fields require explicit schema 8')
         base,flags=unwrap_proposal_model(raw_model)
         require(base.get('dfs') is None or all(v is None for v in base['dfs']), 'Gaussian vessel model required')
         require(base['shape_sha256']==manifest['shape_sha256'],'Vessel shape identity differs')
@@ -140,11 +214,17 @@ class VesselDensity:
         require(len(poses)>0,'Nonempty audit batch required')
         displacement=np.asarray([p['position'] for p in poses])-self.config['capture_center']
         cube=np.all((displacement>=-self.radius)&(displacement<self.radius),axis=1)
-        uniform=np.where(cube,math.log(self.epsilon)-3*math.log(2*self.radius),-np.inf)
+        if self.envelope is None:
+            support=cube
+            uniform=np.where(cube,math.log(self.epsilon)-3*math.log(2*self.radius),-np.inf)
+        else:
+            envelope_logs,support=self.envelope.evaluate(poses)
+            uniform=math.log(self.epsilon)+envelope_logs
         gaussians=np.asarray([self.density.evaluate(relative_poses(poses,self.config['fixed_poses'][i]))[0] for i in self.indices])
         anchors=np.logaddexp(uniform[None,:],math.log1p(-self.epsilon)+gaussians) if self.epsilon<1 else np.broadcast_to(uniform,gaussians.shape)
         full=logsumexp(anchors,axis=0)-math.log(len(self.indices))
-        return full,dict(anchor_log_densities=anchors,cube=cube,capture=np.linalg.norm(displacement,axis=1)<=self.radius)
+        return full,dict(anchor_log_densities=anchors,cube=cube,uniform_support=support,
+            capture=np.linalg.norm(displacement,axis=1)<=self.radius)
 
 
 def check_rows(config,manifest,rows,vessel,latent):
@@ -232,8 +312,13 @@ def check_generation_metadata(config, manifest, rows, vessel):
                 and min(np.linalg.norm(a-b),np.linalg.norm(a+b))<2e-8,'Vessel generation/world rotation differs')
         component=proposal['component_index']
         if proposal['branch']=='uniform':
-            require(geometry['cube'][i] and component is None and 'component_inverted' not in proposal,
+            require(geometry['uniform_support'][i] and component is None and 'component_inverted' not in proposal,
                     'Uniform vessel generation metadata differs')
+            if vessel.envelope is not None:
+                reconstructed=dict(position=(np.asarray(candidate['position'])+config['capture_center']).tolist(),
+                                   orientation=candidate['orientation'])
+                require(vessel.envelope.evaluate([reconstructed])[1][0],
+                        'Uniform reconstructed wall-envelope support differs')
         else:
             require(proposal['branch']=='learned' and vessel.epsilon<1
                     and type(component) is int and 0<=component<count,'Unsupported learned vessel component')
@@ -244,7 +329,7 @@ def check_generation_metadata(config, manifest, rows, vessel):
         new=float(geometry['anchor_log_densities'][anchor-1,i]);old=float(initial['anchor_log_densities'][anchor-1,0])
         log_close(proposal['new_log_density'],new,'Selected-anchor generation density differs')
         log_close(proposal['old_log_density'],old,'Initial selected-anchor density differs')
-        close(proposal['log_reverse_forward'],old-new,'Selected-anchor forward/reverse ratio differs')
+        log_close(proposal['log_reverse_forward'],old-new,'Selected-anchor forward/reverse ratio differs')
     return dict(checked_vessel_generation_rows=len(selected),scope='Generation metadata and selected-anchor densities; RNG replay is a separate implementation obligation.')
 
 

@@ -25,6 +25,7 @@ pub mod math;
 pub mod native_entry;
 pub mod native_region;
 pub mod normalizer;
+pub mod normalizer_wall_envelope;
 pub mod overlap_weight;
 pub mod pair_selection;
 pub mod proposal;

@@ -1,6 +1,37 @@
 # Review of the next physical contact calculation and frozen dimer analysis
 
-Review date: 2026-10-03. This document records a proposed allocation and a launch recipe. It does **not** allocate new protein queries or launch an analysis. The review used source, frozen protocols, saved aggregate evidence and controller metadata; it did not sample poses, classify protein geometry, fit proposals or evaluate depletion weights.
+Original review date: 2026-10-03. That review used source, frozen protocols,
+saved aggregate evidence and controller metadata, without sampling poses or
+evaluating geometry or depletion weights. Subsequent implementations, audits
+and execution records below preserve that history.
+
+**2026-10-04 status:** the revised-guide pilot completed all 512 attempts and
+64 preselected independent geometry checks. Its frozen 116-component guide
+passed the access screen, with continuing sparse access in competing orthant
+22. The separately reviewed **primary-only physical comparison is running**
+at `/vast/xvg/tetramer-mc-runs/native-class-physical-primary-20261004`.
+It contains eight independent populations of 16,384 draws for each of the
+existing H guide and revised class guide: 262,144 attempts in total, two
+clouds per valid pose, alpha 0.5, and lambda/z 128. Shape, rd=1.5 Å, z=0.035
+Å^-3, D170/R4, physical measure and complete classifiers remain unchanged.
+
+The execution plan has 81 ordered stages and one worker. Its SHA is
+`3d7f6e61f6b77d4b08b73659fca5b3ef9f07cd721361edec3c152cd68985c94a`;
+protocol SHA is
+`780dad504535f67184939367d35769cda5a0feeab47cce989949a0138339de92`.
+The host controller was launched once as PID 1960550, birth tick 199454871;
+the first worker was verified live as PID 1960561, birth tick 199455115.
+The fixed phase ceilings sum to 98 CPU hours and 196 wall hours; these are
+stop limits, not runtime predictions or convergence guarantees. The /vast
+reserve exceeded the required 128 GiB. All 32 sampling/audit seeds are distinct
+and passed the historical collision check.
+
+The [concrete launch review](../results/native-class-116-primary-review-20261004/launch-review.json)
+records the validated sources, guide relocation (compiled-native path only),
+unchanged production binary and available host capacity. The larger-population,
+defensive-probability, cloud-intensity, remaining-support, full-vessel and
+assembly gates remain open obligations. A successful conditional calculation
+alone cannot decide finite-system assembly.
 
 ## What remains unresolved
 

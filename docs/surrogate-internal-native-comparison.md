@@ -48,6 +48,15 @@ The declared ceiling is one worker, 3,600 CPU seconds, 7,200 wall seconds and
 replace chains. Complete input hashes and prior arithmetic audits authorize
 reading retained poses without repeating proposal or depletant arithmetic.
 
+The observer is implemented in `tools/analyze_surrogate_internal_native.py`.
+All nine focused synthetic tests passed, including retained-state cadence,
+metadata identity failures, baseline/CPU metrics, multiple motif labels,
+exact-pose reuse, query caps, fixtures and durable failure prefixes. The
+complete source closure was unchanged across validation. Receipt:
+`results/surrogate-internal-native-validation-20261004/attempt01/validation.json`,
+SHA256 `75778ed7c2d79c4459fca8747efdd9652f5a25c30cd703e19e8f11e35535ef6a`.
+No protein geometry or trajectory was evaluated during this validation.
+
 The diagnostic asks whether extra internal flexibility improves registry
 sampling per CPU and agreement between initializations, beyond coarse patch
 motion. Higher native occupancy alone is not an efficiency measure. A short

@@ -120,15 +120,17 @@ unequal activity allocations, retained invalid zeros and variance denominators.
 The completed cube allocation will not be extended or rerun to replace its
 failure.
 
-The new reference launched on 4 October at
+The new reference completed on 4 October at
 `/vast/xvg/tetramer-mc-runs/wall-envelope-vessel-sphere-20261004`, with one worker,
 one thread and seventeen sequential producer/audit/statistics stages. Its
 execution plan SHA256 is
 `4fa24d933702fd8a991c3bec057d52bae628b0fa317564f6cdf8dc889db62f27`.
-The fixed seeds are 6900410001–6900410004 and 6900411001–6900411004.
+All seventeen stages completed and drained; all **47 checks passed**. The
+largest absolute log discrepancy was 0.021998. There were 222,950 independent
+clouds across 111,475 valid poses, with all 19,597 invalid draws retained as
+zeros. The fixed seeds were 6900410001–6900410004 and 6900411001–6900411004.
 Its optimized executable reproduces the Rust source bundle used in the passed
-80-attempt CLI check. No partial scientific result is reported; interpretation
-waits for completion and drainage of the complete allocation.
+80-attempt CLI check. See the [completed result and comparison figure](wall-envelope-reference-result-20261004.md).
 [Tool-validation receipt](../results/wall-envelope-tools-validation-20261004/attempt01/validation.json).
 
 Here is the explicit statistical assurance, rather than a budget inferred from

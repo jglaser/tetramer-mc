@@ -94,9 +94,12 @@ failed gate. An [optional normalized wall-envelope proposal](wall-envelope-norma
 has now been implemented and checked with nine Rust tests, independent Python
 reconstruction and 80 retained toy CLI attempts. A separately calculated
 131,072-attempt reference has a conservative point-error bound and has now
-launched with one worker and seventeen fixed stages. The preparation/reduction
-tools passed thirteen additional checks. These are correctness and allocation results, not a measured
-sampling speedup. No finished allocation is extended. The regional campaign's explicit admission
+completed all seventeen stages, passing all 47 checks. Its largest log-weight
+discrepancy was 0.022; the nonzero-activity contact mass was 17.605 ± 0.193
+(population SE) versus the analytic 17.781. The preparation/reduction tools
+passed thirteen additional checks. The [completed comparison](wall-envelope-reference-result-20261004.md)
+keeps the earlier failed result separate. Proposal and allocation both changed,
+so this is not an isolated speedup measurement. No finished allocation is extended. The regional campaign's explicit admission
 checks also remain. See the
 [implementation and validation record](native-class-full-vessel-guide.md).
 

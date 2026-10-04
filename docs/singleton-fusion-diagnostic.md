@@ -319,3 +319,57 @@ in `results/singleton-fit-policy-comparison-20261004`. Its authenticated
 The independent physical-weight campaign and native-registry trajectory audit
 remain separate calculations; this result changes neither their estimates nor
 the unresolved finite-system assembly verdict.
+
+## Admission-only follow-up: all fitted centers overlap
+
+A second completed diagnostic changed only the final mismatch cutoff from 12
+to 20,000, retaining `full_iterations`, the fitted charts/covariances, all fifty
+anchor/state/member contexts and every original work cap. The CLI accepts this
+single diagnostic override only with `full_iterations`; production kernels keep
+their existing settings. Every field of all 34 fit traces matched the preceding
+full-fit calculation exactly, except the final admission disposition.
+
+| Stage or first failure | Count |
+| --- | ---: |
+| Saved contexts retained | 50 |
+| Identical fits admitted and centers checked | 34 |
+| First core collision with the other mobile member | 24 |
+| First core collision with the selected anchor | 8 |
+| First core collision with another frozen spectator | 2 |
+| Wall or invalid-pose rejection | 0 |
+| Centers reaching covariance checks / components retained | 0 / 0 |
+
+All 34 centers collide. The whole diagnostic used 4,209 pair-core queries and
+2.583 CPU seconds including loading (0.270 constructor-only seconds); it drew
+no poses or Poisson clouds and made no native-label queries. The first blocker
+is defined by the existing spectator traversal, so these counts do not enumerate
+all overlapping neighbors or show that removing one blocker would clear a pose.
+
+This rules out **raising this cutoff alone** as a rescue for the present fifty
+contexts. It does not bound the feasible probability in the surrounding
+Gaussians, establish a global fitting optimum, or measure physical stability.
+The information/covariance tests were never reached. Broadening proposals or
+optimizing under hard constraints would be separate changes requiring their own
+feasible-mass, complete-density and sampling-efficiency controls.
+
+The existing factorized dimer move already changes both mobile poses and their
+relative geometry. A distinct next cooperative control can mix its two tree
+rootings with a state-independent one-half prior. The chosen root must remain
+fixed through every retry and the complete proposal/auxiliary/physical decision;
+each component retains its own density ratio. Reversed-root source support may
+be worse, so diagnostics must keep both root choices without filtering failures.
+A role mixture does not by itself guarantee better contact exploration.
+
+Seven CLI tests and four metadata-preparer tests passed. The unchanged fitting
+library retains its previous eleven passing tests. Build/test evidence is in
+`results/singleton-admission-validation-20261004` and
+`results/singleton-relaxed-fit-context0-20261004-preparation/validation-attempt-01`.
+All five serial jobs completed without retry. The launcher had a post-launch
+metadata-record error; its original source/claim and the explicit recovery
+receipt were preserved, using the completed controller and all five drained
+child receipts. No simulation was restarted.
+
+The complete results, per-center labels, fit-identity checks and reduction are in
+`results/singleton-relaxed-fit-context0-20261004`. Its execution-plan SHA is
+`1eaaa5c5c1f512810a7c021e18478cd2bd768afc83574234faeb306b718181c8`.
+The production executable and running physical/native-audit jobs were unchanged.

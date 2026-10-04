@@ -140,9 +140,16 @@ fn validate_manifest(m: &Manifest) -> Result<()> {
         m.members[0] != m.members[1] && !m.members.contains(&m.anchor),
         "invalid context labels"
     );
+    // The sole admission-only comparison leaves the atlas, fitted covariance,
+    // screening and work caps unchanged. FullIterations is required so this
+    // limit cannot also change the fitter's early-abort trajectory.
+    let mut expected = OligomerConfig::default();
+    if m.fit_policy == FusionFitPolicy::FullIterations && m.oligomer.max_mismatch == 20000. {
+        expected.max_mismatch = 20000.;
+    }
     ensure!(
-        m.oligomer == OligomerConfig::default(),
-        "diagnostic must use the frozen singleton fusion configuration"
+        m.oligomer == expected,
+        "diagnostic requires default fusion configuration, or full_iterations with only max_mismatch=20000"
     );
     m.oligomer.validate()?;
     ensure!(
@@ -436,7 +443,7 @@ where
             journal,
             &json!({"state":"begin","ordinal":ordinal,"construction":c,
             "members":[IDENTITY],"spectator_labels":spectator_labels,"context":m.context,
-            "fit_policy":m.fit_policy}),
+            "fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch}),
         )?;
         totals.constructions_begun += 1;
         let mut diagnostics = FusionBuildDiagnostics::default();
@@ -454,7 +461,7 @@ where
         emit(
             journal,
             &json!({"state":if success {"complete"} else {"failed"},"ordinal":ordinal,"construction":c,
-            "fit_policy":m.fit_policy,"diagnostics":diagnostics,"spectator_labels":spectator_labels,"totals":totals,
+            "fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch,"diagnostics":diagnostics,"spectator_labels":spectator_labels,"totals":totals,
             "cpu_seconds":cpu_seconds()-started,"error":result.as_ref().err().map(|e|format!("{e:#}")),
             "counter_limits_passed":counters_valid}),
         )?;
@@ -505,7 +512,7 @@ fn run(args: Args) -> Result<()> {
         emit(
             &mut journal,
             &json!({"state":"started","schema":SCHEMA,"manifest_sha256":args.manifest_sha256,
-            "fit_policy":m.fit_policy}),
+            "fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch}),
         )?;
         ensure!(
             hash_bytes(BUNDLE) == m.witness.compiled_source_bundle_sha256
@@ -525,7 +532,7 @@ fn run(args: Args) -> Result<()> {
             &json!({"state":"inputs_verified","input_sha256":inputs.files,"pose_count":loaded.states.values().next().unwrap().len(),
             "coordinate_frame":m.coordinate_frame,"wall_center":m.wall_center,"wall_radius":loaded.wall.radius,
             "atlas_loading":{"periodic":false,"uniform_weight":0.1,"correlation":0.},"caps":m.caps,
-            "fit_policy":m.fit_policy}),
+            "fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch}),
         )?;
         execute(&m, &loaded, &mut journal, &mut totals, construct)?;
         inputs.recheck()?;
@@ -536,12 +543,12 @@ fn run(args: Args) -> Result<()> {
         emit(
             &mut journal,
             &json!({"state":"failed","error":format!("{error:#}"),"totals":totals,"input_recheck_error":recheck_error,
-            "fit_policy":m.fit_policy}),
+            "fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch}),
         )?;
         save_new(
             &args.out.join("failure.json"),
             &json!({"schema":"singleton-fusion-diagnostic-failure-v1","complete":false,
-            "manifest_sha256":args.manifest_sha256,"fit_policy":m.fit_policy,"error":format!("{error:#}"),"totals":totals,
+            "manifest_sha256":args.manifest_sha256,"fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch,"error":format!("{error:#}"),"totals":totals,
             "input_sha256":inputs.files,"input_recheck_error":recheck_error,"attempts_sha256":hash_file(&journal_path)?,
             "retries":0,"new_pose_draws":0,"new_Poisson_clouds":0}),
         )?;
@@ -549,13 +556,13 @@ fn run(args: Args) -> Result<()> {
     }
     emit(
         &mut journal,
-        &json!({"state":"finished","fit_policy":m.fit_policy,"totals":totals}),
+        &json!({"state":"finished","fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch,"totals":totals}),
     )?;
     save_new(
         &args.out.join("summary.json"),
         &json!({"schema":"singleton-fusion-diagnostic-v1","complete":true,"passed":true,
         "context":m.context,"manifest_sha256":args.manifest_sha256,"witness":m.witness,"totals":totals,
-        "fit_policy":m.fit_policy,
+        "fit_policy":m.fit_policy,"max_mismatch":m.oligomer.max_mismatch,
         "input_sha256":inputs.files,"attempts_sha256":hash_file(&journal_path)?,"cpu_seconds":cpu_seconds()-started,
         "new_pose_draws":0,"new_Poisson_clouds":0,"native_queries":0,"contact_graph_queries":0,"density_queries":0,
         "scope":"Passive exact singleton catalogue construction at explicitly bound states; no sampling or scientific mixing conclusion"}),
@@ -699,6 +706,121 @@ mod tests {
         }
         Ok(())
     }
+
+    #[test]
+    fn singleton_fusion_admission_override_is_exact_and_full_iterations_only() -> Result<()> {
+        let fixture = fixture()?;
+        for policy in [FusionFitPolicy::EarlyAbort, FusionFitPolicy::FullIterations] {
+            for limit in [
+                12.,
+                20000.,
+                19999.,
+                20001.,
+                120.,
+                0.,
+                -1.,
+                f64::INFINITY,
+                f64::NAN,
+            ] {
+                let mut m = fixture.manifest.clone();
+                m.fit_policy = policy;
+                m.oligomer.max_mismatch = limit;
+                let allowed =
+                    limit == 12. || (policy == FusionFitPolicy::FullIterations && limit == 20000.);
+                assert_eq!(
+                    validate_manifest(&m).is_ok(),
+                    allowed,
+                    "{policy:?}, {limit}"
+                );
+            }
+        }
+        let mut m = fixture.manifest.clone();
+        m.fit_policy = FusionFitPolicy::FullIterations;
+        m.oligomer.max_mismatch = 20000.;
+        let value = serde_json::to_value(&m)?;
+        for (field, changed) in [
+            ("multi_contact_mass", json!(0.7)),
+            ("pair_distance_A", json!(9.)),
+            ("pair_angle_degrees", json!(61.)),
+            ("max_candidates", json!(4095)),
+            ("max_hard_checks", json!(255)),
+            ("max_components", json!(31)),
+        ] {
+            let mut bad = value.clone();
+            bad["oligomer"][field] = changed;
+            assert!(
+                validate_manifest(&serde_json::from_value(bad)?).is_err(),
+                "{field}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn singleton_fusion_admission_checks_centers_without_changing_fit_records() -> Result<()> {
+        let fixture = fixture()?;
+        let mut m = fixture.manifest.clone();
+        m.fit_policy = FusionFitPolicy::FullIterations;
+        let loaded = load(&m, &mut Inputs::default())?;
+        let mut baseline = Vec::new();
+        for c in &m.constructions {
+            let mut d = FusionBuildDiagnostics::default();
+            construct(&loaded, &m, c, &mut d)?;
+            baseline.push(d);
+        }
+        assert!(baseline.iter().any(|d| d.fits_above_threshold > 0));
+        m.oligomer.max_mismatch = 20000.;
+        let path = fixture.root.join("admission-manifest.json");
+        save_new(&path, &serde_json::to_value(&m)?)?;
+        let bytes = fs::read(&path)?;
+        run(Args {
+            manifest: path.clone(),
+            manifest_sha256: hash_file(&path)?,
+            out: m.output.clone(),
+        })?;
+        let summary: Value = serde_json::from_slice(&fs::read(m.output.join("summary.json"))?)?;
+        assert_eq!(summary["fit_policy"], "full_iterations");
+        assert_eq!(summary["max_mismatch"], 20000.);
+        assert_eq!(summary["new_pose_draws"], 0);
+        assert_eq!(summary["new_Poisson_clouds"], 0);
+        assert_eq!(fs::read(m.output.join("provenance/manifest.json"))?, bytes);
+        let rows: Vec<Value> = fs::read_to_string(m.output.join("attempts.jsonl"))?
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<std::result::Result<_, _>>()?;
+        for row in &rows {
+            assert_eq!(row["fit_policy"], "full_iterations");
+            assert_eq!(row["max_mismatch"], 20000.);
+        }
+        let completed: Vec<_> = rows.iter().filter(|r| r["state"] == "complete").collect();
+        assert_eq!(completed.len(), baseline.len());
+        for (row, old) in completed.iter().zip(&baseline) {
+            let d = &row["diagnostics"];
+            assert_eq!(d["fit_attempts"], old.fit_attempts);
+            assert_eq!(d["fit_returned_none"], old.fit_returned_none);
+            assert_eq!(d["fits_above_threshold"], 0);
+            assert_eq!(d["usable_fits"], old.usable_fits + old.fits_above_threshold);
+            assert_eq!(
+                d["centers_checked"],
+                old.usable_fits + old.fits_above_threshold
+            );
+            let mut before = serde_json::to_value(&old.fit_records)?;
+            let mut after = d["fit_records"].clone();
+            for records in [&mut before, &mut after] {
+                for record in records.as_array_mut().unwrap() {
+                    record.as_object_mut().unwrap().remove("disposition");
+                }
+            }
+            assert_eq!(before, after);
+            assert!(d["core_overlap_calls"].as_u64().unwrap() >= old.core_overlap_calls as u64);
+            assert_eq!(
+                d["records"].as_array().unwrap().len(),
+                d["centers_checked"].as_u64().unwrap() as usize
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn singleton_fusion_manifest_rejects_frame_neighbor_inventory_and_budget_drift() -> Result<()> {
         let fixture = fixture()?;

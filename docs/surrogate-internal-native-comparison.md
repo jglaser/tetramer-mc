@@ -21,11 +21,12 @@ These are copied completed summary statistics, not a new trajectory pass:
 
 SHA256 `07f25356cff250001bbc64fe3eef5b800581883fca9da6ec45a8a366136b8d68`.
 
-## Fixed next comparison
+## Declared internal-native comparison
 
-After all 24 flexible producers and their complete contact observer finish,
-classify the internal pair at every initial and retained endpoint of all
-24 rigid and 24 flexible chains. The maximum is 221,232 full pair calls,
+All 24 flexible producers and their complete contact observer have finished.
+A separate internal-native observer has been launched to classify the internal
+pair at every initial and retained endpoint of all 24 rigid and 24 flexible
+chains. The maximum is 221,232 full pair calls,
 before exact-pose caching. Reuse the sixteen existing native controls; do not
 reclassify them. Keep all 4,096 production blocks, rejected-state residence,
 block512 as the transition baseline, separate starts/streams, and full sampler
@@ -78,24 +79,83 @@ conditional pair.
 
 ## Contact analysis and figures
 
-The completed-inventory contact dispatcher is prepared as source under
-`results/flexible-surrogate-analysis-preparation-20261004/`. Its twelve
-synthetic tests passed; its actual completion gate remains closed while the
-producers run. It classifies 110,616 new endpoints and reuses forty contact
-controls, without old geometry queries.
+The whole-contact analysis completed its declared 24 new and 40 cached chains,
+classifying 110,616 new endpoints without old geometry queries, replacement
+chains or additional physical draws. The completed report is
+`/vast/xvg/tetramer-mc-runs/flexible-surrogate-dimer-analysis-20261004/analysis/analysis.json`,
+SHA256 `58307808150d4f3fc35879dbe28e6f617998c40b580eccdb97b2d1dd616b8f16`.
 
-`tools/plot_flexible_surrogate_benchmark.py` consumes only completed,
-authenticated contact summaries. Its three figures separate cached and new
-chains and show contact organization, efficiency, and initialization
-differences. Undefined ESS remains undefined; occupied-frame counts accompany
-presence ESS to expose rare-event artifacts. Six synthetic tests, including
-PNG/SVG rendering, passed. Run after the observer completes:
+The authenticated figures retain all eight start/stream contexts separately:
 
-```sh
-/home/xvg/protein-nucleation/.venv/bin/python -B tools/plot_flexible_surrogate_benchmark.py \
-  --root /vast/xvg/tetramer-mc-runs/flexible-surrogate-dimer-analysis-20261004 \
-  --output /absolute/fresh/figure-directory
-```
+- [Contact organization](../results/flexible-surrogate-contact-figure-20261004/contact-organization.png)
+  ([SVG](../results/flexible-surrogate-contact-figure-20261004/contact-organization.svg)).
+- [Contact efficiency](../results/flexible-surrogate-contact-figure-20261004/contact-efficiency.png)
+  ([SVG](../results/flexible-surrogate-contact-figure-20261004/contact-efficiency.svg)).
+- [Initialization differences](../results/flexible-surrogate-contact-figure-20261004/initialization-differences.png)
+  ([SVG](../results/flexible-surrogate-contact-figure-20261004/initialization-differences.svg)).
 
-These contact figures do not contain native classifications. The separately
-bounded internal-native observer supplies that additional measurement.
+The [plotted scalar table](../results/flexible-surrogate-contact-figure-20261004/plotted-values.json)
+has SHA256 `326f7f6457dee722a61d97255ca0ba18f3dedffddf71e435a92f593a23d17276`;
+its [plot receipt](../results/flexible-surrogate-contact-figure-20261004/plot-receipt.json)
+has SHA256 `1b868b7ec002bebc69e08774ebe6088b76f8cf754ebf45686d228e7b6f688f00`.
+The plotter copied completed observer scalars; it read no scientific journals,
+performed no geometry queries, fitted no new statistics and pooled no starts
+or streams. Undefined ESS remains undefined.
+
+Guided m8 does not establish a general efficiency improvement. It used
+18–46% less full sampler CPU than flat8 in these matched contexts, but its
+whole-fingerprint apparent ESS/CPU was lower in six of eight. Its two higher
+values occurred in proposal-prepared streams 0 and 2, which were also its only
+two improvements over local updates. The saved values below use full sampler
+CPU, including setup and warmup, and are finite-record descriptors rather than
+equilibrium ESS:
+
+| Start / stream | Local ESS/s | Flexible m1 ESS/s | Guided m8 ESS/s | Flat8 ESS/s |
+| --- | ---: | ---: | ---: | ---: |
+| Source / 0 | 0.304 | 0.280 | 0.105 | 0.209 |
+| Source / 1 | 0.245 | 0.099 | 0.076 | 0.176 |
+| Source / 2 | 0.163 | 0.096 | 0.096 | 0.192 |
+| Source / 3 | 0.321 | 0.078 | 0.146 | 0.171 |
+| Proposal-prepared / 0 | 0.369 | 0.274 | 0.759 | 0.084 |
+| Proposal-prepared / 1 | 0.314 | 0.718 | 0.294 | 0.410 |
+| Proposal-prepared / 2 | 0.234 | 0.409 | 0.479 | 0.250 |
+| Proposal-prepared / 3 | 0.177 | 0.118 | 0.076 | 0.356 |
+
+Guided m8's internal patch-return rate per CPU exceeded flat8 in all four
+proposal-prepared streams, by factors 1.54, 1.45, 1.68 and 1.34. For source
+starts it was higher in streams 0 and 2 and lower in streams 1 and 3. Internal
+patch-change rates also varied: the guided/flat ratios were
+`[1.10, 0.93, 1.11, 0.66]` for source starts and
+`[0.82, 1.54, 1.28, 1.60]` for proposal-prepared starts. Faster repeated patch
+changes or returns did not consistently yield higher whole-fingerprint ESS.
+
+Occupancy and initialization differences limit these comparisons. All source
+starts in the table retained internal contact throughout their 4,096 production
+frames. In prepared stream 0, guided m8 had 4,096 internally occupied frames
+and 33 distinct internal patch sets, versus flat8's 3,130 frames and 504 sets.
+In prepared stream 2 those counts were 4,096/94 versus 3,734/330. In prepared
+stream 3 the occupied-frame counts were 1,179, 3,160, 2,131 and 4,096 for local,
+m1, guided m8 and flat8, respectively. Every matched source/prepared internal
+patch-set occupancy comparison for these four arms had saved total variation
+1.0: their observed supports were disjoint. Agreement between initializations
+and equilibrium coverage therefore remain unestablished.
+
+All 24 flexible chains had zero external-contact occupied frames, external
+patch changes and external patch returns; their external-presence ESS is
+undefined. They demonstrate no external-contact exploration benefit here.
+The cached rigid controls illustrate why occupied-frame counts must accompany
+presence ESS: rigid m8 source stream 0 had only one occupied frame and zero
+external returns, yet apparent external ESS 4,096, or 31.12/s. Rigid m8 source
+stream 1 had seven occupied frames and apparent ESS 586.87. Such high apparent
+ESS from rare presence is not evidence of effective contact exploration.
+
+These figures contain contact labels, not native classifications. The separate
+internal-native observer was launched at
+`/vast/xvg/tetramer-mc-runs/surrogate-internal-native-20261004`, with
+execution-plan SHA256
+`8749c0aa965f128e22ea3c9d78a9ce25057090d4d96963e5d9e44219cddf1466`
+and protocol SHA256
+`e7d51de9b01a4356b4524de401ba099e397016c34cdc87099406b5bf8416ea7c`.
+No partial native-observer outcome is included here. The completed contact
+results retain the conditional physical scope above and do not decide
+finite-system assembly or native registry.

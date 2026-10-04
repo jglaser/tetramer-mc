@@ -169,41 +169,103 @@ The complete numeric summary and PNG/SVG figures are under
 The snapshot preparer passed eight synthetic checks and the plotter six;
 analysis reused the unchanged archived native observer and definition.
 
-## Which contact families can connect the reference tiling?
+## Exact native embeddings beyond one reference covering
 
-A separate exact integer calculation now answers the connectivity question
-for the frozen certified tetramer tiling. Each motif supplies directed edges
-between four block types with integer tiling-image shifts. A spanning forest
-gives closed-walk translation vectors; their integer rank and lattice index
-determine whether repeating the selected ideal contacts connects chains,
-planes, or the full three-dimensional tiling. The translation basis is
-`(a,b,2c)`, with lengths `(79.1,79.1,75.8)` Å.
+**Every one of the 64 final registered components admits an exact, injective
+embedding of its retained labels into the native monomer symmetry orbit.**
+This broader calculation resolves all failures of the earlier four-type
+tetramer-cover test, including the enlarged informed seed component. Those
+failures constrain one selected covering; they do not demonstrate loss of
+native monomer registry. The frozen classifier and its original counts remain
+unchanged.
 
-| Available inverse-motif families | Translation rank in the reference tiling |
-| --- | --- |
-| 3/8 and 6/7, the blind history's observed outside-seed families | 1, along b |
-| Those two plus 4/5 | 2, in the a–b plane |
-| Those three plus any one of 0/1, 2/9 or 11/13 | 3, lattice index 1 |
+| Final component class | Components | Tetramers | Exact monomer-orbit embeddings |
+| --- | ---: | ---: | ---: |
+| Informed, separate from the original seed | 46 | 212 | 46 |
+| Informed, touching the original seed | 1 | 16 | 1 |
+| Blind, separate from the original seed | 16 | 32 | 16 |
+| Blind, touching the original seed | 1 | 8 | 1 |
 
-All 128 subsets of the seven families were enumerated component by component.
-Six integer-lattice controls, a disconnected-component control and 384 direct
-modular-cover connectivity checks passed. No geometric predicates, approximate
-transform compositions, trajectory replay or new physical samples were used.
-The [full report](../results/growth-z004-contact-topology-20261004/REPORT.md)
-and all subset/cycle witnesses are archived under
-`results/growth-z004-contact-topology-20261004`; receipt SHA256 is
+The calculation reconstructs eight native basis representatives from seven
+previously checked monomer contact operators with integer rotations and exact
+rational translations. It verifies all 56 monomer contact relations, all 64
+basis products and eight inverses, the prototype's 32 member-site identities
+under eight anchor placements, all 36 tetramer-motif occurrences and all 30
+prescribed member contacts. Each motif therefore has an exact crystal-group
+operator. Propagating those operators through a saved component gives exact
+cycle closure and distinct occupied **monomer** sites in every case. No
+floating-point transform composition or new geometric query enters this check.
+
+The broader symmetry orbit also changes the interpretation of family
+connectivity. The blind history's two observed families, **3/8 and 6/7, already
+generate rank-three primitive translations**. Additional contact families
+cannot be declared generally necessary for three-dimensional native assembly
+from the restricted-cover calculation.
+
+| Available inverse-motif families | Translation rank using only reference-cover occurrences | Translation rank in the unrestricted generated subgroup |
+| --- | ---: | ---: |
+| 3/8 and 6/7 | 1 | 3 |
+| 3/8, 4/5 and 6/7 | 2 | 3 |
+| All seven families | 3 | 3 |
+
+For these three unrestricted subgroups, the rotation subgroup has order four
+and the translation lattice has index one in primitive `(a,b,c)` coordinates.
+Their index in the full native space group is two. This is distinct from the
+four-type covering, whose translation cell is `(a,b,2c)`.
+
+Group generation does **not** construct a nonoverlapping infinite packing.
+For example, motif 3 squared is translation by c, while the prototype already
+contains monomers at the same basis with images zero and c. Occupying every
+generated tetramer placement would reuse monomer sites. Conversely, subgroup
+index two does not imply that half the monomer lattice is inaccessible, because
+the prototype contains several monomer symmetry classes. The finite-component
+site-injectivity checks pass; infinite packing and equilibrium stability remain
+separate questions.
+
+The [unrestricted-orbit report](../results/growth-z004-unrestricted-native-orbit-20261004/REPORT.md)
+and [execution receipt](../results/growth-z004-unrestricted-native-orbit-20261004/receipt.json)
+preserve all component assignments and all 128 family-subgroup calculations.
+Receipt SHA256 is
+`8c1973443cc02302b3697af13e7b3a738c85aba53b4c4343ded8849582a24e5e`;
+full-result SHA256 is
+`25bf85f703bb281756c8dab6044a3a327af984c4f0d70e0a573ff7a28c9ea886`.
+Affine inverse, screw-power, translation-conjugation, lattice-index, reverse
+traversal, cycle-conflict and monomer-collision controls passed. This is an
+ideal-label embedding for each component, not a fit of the measured perturbed
+coordinates to one global crystal, a joint system-wide embedding or an
+equilibrium conclusion.
+
+### Preserved diagnostics for the restricted covering
+
+The earlier calculation used the frozen catalogue's four block types and
+integer covering-image shifts. Its spanning-forest cycle voltages, ranks and
+indices are valid for that selected graph. All 128 family subsets, six lattice
+controls, a disconnected-component control and 384 direct modular-cover checks
+are retained in the [restricted-topology report](../results/growth-z004-contact-topology-20261004/REPORT.md)
+and [receipt](../results/growth-z004-contact-topology-20261004/receipt.json), SHA256
 `40b1c1452350eac8ae9cba2b2035fb0beaf6e17646a9311e25da79f3a22d5f8f`.
+Its rank-one and rank-two statements do not bound the unrestricted native
+symmetry orbit.
 
-This sharpens, but does not complete, the sampling diagnosis. The blind-observed
-families already allow arbitrarily long native chains, so their rank-one
-limitation does **not** explain why that trajectory stops at dimers. Additional
-families are needed for three-dimensional connectivity, but **2/9 is not
-uniquely necessary**. The native-informed final family inventory already
-contains rank-three subsets despite its stalled seed. Their simultaneous
-presence in one suitably arranged component is a separate question.
+Within that restricted graph, 41 informed nonseed components/200 bodies have
+rank-two-capable family inventories; five smaller components contain only
+6/7. These counts remain useful descriptions of the observed families, without
+implying a dimensional limit on general native assembly. The blind history has
+16 dimers/32 bodies. The 36 informed and 224 blind bodies with no registered
+edge are not thereby physically free; no exclusion graph was used. The
+[component inventory](../results/growth-z004-component-topology-20261004/REPORT.md)
+and [receipt](../results/growth-z004-component-topology-20261004/receipt.json), SHA256
+`64cb5b8bf996504367ce80fb847801a38de2cd40e8353fe04d7238e5edd6bc4d`,
+preserve the exact joins.
 
-This is contact availability on the reference tiling, not a basin entropy,
-equilibrium probability, rigidity calculation or stability test. The trajectory
-observer's local registry and SE(3) cycle check also do not enforce this exact
-block-type/image assignment; the topology calculation cannot retrospectively
-certify the observed components' embedding into that unique tiling.
+The subsequent four-root type/image embedding test admitted 19 informed
+nonseed components (58 bodies) and rejected 27 (154 bodies), plus the enlarged
+16-body seed component. All blind dimers and its eight-body seed passed.
+Every rejected root had an unavailable typed motif. The
+[restricted embedding report](../results/growth-z004-integer-embedding-20261004/REPORT.md)
+and [receipt](../results/growth-z004-integer-embedding-20261004/receipt.json), SHA256
+`5a5a8bac689b8d40c77aa6428e9a31520c7bc4fb6e226489a12505f5a9ac5092`,
+preserve these obstructions. **All of those component failures are resolved
+by the unrestricted native-monomer embedding above.** They must not be
+presented as failures of native registry, evidence that missing families
+prevent three-dimensional assembly, or evidence of thermodynamic instability.

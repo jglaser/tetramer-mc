@@ -1,11 +1,13 @@
 # Prospective atlas transport inside a flexible surrogate chain
 
-This is a source-level design, not an implementation, launch plan or new test
-allocation. **Do not code or launch this extension until the completed internal
-native audit has been interpreted.** The current contact comparison shows no
+This records the original rigid-atlas-plus-local design and the decision from
+the now-completed internal-native audit. **The rigid-only atlas mixture below
+has not been promoted or launched.** The revised next candidate is a
+[partner-anchored coordinate atlas](#decision-after-the-completed-native-audit),
+which directly changes the pair's relative pose. The contact comparison shows no
 consistent guided-versus-flat flexible ESS/CPU gain and no external contact in
 the 24 flexible chains. It does not establish whether internal native registry
-improved. That separate question remains with the running native observer.
+improved. The completed native observer now supplies that separate evidence.
 
 The proposed intervention changes spatial reach: mix a cooperative atlas move
 of the current pair with the existing single-member inner moves. Keep the
@@ -238,3 +240,58 @@ and validate that allocation separately before collecting new samples.
   [completed evolving-dimer diagnosis](evolving-dimer-benchmark.md),
   [completed two-root/score evidence](dimer-surrogate-inner-chain.md), and
   [internal-native audit scope](surrogate-internal-native-comparison.md).
+
+## Decision after the completed native audit
+
+The [completed audit](surrogate-internal-native-comparison.md#completed-native-audit-and-decision)
+finds no native production occupancy in all 24 newly audited prepared-start
+rigid/flexible histories. The source-start observations in those new arms
+reach only motif 6; guided flexible m8 improves native-presence ESS per CPU over
+flat8 in only one of four streams. The reused nonlocal m4 reaches motifs 3, 6
+and 7 from some prepared starts. These are accessibility and initialization
+results, not equilibrium basin weights.
+
+A common rigid map preserves \(g_0^{-1}g_1\); adding it alone cannot directly
+repair the observed internal-registry gap. The smaller, targeted next baseline
+is therefore a **partner-anchored coordinate map**. Each inner attempt chooses
+one of the two tetramers with probability 1/2, then chooses an atlas proposal
+with fixed probability 1/4 or the existing local proposal with probability 3/4.
+The atlas call is `propose_members([current[slot]], handle=0, pool=[current[other]])`.
+It replaces only the selected tetramer's pose. Both tetramers retain their
+supplied rigid intratetramer geometry.
+
+The other tetramer is unchanged during this coordinate move. Consequently its
+anchor pose is identical in the paired reverse move even though it changes
+between inner steps. Conditional detailed balance at each fixed partner pose
+therefore extends to detailed balance on the full twelve-dimensional pair
+measure after integrating over the partner. No additional anchor-selection
+factor arises for this one-element pool. A pool chosen using the moving
+tetramer's current neighborhood would require a different argument and is not
+part of this baseline.
+
+Use the helper's complete learned branch correction in
+\(\Delta S+\log q_{\rm rev}/q_{\rm fwd}\), inside each inner MH decision.
+For its separately labeled uniform branch, explicitly check source and target
+support in the same frozen cube. A source outside that cube has zero reverse
+support and produces a recorded rejection, with no retry. Null proposals, hard
+rejections and MH rejections all consume one step. The random mode/coordinate
+mixture and a fixed horizon preserve reversibility of the common
+\(1_D\exp S\) target. The final flexible two-singleton bath still receives only
+\(S_0-S_m\); no inner proposal correction is added twice.
+
+Retain a **direct physical coordinate-map control**: one proposal from exactly
+the same atlas/local/slot mixture followed by one physical decision with bath
+weight plus that proposal correction. This control omits the surrogate filter.
+Compare direct, guided m1, guided m8 and flat8 with the same atlas, local scales,
+starts, spectator geometry and outer local schedule. Guidance has shown no
+consistent efficiency advantage, so guided-versus-flat alone is insufficient.
+The existing pointwise delayed-acceptance inequality still applies to m1.
+
+Implementation is underway as an optional conditional-kernel method. Production
+defaults, examples, executable and run allocations are unchanged. No benchmark
+has been launched. Before doing so, check the conditional map's inverse trace,
+uniform support, hard/score rejection accounting, fatal-state atomicity and the
+full correction, then run an independent reference-limit comparison. Assess
+native occupancy and motif exchanges separately by initialization, with full
+CPU and absent-state diagnostics. Atlas coverage, hard destination failures,
+source-tail penalties and noisy bath costs can still defeat this proposal.

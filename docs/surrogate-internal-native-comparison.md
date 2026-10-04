@@ -160,7 +160,7 @@ No partial native-observer outcome is included here. The completed contact
 results retain the conditional physical scope above and do not decide
 finite-system assembly or native registry.
 
-The completed-only native presentation tool is now implemented in
+The completed-only native presentation tool is implemented in
 `tools/plot_surrogate_internal_native.py`. It shows all 64 chains separately:
 native occupancy and occupied-frame counts, motif-presence ESS per full CPU,
 nonempty returns, all fourteen motif marginals and 32 same-stream initialization
@@ -173,11 +173,97 @@ source binding, sample/CPU consistency, rare and constant occupancy, and all
 three PNG/SVG renderings. Receipt:
 `results/surrogate-internal-native-plot-validation-20261004/attempt01/validation.json`,
 SHA256 `7e3efde58f3670b8ba6fb42fa2f91bf26d627ec3d6f4ac4f46983aedcf973028`.
-No scientific plot has been generated from the running observer. After its
-complete successful terminal record, use a fresh output directory:
+The observer subsequently completed successfully. Its completed plots and
+interpretation follow below. For another presentation of this completed
+record, use a fresh output directory:
 
 ```sh
 /home/xvg/protein-nucleation/.venv/bin/python -B tools/plot_surrogate_internal_native.py \
   --root /vast/xvg/tetramer-mc-runs/surrogate-internal-native-20261004 \
   --output /absolute/fresh/native-figure-directory
 ```
+
+## Completed native audit and decision
+
+The full observer completed and drained on 4 October. It classified 48 new
+rigid/flexible histories and reused sixteen completed local/m4 controls. All
+221,232 retained endpoints in the new histories were accounted for, using
+133,138 pair queries and an exact-pose cache. There were no new physical draws,
+external-pair queries or contact-geometry queries. Both classifier fixtures
+passed. The analysis used 1,569.61 CPU seconds; observer CPU is separate from
+the full sampler CPU used for sampling-efficiency comparisons.
+
+Here **internal** means the relative registry of selected tetramers 27 and 132.
+Each tetramer's four-protein geometry stays rigid. This audit does not measure
+native registry between those tetramers and the 262 frozen spectators, or assess
+cycles in an all-mobile assembly.
+
+All **24 newly audited proposal-prepared histories**—twelve rigid and twelve
+flexible—have zero production internal-native occupancy. Their constant
+presence indicators have undefined ESS, not high efficiency or demonstrated
+zero equilibrium weight. Native observations from the new source-start histories
+are all motif 6. These starts have markedly different observed native occupancy:
+
+| Arm | Source-start native fractions, streams 0–3 | Prepared-start native fractions |
+| --- | --- | --- |
+| Local, reused | .3020, .7087, .3289, .5559 | 0, 0, 0, 0 |
+| m4, reused | 0, .4048, .2788, .0410 | 0, .1487, 0, .1633 |
+| Flexible m1 | 0, .3733, .3005, .0471 | 0, 0, 0, 0 |
+| Flexible guided m8 | .3545, .3284, .5178, .1892 | 0, 0, 0, 0 |
+| Flexible flat8 | .1313, .6909, .4019, .4045 | 0, 0, 0, 0 |
+| Rigid guided m8 | .2888, .4277, .7837, .8286 | 0, 0, 0, 0 |
+| Rigid flat8 | .1360, .5896, .7190, .8518 | 0, 0, 0, 0 |
+
+The guided flexible m8 / flat8 native-presence ESS per full sampler CPU ratios
+are **0.151, 0.689, 4.318 and 0.682**, respectively, for source streams 0–3.
+Only stream 2 improves. Its nonempty-return counts are 6, 6, 12 and 6, versus
+9, 10, 10 and 13 for flat8; returns per CPU also improve only in stream 2.
+Against local moves, guided m8 improves ESS per CPU in two of four streams.
+Rigid guided m8 has lower native-presence ESS per CPU than rigid flat8 in all
+four source streams. These finite-record comparisons give no consistent
+native-sampling benefit from the tested guidance.
+
+The reused nonlocal m4 control is informative despite its earlier low acceptance
+and cost. From prepared streams 1 and 3 it occupied a native motif for 609 and
+669 of 4,096 production frames, visiting motifs 3/6 and 3/6/7, respectively.
+Its source stream 2 also visited motifs 6/7. Those observations establish some
+nonlocal relative-pose accessibility; they neither demonstrate equilibrated
+motif weights nor turn m4 into an efficient assembly algorithm.
+
+![Every native motif and stream](../results/surrogate-internal-native-figure-20261004/internal-native-motifs.png)
+
+The [efficiency figure](../results/surrogate-internal-native-figure-20261004/internal-native-efficiency.png)
+keeps occupancy, occupied-frame counts, undefined ESS and returns together. The
+[initialization figure](../results/surrogate-internal-native-figure-20261004/initialization-differences.png)
+shows the same-stream differences without pooling streams or starts.
+Only completed scalar records were used for these figures; no geometry was
+replayed. Instantaneous threshold crossings can flicker and are not independent
+basin passages or physical kinetic rates.
+
+This evidence changes the next proposal choice. A common rigid atlas transport
+preserves \(h=g_0^{-1}g_1\) and therefore cannot directly change the selected
+pair's internal registry. Local internal steps did not connect the observed
+prepared and source supports here. Before adding a larger mode mixture, test
+a **single-tetramer atlas map anchored to its other mobile partner**, mixed
+with the existing local proposals. The partner is fixed during that coordinate
+move, so it supplies the same anchor in both directions. This changes \(h\)
+over the map's full scale and targets the observed accessibility gap directly.
+It still needs the complete forward/reverse correction, the common physical
+bath and a direct physical control. It is a hypothesis under implementation,
+not a measured improvement. See the
+[revised sampling design](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit).
+
+Authoritative result:
+`/vast/xvg/tetramer-mc-runs/surrogate-internal-native-20261004/analysis/summary.json`,
+SHA256 `3baa409dfb071a9b9315c5ca17c4ebb93a8b6c5eb2ace6879cf78052219f2f5e`.
+The controller's complete/drained summary has SHA256
+`ef6ab98f4509d1a76e673f1b20ed280b1ed97135cf42dccd641d8eada237410a`.
+The [plot execution receipt](../results/surrogate-internal-native-figure-20261004/execution-receipt.json)
+has SHA256 `54e270b9ff48f56dff64742f5fe35622ef435e3faec98486b931ed73155d26fb`;
+the [plot receipt](../results/surrogate-internal-native-figure-20261004/plot-receipt.json)
+has SHA256 `cef93baabd5d2b78263a368f8963160db004f3cd065304dcdbd60f8784d9add4`.
+
+The conditional target remains radius 1.4 Å, activity 0.0275 Å⁻³, and the saved
+500 μM environment. Initialization disagreement leaves mixing unresolved.
+Nothing here establishes finite-system native assembly or instability at the
+original 1.5 Å / 0.035 Å⁻³ / approximately 106.8 μM decision conditions.

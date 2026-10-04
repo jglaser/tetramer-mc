@@ -26,6 +26,7 @@ pub mod native_entry;
 pub mod native_region;
 pub mod normalizer;
 pub mod overlap_weight;
+pub mod pair_selection;
 pub mod proposal;
 pub mod rj;
 pub mod simulation;

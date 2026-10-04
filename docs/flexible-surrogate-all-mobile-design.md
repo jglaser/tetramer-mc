@@ -77,6 +77,29 @@ attempts would instead make a particular local pair increasingly unlikely.
 The defensive component maintains support; it does not remove the proposal
 penalty for an endpoint supported only by its global tail.
 
+The standalone `DefensivePairSelector` in `src/pair_selection.rs` now implements
+this discrete law. `draw` retains the ordered labels and reports the complete
+mixture density; `evaluate` and `log_reverse_minus_forward` scan the actual
+endpoint poses, including a moved root and partner. The sampled mixture branch
+is diagnostic only. This first implementation uses ordinary Euclidean center
+distance with an inclusive cutoff, not periodic minimum images or hard-contact
+classification. It remains disconnected from the production phases and final
+physical gate.
+
+Six focused Rust tests passed: enumerated normalization including empty
+neighborhoods, complete-mixture probabilities, changed endpoint eligibility,
+seeded-prefix RNG replay, invalid inputs, and an eight-state target with
+label-dependent involutive proposals. The last test checks full transition rows,
+diagonal rejection, detailed balance and invariance; omitting or reversing the
+selection correction fails its controls. The tiny-defensive-probability check
+covers log-density arithmetic, not exact floating-point RNG probabilities.
+Validation is recorded in
+`results/pair-selection-validation-20261004-attempt02/validation.json`. The
+initial compile failure from an unsupported `StdRng::clone` in a test is retained
+in the preceding attempt. Builds used a fresh `/tmp` target; production and
+active-campaign executables/source bundles remained byte-identical. No physical
+draws or assembly runs were made by these tests.
+
 An alternative retains the existing fixed-duration event clock and bounded
 pair rates `a_ij(X)`. Its correction is `log a_ij(Y) - log a_ij(X)`, with no
 total-rate ratio: state-dependent holding times supply that part. A fixed

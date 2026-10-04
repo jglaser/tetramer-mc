@@ -50,6 +50,14 @@ one newly observed solution pair. The many observed threshold returns do not
 demonstrate physical exchanges. The [history figure and report](expanded-native-contact-diagnostic-20261004.md#completed-histories-accessibility-and-growth-are-different)
 separate this positive accessibility evidence from the remaining growth limit.
 
+Exact enumeration now finds 12–16 vacant cooperative catalogue placements on
+each of the four blind solution quartets and 33 on its nine-body seed
+component. Thus the retained ideal structures are not terminal through a lack
+of site-disjoint native extensions. The
+[extension figure and scope](expanded-native-contact-diagnostic-20261004.md#vacant-cooperative-extension-sites)
+separate this geometric result from the still-untested atomic clearance and
+binding weights in the surrounding fluid.
+
 ## Completed growth comparison
 
 At radius 1.4 Å, activity 0.04 Å⁻³ and 500 μM, two completed N=264 histories
@@ -97,8 +105,8 @@ promoting the current flexible kernel into assembly production.
 
 ## Physical weights and completed native observer
 
-The independent physical-weight campaign remains active. The native observer
-has now completed:
+The primary physical-weight campaign and its postrun have completed; the new
+sensitivity follow-up is active. The earlier native observer also completed:
 
 - The independent physical-weight campaign at
   `/vast/xvg/tetramer-mc-runs/native-class-physical-primary-20261004` uses the
@@ -172,9 +180,22 @@ new native prior. The matched 32-chain campaign has now completed at
 worker, two reused initializations and four streams per arm. Eight completed
 local controls are the primary comparison; 32 additional completed controls
 remain contextual. All sixteen observer/preparation tests passed. The
-147,488 retained endpoints receive contact and separate instantaneous
-native-label analyses after the full allocation. Those postrun analyses are
-being completed before reporting a protein efficiency result.
+147,488 retained endpoints have completed contact and instantaneous
+native-label analyses. A separately validated expanded observer has also
+completed all 221,232 endpoints from the 32 new chains and sixteen reused
+controls, adding the twenty missing native placements without altering the
+old labels or sampling kernels.
+
+The [expanded comparison and figure](partner-atlas-expanded-native-comparison.md)
+show native accessibility hidden by the old catalogue: guided m8 has mean
+native fractions of 69.4% and 72.5% from its two starts, versus 47.4% and zero
+for local moves. However, its placement histograms still differ (descriptive
+TV 0.2271), and one prepared stream remains in a single native placement for
+all production. Generic contact-fingerprint apparent ESS/CPU is below local
+in all eight m8 comparisons, with median ratio 0.4273. High native occupancy
+and similar means therefore do not establish equilibrium mixing or an
+assembly speedup. The m4 control also reaches supplemental native placements
+frequently but includes trapped streams.
 The native-label adapter has passed eight synthetic tests, including complete
 inventory admission, rejected residence, multilabel caching, full-CPU metrics
 and failure-prefix preservation. It requires the completed contact/arithmetic
@@ -182,17 +203,19 @@ observer first and reuses sixteen cached native controls without reading their
 old trajectories. The contact-analysis handoff passed fifteen tests and refuses
 incomplete allocations. The subsequent native handoff passed fourteen tests
 and refuses dispatch before that contact analysis completes. The handoff
-watcher has now dispatched the completed-campaign contact analysis.
+watcher completed both previously declared analyses successfully.
 The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
 records the balance argument and retains a direct physical control.
 
-A reviewed handoff watcher now waits for completion and controller exit before
+A reviewed handoff watcher waited for completion and controller exit before
 starting the two already validated analyses serially. Twelve synthetic
 lifecycle/deadline tests passed. Its frozen record is
 `results/partner-atlas-autonomous-handoff-20261004/freeze.json`, SHA256
 `fabbcefb49f568ea462bb26cab6acd9bd3a1c334569b216fb5d6eeb438e73457`.
-It adds no physical draws, refuses retries, preserves failures, and waits at
-most six hours; the analysis workers retain their own frozen resource limits.
+It added no physical draws, refused retries and preserved failures. The
+separate expanded-observer handoff also completed; its 23 observer/preparation
+tests and six dispatch checks passed. That observer retained all rejected
+residence and classified both new histories and reused controls consistently.
 
 A standalone defensive pair selector and a checked Lean selection theorem are
 ready for later all-mobile integration. State-dependent pair selection enters
@@ -214,6 +237,15 @@ The three missing sensitivity arms are now running in a separately frozen
 24-population follow-up, with the completed primary controls external and
 unchanged. Fourteen focused tests and the actual source/metadata preflight
 passed. The existing 32-chain partner-atlas simulation also completed; its
-previously validated contact and native observers are dispatched by the
-existing handoff watcher. No production assembly kernel has been promoted
+previously validated contact and native observers, including the supplemental
+catalogue, have completed. No production assembly kernel has been promoted
 on accepted-move throughput alone.
+
+The N=12/N=24 bank's archived application sources were recovered exactly from
+commit `9f2ae102ed100df68ad582d52043accd16490646`, including all 399 pinned
+vendor files. Its 49 archived application/source files match the prepared
+bank. The [isolated release build](finite-assembly-baseline-release-20261004.md)
+passed the same forty integration and one configuration references, with all
+children drained and source bindings rechecked. The existing production
+executable is unchanged. This closes an executable-provenance prerequisite;
+it does not open the physical convergence gate or launch the assembly bank.

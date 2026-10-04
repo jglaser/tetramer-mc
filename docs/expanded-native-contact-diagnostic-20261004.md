@@ -133,6 +133,42 @@ retains original, supplemental and union counts, baseline labels, every saved
 frame, persistence episodes and descriptive slopes. No equilibrium conclusion
 follows from these two trajectories.
 
+## Vacant cooperative extension sites
+
+The four geometry-only solution quartets are **not terminal under the exact
+34-placement catalogue**. Keeping each already selected ideal embedding fixed,
+enumeration finds 12, 16, 12 and 12 vacant placements contacting at least two
+distinct existing tetramers. Each quartet has four or six three-neighbor
+placements. The nine-body geometry-only seed component has 33 cooperative
+placements, including one with four neighbors; the sixteen-body informed seed
+has 62, including one with five neighbors.
+
+![Exact catalogue extensions and an example ideal quartet](../results/native-oligomer-extension-design-20261004/figure/extension-slots.png)
+
+For every existing body operator H and catalogue placement M, the diagnostic
+constructs HM, deduplicates the complete operator, independently checks every
+relative contact, and rejects candidates sharing any occupied monomer site.
+It retains all 113 nontrivial components and their original embedding
+witnesses. All 13,022 products were examined, producing 9,952 distinct candidate
+operators before occupied-site rejection. Aliases never inflate the number of
+neighboring bodies. A separate output check found no duplicate unordered
+monomer-site sets among the vacant operator slots.
+
+This is a native-informed **diagnostic**, not a prior supplied to the blind
+proposal. The slots describe isolated ideal components. Site disjointness is
+not an atomic hard-overlap test, surrounding-particle clearance, finite basin
+volume, or binding free energy. The result rules out a simple catalogue/site
+exhaustion explanation for these retained ideal oligomers. Actual thermal
+clearance and statistical weight remain to be tested before attributing the
+growth stall to sampling or thermodynamics.
+
+The [procedure and source](../results/native-oligomer-extension-design-20261004/PROCEDURE.md)
+record the predeclared inventory and limits. Twelve synthetic controls passed,
+including an independent finite-grid oracle, inverse composition, aliases,
+gauge changes and occupied-site blocking. Enumeration completed in 1.52 CPU
+seconds without atom queries. Receipt SHA256:
+`d79ea6d00f6f745d85f5807726054e4eb722171d30e5099430da47e748c8ee9e`.
+
 ## Reproducibility
 
 - Supplemental classifier: 13 synthetic tests passed, including direction,

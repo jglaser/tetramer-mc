@@ -164,3 +164,9 @@ Nine focused implementation tests had passed before preparation. Executable,
 observation window and dispatcher remain unresolved; no assembly runs were
 started. This prepares the requested size, initial-condition, proposal-family
 and boundary controls without claiming their equilibrium behavior.
+
+The [4 October isolated release rebuild](finite-assembly-baseline-release-20261004.md)
+now supplies an executable from the exact archived application/dependency
+source, with all 41 existing release reference checks passed. The bank remains
+unchanged and unlaunched; production-window, dispatch, expanded starting-state
+observation and physical-evidence obligations remain.

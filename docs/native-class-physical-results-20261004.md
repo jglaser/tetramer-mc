@@ -176,6 +176,19 @@ completion of all new stages; comparison then uses the completed independent
 population summaries. No primary jobs are manufactured in the new lifecycle,
 and sensitivity completion is not the same as passing its scientific checks.
 
+A reviewed postrun handoff is now running. It waits for all 121 declared stages
+to complete and drain, and for the original controller to exit, before invoking
+the unchanged frozen admission and comparison entry points serially. Its
+24 synthetic lifecycle tests pass, including failed-admission sequencing,
+deadline/capacity checks, no second dispatch, and subprocess timeout draining.
+Each analysis receives 600 CPU seconds, 1,200 wall seconds and 2 GiB; the
+watcher has a 74-hour deadline and adds no physical draws. Frozen source and
+input identities are checked again at dispatch. Record:
+`results/native-class-physical-followup-handoff-20261004/freeze.json`, SHA256
+`5ba56d5e929162f8d63d5850c1160d30d5c499b4e2dccffe013f9da94d4cab27`.
+It will preserve failures and leave scientific convergence decisions separate
+from successful execution.
+
 In parallel, the completed expanded growth histories and the partner-atlas
 benchmark address accessibility and contact exchange. Finite-system assembly
 and instability both remain unresolved.

@@ -68,7 +68,7 @@ The aggregate results do **not** open the convergence gate:
   of observed native weight is at latent radius 3–4. That is a reason to
   investigate the boundary and remaining space, not to discard these draws.
 - New class-guide population-size, defensive-probability and cloud-intensity
-  studies have not run. The **original conditional-ray allocation of 786,432
+  studies are not yet complete. The **original conditional-ray allocation of 786,432
   draws already completed** and retains its failed convergence result; it will
   not be repeated or relabeled as this follow-up.
 - The atomic-wall domain outside R4 remains unresolved. A tiny competitor
@@ -79,7 +79,7 @@ There were no unbound observations and no native-entry/unbound classifier
 inconsistencies. Absence is not a zero-mass proof. Independently, the previously
 completed calculation provides the deterministic bound
 
-`log Q_unbound(R4) ≤ −9.8079042`
+`log Q_unbound(R4) ≤ log[V6(4) max J] ≈ −9.8079042`
 
 for both hard-only and depletion weights. Its region bytes, repaired shape and
 Cayley/Haar convention match this calculation exactly. An unbound pose has
@@ -146,8 +146,36 @@ coverage outside R4.
   native R4” to avoid describing the reference-region complement as a purely
   radial shell. Numerical results are unchanged.
 
-The next sensitivity allocation uses three new independent class-guide arms,
-with completed primary controls reused externally. In parallel, the broader
-growth-history observer and the partner-atlas benchmark test accessibility
-and contact exchange. Finite-system assembly and instability both remain
-unresolved.
+The sensitivity follow-up is now running at
+`/vast/xvg/tetramer-mc-runs/native-class-physical-followup-20261004`:
+
+| New class-guide arm | Populations × draws | Defensive probability | Auxiliary λ/z |
+| --- | ---: | ---: | ---: |
+| Larger populations | 8 × 65,536 | 0.5 | 128 |
+| Defensive probability | 8 × 16,384 | 0.2 | 128 |
+| Cloud intensity | 8 × 16,384 | 0.5 | 64 |
+
+These 786,432 **new** draws use the unchanged frozen 116-component guide;
+they are distinct from the completed original conditional-ray campaign.
+Physical depletant activity remains 0.035 Å⁻³ in every arm. Completed primary
+populations remain external controls and are not replayed. Every attempted
+draw and both Poisson clouds are retained in the existing audit pipeline.
+
+The new orchestration passed fourteen synthetic tests and an actual
+metadata-only preflight. It preserves 137 historical stratum keys, including
+six newly flagged keys, with all 223 primary Qz/Q0 issue records. The seed
+inventory covers existing repository and `/vast` declarations. The frozen
+121-stage execution uses one worker/thread, with approximately forty hours
+expected from primary timings, subject to the declared per-stage limits.
+Execution-plan SHA256:
+`185b8f43095da1de70113ea1f8db27df765090acd7045d0b1105ff0b3c97973f`.
+
+The new entry points are `tools/prepare_native_class_physical_followup.py`
+and `tools/postrun_native_class_physical_followup.py`. Admission follows
+completion of all new stages; comparison then uses the completed independent
+population summaries. No primary jobs are manufactured in the new lifecycle,
+and sensitivity completion is not the same as passing its scientific checks.
+
+In parallel, the completed expanded growth histories and the partner-atlas
+benchmark address accessibility and contact exchange. Finite-system assembly
+and instability both remain unresolved.

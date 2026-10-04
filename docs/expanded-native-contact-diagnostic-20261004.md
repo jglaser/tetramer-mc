@@ -91,11 +91,47 @@ The four separate geometry-only four-tetramer components have RMS errors of
 are 2.40 Å and 1.40 Å, respectively; a component RMS is not a bound on every
 member error. Maximum body-orientation errors are 3.70° and 2.23°. These fits
 support interpreting the classified endpoint components as native-lattice
-arrangements. A separately frozen full-history observer is needed to
-distinguish their initial presence, formation, loss, and reformation.
+arrangements. The separately frozen full-history observer has now completed,
+distinguishing initial presence from later observations without changing the
+original labels.
 
 Finite-system stability remains unresolved pending physical weights,
 independent-start agreement, reversible exchanges, and size/boundary checks.
+
+## Completed histories: accessibility and growth are different
+
+Both runs began with thirteen original seed bonds, **zero supplemental
+contacts, and zero solution contacts**. All seventy supplemental labels in the
+geometry-only final frame appeared after initialization. The final solution
+inventory is 53 dimers, eight trimers and four quartets of tetramers. Its only
+seed addition first appears at sweep 5,200; its largest solution component
+first reaches four at sweep 15,500 and never exceeds that size.
+
+![Expanded contact histories](../results/growth-z004-supplemental-history-figure-20261004/contact-history.png)
+
+These historical runs use 1.4 Å / 0.04 Å⁻³ / 500 μM, N=264, a supplied
+eight-tetramer seed and correlated initializations. In the last 25,000 sweeps,
+the geometry-only history finds only **one new solution pair**, versus 34
+returns of previously seen pairs across the saved entry threshold. Its seed
+stays at nine and solution components stay at most four. The informed history
+finds thirteen new solution pairs and 37 returns, while ending with a seed
+size of sixteen and maximum solution component of ten.
+
+The supplemental geometry-only labels are usually persistent at the saved
+cadence: 144 of 185 observed episodes span at least 1,000 sweeps, 85 span at
+least 10,000, and seventy are still present at the final frame. Only twelve
+appear at one saved frame. These are consecutive saved observations, with
+explicit censoring, not physical residence times. Threshold flicker can
+produce a loss and return within the same physical contact; these counts do
+not establish completed attachment/detachment or environment exchanges.
+
+The new evidence establishes formation of native-registered solution
+oligomers under this proposal. It also locates the observed stagnation in
+growth beyond those oligomers. The
+[full history report](../results/growth-z004-supplemental-history-figure-20261004/report.md)
+retains original, supplemental and union counts, baseline labels, every saved
+frame, persistence episodes and descriptive slopes. No equilibrium conclusion
+follows from these two trajectories.
 
 ## Reproducibility
 
@@ -128,3 +164,13 @@ independent-start agreement, reversible exchanges, and size/boundary checks.
   63.5; it is not an end-to-end sampler speedup. Receipt:
   `results/supplemental-center-pruning-20261004/receipt.json`, SHA256
   `4af3fc492cb5dbb690e25beb71c10467180ddbbc0fce4bc930dda41722090ff1`.
+- Full-history observer: twelve synthetic tests passed; all 2,002 frames
+  completed in 163.01 CPU / 194.57 wall seconds, using 262,538 monomer contact
+  queries. Conservative center pruning retained 1,200,437 new pair queries
+  from a complete 69,432,000-pair inventory for the 2,000 noncached frames.
+  Both completed final endpoints and every old label were reused. Receipt:
+  `/vast/xvg/tetramer-mc-runs/growth-z004-supplemental-history-20261004/analysis/receipt.json`,
+  SHA256 `24b6658c85ed9b9bfea8416dd05b8284a6b8bb4c41dad4034c03939025082f86`.
+- The independent history reduction checked every union label/pair episode,
+  including timing and censoring. Plot receipt SHA256:
+  `55c641c42118a941a7976cbbb83e4675daf6925120c33d3bc0a2eaacecdbf6a1`.

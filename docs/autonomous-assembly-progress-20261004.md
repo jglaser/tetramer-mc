@@ -43,6 +43,13 @@ that the old physical region “contact without native entry” must not be read
 as proof of nonnative monomer geometry. Running analyses keep their frozen
 region definitions.
 
+The full expanded histories have now completed. Both began with no supplemental
+or solution contacts. The geometry-only history forms native-registered
+solution oligomers up to four tetramers, but its last quarter contains only
+one newly observed solution pair. The many observed threshold returns do not
+demonstrate physical exchanges. The [history figure and report](expanded-native-contact-diagnostic-20261004.md#completed-histories-accessibility-and-growth-are-different)
+separate this positive accessibility evidence from the remaining growth limit.
+
 ## Completed growth comparison
 
 At radius 1.4 Å, activity 0.04 Å⁻³ and 500 μM, two completed N=264 histories
@@ -160,22 +167,22 @@ partner-atlas arms. An isolated release build passed all fifteen kernel tests
 and all 23 example tests, including restarts and preservation of the original
 local schedule. The bound model is the existing geometry-only FFT atlas, with
 zero transport correlation and its defensive uniform branch; it supplies no
-new native prior. The matched 32-chain campaign is now running at
+new native prior. The matched 32-chain campaign has now completed at
 `/vast/xvg/tetramer-mc-runs/partner-atlas-dimer-context0-20261004`, with one
 worker, two reused initializations and four streams per arm. Eight completed
 local controls are the primary comparison; 32 additional completed controls
 remain contextual. All sixteen observer/preparation tests passed. The
-147,488 retained endpoints will receive contact and separate instantaneous
-native-label analyses only after the full allocation completes. No protein
-efficiency result is available yet.
+147,488 retained endpoints receive contact and separate instantaneous
+native-label analyses after the full allocation. Those postrun analyses are
+being completed before reporting a protein efficiency result.
 The native-label adapter has passed eight synthetic tests, including complete
 inventory admission, rejected residence, multilabel caching, full-CPU metrics
 and failure-prefix preservation. It requires the completed contact/arithmetic
 observer first and reuses sixteen cached native controls without reading their
 old trajectories. The contact-analysis handoff passed fifteen tests and refuses
 incomplete allocations. The subsequent native handoff passed fourteen tests
-and refuses dispatch before that contact analysis completes. Neither observer
-has classified this running campaign.
+and refuses dispatch before that contact analysis completes. The handoff
+watcher has now dispatched the completed-campaign contact analysis.
 The [revised construction](mixed-atlas-surrogate-design.md#decision-after-the-completed-native-audit)
 records the balance argument and retains a direct physical control.
 
@@ -202,3 +209,11 @@ unmeasured vessel contribution. The existing N=12/N=24 input bank remains
 prepared, not validated assembly production. Finite-system stability requires
 the independent-start, size, boundary and physical-weight evidence specified
 in the original plan.
+
+The three missing sensitivity arms are now running in a separately frozen
+24-population follow-up, with the completed primary controls external and
+unchanged. Fourteen focused tests and the actual source/metadata preflight
+passed. The existing 32-chain partner-atlas simulation also completed; its
+previously validated contact and native observers are dispatched by the
+existing handoff watcher. No production assembly kernel has been promoted
+on accepted-move throughput alone.

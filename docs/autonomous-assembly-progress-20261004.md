@@ -249,3 +249,18 @@ passed the same forty integration and one configuration references, with all
 children drained and source bindings rechecked. The existing production
 executable is unchanged. This closes an executable-provenance prerequisite;
 it does not open the physical convergence gate or launch the assembly bank.
+
+The [expanded starting-state audit](finite-start-expanded-native-20261004.md)
+has now completed all 48 assets and 8,208 pairs. No supplemental native
+placements were found: the competing and dispersed starts remain without
+native contacts, while the supplied eight-tetramer seeds retain thirteen
+contacts. All exact graph checks completed without unresolved components or
+periodic winding. The existing preparations were retained without redraws.
+
+A separate analytic bound also excludes all twenty supplemental native
+placements from the frozen R4 contact-weight region, against both fixed
+neighbors and in either pair order. An independent calculation agrees with
+the geometric margins to 2.85e-14 Å. Thus the new trajectory labels do not
+reclassify the completed regional mass contrast. This resolves a definition
+ambiguity, not the remaining convergence or full-vessel mass questions; see
+the [updated regional report](native-class-physical-results-20261004.md).

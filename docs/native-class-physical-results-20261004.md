@@ -53,6 +53,19 @@ efficiencies; they exclude audit cost and do not measure trajectory mixing.
 
 ## What remains unresolved
 
+The subsequently expanded native catalogue does **not** reclassify any part
+of this frozen R4 domain. A separate metadata-only bound excludes all twenty
+additional placements against both fixed neighbors. The entire translation
+projection fits within 3.13556 Å of its mean, while a necessary member-position
+match lies farther away. The smallest separation margin is 15.0250 Å for the
+direct pair order and 0.38435 Å after allowing the additional displacement
+from reversing the finite-tolerance gate. Exact inverse closure and an
+independent quaternion/frame calculation were checked. This is an analytic
+sufficient bound evaluated with explicit floating-point allowances, not a
+formal interval certificate. The [derivation and reproducible calculation](../results/r4-supplemental-exclusion-20261004/README.md)
+leave the classifier and physical estimates unchanged. The exclusion applies
+only to R4; expanded labels remain relevant elsewhere in the vessel.
+
 The aggregate results do **not** open the convergence gate:
 
 - The report retains 223 unresolved stratum comparisons across physical

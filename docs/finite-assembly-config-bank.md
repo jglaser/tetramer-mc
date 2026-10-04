@@ -170,3 +170,9 @@ now supplies an executable from the exact archived application/dependency
 source, with all 41 existing release reference checks passed. The bank remains
 unchanged and unlaunched; production-window, dispatch, expanded starting-state
 observation and physical-evidence obligations remain.
+
+The subsequent [expanded starting-state observation](finite-start-expanded-native-20261004.md)
+completed all 48 states without changing their preparations: none has a
+supplemental contact, and every supplied seed retains its thirteen original
+contacts. This closes the expanded starting-state coverage check; the bank
+remains unlaunched.

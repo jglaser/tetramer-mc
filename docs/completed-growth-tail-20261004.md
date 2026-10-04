@@ -108,3 +108,102 @@ equilibrium finite-system assembly or instability. The independent contact-mass
 calculation and [corrected surrogate-chain comparison](dimer-surrogate-inner-chain.md)
 remain separate requirements. No production kernel or live simulation was
 changed by this analysis.
+
+## Completed z = 0.04 proposal comparison
+
+Two other completed 100,000-sweep histories now have the same strict native
+observer applied to every saved frame. These use radius 1.4 Å, activity
+0.04 Å⁻³, 264 mobile tetramers and 500 μM, with identical initial poses, eight
+native seed bodies and the same RNG seed. They are a historical proposal
+comparison, not independent replicates or an activity-controlled comparison
+with the preceding trajectory. The original 1.5 Å / 0.035 Å⁻³ / 106.8 μM
+decision conditions remain separate.
+
+| Completed history | Native-informed coverage | Native-blind FFT 512 |
+| --- | ---: | ---: |
+| Cycle-certified seed component, initial → final | 8 → 16 | 8 → 8 |
+| Maximum seed component | 18 | 8 |
+| Final registered edges involving at least one original solution body | 236 | 16 |
+| Largest separate cycle-certified native component, final | 10 | 2 |
+| Saved seed-member entries / exits | 16 / 8 | 0 / 0 |
+| Final-quarter edge gains / losses, whole system | 53 / 50 | 16 / 16 |
+| Recorded sampler CPU, seconds | 379,436 | 430,983 |
+
+![Completed native-registry comparison](../results/growth-z004-native-figure-20261004/native-growth.png)
+
+The geometry-only history reaches native pairs but its separate registered
+components never exceed dimers. Outside the supplied seed, it visits only
+families 3/8 and 6/7; family 4/5 is absent throughout all 1,001 saved frames.
+The native-informed history has 60 final outside-seed edges in family 4/5,
+53 in 3/8 and 118 in 6/7. It forms larger native oligomers, yet its seed component
+has no net growth in the last 25,000 sweeps. Family 2/9 never appears outside
+the original seed in either history. These are observed family gaps, not
+estimates of zero equilibrium mass or proofs of which families are necessary
+for three-dimensional connectivity.
+
+The contrast motivates testing exchange between competing contacts and access
+to additional contact families. It does not distinguish a proposal barrier from
+thermodynamic preference: the histories have no independent-start convergence
+test. Native-edge turnover also does not establish oligomer attachment, which
+requires the separate exclusion-interface and move-replay diagnostics used
+above. No such geometry or move-log pass was added for this comparison.
+
+Both final exhaustive 34,716-pair checks agree with the accelerated observer.
+All 2,002 saved frames, including unchanged states, are retained; no unresolved
+or frustrated native components occur. This last statement is a classifier
+result, not certification that every exclusion aggregate is a native crystal.
+Between-frame excursions remain unresolved, and reported sweep/CPU changes
+are not physical rates.
+
+The authenticated analysis root is
+`/vast/xvg/tetramer-mc-runs/growth-z004-native-20261004`, execution-plan SHA256
+`911b312e323c1e56135b89cd6dfb3141bfc86138b2551eff50eba0ead66aa724`.
+The actual coverage and blind model hashes are respectively
+`feb4011c622c3104bbe909a29685bd7f077e28f0c847f630c69d8fa87939c20e`
+and `c460dc61fb7bf9e76f1d4dca77987b5886ea82cdda5d703ea5de6a25733fcb08`.
+The native manifests are `e992788eaf76bad0548077f70848784ba7db483d90098f23268e7c071fed6428`
+and `835dbc3c30aa18b4f1774866a06db35a263c548c177c340e8f7aa4f02e03be55`.
+The complete numeric summary and PNG/SVG figures are under
+`results/growth-z004-native-figure-20261004`; presentation receipt SHA256 is
+`12d6c42a423e26c98fe7368872116da7c5e7aa5ad99a7b70c2bf75642ef2ae7e`.
+The snapshot preparer passed eight synthetic checks and the plotter six;
+analysis reused the unchanged archived native observer and definition.
+
+## Which contact families can connect the reference tiling?
+
+A separate exact integer calculation now answers the connectivity question
+for the frozen certified tetramer tiling. Each motif supplies directed edges
+between four block types with integer tiling-image shifts. A spanning forest
+gives closed-walk translation vectors; their integer rank and lattice index
+determine whether repeating the selected ideal contacts connects chains,
+planes, or the full three-dimensional tiling. The translation basis is
+`(a,b,2c)`, with lengths `(79.1,79.1,75.8)` Å.
+
+| Available inverse-motif families | Translation rank in the reference tiling |
+| --- | --- |
+| 3/8 and 6/7, the blind history's observed outside-seed families | 1, along b |
+| Those two plus 4/5 | 2, in the a–b plane |
+| Those three plus any one of 0/1, 2/9 or 11/13 | 3, lattice index 1 |
+
+All 128 subsets of the seven families were enumerated component by component.
+Six integer-lattice controls, a disconnected-component control and 384 direct
+modular-cover connectivity checks passed. No geometric predicates, approximate
+transform compositions, trajectory replay or new physical samples were used.
+The [full report](../results/growth-z004-contact-topology-20261004/REPORT.md)
+and all subset/cycle witnesses are archived under
+`results/growth-z004-contact-topology-20261004`; receipt SHA256 is
+`40b1c1452350eac8ae9cba2b2035fb0beaf6e17646a9311e25da79f3a22d5f8f`.
+
+This sharpens, but does not complete, the sampling diagnosis. The blind-observed
+families already allow arbitrarily long native chains, so their rank-one
+limitation does **not** explain why that trajectory stops at dimers. Additional
+families are needed for three-dimensional connectivity, but **2/9 is not
+uniquely necessary**. The native-informed final family inventory already
+contains rank-three subsets despite its stalled seed. Their simultaneous
+presence in one suitably arranged component is a separate question.
+
+This is contact availability on the reference tiling, not a basin entropy,
+equilibrium probability, rigidity calculation or stability test. The trajectory
+observer's local registry and SE(3) cycle check also do not enforce this exact
+block-type/image assignment; the topology calculation cannot retrospectively
+certify the observed components' embedding into that unique tiling.

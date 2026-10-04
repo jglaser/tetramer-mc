@@ -55,8 +55,9 @@ each of the four blind solution quartets and 33 on its nine-body seed
 component. Thus the retained ideal structures are not terminal through a lack
 of site-disjoint native extensions. The
 [extension figure and scope](expanded-native-contact-diagnostic-20261004.md#vacant-cooperative-extension-sites)
-separate this geometric result from the still-untested atomic clearance and
-binding weights in the surrounding fluid.
+separate this ideal geometric result from the subsequent fixed-point and
+incoming-adjustment checks described below. Binding weights in the surrounding
+fluid remain unresolved.
 
 ## Completed growth comparison
 
@@ -278,6 +279,22 @@ all 52 points are hard-clear against ideal quartets, versus one against the
 measured quartets. Ideal minimum gaps are only 0.0369–0.0426 Å. This establishes
 the role of the measured distortions at those fixed positions, without
 excluding nearby incoming poses. Nine synthetic tests and an independent
-52-record audit passed. The next bounded diagnostic allows only the incoming
-tetramer to adjust, keeping the actual quartet fixed; optimizer failure will
-remain unresolved rather than proving collective motion necessary.
+52-record audit passed.
+
+The [incoming-only search](native-extension-incoming-search-20261004.md) has
+now completed for the same 52 points. With all existing bodies fixed, small
+incoming adjustments make 50/52 points quartet-clear and 34/52 entirely clear,
+retaining every intended native contact. Median motion is 0.377 Å / 0.590°;
+maximum motion is 0.937 Å / 1.894°. Sixteen quartet-clear points remain blocked
+by spectators. Both remaining quartet failures report numerical optimizer
+success, correctly overridden by their strict atomic clash certificates.
+Twenty-three synthetic tests and an independent audit of every slot and
+objective evaluation passed. The solve used 2.38 CPU seconds.
+
+This weakens the hypothesis that extension usually requires simultaneous
+motion of the existing quartet at these historical endpoints. It does not
+measure allowed proposal volume or physical binding weight. The next fixed
+control compares identical untruncated Gaussian kernels about the original
+and adjusted centers, retaining all 52 slots and every invalid draw. It remains
+native-informed and separate from geometry-only discovery and the running
+original-condition physical-weight sensitivity campaign.

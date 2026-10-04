@@ -1,10 +1,12 @@
 # Native extension points in the observed oligomer geometries
 
-**Only one of 52 cooperative extension points around the four geometry-only
-quartets remains hard-clear in the saved endpoint.** The other 51 clash with
-the existing quartet itself. The minimum atomic gaps are sub-Ångström, so this
-is a reason to test nearby poses and coordinated rearrangements, not evidence
-that the native basins are absent.
+**At the original fixed positions, only one of 52 cooperative extension points
+around the four geometry-only quartets is hard-clear.** A subsequent
+[incoming-only pose search](native-extension-incoming-search-20261004.md) clears
+50 of the same 52 points against the measured quartet and 34 against the full
+environment. Thus most fixed-point clashes can be resolved without moving the
+existing quartet. These are point-accessibility results, not basin volumes or
+equilibrium weights.
 
 This diagnostic uses the historical N=264 growth endpoints at **1.4 Å
 depletant radius, 0.04 Å⁻³ activity and 500 μM**. It is separate from the
@@ -66,10 +68,11 @@ These are spatial inventories, not statistical weights or effective samples.
 An open point does not establish an entry path or appreciable basin volume.
 A blocked point does not exclude a nearby allowed pose. The separately
 allocated ideal-component control below resolves whether the underlying ideal
-packing permits these same points. Bounded incoming-pose adjustment with the
-measured components fixed is the next test. A successful adjustment would
-demonstrate local accessibility; an unsuccessful optimizer would not prove
-that cooperative component rearrangement is required. No model-refutation or
+packing permits these same points. The completed bounded incoming-pose search
+then resolves 49 of the 51 initially blocked points with the measured component
+fixed; the initially clear point stays unchanged. The two remaining searches
+are unresolved, despite numerical optimizer success. Neither proves that
+cooperative component rearrangement is required. No model-refutation or
 equilibrium-stability claim follows from these pointwise diagnostics.
 
 ## Completed ideal-component control

@@ -116,14 +116,14 @@ The correction changes that exact format check and its synthetic fixture. All
 was launched with one worker. Its first stage successfully adopted the complete
 first population byte for byte; it generates only the remaining 384 draws,
 with the original seeds, guide and unconditional audit IDs. The failed run's
-source and receipts remain unchanged. The physical-weight campaign remains on
-hold pending the complete prospective result and its review.
+source and receipts remain unchanged. All 17 continuation jobs have now
+completed cleanly; the physical-weight calculation is a separate next stage.
 
 The continuation execution-plan SHA is
 `a847304317aae29967c1aaacc04a12388b34ecbb41af5d4da304e5a8c6d19cee`.
 Its launch controller was PID 1925272, process birth tick 199206093. Current
-progress and any failure are recorded in its `execution` directory. Launch
-and successful byte adoption do not establish completion or scientific access.
+completion is authenticated by `execution/summary.json`, SHA
+`48a5d298b01959df747980fdb05e84973fab7b76a03d71a792108d4264c7f2a2`.
 The [validation receipt](../results/native-class-support-recovery-validation-20261004/validation.json)
 has SHA `8e6000f96ade5b4f5c75cde4f514be790390f39739014a04dec1f2c68c0fd471`.
 
@@ -131,6 +131,43 @@ The initial sandbox-local launcher ended before creating any controller claim
 or scientific output. The subsequent host launch is separately recorded in
 the pilot directory; it is the launch that generated the 128 proposals. No
 scientific draws were repeated by that launcher correction.
+
+### Completed revised-guide access result
+
+All 512 proposal draws passed the algebra and endpoint checks; all 64
+preselected rows passed the independent full geometry check. The complete
+[statistics](../results/native-class-support-recovery-20261004/analysis/statistics.json)
+have SHA `503a7f0e18e81f601ec74e487e09773920caab7cbe7dacd92b66b442450d5ec6`.
+
+| Population | Native | Competing | Competing22 | Competing62 | Native55 |
+|---|---:|---:|---:|---:|---:|
+| r00 | 17 | 25 | 0 | 2 | 6 |
+| r01 | 18 | 28 | 1 | 1 | 6 |
+| r02 | 20 | 19 | 1 | 2 | 7 |
+| r03 | 20 | 34 | 3 | 2 | 9 |
+
+The other 331 attempts were invalid or exterior, retained in the unconditional
+denominator. No unbound endpoint was observed. Usable selected class lines
+were 1/59, 3/57 and 10/58 for the three critical channels. The first channel's
+single hit occurred in r02; it remains a fragile route. All competing22/62
+selected-line hits came from the added bank. The corresponding original-bank
+counts were 0/43 and 0/41.
+
+The predeclared access screen passes. This demonstrates access under the
+revised proposal, not physical mass or independent generalization. All eight
+critical training centers were used in construction; there are no critical
+holdouts. Empty requested class intervals still occurred in 207/257 learned
+selections (80.5%): 89 fell back to the hard-free line and 118 to the
+unconditional law. Thus the retained five coordinates still frequently miss
+the requested class.
+
+Producer work totaled 9.21 CPU seconds (about 18 ms per proposal), without
+Poisson weight estimation. Independent selected geometry cost 1,704 CPU
+seconds, about 26.6 seconds per reference row. Algebra and endpoint checks cost
+61.4 and 12.7 CPU seconds. These costs support reviewing the already bounded
+primary physical allocation, but do not estimate its unknown cloud cost or
+assembly efficiency. The guide stays frozen; the physical comparison must
+retain all original strata, coverage and sensitivity obligations.
 
 ## Receipts and the reporting correction
 
@@ -152,5 +189,6 @@ unchanged. Six focused synthetic tests passed.
 - [Correction validation](../results/native-class-line-summary-schema-correction-20261004/validation.json),
   SHA `f8ee20a00af160b328fb17aee2be37f74eb0f906f48f116fc3822d590d52442b`.
 
-No conclusion about finite-system native assembly follows from this failed
-coverage improvement. The required thermodynamic question remains unresolved.
+Neither the original guide's coverage failure nor the revised guide's access
+success decides finite-system native assembly. The thermodynamic question
+remains unresolved.

@@ -735,3 +735,28 @@ Dispatch permits three single-threaded chains at a time, with per-chain limits
 of 3,600 CPU seconds, 7,200 wall seconds and 16 GiB. A failed chain stops new
 launches and drains active jobs; failures and unstarted jobs remain visible,
 without reseeding, replacement or continuation of an incomplete campaign.
+
+The matched campaign launched on 2026-10-03 after its concrete prelaunch review.
+`dispatch/plan.json` has SHA256
+`70e391fea85b7ceb5e45248c8280e7fe29e19f1bbebd5c25e0ba5d012d2a3505`.
+The host launch receipt verifies controller PID 1768432 (birth 197614447) and
+three single-threaded workers. Existing growth jobs and the original proposal
+audit continue separately; the production executable remains unchanged.
+No completed benchmark result is asserted here. Observe the complete 64-chain
+inventory only after successful dispatch and child draining, using the frozen
+analysis source. Keep the analysis child bounded and its failure prefix visible.
+
+`tools/run_two_neighbor_singleton_analysis.py` supplies that postrun boundary.
+Its metadata-only preparation requires every successful terminal, the exact
+64 new trajectories and 64 cached controls, the complete original source and
+preparation authority, and the frozen scientific observer. A separate execution
+claim runs one observer child with 3,600 CPU seconds, 7,200 wall seconds and
+16 GiB, authenticates its output inventory and drains it on failure. It never
+recomputes cached control geometry or admits a partial successful subset.
+The wrapper is an execution layer around the already frozen scientific plan;
+it does not change its observables or inspect incomplete trajectories.
+All 12 synthetic wrapper tests passed, including a real bounded toy-child
+timeout, exact resource/thread limits, prepared-start input coverage, duplicate
+control rejection and exclusive failure handling. Receipt:
+`results/two-neighbor-singleton-observer-wrapper-validation-20261003/validation.json`,
+SHA256 `d946ccd02487cd7e8b6fd7d68c45b87632341be799637f5eb84b8682c37e0410`.

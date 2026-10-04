@@ -272,3 +272,12 @@ their own observed quartet. Both seeds retain open cooperative points. The
 sub-Ångström gaps motivate a controlled ideal-component comparison and nearby
 pose feasibility checks, not a physical instability conclusion. Nineteen
 synthetic tests and an independent full-output arithmetic reduction passed.
+
+The separately allocated same-52-point ideal-component control also completed:
+all 52 points are hard-clear against ideal quartets, versus one against the
+measured quartets. Ideal minimum gaps are only 0.0369–0.0426 Å. This establishes
+the role of the measured distortions at those fixed positions, without
+excluding nearby incoming poses. Nine synthetic tests and an independent
+52-record audit passed. The next bounded diagnostic allows only the incoming
+tetramer to adjust, keeping the actual quartet fixed; optimizer failure will
+remain unresolved rather than proving collective motion necessary.

@@ -64,13 +64,51 @@ clear native points out of 577; the informed endpoint has 100 out of 865.
 These are spatial inventories, not statistical weights or effective samples.
 
 An open point does not establish an entry path or appreciable basin volume.
-A blocked point does not exclude a nearby allowed pose. Moreover, the
-previous ideal-site enumeration was not an all-atom check of every ideal
-component-plus-insertion geometry. The proper next control is therefore the
-same 52 points against their ideal components, followed by bounded incoming-pose
-adjustment with the measured components fixed. Only after that distinction is
-resolved can a need for cooperative component rearrangement be established.
-No model-refutation or equilibrium-stability claim follows from this audit.
+A blocked point does not exclude a nearby allowed pose. The separately
+allocated ideal-component control below resolves whether the underlying ideal
+packing permits these same points. Bounded incoming-pose adjustment with the
+measured components fixed is the next test. A successful adjustment would
+demonstrate local accessibility; an unsuccessful optimizer would not prove
+that cooperative component rearrangement is required. No model-refutation or
+equilibrium-stability claim follows from these pointwise diagnostics.
+
+## Completed ideal-component control
+
+**All 52 points are clear against the corresponding ideal quartet**, with the
+same repaired atomic shape, candidate poses, exact embedding witnesses and
+previously fitted global rigid frame. Only the existing four bodies are moved
+from their measured coordinates to their fitted ideal coordinates. Spectators
+and walls are omitted from this isolated-component comparison in both columns:
+
+| Quartet | Ideal component: clear / tested | Measured component: clear / tested |
+| --- | ---: | ---: |
+| Q1 | 12 / 12 | 0 / 12 |
+| Q2 | 16 / 16 | 0 / 16 |
+| Q3 | 12 / 12 | 0 / 12 |
+| Q4 | 12 / 12 | 1 / 12 |
+
+The ideal minimum atomic gaps range from **0.036918 to 0.042645 Å**, with median
+0.037131 Å and no near-zero flags. Thus departures of these observed quartets
+from ideal geometry cause the obstruction at the particular tested points.
+That does not establish obstruction of every nearby incoming pose, or exclude
+physical growth through another route. These gaps are not basin widths.
+
+The fixed 52-query control completed in 1.39 CPU / 1.49 wall seconds with its
+child drained. Nine synthetic tests passed. Before querying atoms, the source
+checked all 34 catalogue labels and 70 ideal monomer-contact witnesses; every
+slot's intended operators and its unchanged candidate pose were independently
+reconstructed. A separate arithmetic audit reconciled all 52 records and 104
+begin/end events without additional geometry queries.
+
+Artifacts are in `results/native-extension-ideal-control-20261004/`:
+
+- Execution plan: `66d6daa9ad91ae608532cc25aeca750e20ea95cf15d9ad24aa9c50c25f53edb8`.
+- Observer source: `b024518c1ad39fa962197536d30743113ad5fe6c0ab2763b47fdf341dfeddbb9`.
+- Completed receipt: `b547efeb90f34b395c9f2ceffda6d55acc02d128cb774a50f907d5b19e2e1cf9`.
+
+The [ideal-control procedure](../results/native-extension-ideal-control-preparation-20261004/PROCEDURE.md)
+records the fixed body-ID mapping, omitted wall and spectator terms, and
+floating-point implementation obligations.
 
 ## Validation and artifacts
 

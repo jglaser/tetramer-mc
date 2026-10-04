@@ -166,9 +166,11 @@ The subsequent [fixed-point clearance audit](native-extension-clearance-20261004
 has now tested all 7,207 site-disjoint slots in the measured endpoints. Only
 one of the four quartets' 52 cooperative points is fully hard-clear; the other
 51 clash with the quartet itself, with sub-Ångström penetration. Both seeds
-retain several open points. This narrows the next test to ideal-component
-clearance and nearby incoming poses before claiming that cooperative
-rearrangement is required. Point counts do not measure basin weights.
+retain several open points. A separate ideal-component control then found
+all 52 quartet points clear, with minimum gaps of 0.0369–0.0426 Å. The remaining
+distinction is whether adjusting only the incoming pose can clear the measured
+quartet; failure to find such a pose would not itself prove cooperative
+rearrangement necessary. Point counts do not measure basin weights.
 
 The [procedure and source](../results/native-oligomer-extension-design-20261004/PROCEDURE.md)
 record the predeclared inventory and limits. Twelve synthetic controls passed,

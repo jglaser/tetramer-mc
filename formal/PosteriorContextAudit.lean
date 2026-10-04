@@ -1,0 +1,18 @@
+import ReversibleSampling.PosteriorContext
+
+#print axioms ReversibleSampling.PosteriorContext.posterior_sum_one
+#print axioms ReversibleSampling.PosteriorContext.posterior_nonnegative
+#print axioms ReversibleSampling.PosteriorContext.posterior_capped_mass_identity
+#print axioms ReversibleSampling.PosteriorContext.posterior_capped_mass_bounds
+#print axioms ReversibleSampling.PosteriorContext.weighted_gate_path_symmetric
+#print axioms ReversibleSampling.PosteriorContext.weighted_gate_context_sum_symmetric
+#print axioms ReversibleSampling.PosteriorContext.full_mixture_correction
+#print axioms ReversibleSampling.PosteriorContext.real_mass_mul_mh
+#print axioms ReversibleSampling.PosteriorContext.accepted_path_factorization
+#print axioms ReversibleSampling.PosteriorContext.accepted_path_symmetric
+#print axioms ReversibleSampling.PosteriorContext.capped_context_sum_symmetric
+#print axioms ReversibleSampling.PosteriorContext.zero_cap_path
+#print axioms ReversibleSampling.PosteriorContext.zero_context_source_path
+#print axioms ReversibleSampling.PosteriorContext.zero_mixture_source_path
+#print axioms ReversibleSampling.PosteriorContext.zero_hard_mass
+#print axioms ReversibleSampling.PosteriorContext.complete_context_kernel

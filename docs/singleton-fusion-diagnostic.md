@@ -158,3 +158,88 @@ with `distance-bounds.json` recording all ten separations and the necessary
 bounds. Six additional preparer tests passed before execution; the complete
 initial audit and original prepared-state files are bound in the manifest's
 preparation closure.
+
+## Completed nearby-anchor mean screen
+
+The follow-up `tools/audit_singleton_anchor_screens.py` reconstructs all ten
+original screens independently in Python before examining alternatives. It
+decodes zero-latent atlas means directly, including reciprocal inversion;
+stored covariances are neither factored nor fitted. A chunked KD search is
+followed by the same strict distance and rotation-angle predicates. Counts
+within 1e-8 Å or 1e-10 radians of either threshold are flagged as ambiguous.
+
+For each fixed primary neighbor, the inventory contains the original anchor
+and up to eight nearest eligible spectators within `2 Rmean + 8 Å`. It excludes
+the moving label and uses label order to break distance ties. The inventory
+does not read the moving pose. All inventories are recorded before screening;
+no anchor is selected by its screen outcome.
+
+All ten original screens agreed with the saved Rust counts. The bounded job
+completed 21 screens (ten controls and eleven alternatives) in 3.895 CPU
+seconds, with no threshold ambiguity. Only two alternative screens admitted
+mean pairs through both predicates:
+
+| State / moving label | Alternative anchor | Distance pass | Angle pass | Original anchor angle pass |
+| --- | ---: | ---: | ---: | ---: |
+| source / 27 | 179 | 278 | 21 | 5 |
+| prepared-0 / 27 | 46 | 11 | 8 | 0 |
+
+The other nine alternatives admitted no pair. The union of alternative labels
+is `[46, 106, 178, 179]`; this inventory is determined by spectator geometry,
+not by the successful rows. No Gaussian fit, atomic overlap, native label,
+Poisson cloud or pose draw was evaluated. Passing means are only candidate
+initializations: they need not survive fitting, the whitened mismatch limit,
+or hard-center checks. This result motivates checking construction at all four
+alternative anchors before adding a sampling arm.
+
+Eight synthetic tests cover decoding, reciprocity, spectator-only selection,
+strict thresholds, chunked versus exhaustive enumeration, resource failure
+prefixes and metadata-only preparation. The test receipt is
+`results/singleton-anchor-screen-validation-20261004/validation.json` (SHA
+`8df91735b9389819ba6fce96929b779c9e8e10ecfe6ee14cc7d447014339f976`).
+The completed diagnostic and authenticated reduction are in
+`results/singleton-anchor-screens-context0-20261004`; its terminal summary SHA
+is `c4fe35254a88d1d45eb4492aa0e5a0ddfd34929b274ab59c775874b0154d308f`.
+
+The prospective selection balance, exact finite-state controls and separate
+Lean bridge are described in [context-selector-balance.md](context-selector-balance.md)
+and [posterior-context-balance.md](posterior-context-balance.md). Neither these
+proofs nor mean compatibility establish improved protein mixing or a physical
+preference for assembly.
+
+## Completed alternative-anchor construction
+
+The next fixed diagnostic crossed **all four** alternative labels with all
+five states and both moving labels: 40 constructors, reusing the validated
+executable and unchanged shape, atlas, poses and default thresholds. The
+original ten constructors were reused as controls. All four serial jobs
+completed, taking 2.163 CPU seconds in total.
+
+The 21 and 8 pairs identified above were the only fit candidates. All 29 fits
+returned `None`; none reached a center, wall, core-overlap or covariance check.
+No constructor retained a fused component. Alternative anchor selection alone
+therefore does not yet justify a new trajectory benchmark with this fitter.
+The frozen Cartesian allocation includes the unsuccessful anchors and starts,
+not just the two passing mean screens.
+
+`fit_returned_none` conflates initial/finite-difference chart encoding errors,
+normal-matrix factorization failures and the heuristic early-abort rule
+(`chi_squared > 120` after two iterations). Failed line search, a tiny step or
+the sixteen-iteration limit instead returns a fit, which may still exceed the
+final mismatch limit of 12. The next bounded test must separate those exits.
+A large current residual is an upper bound on the attainable minimum, not a
+certificate that the minimum exceeds the threshold. Skipping only that early
+abort, while preserving all existing iteration/backtrack and final acceptance
+limits, is a controlled fitting comparison. It remains a proposal construction
+experiment, not a change in physical energy.
+
+No fused component means this construction rule found none. It does not imply
+zero Gaussian support, absence of hard-feasible contact poses, or unfavorable
+physical assembly. Any modified fitter must remain a deterministic function
+of unchanged spectators, use the same complete normalized proposal at both
+endpoints, and retain the physical hard/depletion acceptance tests.
+
+The complete preparation, four manifests, execution journals and authenticated
+reduction are in `results/singleton-alternative-fusion-context0-20261004`.
+Its execution-plan SHA is
+`d351e0d791602a0b410e527748958188ae235469524d78ff033549ab5a80acb1`.

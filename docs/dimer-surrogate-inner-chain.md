@@ -146,6 +146,13 @@ execution-plan SHA256 is
 The archived observer is admitted only after all 24 terminal contracts complete
 and their processes are drained. No efficiency outcome is asserted at launch.
 
+The general measurable-state balance bridge is now formalized in
+[`FixedLengthSurrogate.lean`](../formal/ReversibleSampling/FixedLengthSurrogate.lean).
+It proves fixed-power reversibility and the corrected physical Poisson endpoint
+kernel, including singular endpoint proposals. The endpoint theorem explicitly
+assumes a finite surrogate measure; the power theorem does not. See the
+[scope and implementation obligations](../formal/FixedLengthSurrogate.md).
+
 ## A fixed-cloud many-body score
 
 Let E0,E1 be the two identical inflated sphere unions of volume v, and S the

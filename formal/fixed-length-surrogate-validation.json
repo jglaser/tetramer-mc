@@ -1,0 +1,157 @@
+{
+  "schema": "fixed-length-surrogate-validation-v1",
+  "complete": true,
+  "checked_at_utc": "2026-10-04T08:45:42.972476+00:00",
+  "source_baseline_commit": "380f9e2552cf4ba25d0e8f3bc4a8c8ec1f363b04",
+  "lean": "4.24.0",
+  "lean_commit": "797c613eb9b6d4ec95db23e3e00af9ac6657f24b",
+  "mathlib_commit": "f897ebcf72cd16f89ab4577d0c826cd14afaafc7",
+  "dependency_pins_unchanged_from_HEAD": true,
+  "existing_project_import_closure_unchanged_from_HEAD": true,
+  "main_import_and_audit_and_validation_unchanged_from_HEAD": true,
+  "checks": [
+    {
+      "command": [
+        ".elan/bin/lake",
+        "build",
+        "ReversibleSampling.FixedLengthSurrogate"
+      ],
+      "exit_code": 0,
+      "log": "fixed-length-surrogate-build.log",
+      "cpu_affinity": [
+        0
+      ],
+      "cached_dependencies": true
+    },
+    {
+      "command": [
+        ".elan/bin/lake",
+        "env",
+        "lean",
+        "-j1",
+        "FixedLengthSurrogateAudit.lean"
+      ],
+      "exit_code": 0,
+      "log": "fixed-length-surrogate-audit.txt"
+    }
+  ],
+  "environment": {
+    "ELAN_HOME": "/home/xvg/tetramer-mc/formal/.elan"
+  },
+  "proof_declarations_axiom_audited": 13,
+  "declaration_counts": {
+    "theorems": 11,
+    "lemmas": 1,
+    "instances": 1
+  },
+  "axioms": {
+    "ReversibleSampling.reversible_restrict_bind": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.reversible_setLIntegral": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.reversible_comp_reverse": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.reversible_comp_of_commute": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.fixedSteps_markov": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.fixedSteps_commute": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.fixedSteps_reversible": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.fixedSteps_invariant": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.reversible_pair_swap": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.surrogateWeight_measurable": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.surrogate_correction_ratio": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.surrogate_target_cancel": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ],
+    "ReversibleSampling.fixed_surrogate_poisson_correct": [
+      "propext",
+      "Classical.choice",
+      "Quot.sound"
+    ]
+  },
+  "allowed_axioms": [
+    "Classical.choice",
+    "Quot.sound",
+    "propext"
+  ],
+  "no_sorry_admit_or_new_axioms_in_module": true,
+  "project_local_import_closure": [
+    "ReversibleSampling/Balance.lean",
+    "ReversibleSampling/ConditionalPoisson.lean",
+    "ReversibleSampling/CountGate.lean",
+    "ReversibleSampling/FixedLengthSurrogate.lean",
+    "ReversibleSampling/ImportanceSampling.lean",
+    "ReversibleSampling/MetropolisHastings.lean",
+    "ReversibleSampling/PairFlowPoisson.lean",
+    "ReversibleSampling/Poisson.lean"
+  ],
+  "source_sha256": {
+    "FixedLengthSurrogate.md": "682dc5c2f0ce78543cfdf678867af12811feaf8e7ffe7f2a3b12349035719dcd",
+    "FixedLengthSurrogateAudit.lean": "e8e137d895447eb5dd19fa12f7bd01d6438c46393687094619bb05030e2da357",
+    "ReversibleSampling/Balance.lean": "a386a56873d3ab56dcc1b2431747ca487b5e94b90915d1e65ff857f2973ee60f",
+    "ReversibleSampling/ConditionalPoisson.lean": "8945b49e5a6c5d8f8e673b1dea1dd9cc4bd7ba86e3d2b1b39bfb56f4cff004c5",
+    "ReversibleSampling/CountGate.lean": "7ea576a144c76c5d9b4b6a4c5ceeb137ffce9c4ed09d296084992c8ef764131a",
+    "ReversibleSampling/FixedLengthSurrogate.lean": "e439eaa81fb83294e6cc1c9ac484356eb64038907398294e4129ef757cd07b2a",
+    "ReversibleSampling/ImportanceSampling.lean": "d62a8ce9c93d2a234f11df8f4d3f57cd87353cf2d0cc3e0014e1c72bebc2de1d",
+    "ReversibleSampling/MetropolisHastings.lean": "02116637e0f9944bbfc462e3e81b75c3b3037945db8fc1d0da0ef430cf118105",
+    "ReversibleSampling/PairFlowPoisson.lean": "247cc12297fc9bd2d678573185a313a9f00d10b48192516b77b47948df6bda19",
+    "ReversibleSampling/Poisson.lean": "2495f78e18c8646308741adad88ea6ef15b430c521187f57674ec73722899ea2",
+    "lake-manifest.json": "361f14cfefdb7fcb55d8caa43e9b30122a690acfbfce6b39a44f484ada4f9ff5",
+    "lakefile.toml": "428ffa21b5ac20c4057b610b6e1bd1bde766a67079e60df7ab8f49abba711ef7",
+    "lean-toolchain": "42779d67b81608af8a12aa4328d2ab47ca201925b3b2bd68369587b5340bb434"
+  },
+  "log_sha256": {
+    "fixed-length-surrogate-build.log": "95a51c5015118054494d5a5bce6dd65de32682756c06e224d534e7f65c2910ea",
+    "fixed-length-surrogate-audit.txt": "3b6952f653889cf215ac3e781ca2d25130712c496fdfad606e455039e074bce2"
+  },
+  "scope": "Arbitrary-measurable-space reversibility of every fixed power of one reversible kernel; Markov and invariant corollaries. For a finite surrogate reference measure and explicit geometric/count-law assumptions, one conditional-Poisson endpoint gate with inverse surrogate factor preserves the physical depletion target. No finite-state restriction or endpoint proposal density assumption.",
+  "not_proved": [
+    "Concrete handle-Gaussian/Cayley reference symmetry or geometric Jacobians",
+    "Rust implementation refinement, floating-point arithmetic, hard checks, or resource/error paths",
+    "Random-number generation, independence, exact thinning/envelope implementation",
+    "Physical target normalization",
+    "Ergodicity, convergence, mixing, or scientific efficiency"
+  ]
+}

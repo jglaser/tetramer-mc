@@ -109,7 +109,7 @@ Bind its complete input closure; a similarly named file is insufficient.
 Only the geometric pair predicate transfers from the old definition, not its
 R4 integration domain or fixed-scaffold physical target.
 
-## Validation and remaining production work
+## Validation and production admission
 
 The candidate filter passed 12 synthetic tests, including comparison to an
 independent unpruned all-member inequality, noncentered shapes, directed motifs,
@@ -135,15 +135,51 @@ Source-bound receipts:
 - `results/conditional-native-pipeline-validation-20261004/validation.json`, SHA256
   `9278d0dde946e732a78d612efee851d841cf9abbec5ee40fdcad139b95cc994c`.
 
-These tests used no protein observations. The full trajectory audit has not run. Before
-production, bind the completed contact receipts, freeze the endpoint/metrics
-adapter and one-worker resource/query allocation, and include classifier setup
-and fixed-graph queries in durable attempt accounting. Leave partial outputs
-visible and do not replace failed chains. The unpruned pair-query ceiling is
-309,724,800 mobile-related calls plus 136,764 fixed-pair calls over four contexts;
-the candidate and exact-pose caches should reduce actual calls, but their protein
-cost has not been measured. Constructor reference/scaffold work is additional
-and uses the existing bounded setup instrumentation.
+These tests used no protein observations. The full trajectory audit has not run.
+[The metadata binder](../tools/bind_conditional_native_audit.py) and
+[streaming worker](../tools/run_conditional_native_audit.py) now implement it.
+Admission requires the completed, successful, drained singleton contact
+analysis and the passed initial-state reference check below. The binder
+authenticates the reused 64 controls through their original arithmetic-analysis
+receipt and original journal/terminal hashes, not just the later copied metrics.
+The identity is context, arm, initialization and stream; campaign-local numeric
+job IDs overlap and cannot be used alone.
+
+The allocation covers all 128 chains and 589,952 retained endpoints, with 524,288
+production endpoints. Each context reuses one observer over its 32 chains. Fixed
+native keys come from the authenticated exhaustive source check, so the new
+worker repeats **zero fixed-pair geometry queries**. Its unpruned ceiling is
+309,724,800 main mobile-pair queries, reduced in practice by candidate and exact
+pose caches. Constructor reference/scaffold work is separately bounded through
+the existing setup instrumentation. All actual queries and endpoints receive
+durable begun/completed records; a failure preserves its prefix without retries.
+
+For an additional check of pruning during the trajectories, the binder freezes
+one block in 513–2,560 and one in 2,561–4,608 for each chain. A public,
+domain-separated hash of the chain identity selects the blocks before reading
+any trajectory. At these 256 endpoints the worker classifies every mobile pair
+omitted by the recorded candidate search and requires no native match. This adds
+at most 134,400 reference calls. It repeats neither the candidate search nor
+candidate classifications, and it retains repeated states and failures. This
+checks the selected endpoints only; it is not a guarantee about all floating
+point inputs.
+
+Graph metadata is stored once per native-key fingerprint per context; every
+endpoint still has its own record and production residence contribution. Full
+sampler CPU, geometry loading, inherited preparation, previous contact analysis,
+native setup, native observation and checkpoint costs remain distinguishable.
+The proposed worker limits are one CPU thread, 16 GiB, 36,000 CPU seconds and
+72,000 wall seconds. These are limits, not a runtime forecast; the complete
+production plan is not prepared until the prerequisite contact analysis exists.
+
+All 24 integrated synthetic tests passed: 13 binding cases, nine worker cases,
+and two complete tiny streaming runs exercising success and classifier failure.
+They verify old/new journal identity, every retained endpoint, checkpoint
+accounting, cache residence, full CPU denominators, graph output and preservation
+of incomplete attempts. The 61-file source closure stayed unchanged during the
+suite. Receipt:
+`results/conditional-native-worker-validation-20261004/validation.json`, SHA256
+`514d2b260bb25675853b53a06e314b711341f2d6e87f996d7cb30b6240e983fb`.
 
 ### Initial-state differential check
 

@@ -224,6 +224,81 @@ pub struct DockingProposal {
     cube: Vec3,
     proposal_anchor_index: Option<usize>,
 }
+
+/// A finite, positive proposal prior; no feasible-volume normalizer is used.
+///
+/// `eligible` is a deterministic center diagnostic depending only on fixed
+/// outside context, never the moving pose. For normalized base probabilities
+/// p and positive floor epsilon, return log[epsilon*p +
+/// (1-epsilon)*p*eligible/sum(p*eligible)]. Empty/all-eligible sets and epsilon=1
+/// preserve the original logs exactly. Every virtual branch retains support,
+/// including reciprocal branches with different eligibility. These are
+/// proposal weights, not physical energies or finite-width coverage estimates.
+pub fn defensive_virtual_branch_log_prior(
+    base_log_prior: &[f64],
+    eligible: &[bool],
+    floor_probability: f64,
+) -> Result<Vec<f64>> {
+    validate_virtual_branch_log_prior(base_log_prior)?;
+    ensure!(
+        eligible.len() == base_log_prior.len(),
+        "Wrong branch eligibility count"
+    );
+    ensure!(
+        floor_probability.is_finite() && floor_probability > 0. && floor_probability <= 1.,
+        "Branch prior floor must lie in (0,1]"
+    );
+    if floor_probability == 1. || eligible.iter().all(|x| *x) || eligible.iter().all(|x| !*x) {
+        return Ok(base_log_prior.to_vec());
+    }
+    let selected: Vec<_> = base_log_prior
+        .iter()
+        .zip(eligible)
+        .filter_map(|(&p, &keep)| keep.then_some(p))
+        .collect();
+    let selected_maximum = selected.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    // Keep the two terms separate. Adding log(m) to a common log probability
+    // near -1e300 would round it away and break the declared defensive floor.
+    let selected_relative_normalizer = selected
+        .iter()
+        .map(|p| (p - selected_maximum).exp())
+        .sum::<f64>()
+        .ln();
+    let floor = floor_probability.ln();
+    let preferred = (-floor_probability).ln_1p();
+    let mut result: Vec<_> = base_log_prior
+        .iter()
+        .zip(eligible)
+        .map(|(&p, &keep)| {
+            if keep {
+                let selected_log_probability =
+                    (p - selected_maximum) - selected_relative_normalizer;
+                log_sum(&[floor + p, preferred + selected_log_probability])
+            } else {
+                floor + p
+            }
+        })
+        .collect();
+    let normalization = log_sum(&result);
+    for p in &mut result {
+        *p -= normalization;
+    }
+    validate_virtual_branch_log_prior(&result)?;
+    Ok(result)
+}
+
+fn validate_virtual_branch_log_prior(log_prior: &[f64]) -> Result<()> {
+    ensure!(
+        !log_prior.is_empty() && log_prior.iter().all(|p| p.is_finite()),
+        "Every virtual branch needs a finite log prior (strictly positive support)"
+    );
+    ensure!(
+        log_sum(log_prior).abs() <= 1e-12,
+        "Virtual branch log prior is not normalized"
+    );
+    Ok(())
+}
+
 impl DockingProposal {
     pub fn new(
         model: FrozenRelativePoseProposal,
@@ -273,6 +348,36 @@ impl DockingProposal {
     pub fn with_anchor_index(mut self, index: Option<usize>) -> Self {
         self.proposal_anchor_index = index;
         self
+    }
+    /// Replace only the learned virtual-label prior, retaining every exact
+    /// chart, reciprocal wrapper, uniform branch and original serialized model.
+    ///
+    /// Posterior selection, independent destinations, densities and all member
+    /// APIs share this vector. The unchanged map therefore still gives
+    /// log G_C(old)-log G_C(new). Static-pair and direct-model methods use other
+    /// draw laws and are deliberately rejected. No map/pair table is rebuilt.
+    ///
+    /// The caller must freeze the prior during each forward/reverse move and
+    /// bind its complete vector, context, excluded moving labels, anchor and
+    /// construction rule in provenance/checkpoints; model SHA alone no longer
+    /// identifies the proposal. This API performs no context inference or
+    /// physical-target change and is not wired into production runners.
+    pub fn with_virtual_branch_log_prior(mut self, log_prior: &[f64]) -> Result<Self> {
+        ensure!(
+            self.method == DockingMethod::PosteriorInvolution,
+            "Virtual branch priors require posterior-involution"
+        );
+        ensure!(
+            log_prior.len() == self.branches.len(),
+            "Wrong virtual branch prior count"
+        );
+        validate_virtual_branch_log_prior(log_prior)?;
+        self.log_component_weights = log_prior.to_vec();
+        Ok(self)
+    }
+
+    pub fn virtual_branch_log_prior(&self) -> &[f64] {
+        &self.log_component_weights
     }
     /// Apply a virtual-chart trace in one fixed anchor-relative frame.
     /// The inverse trace swaps virtual labels as well as Gaussian noise. Each
@@ -911,6 +1016,332 @@ fn log_sum(values: &[f64]) -> f64 {
         return maximum;
     }
     maximum + values.iter().map(|v| (v - maximum).exp()).sum::<f64>().ln()
+}
+
+#[cfg(test)]
+mod virtual_prior_tests {
+    use super::*;
+
+    const NEW_PRIOR: [f64; 3] = [0.08, 0.62, 0.30];
+    const ID: Pose = Pose {
+        position: [0.; 3],
+        orientation: [1., 0., 0., 0.],
+    };
+
+    fn atlas(method: DockingMethod) -> Result<DockingProposal> {
+        let covariance: [[f64; 6]; 6] = std::array::from_fn(|i| {
+            std::array::from_fn(|j| if i == j { 0.4 + 0.08 * i as f64 } else { 0. })
+        });
+        let means = [[0.; 6]; 2];
+        let shape = "7".repeat(64);
+        let raw = json!({"schema":"reciprocal-pose-mixture-v1", "reciprocal_components":[true,false],
+            "base_model":{"angular_length":1.3,"shape_sha256":shape,
+                "coordinate_convention":"anchor-body-relative",
+                "anchors":[{"position":[-0.7,0.3,-0.1],"rotation":cayley([0.2,-0.3,0.1])},
+                           {"position":[0.9,-0.2,0.3],"rotation":cayley([-0.1,0.2,0.4])}],
+                "means":means,"covariances":[covariance,covariance],"weights":[0.7,0.3]}});
+        DockingProposal::new(
+            FrozenRelativePoseProposal::from_json_str_open(
+                &raw.to_string(),
+                [30., 32., 34.],
+                0.5,
+                &shape,
+            )?,
+            method,
+            0.65,
+            [0.; 3],
+        )
+    }
+
+    fn modified() -> Result<DockingProposal> {
+        atlas(DockingMethod::PosteriorInvolution)?
+            .with_virtual_branch_log_prior(&NEW_PRIOR.map(f64::ln))
+    }
+
+    fn old_pose() -> Pose {
+        Pose {
+            position: [0.15, -0.25, 0.35],
+            orientation: quaternion(cayley([0.1, 0.2, -0.15])),
+        }
+    }
+
+    fn expected_logs(p: &DockingProposal, pose: Pose) -> Result<Vec<f64>> {
+        NEW_PRIOR
+            .iter()
+            .enumerate()
+            .map(|(i, w)| Ok(w.ln() + p.component_log_density(i, pose)?))
+            .collect()
+    }
+
+    fn close(a: f64, b: f64) {
+        assert!((a - b).abs() < 2e-11, "{a} != {b}");
+    }
+
+    #[test]
+    fn defensive_prior_normalized_positive_with_exact_fallbacks() -> Result<()> {
+        let p = [0.35_f64, 0.35, 0.30];
+        let base = p.map(f64::ln);
+        let logs = defensive_virtual_branch_log_prior(&base, &[false, true, false], 0.1)?;
+        close(log_sum(&logs), 0.);
+        for i in 0..3 {
+            close(logs[i].exp(), 0.1 * p[i] + if i == 1 { 0.9 } else { 0. });
+            assert!(logs[i].is_finite());
+            assert!(logs[i].exp() >= 0.1 * p[i] - 1e-15);
+        }
+        for mask in [[false; 3], [true; 3]] {
+            assert_eq!(defensive_virtual_branch_log_prior(&base, &mask, 0.1)?, base);
+        }
+        assert_eq!(
+            defensive_virtual_branch_log_prior(&base, &[false, true, false], 1.)?,
+            base
+        );
+        // Selected probability underflows in linear arithmetic; log-space
+        // normalization still retains both labels and gives the declared floor.
+        let tiny = defensive_virtual_branch_log_prior(&[0., -1000.], &[false, true], 0.1)?;
+        close(tiny[0].exp(), 0.1);
+        close(tiny[1].exp(), 0.9);
+        let extreme =
+            defensive_virtual_branch_log_prior(&[0., -1e300, -1e300], &[false, true, true], 0.1)?;
+        for (actual, expected) in extreme.iter().zip([0.1, 0.45, 0.45]) {
+            close(actual.exp(), expected);
+            assert!(actual.is_finite());
+        }
+        assert!(extreme[0].exp() >= 0.1 - 1e-15);
+        Ok(())
+    }
+
+    #[test]
+    fn virtual_prior_rejects_invalid_arguments_and_other_methods() -> Result<()> {
+        for method in [
+            DockingMethod::Local,
+            DockingMethod::Mixture,
+            DockingMethod::Involution,
+        ] {
+            assert!(
+                atlas(method)?
+                    .with_virtual_branch_log_prior(&NEW_PRIOR.map(f64::ln))
+                    .is_err()
+            );
+        }
+        for bad in [
+            vec![],
+            vec![0.],
+            vec![0.; 3],
+            vec![f64::NEG_INFINITY, 0., 0.],
+            vec![f64::NAN, 0., 0.],
+            vec![f64::INFINITY, 0., 0.],
+        ] {
+            assert!(
+                atlas(DockingMethod::PosteriorInvolution)?
+                    .with_virtual_branch_log_prior(&bad)
+                    .is_err()
+            );
+        }
+        for bad in [0., -0.1, 1.1, f64::NAN, f64::INFINITY] {
+            assert!(defensive_virtual_branch_log_prior(&[0.], &[true], bad).is_err());
+        }
+        assert!(defensive_virtual_branch_log_prior(&[0.], &[], 0.1).is_err());
+        assert!(defensive_virtual_branch_log_prior(&[0., 0.], &[true, false], 0.1).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn prior_preserves_model_charts_reciprocal_flags_and_uniform() -> Result<()> {
+        let base = atlas(DockingMethod::PosteriorInvolution)?;
+        let changed = modified()?;
+        assert_eq!(
+            base.model.component_parameters(),
+            changed.model.component_parameters()
+        );
+        assert_eq!(base.member_chart_parts().1, changed.member_chart_parts().1);
+        assert_eq!(changed.member_chart_parts().1, [false, true, false]);
+        assert_eq!(
+            base.member_uniform_weight(),
+            changed.member_uniform_weight()
+        );
+        assert_eq!(changed.virtual_branch_log_prior(), NEW_PRIOR.map(f64::ln));
+        let z = [0.2, -0.3, 0.1, 0.4, -0.2, 0.15];
+        for i in 0..3 {
+            assert_eq!(
+                serde_json::to_value(base.map.decode(i, z)?)?,
+                serde_json::to_value(changed.map.decode(i, z)?)?
+            );
+            assert_eq!(
+                base.component_log_density(i, old_pose())?,
+                changed.component_log_density(i, old_pose())?
+            );
+        }
+        let mut a = StdRng::seed_from_u64(718);
+        let mut b = StdRng::seed_from_u64(718);
+        let ua = base.draw_member_uniform(&mut a)?;
+        let ub = changed.draw_member_uniform(&mut b)?;
+        assert_eq!(serde_json::to_value(ua)?, serde_json::to_value(ub)?);
+        assert_eq!(a.random::<u64>(), b.random::<u64>());
+        Ok(())
+    }
+
+    #[test]
+    fn all_learned_density_views_use_same_virtual_prior() -> Result<()> {
+        let p = modified()?;
+        let x = old_pose();
+        let expected = expected_logs(&p, x)?;
+        assert_eq!(p.branch_log_densities(x, ID)?, expected);
+        close(p.learned_relative_log_density(x)?, log_sum(&expected));
+        close(p.members_log_density(&[x], &[ID])?, log_sum(&expected));
+        assert_eq!(p.member_chart_parts().2, p.virtual_branch_log_prior());
+        // The inverse branch remains the exact inverse law, with its own prior.
+        let inverse = invert_relative_pose(x);
+        close(
+            expected[1],
+            NEW_PRIOR[1].ln() + p.map.log_density(1, inverse),
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn independent_draw_replays_new_destination_prior_and_exact_inverse() -> Result<()> {
+        let p = modified()?;
+        let mut inverse_seen = false;
+        for seed in 0..16 {
+            let mut actual = StdRng::seed_from_u64(812 + seed);
+            let mut replay = StdRng::seed_from_u64(812 + seed);
+            let _ = replay.random_range(0..1_usize);
+            let target = draw_log_category(&mut replay, &NEW_PRIOR.map(f64::ln))?.unwrap();
+            let z: [f64; 6] = std::array::from_fn(|_| StandardNormal.sample(&mut replay));
+            let (pose, trace) = p.draw_singleton_independent(&mut actual, &[ID])?;
+            assert_eq!(trace["target_label"]["branch"], target);
+            assert_eq!(trace["target_latent"], json!(z));
+            let mut expected = p.map.decode(target, z)?;
+            if target == 1 {
+                expected = invert_relative_pose(expected);
+                inverse_seen = true;
+            }
+            let pose = pose.unwrap();
+            for i in 0..3 {
+                close(pose.position[i], expected.position[i]);
+            }
+            for (a, b) in rotation(pose.orientation)
+                .iter()
+                .flatten()
+                .zip(rotation(expected.orientation).iter().flatten())
+            {
+                close(*a, *b);
+            }
+            assert_eq!(actual.random::<u64>(), replay.random::<u64>());
+        }
+        assert!(inverse_seen);
+        Ok(())
+    }
+
+    #[test]
+    fn posterior_draw_replays_source_destination_and_correction() -> Result<()> {
+        let p = modified()?;
+        let x = old_pose();
+        let logs = expected_logs(&p, x)?;
+        let mut learned = 0;
+        for seed in 0..16 {
+            let mut actual = StdRng::seed_from_u64(941 + seed);
+            let mut replay = StdRng::seed_from_u64(941 + seed);
+            let _ = replay.random_range(0..1_usize);
+            let uniform = replay.random::<f64>() < p.member_uniform_weight();
+            let (candidate, info) = p.propose(&mut actual, x, &[ID])?;
+            if uniform {
+                assert_eq!(info["branch"], "uniform");
+                continue;
+            }
+            learned += 1;
+            let i = draw_log_category(&mut replay, &logs)?.unwrap();
+            let j = draw_log_category(&mut replay, &NEW_PRIOR.map(f64::ln))?.unwrap();
+            let noise: [f64; 6] = std::array::from_fn(|_| StandardNormal.sample(&mut replay));
+            assert_eq!(
+                info["trace"],
+                json!(BasinTrace {
+                    source: i,
+                    target: j,
+                    noise
+                })
+            );
+            let y = candidate.unwrap();
+            let next = expected_logs(&p, y)?;
+            close(
+                info["source_log_probability"].as_f64().unwrap(),
+                logs[i] - log_sum(&logs),
+            );
+            close(
+                info["inverse_source_log_probability"].as_f64().unwrap(),
+                next[j] - log_sum(&next),
+            );
+            close(
+                info["log_reverse_forward"].as_f64().unwrap(),
+                log_sum(&logs) - log_sum(&next),
+            );
+            close(
+                info["expanded_log_reverse_forward"].as_f64().unwrap(),
+                info["log_reverse_forward"].as_f64().unwrap(),
+            );
+            assert_eq!(actual.random::<u64>(), replay.random::<u64>());
+        }
+        assert!(learned > 0);
+        Ok(())
+    }
+
+    #[test]
+    fn member_draw_and_reversed_map_use_same_prior() -> Result<()> {
+        let p = modified()?;
+        let x = old_pose();
+        let logs = expected_logs(&p, x)?;
+        let mut actual = StdRng::seed_from_u64(1921);
+        let mut replay = StdRng::seed_from_u64(1921);
+        let i = draw_log_category(&mut replay, &logs)?.unwrap();
+        let _ = replay.random_range(0..1_usize);
+        let _ = replay.random_range(0..1_usize);
+        let j = draw_log_category(&mut replay, &NEW_PRIOR.map(f64::ln))?.unwrap();
+        let noise: [f64; 6] = std::array::from_fn(|_| StandardNormal.sample(&mut replay));
+        let (candidate, info) = p.propose_members_learned(&mut actual, &[x], 0, &[ID])?;
+        assert_eq!(info["labels"]["source"]["branch"], i);
+        assert_eq!(info["labels"]["target"]["branch"], j);
+        let source = MemberLabel {
+            member: 0,
+            anchor: 0,
+            branch: i,
+        };
+        let target = MemberLabel {
+            member: 0,
+            anchor: 0,
+            branch: j,
+        };
+        let step = p.apply_member_trace(&[x], 0, &[ID], source, target, noise)?;
+        assert_eq!(
+            serde_json::to_value(candidate.unwrap())?,
+            serde_json::to_value(step.handle)?
+        );
+        close(step.expanded_log_reverse_forward, step.log_reverse_forward);
+        close(
+            step.log_reverse_forward,
+            log_sum(&logs) - log_sum(&expected_logs(&p, step.handle)?),
+        );
+        let back = p.apply_member_trace(
+            &[step.handle],
+            0,
+            &[ID],
+            target,
+            source,
+            step.step.inverse_trace.noise,
+        )?;
+        close(back.log_reverse_forward, -step.log_reverse_forward);
+        for i in 0..3 {
+            close(back.handle.position[i], x.position[i]);
+        }
+        for (a, b) in rotation(back.handle.orientation)
+            .iter()
+            .flatten()
+            .zip(rotation(x.orientation).iter().flatten())
+        {
+            close(*a, *b);
+        }
+        assert_eq!(actual.random::<u64>(), replay.random::<u64>());
+        Ok(())
+    }
 }
 
 /// Gumbel-max avoids exponentiating tiny component responsibilities or silently

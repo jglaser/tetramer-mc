@@ -53,6 +53,19 @@ tests; the deliberately incorrect shortcut fails ten of twelve diagnostics.
 Eight focused Lean statements check the selection/accepted-flow algebra under
 explicit implementation obligations. This is a Gaussian-target validation,
 not a production protein kernel or an observed mixing gain.
+
+An optional [fixed-context branch prior](context-branch-prior.md) now provides
+a simpler unchanged-chart control. It retains every reciprocal label and a
+10% original-prior component, using the same new probabilities in source
+selection, destination selection and density evaluation. A frozen asset for
+moving body 77 against the other 263 bodies is prepared from saved overlap
+counts. It still needs source/domain certification and runner/checkpoint
+binding before a physical comparison. Twenty-eight joint release tests pass.
+The same validated change set removes a redundant complete-pair support scan:
+the [fixed microbenchmark](atlas-pair-support-cost.md) measured approximately
+0.879 ms per old check at 2,048 charts. The new check is constant-time, but no
+end-to-end sampling or assembly speedup has yet been measured.
+
 An exact-rational displacement bound, conditional on the saved gap error being
 at most 0.01 Å, screens 95.736% of parent label mass as unrepairable within the
 current 1 Å / 2° box. All previously capped labels screen. Smaller declared

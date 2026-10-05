@@ -150,3 +150,119 @@ This refinement is specific to the independent candidate law. Nonzero correlatio
 The current `physical_step` has no correction-override mode. A future explicit, checkpointed zero-correlation mode could retain the original trace correction and record the full-mixture correction separately. Learned traces already store both endpoint `log G_C` values: with `a=log G_C(x)-log u`, `b=log G_C(y)-log u`, the new correction is `softplus(a)-softplus(b)`. Saved complete bath counts and uniforms permit a one-step counterfactual at the saved source. Uniform candidates require additional map-density evaluations to measure their compensating changes. Such a replay is not a new trajectory or a mixing estimate.
 
 Extra scoring cost and the deterministic four-local/one-global schedule matter: Peskun ordering of the reversible global kernel alone does not establish ordering of that full cycle composition or improvement per CPU. Saved correction/bath diagnostics should precede implementation and a matched benchmark. No refinement has been implemented or allocated by this note.
+
+## Minimum bank adapter and preflight gates — unimplemented, unallocated
+
+The smallest useful implementation is a separate bank scorer, with no change
+to the production sampler. It would consume all 36,864 global candidates from
+the completed **rho=0** original/context runs, including warmup and rejected
+proposals. The local and rho=0.95 runs are not candidate sources. Admission
+must authenticate every chain's completion receipt, compiled source bundle,
+config, prior, model, shape, fixed context, events and exact 2,304-slot
+inventory. Missing candidates or numerical failures stop the calculation;
+they do not become zero weights or replacement draws.
+
+The existing APIs are sufficient for density reconstruction:
+[`DockingProposal::member_chart_parts`](../src/docking.rs) supplies the actual
+map, virtual reciprocal flags and effective priors;
+[`FixedBasinInvolution::checked_log_density`](../src/basin_involution.rs)
+distinguishes the legitimate Cayley seam from arithmetic failure. Compose
+each saved pose with the inverse fixed anchor, apply each branch's reciprocal
+wrapper, and sum its weighted physical density. Include the immutable cube
+indicator when forming `log Q = logaddexp(log(U/2), log(G/2))`, for **both**
+generating branches. Check saved learned `log G(new)` against reconstruction.
+The score already includes the map factor and normalized-Haar Jacobian: the
+mass contribution is `mean(W)/Q`, with no extra Jacobian or source-label factor.
+
+Use two stages, with their inventories and resource ceilings frozen before
+each stage:
+
+1. **Whole-bank geometry and coverage preflight, without Poisson clouds.**
+   Preserve one record per slot, reconstruct Q, check the full atomic wall
+   and rigid core against the saved verdict, and classify every valid
+   candidate with the existing native-blind patch observer. Keep all fixed
+   bodies in the physical definition. A conservative body-bound cutoff may
+   omit provably distant spectators from point tests, using the guarded
+   `2*(tree.bound + rd)` construction already used in
+   [`RigidSubset::new`](../src/rigid_subset.rs); validate this optimization
+   against the unpruned union in synthetic tests. Build one
+   `OverlapEnvelope` per valid candidate and record its lower and uncertain
+   volumes and construction cost. An empty overlap has W=1 exactly.
+2. **Independent absolute weights, only after reviewing the complete
+   preflight.** Use that same pose/context/envelope for two independent
+   clouds at lambda=64z. An explicit new SHA-256 seed namespace must include
+   the bank/protocol digest, arm, start, stream, cycle and cloud index 0/1.
+    Neither old acceptance clouds nor proposal RNG state is reused. Retain
+   both individual estimates and their linear average, represented with
+   log-sum-exp to avoid overflow. A preflight decision may stop the whole
+   calculation as insufficiently covered; it may not remove unfavorable
+   slots or populations from a subsequent estimate.
+
+Patch regions should be fixed from the **certified initial source geometry**,
+not from tokens chosen because another trajectory missed them. Let T be that
+source pose's complete secondary-neighbor-217 patch-token set. Within A,
+record `c=|P217(y) intersection T|/|T|` in the exhaustive bins
+`[0,.25)`, `[.25,.5)`, `[.5,.75)`, `[.75,1)`, and `{1}`; the last is the
+source-secondary-contact inclusion region and permits additional tokens.
+Also retain the Jaccard similarity, complete sorted tokens and full
+fingerprint. B and Other remain complete, with Other split into contacted
+and unbound poses. These definitions must be serialized before examining
+bank coverage. They are source-informed retrospective diagnostics on reused
+candidate data, not a prospectively independent discovery experiment.
+Confirmatory region choices informed by these bank results would require
+fresh candidates.
+
+Zero bank hits in the source-secondary region would be a decisive
+**coverage failure**, not an upper bound on its physical mass. Sparse hits,
+large importance tails, or disagreement between starts/populations likewise
+prevent coarse A/B agreement from resolving the missing patch pocket. Report
+every patch stratum and the full complement; do not substitute neighbor-ID
+agreement for surface registration. The current trajectories' disagreement
+in secondary-neighbor patches makes this failure mode plausible.
+
+The only necessary sampling addition is a small bounded counterpart of
+[`sample_with_envelope`](../src/overlap_weight.rs). It should preserve the
+existing Poisson draw, cell selection, membership predicates and arithmetic
+bit for bit when no limit is reached. Journal the cloud start and planned
+Poisson count **before** its point loop; reject an over-budget allocation
+fatally before processing points. Track processed/retained counts and CPU
+periodically, preserve partial progress on failure, and publish a usable W
+only for a complete cloud. Set explicit per-cloud, per-candidate and total
+raw/retained-count limits, plus CPU/wall/memory limits. No clipping, early
+acceptance, retries or partial-cloud weights are allowed. A sibling wrapper
+keeps currently pinned production sources untouched; its equivalence tests
+must compare both output and RNG continuation with the existing sampler.
+The envelope's pose binding is private in the current API. A sibling adapter
+must therefore own construction together with its immutable pose and context,
+rather than accept arbitrary external envelopes. If the two stages run in
+separate processes, rebuild deterministically, check against the preflight's
+bound metadata, and share that checked envelope between the two clouds.
+
+Useful new tests are the bounded/unbounded equivalence and failure-prefix
+cases, two-cloud role separation and deterministic continuation, complete
+bank/invalid-zero accounting, full-Q cube boundaries and reciprocal/Haar
+density reconstruction, and patch-partition completeness. Reuse the existing
+analytic lens first/second-moment, duplicate-neighbor union, rotated-dumbbell,
+zero-activity and empty-overlap checks in
+[`tests/overlap_weight.rs`](../tests/overlap_weight.rs); do not mistake the
+acceptance-ratio reference for an absolute-weight reference. The same bank
+also yields a hard-only `1/Q` control without new clouds.
+
+Keep eight distinct start/stream populations per arm, each with denominator
+2,304. Arms share proposal-role seeds and must be compared as paired
+populations; clouds use independent roles. Cloud-replicate disagreement
+measures only conditional cloud noise. Report population spread, importance
+ESS, largest contributions, linear masses and their free-energy ratios,
+without treating the two clouds as independent pose populations.
+
+Cost is measurable before cloud scoring. Full density reconstruction requires
+75,497,472 virtual-chart evaluations. At two clouds and lambda=2.24 Å^-3,
+expected raw-point work is `4.48 * sum(uncertain_volume)` over valid poses;
+the two copies reuse each envelope. The existing point loop stores no cloud
+and short-circuits membership in the fixed union. However,
+`Environment::contains` scans its retained spectator list, so conservative
+spectator pruning matters. Acceptance-gate throughput is not a validated
+runtime prediction for absolute envelopes. Record density, geometry, envelope
+and point-loop costs separately. The preflight's volume totals and variance
+bounds, rather than a guessed runtime or favorable subset, should determine
+whether a separately frozen full-bank cloud allocation is worthwhile.

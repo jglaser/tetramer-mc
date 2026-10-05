@@ -236,6 +236,22 @@ move is accepted in any A-start stream, and its paired retained contact
 history is unchanged by correlation. These facts prevent interpreting the
 neighbor occupancy agreement as contact equilibration or native registry.
 
+The [per-neighbor reduction](../results/context-correlated-patch-neighbor-reduction-20261005/report.json)
+locates the discrepancy. In the correlated context arm, the mean absolute
+patch-occupancy difference between starts is 0.0469 for the common anchor
+16, but 0.8012 for neighbor 217. Expected active patch-token counts are
+9.00 versus 9.45 at the anchor, and 17.29 versus 2.87 at neighbor 217.
+Ten secondary-contact tokens are present throughout the A-start production
+histories and never observed from B starts. The calculation retains all
+40,960 production endpoints per start, including rejected residence and
+poses without that neighbor; it does not condition on having the contact.
+All arms and tokens are retained in the report (SHA256
+`a09f4e3f9e1880139c528cef7710000575298afc913355a4eebcd962f4a0ca23`).
+These coarse patch indicators are neither physical contact area nor exclusion
+overlap volume, depletion free energy, or a native-registry classification.
+They suggest a concrete missing capability: preserving or discovering the
+second-neighbor registration while satisfying the anchor contact.
+
 The predeclared efficiency measure does not show a consistent benefit:
 
 | rho=.95 / rho=0, same prior | Median patch ESS/CPU ratio | Median fingerprint ESS/CPU ratio | Defined pairs |

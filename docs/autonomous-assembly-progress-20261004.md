@@ -45,7 +45,14 @@ occupied surroundings dominate this particular destination-feasibility failure.
 The next proposal should account for the outside geometry with its exact
 forward/reverse selection correction. A practical reversible construction can
 refit only two selected charts per attempt, using the original atlas for label
-selection. It is not yet a production kernel or an observed mixing gain.
+selection. Its [standalone Rust implementation](context-selected-transport.md)
+now passes ten unit tests and an independent one-step stationarity control:
+16,384 IID sources, 49,152 paired-arm transitions and all 131,072 journal events
+were retained. Neither correct arm fails any of the 24 predeclared primary
+tests; the deliberately incorrect shortcut fails ten of twelve diagnostics.
+Eight focused Lean statements check the selection/accepted-flow algebra under
+explicit implementation obligations. This is a Gaussian-target validation,
+not a production protein kernel or an observed mixing gain.
 An exact-rational displacement bound, conditional on the saved gap error being
 at most 0.01 Å, screens 95.736% of parent label mass as unrepairable within the
 current 1 Å / 2° box. All previously capped labels screen. Smaller declared

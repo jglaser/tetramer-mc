@@ -484,6 +484,21 @@ two-theorem standard-axiom audit and source closure. Existing validation receipt
 and the default import target are unchanged. Concrete selection implementation,
 the surrogate-density substitution, geometry and executor remain obligations.
 
+[`SelectedChart.lean`](ReversibleSampling/SelectedChart.lean) supplies eight
+focused bridges for transport with context-adjusted charts and original-atlas
+label selection. The prior-label factors cancel, but the selected original
+component-density ratio must remain when transport charts differ. The checked
+accepted-flow identity includes zero reverse mass; completion still explicitly
+assumes integrated balance. The corresponding Rust utility and caller
+obligations are described in [the selected-chart design](../docs/context-selected-transport.md).
+The isolated compile and [`SelectedChartAudit.lean`](SelectedChartAudit.lean)
+passed under the existing Lean 4.24.0 and mathlib pins, with only `propext`,
+`Classical.choice` and `Quot.sound`. The focused receipt is
+`results/selected-chart-lean-20261004/attempt02/receipt.json` from the repository
+root. It leaves the default import target and earlier receipts unchanged.
+No concrete floating-point map, geometry predicate or Poisson thinning law is
+proved by these finite-density identities.
+
 | Checked mathematical bridge | Rust implementation | Obligation still outside Lean |
 |---|---|---|
 | `poisson_depletion_mean`, second moment and relative variance | [`overlap_weight::sample_with_envelope`](../src/overlap_weight.rs) | Envelope coverage, disjoint volume accounting, exact overlap predicates and thinning must give the stated Poisson law. |

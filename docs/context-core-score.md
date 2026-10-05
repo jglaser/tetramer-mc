@@ -259,6 +259,12 @@ at the chart center; the widespread clashes in this environment primarily
 involve additional bodies. This is evidence about these fixed centers, not
 the probability that a Gaussian draw will be valid or an equilibrium conclusion.
 
+![Disjoint attribution of blocked atlas centers](../results/context-occupied-destinations-figure-20261004/render02/occupied-destinations.png)
+
+The figure aggregates only the independently audited saved scores; it adds no
+geometry queries or physical draws. Its categories are disjoint, unlike the
+three overlapping blocker groups in the table.
+
 The scorer recorded 44.26 CPU seconds before writing its final report. Total
 controller cost, including report serialization, was 50.15 CPU seconds and
 50.41 wall seconds, with approximately 349 MiB peak RSS. The independently

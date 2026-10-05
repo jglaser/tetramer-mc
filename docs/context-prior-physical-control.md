@@ -74,3 +74,42 @@ controller CPU seconds; all child groups drained. The production executable
 and the reused dependency cache were unchanged. This validates the exercised
 integration cases; the independent physical stationarity check and protein
 pilot remain separate gates.
+
+The subsequent [geometry certificate](../results/context-branch-prior-start-certification-20261005/certification/summary.json)
+validated all 263 fixed bodies, the saved source, and all 51 eligible branch
+centers. Forty-seven centers have a different exclusion-neighbor set from the
+source. The frozen rule selected virtual branch 32, with contacts `{16,56}`;
+the source has contacts `{16,217}`. The
+[selection record](../results/context-branch-prior-start-certification-20261005/selection.json)
+retains every candidate. Certification and selection used 1.49 CPU seconds;
+neither performed bath sampling or equilibrium inference. This clears the
+two-start feasibility gate.
+
+## Independent physical reference
+
+The shared physical step completed 16,384 calls from all 8,192 cached IID
+two-sphere configurations, updating one sphere while conditioning on the
+other. Both original and context-prior arms passed all 24 predeclared paired
+binary stationarity tests at familywise level 0.05. The smallest p-value was
+0.0228, above the per-test threshold 0.002083. An intentionally incorrect
+control reused the same candidate, bath and acceptance uniform while omitting
+the proposal ratio; it failed 10 of its 12 tests.
+
+The [independent audit](../results/context-prior-reference-preparation-20261005/audit.json)
+also passed 260,584 reconstructions of densities, reciprocal charts,
+Jacobians, auxiliary noise/label factors, count arithmetic, endpoint predicates
+and decisions. Maximum absolute numerical discrepancy was `2.30e-9`, within
+the predeclared scaled tolerances. The run used 186,550 raw bath points;
+physical execution cost 1.98 CPU seconds and the saved-record audit 20.56 CPU
+seconds. All process groups drained, without replacement sources or retries.
+
+Audit SHA256:
+`48ef84099b810f084b872248750541de8f18cc59e5765a9fad6bf597a8437711`.
+The [host receipt](../results/context-prior-reference-preparation-20261005/execution-v4/receipt.json)
+has SHA256
+`098afd04da962de2dc790cf6da80b021d7050951354a4bf6cddb6ee90a571d5d`.
+Six deterministic tests of the independent analyzer also passed. Earlier
+controller versions were revised before execution to ensure child-process
+cleanup on interruption; they made no scientific draws. This check supports
+the implemented physical kernel in the tested reference limit. Protein mixing
+efficiency and equilibrium assembly remain separate questions.

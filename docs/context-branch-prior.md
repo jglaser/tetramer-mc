@@ -137,8 +137,10 @@ has SHA256 `e189bba9838a9b90924ee4e629ff71b5b8fd5381db9edf4652c7a32736b7639e`.
 Its [report](../results/context-branch-prior-preparation-20261004-v3/result/report.json)
 has SHA256 `8baf53ba1fa54a92750f447bca5a80e9e481b365028278f3525122e596297134`.
 The fixed 263-body context and source pose are copied without transformations
-from the bound endpoint. **Source hard/wall validity has not been rechecked**;
-the saved center scores do not certify that pose. The reduction used 2.682 CPU
+from the bound endpoint. Source hard/wall validity was not checked during that
+reduction; the later [full-wall certification](context-prior-physical-control.md)
+validated the source, all fixed bodies, and all 51 eligible centers. The
+saved center scores alone do not certify a pose. The reduction used 2.682 CPU
 seconds including its controller, with no geometry queries, new poses or
 physical draws. All process groups drained.
 

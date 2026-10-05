@@ -36,9 +36,12 @@ FAMILY_ALPHA = .05
 PRIMARY_TESTS = len(VALID_ARMS) * len(OBSERVABLES)
 SOURCE_EXCERPTS = (
     ('fn cholesky(', 'fn chart_parameters_valid(',
-     'e06c2385578d028b4a68cb912f64011c63b62ea8f441910dc13945731bb6c238'),
+     ('e06c2385578d028b4a68cb912f64011c63b62ea8f441910dc13945731bb6c238',)),
     ('    pub fn encode(', '\n}\n\n/// The correlated latent map',
-     'e6354e442aa659e280a96d591992bbfbb5300c730e63b2a0be67197c35c9bc05'),
+     ('e6354e442aa659e280a96d591992bbfbb5300c730e63b2a0be67197c35c9bc05',
+      # Certified complete-pair membership changes only the support guard.
+      # The isolated 28-test release receipt includes bitwise map equivalence.
+      '10d7807e5a097d428097c565941df459aa71df8420556f1abe110a7b182d0aab')),
 )
 
 
@@ -54,6 +57,13 @@ def sha(path):
 
 def read(path):
     return json.loads(Path(path).read_bytes())
+
+
+def verify_compiled_chart_source(text):
+    for start, end, digests in SOURCE_EXCERPTS:
+        first = text.index(start)
+        require(hashlib.sha256(text[first:text.index(end, first)].encode()).hexdigest() in digests,
+                'Unknown compiled factor/chart arithmetic')
 
 
 def observations(pose):
@@ -440,10 +450,7 @@ def main():
     require(hashes['producer_source'] == 'cc11fb80b3f1af48158b5cf307206565477e5aa1acc74d590fd9b7148760b469',
             'Unreviewed archived producer example')
     text = bundle['files']['src/basin_involution.rs']['text']
-    for start, end, digest in SOURCE_EXCERPTS:
-        first = text.index(start)
-        require(hashlib.sha256(text[first:text.index(end, first)].encode()).hexdigest() == digest,
-                'Unknown compiled factor/chart arithmetic')
+    verify_compiled_chart_source(text)
     report = audit(fixture, args.events, read(args.summary))
     require(all(sha(path) == hashes[name] for name, path in inputs.items()), 'Audit input changed')
     report.update(schema='context-transport-independent-stationarity-v1', input_sha256=hashes,

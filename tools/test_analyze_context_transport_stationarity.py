@@ -1,13 +1,14 @@
 """Deterministic reconstruction controls; no statistical/protein draws."""
 import math
 import unittest
+from pathlib import Path
 
 import numpy as np
 from scipy.special import logsumexp
 from scipy.spatial.transform import Rotation
 from scipy.stats import multivariate_normal
 
-from analyze_context_transport_stationarity import Chart, Reference, observations
+from analyze_context_transport_stationarity import Chart, Reference, observations, verify_compiled_chart_source
 from dimer_destination_density import inverse_pose, pose_arrays
 
 
@@ -108,6 +109,14 @@ class ReferenceTests(unittest.TestCase):
         opposite = dict(position=pose['position'], orientation=[-v for v in pose['orientation']])
         self.assertEqual(observations(pose), observations(opposite))
         self.assertEqual(len(observations(pose)), 12)
+
+    def test_compiled_source_guard_accepts_reviewed_support_check_and_rejects_tampering(self):
+        text = (Path(__file__).resolve().parents[1]/'src/basin_involution.rs').read_text()
+        verify_compiled_chart_source(text)
+        start = text.index('    pub fn encode(')
+        modified = text[:start]+text[start:].replace('pub fn encode(', 'pub fn encode(/* changed */', 1)
+        with self.assertRaisesRegex(ValueError, 'Unknown compiled'):
+            verify_compiled_chart_source(modified)
 
 
 if __name__ == '__main__':

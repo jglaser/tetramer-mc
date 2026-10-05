@@ -191,6 +191,15 @@ The [drain receipt](../results/context-transport-stationarity-preparation-202610
 has SHA-256 `0530b1d9d35ca4801f5dde2e7b9ae65979a0f9f915dd7c9d30fe8b22d961c931`.
 No protein geometry, bath estimator or assembly trajectory was evaluated.
 
+The current reconstruction tool also accepts the reviewed source excerpt with
+the certified complete-pair support check. That change leaves chart arithmetic
+unchanged; the joint 28-test release validation includes bitwise transport
+equivalence with the original scan. Seven deterministic Python reconstruction
+and source-guard tests pass, including rejection of an unreviewed source change.
+The archived statistical run, its original reducer and all reported data remain
+unchanged; the statistical allocation was not repeated for this compatibility
+update.
+
 ## Checked algebra bridge
 
 [`SelectedChart.lean`](../formal/ReversibleSampling/SelectedChart.lean) contains

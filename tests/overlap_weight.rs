@@ -232,3 +232,503 @@ fn empty_overlap_zero_activity_and_boundary_reference_limits() -> Result<()> {
     );
     Ok(())
 }
+
+// The compatibility oracle below is the pre-observer sampling loop, frozen in
+// this test. Unlike a bounded-vs-public-wrapper comparison alone, it can catch
+// an accidental RNG/arithmetic change in their now-shared private core.
+fn legacy_positive_cloud(
+    rng: &mut StdRng,
+    env: &Environment,
+    old: Pose,
+    lambda: f64,
+    z: f64,
+    envelope: &OverlapEnvelope,
+) -> overlap_weight::OverlapWeight {
+    use rand::RngExt;
+    use rand_distr::{Distribution, Poisson};
+    let mut result = overlap_weight::OverlapWeight {
+        lower_volume: envelope.lower_volume,
+        upper_volume: envelope.upper_volume(),
+        uncertain_volume: envelope.uncertain_volume,
+        retained_cells: envelope.cells.len(),
+        created_cells: envelope.created,
+        certified_cells: envelope.certified_cells,
+        ..Default::default()
+    };
+    result.log_weight = z * envelope.lower_volume;
+    result.raw_points = Poisson::<f64>::new(lambda * envelope.uncertain_volume)
+        .unwrap()
+        .sample(rng) as u64;
+    let moving = Placed::new(old);
+    for _ in 0..result.raw_points {
+        let target = rng.random::<f64>() * envelope.uncertain_volume;
+        let k = envelope
+            .cumulative
+            .partition_point(|&v| v <= target)
+            .min(envelope.cells.len() - 1);
+        let cell = envelope.cells[k];
+        let p =
+            std::array::from_fn(|j| cell.lo[j] + rng.random::<f64>() * (cell.hi[j] - cell.lo[j]));
+        if env.tree.contains(p, env.rd) && env.contains(moving.apply(p)) {
+            result.overlap_points += 1;
+        }
+    }
+    let ratio = z / lambda;
+    let coefficient = if ratio.is_finite() {
+        ratio.ln_1p()
+    } else {
+        (lambda + z).ln() - lambda.ln()
+    };
+    result.log_weight += result.overlap_points as f64 * coefficient;
+    result
+}
+
+fn cloud_limits(interval: u64) -> overlap_weight::CloudLimits {
+    overlap_weight::CloudLimits {
+        raw_points: 1_000_000,
+        processed_points: 1_000_000,
+        callback_interval: interval,
+    }
+}
+
+#[test]
+fn bounded_cloud_matches_legacy_and_original_bitwise_with_rng_continuation() -> Result<()> {
+    use overlap_weight::{CloudEvent, CloudProgress};
+    use rand::RngExt;
+    let tree = sphere()?;
+    let old = pose([0.; 3]);
+    for positions in [
+        vec![[2., 0., 0.]],
+        vec![[2., 0., 0.], [-2., 0., 0.], [2., 0., 0.]],
+    ] {
+        let env = environment(&tree, &positions);
+        for cells in [1, 255] {
+            let envelope = OverlapEnvelope::build(&env, old, options(cells))?;
+            assert!(envelope.uncertain_volume > 0.);
+            for seed in [19, 721, 20261005] {
+                for interval in [1, 7, 1024] {
+                    let mut bounded_rng = StdRng::seed_from_u64(seed);
+                    let mut original_rng = StdRng::seed_from_u64(seed);
+                    let mut legacy_rng = StdRng::seed_from_u64(seed);
+                    let mut progress = CloudProgress::default();
+                    let mut events = Vec::new();
+                    let bounded = overlap_weight::sample_with_envelope_bounded(
+                        &mut bounded_rng,
+                        &env,
+                        old,
+                        1.4,
+                        0.35,
+                        &envelope,
+                        cloud_limits(interval),
+                        &mut progress,
+                        |event, state| {
+                            assert!(!state.complete && state.log_weight.is_none());
+                            events.push((event, *state));
+                            Ok(())
+                        },
+                    )?;
+                    let original = overlap_weight::sample_with_envelope(
+                        &mut original_rng,
+                        &env,
+                        old,
+                        1.4,
+                        0.35,
+                        &envelope,
+                    )?;
+                    let legacy =
+                        legacy_positive_cloud(&mut legacy_rng, &env, old, 1.4, 0.35, &envelope);
+                    assert_eq!(
+                        serde_json::to_value(bounded)?,
+                        serde_json::to_value(original)?
+                    );
+                    assert_eq!(
+                        serde_json::to_value(bounded)?,
+                        serde_json::to_value(legacy)?
+                    );
+                    assert_eq!(bounded.log_weight.to_bits(), legacy.log_weight.to_bits());
+                    assert_eq!(progress.planned_points, Some(bounded.raw_points));
+                    assert_eq!(progress.processed_points, bounded.raw_points);
+                    assert_eq!(progress.overlap_points, bounded.overlap_points);
+                    assert!(progress.complete && progress.log_weight == Some(bounded.log_weight));
+                    assert_eq!(events[0].0, CloudEvent::Begun);
+                    assert_eq!(events[1].0, CloudEvent::CountDrawn);
+                    assert_eq!(events[1].1.processed_points, 0);
+                    assert_eq!(events.last().unwrap().0, CloudEvent::Finishing);
+                    for _ in 0..4 {
+                        let next = legacy_rng.random::<u64>();
+                        assert_eq!(original_rng.random::<u64>(), next);
+                        assert_eq!(bounded_rng.random::<u64>(), next);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn bounded_cloud_zero_activity_and_empty_envelope_consume_no_rng() -> Result<()> {
+    use overlap_weight::{CloudEvent, CloudProgress};
+    use rand::RngExt;
+    let tree = sphere()?;
+    let old = pose([0.; 3]);
+    for (positions, lambda, z) in [(vec![], 1., 0.3), (vec![[2., 0., 0.]], 0., 0.)] {
+        let env = environment(&tree, &positions);
+        let envelope = OverlapEnvelope::build(&env, old, options(255))?;
+        let mut rng = StdRng::seed_from_u64(9126);
+        let mut baseline = StdRng::seed_from_u64(9126);
+        let mut original_rng = StdRng::seed_from_u64(9126);
+        let mut progress = CloudProgress::default();
+        let mut events = Vec::new();
+        let mut caps = cloud_limits(7);
+        caps.raw_points = 0;
+        caps.processed_points = 0;
+        let result = overlap_weight::sample_with_envelope_bounded(
+            &mut rng,
+            &env,
+            old,
+            lambda,
+            z,
+            &envelope,
+            caps,
+            &mut progress,
+            |event, _| {
+                events.push(event);
+                Ok(())
+            },
+        )?;
+        let original = overlap_weight::sample_with_envelope(
+            &mut original_rng,
+            &env,
+            old,
+            lambda,
+            z,
+            &envelope,
+        )?;
+        assert_eq!(
+            serde_json::to_value(result)?,
+            serde_json::to_value(original)?
+        );
+        assert_eq!(result.log_weight, 0.);
+        assert_eq!(progress.planned_points, None);
+        assert_eq!(progress.processed_points, 0);
+        assert!(progress.complete);
+        assert_eq!(events, [CloudEvent::Begun, CloudEvent::Finishing]);
+        let next = baseline.random::<u64>();
+        assert_eq!(rng.random::<u64>(), next);
+        assert_eq!(original_rng.random::<u64>(), next);
+    }
+    Ok(())
+}
+
+#[test]
+fn bounded_cloud_count_is_visible_before_both_budget_failures() -> Result<()> {
+    use overlap_weight::{CloudEvent, CloudProgress};
+    use rand::RngExt;
+    use rand_distr::{Distribution, Poisson};
+    let tree = sphere()?;
+    let env = environment(&tree, &[[2., 0., 0.]]);
+    let old = pose([0.; 3]);
+    let envelope = OverlapEnvelope::build(&env, old, options(1))?;
+    for raw_failure in [true, false] {
+        let mut rng = StdRng::seed_from_u64(173);
+        let mut reference = StdRng::seed_from_u64(173);
+        let planned =
+            Poisson::<f64>::new(2. * envelope.uncertain_volume)?.sample(&mut reference) as u64;
+        assert!(planned > 0);
+        let mut caps = cloud_limits(7);
+        if raw_failure {
+            caps.raw_points = planned - 1;
+        } else {
+            caps.processed_points = planned - 1;
+        }
+        let mut progress = CloudProgress::default();
+        let mut journal = Vec::new();
+        let error = overlap_weight::sample_with_envelope_bounded(
+            &mut rng,
+            &env,
+            old,
+            2.,
+            0.3,
+            &envelope,
+            caps,
+            &mut progress,
+            |event, state| {
+                journal.push(serde_json::to_string(&(event, state))?);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains(if raw_failure {
+            "raw-point"
+        } else {
+            "processed-point"
+        }));
+        assert_eq!(journal.len(), 2);
+        let count_event: (CloudEvent, CloudProgress) = serde_json::from_str(&journal[1])?;
+        assert_eq!(count_event.0, CloudEvent::CountDrawn);
+        assert_eq!(count_event.1.planned_points, Some(planned));
+        assert_eq!(progress.planned_points, Some(planned));
+        assert_eq!(progress.processed_points, 0);
+        assert!(!progress.complete && progress.log_weight.is_none());
+        assert_eq!(rng.random::<u64>(), reference.random::<u64>());
+    }
+    Ok(())
+}
+
+#[test]
+fn bounded_cloud_callback_abort_retains_exact_processed_prefix() -> Result<()> {
+    use overlap_weight::{CloudEvent, CloudProgress};
+    use rand::RngExt;
+    use rand_distr::{Distribution, Poisson};
+    let tree = sphere()?;
+    let env = environment(&tree, &[[2., 0., 0.]]);
+    let old = pose([0.; 3]);
+    let envelope = OverlapEnvelope::build(&env, old, options(1))?;
+    let mut rng = StdRng::seed_from_u64(6418);
+    let mut reference = StdRng::seed_from_u64(6418);
+    let planned =
+        Poisson::<f64>::new(2. * envelope.uncertain_volume)?.sample(&mut reference) as u64;
+    assert!(planned >= 3);
+    let mut overlaps = 0;
+    for _ in 0..3 {
+        let _cell_uniform = reference.random::<f64>(); // one-cell envelope
+        let cell = envelope.cells[0];
+        let point = std::array::from_fn(|j| {
+            cell.lo[j] + reference.random::<f64>() * (cell.hi[j] - cell.lo[j])
+        });
+        overlaps += u64::from(env.tree.contains(point, env.rd) && env.contains(point));
+    }
+    let mut progress = CloudProgress::default();
+    let mut events = Vec::new();
+    let result = overlap_weight::sample_with_envelope_bounded(
+        &mut rng,
+        &env,
+        old,
+        2.,
+        0.3,
+        &envelope,
+        cloud_limits(3),
+        &mut progress,
+        |event, state| {
+            events.push((event, *state));
+            if event == CloudEvent::Progress {
+                anyhow::bail!("synthetic CPU/wall guard");
+            }
+            Ok(())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        events.iter().map(|x| x.0).collect::<Vec<_>>(),
+        [
+            CloudEvent::Begun,
+            CloudEvent::CountDrawn,
+            CloudEvent::Progress
+        ]
+    );
+    assert_eq!(progress.planned_points, Some(planned));
+    assert_eq!(progress.processed_points, 3);
+    assert_eq!(progress.overlap_points, overlaps);
+    assert!(!progress.complete && progress.log_weight.is_none());
+    assert_eq!(rng.random::<u64>(), reference.random::<u64>());
+    Ok(())
+}
+
+#[test]
+fn bounded_cloud_final_guard_failure_never_publishes_weight() -> Result<()> {
+    use overlap_weight::{CloudEvent, CloudProgress};
+    use rand::RngExt;
+    let tree = sphere()?;
+    let env = environment(&tree, &[[2., 0., 0.]]);
+    let old = pose([0.; 3]);
+    let envelope = OverlapEnvelope::build(&env, old, options(31))?;
+    let mut rng = StdRng::seed_from_u64(963);
+    let mut reference = StdRng::seed_from_u64(963);
+    let original =
+        overlap_weight::sample_with_envelope(&mut reference, &env, old, 1.4, 0.35, &envelope)?;
+    let mut progress = CloudProgress::default();
+    let result = overlap_weight::sample_with_envelope_bounded(
+        &mut rng,
+        &env,
+        old,
+        1.4,
+        0.35,
+        &envelope,
+        cloud_limits(7),
+        &mut progress,
+        |event, _| {
+            if event == CloudEvent::Finishing {
+                anyhow::bail!("final journal/CPU failure");
+            }
+            Ok(())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(progress.processed_points, original.raw_points);
+    assert_eq!(progress.overlap_points, original.overlap_points);
+    assert!(!progress.complete && progress.log_weight.is_none());
+    assert_eq!(rng.random::<u64>(), reference.random::<u64>());
+    Ok(())
+}
+
+#[test]
+fn bounded_cloud_start_validation_and_reused_progress_do_not_draw() -> Result<()> {
+    use overlap_weight::{CloudEvent, CloudProgress};
+    use rand::RngExt;
+    let tree = sphere()?;
+    let env = environment(&tree, &[[2., 0., 0.]]);
+    let old = pose([0.; 3]);
+    let envelope = OverlapEnvelope::build(&env, old, options(1))?;
+    for case in 0..5 {
+        let mut rng = StdRng::seed_from_u64(320);
+        let mut baseline = StdRng::seed_from_u64(320);
+        let mut progress = CloudProgress::default();
+        if case == 4 {
+            progress.begun = true;
+        }
+        let mut caps = cloud_limits(7);
+        if case == 0 {
+            caps.callback_interval = 0;
+        }
+        let p = if case == 1 { pose([0.1, 0., 0.]) } else { old };
+        let lambda = if case == 2 { 0. } else { 1. };
+        let mut events = Vec::new();
+        let result = overlap_weight::sample_with_envelope_bounded(
+            &mut rng,
+            &env,
+            p,
+            lambda,
+            0.3,
+            &envelope,
+            caps,
+            &mut progress,
+            |event, _| {
+                events.push(event);
+                if case == 3 {
+                    anyhow::bail!("begin journal failure");
+                }
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            events,
+            if case == 0 || case == 4 {
+                vec![]
+            } else {
+                vec![CloudEvent::Begun]
+            }
+        );
+        assert_eq!(progress.planned_points, None);
+        assert_eq!(progress.processed_points, 0);
+        assert!(!progress.complete && progress.log_weight.is_none());
+        assert_eq!(rng.random::<u64>(), baseline.random::<u64>());
+    }
+    Ok(())
+}
+
+#[test]
+fn bounded_cloud_sampled_zero_is_distinct_from_skipped_poisson() -> Result<()> {
+    use overlap_weight::{CloudEvent, CloudProgress};
+    let tree = sphere()?;
+    let env = environment(&tree, &[[2., 0., 0.]]);
+    let old = pose([0.; 3]);
+    let envelope = OverlapEnvelope::build(&env, old, options(1))?;
+    let mut rng = StdRng::seed_from_u64(3817);
+    let mut progress = CloudProgress::default();
+    let mut events = Vec::new();
+    let mut caps = cloud_limits(7);
+    caps.raw_points = 0;
+    caps.processed_points = 0;
+    let result = overlap_weight::sample_with_envelope_bounded(
+        &mut rng,
+        &env,
+        old,
+        1e-12,
+        0.3,
+        &envelope,
+        caps,
+        &mut progress,
+        |event, _| {
+            events.push(event);
+            Ok(())
+        },
+    )?;
+    assert_eq!(result.raw_points, 0);
+    assert_eq!(progress.planned_points, Some(0));
+    assert!(progress.complete);
+    assert_eq!(
+        events,
+        [
+            CloudEvent::Begun,
+            CloudEvent::CountDrawn,
+            CloudEvent::Finishing
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn bounded_cloud_remaining_campaign_caps_charge_each_attempt_once() -> Result<()> {
+    use overlap_weight::CloudProgress;
+    use rand_distr::{Distribution, Poisson};
+    let tree = sphere()?;
+    let env = environment(&tree, &[[2., 0., 0.]]);
+    let old = pose([0.; 3]);
+    let envelope = OverlapEnvelope::build(&env, old, options(1))?;
+    let seeds = [914, 1519];
+    let planned: Vec<u64> = seeds
+        .iter()
+        .map(|&seed| {
+            Poisson::<f64>::new(2. * envelope.uncertain_volume)
+                .unwrap()
+                .sample(&mut StdRng::seed_from_u64(seed)) as u64
+        })
+        .collect();
+    assert!(planned.iter().all(|&n| n > 0));
+    let campaign_cap = planned[0] + planned[1] - 1;
+    let mut total_planned = 0;
+    let mut total_processed = 0;
+    for (index, seed) in seeds.into_iter().enumerate() {
+        let mut caps = cloud_limits(3);
+        caps.raw_points = caps.raw_points.min(campaign_cap - total_planned);
+        caps.processed_points = caps.processed_points.min(campaign_cap - total_processed);
+        let mut progress = CloudProgress::default();
+        let mut callbacks = 0;
+        let result = overlap_weight::sample_with_envelope_bounded(
+            &mut StdRng::seed_from_u64(seed),
+            &env,
+            old,
+            2.,
+            0.3,
+            &envelope,
+            caps,
+            &mut progress,
+            |_, _| {
+                callbacks += 1;
+                Ok(())
+            },
+        );
+        // Accumulate once after the call, never once per progress notification.
+        total_planned += progress.planned_points.unwrap_or(0);
+        total_processed += progress.processed_points;
+        assert_eq!(progress.planned_points, Some(planned[index]));
+        if index == 0 {
+            assert!(result.is_ok() && progress.complete);
+            assert!(callbacks >= 3);
+            assert_eq!(total_planned, planned[0]);
+            assert_eq!(total_processed, planned[0]);
+        } else {
+            assert!(result.is_err() && !progress.complete);
+            assert_eq!(callbacks, 2);
+            assert_eq!(progress.processed_points, 0);
+            assert!(progress.log_weight.is_none());
+        }
+    }
+    // The oversized sampled request is recorded in full; only its predecessor
+    // was processed. A caller must stop here, not subtract again or retry.
+    assert_eq!(total_planned, campaign_cap + 1);
+    assert_eq!(total_processed, planned[0]);
+    Ok(())
+}

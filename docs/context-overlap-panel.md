@@ -154,3 +154,25 @@ the proposal change. The broad component's expected squared radius in the
 full chart is 24. Fresh independent populations must assess physical weight
 concentration, population agreement and CPU cost; the present panel motivated
 this choice and cannot serve as its validation.
+
+The broader guide and allocation are now frozen in
+`results/context-broadened-frozen-guides-20261005/result/mixture-manifest.json`
+(SHA256 `d74a4d564fd71547a52292c5d7a9a84ab14cf967e8ce0072389f3958b7bee827`).
+Five synthetic controls passed. This preparation generates no poses, clouds
+or fitted parameters and does not modify an assembly kernel.
+
+The prospective comparison has four fresh 4,096-attempt populations per arm,
+32,768 attempts total. Each baseline population combines 2,048 draws from the
+existing F runner law and 2,048 from D. Each broadened population combines
+1,536 F, 1,536 D and 1,024 B. Each runner law already includes its uniform and
+context branches; these counts are not promised source-branch hits. Reweight
+every draw by its arm's full deterministic-mixture density and divide by all
+4,096 attempts. No old draws are pooled into the new comparison. The unchanged
+runner can generate these strata; a new mixture-aware reduction and separately
+frozen seeds, execution limits and physical-cloud allocation are still needed.
+
+The completed physical panel's final host audit verified every owned process
+group had drained and the production binary and three pre-existing simulation
+workers were unchanged:
+`results/context-overlap-panel-physical-20261005/host-drained.json`, SHA256
+`b91fc00b1d50a77e1f6d0c79eb445e3be1bd64466fc2100a2333864529ddc420`.

@@ -172,3 +172,34 @@ test: the question is whether full contact-environment sampling per CPU and
 initialization agreement improve. Any finding remains conditional sampling
 evidence, not native-registry, equilibrium assembly or model-instability
 evidence.
+
+## Validation completed and control admitted
+
+The isolated build passed both new Rust tests, including all 54 forward and
+54 inverse map cases and 162 prior-correction identities. It used 88.15 total
+CPU seconds and left the production executables and reused cache unchanged.
+The new Python reference/observer contracts passed 21 tests. One initial
+synthetic fixture used a NumPy scalar where the saved-JSON schema requires a
+native scalar; that failed attempt was retained and the corrected JSON-roundtrip
+fixture passed. No physical samples were replaced. Three further comparator
+tests bind declared seeds to the actual executed configuration hashes.
+
+The [correlated reference audit](../results/context-correlated-reference-preparation-20261005/audit.json)
+then passed all 24 predeclared equilibrium checks using all 8,192 cached IID
+sources and 16,384 new one-step physical calls. The smallest paired-test
+p-value was 0.0410, above the 0.002083 per-test cutoff. The separate omitted-
+proposal-ratio control failed 6 of 12 checks. Independent reconstruction
+passed 286,862 numerical checks, with maximum absolute error `4.12e-9` and
+maximum tolerance fraction `0.00012945`. All 49,152 events and all rejected
+states were retained; both execution stages drained normally.
+
+Audit SHA256:
+`afc226f4986ec6382ebed122dea5c7a046b55da95c6ecd3968b863497e5d377d`.
+The [frozen protein controller](../results/context-correlated-control-execution-20261005/controller-manifest.json)
+has SHA256
+`3c633364c0163f08a61467ce2fb6f6018fbe9546a2d7335c013d4cd14f720e7e`.
+All 493 bindings, all 16 actual configuration comparisons, and the eight
+paired seeds were independently checked. Four new controller tests passed,
+covering the changed 16-job inventory and failure/termination cleanup. The
+16-chain control was admitted after these checks; its outcomes remain a
+separate sampling-efficiency question.

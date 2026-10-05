@@ -113,3 +113,26 @@ controller versions were revised before execution to ensure child-process
 cleanup on interruption; they made no scientific draws. This check supports
 the implemented physical kernel in the tested reference limit. Protein mixing
 efficiency and equilibrium assembly remain separate questions.
+
+## Protein pilot
+
+The fixed 24-chain allocation was launched after those gates and independent
+review of all configurations and child-process cleanup. Its
+[controller manifest](../results/context-prior-physical-pilot-execution-20261005/controller-manifest.json)
+has SHA256
+`6ccc5dc13e1d6e565e47269f2a4b69c6bd235f8cfa79d212df5eb3d556cf72d2`.
+Four lanes each run six chains, with at most four new physical jobs at once.
+All 119 input/source/binary bindings and paired stream seeds were checked.
+Four synthetic controller tests passed before launch, including child failure
+and termination of nested process groups. No retries or replacement chains
+are permitted by this allocation.
+
+The [metric specification](../results/context-prior-physical-pilot-20261005/metric-spec.json)
+keeps every instantaneous retained state. A
+[pre-launch addendum](../results/context-prior-physical-pilot-20261005/exchange-addendum.json)
+also fixes the two starting neighbor sets as environments A and B. It records
+five-cycle-confirmed passages between them through any intermediate environment,
+alongside unconditional A/B/other occupancies. Thus a sequence such as
+`{16,217} -> {16} -> {16,56}` can count as a completed A-to-B passage without
+discarding the intermediate states from physical statistics. These are contact
+descriptors, not native-registry or metastability definitions.

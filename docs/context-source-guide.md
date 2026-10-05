@@ -175,3 +175,7 @@ Implementation: [runner](../examples/context_source_guide.rs),
 [geometry bridge](../examples/support/context_source_geometry.rs),
 [bounded cloud kernel](../src/overlap_weight.rs),
 [independent audit](../tools/audit_context_source_guide.py).
+
+The subsequent [full-versus-diagonal covariance control](context-covariance-guide.md)
+adds an optional frozen correlated chart while preserving this pilot's legacy
+input format and proposal law.

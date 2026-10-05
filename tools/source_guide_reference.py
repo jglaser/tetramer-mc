@@ -44,6 +44,30 @@ def cayley(u):
 
 
 def expected_covariance(spec):
+    if 'explicit_gaussian' in spec:
+        require('translation_sigma' not in spec and 'rotation_scale_deg' not in spec,
+                'Explicit source Gaussian cannot declare legacy widths')
+        explicit = spec['explicit_gaussian']
+        require(isinstance(explicit, dict)
+                and set(explicit) == {'schema', 'mean', 'provenance'}
+                and explicit['schema'] == 'source-gaussian-v1'
+                and isinstance(explicit['provenance'], str)
+                and bool(explicit['provenance'].strip()), 'Invalid explicit source Gaussian')
+        ell = float(spec['angular_length'])
+        mean = np.asarray(explicit['mean'], float)
+        require(math.isfinite(ell) and ell > 0
+                and mean.shape == (6,) and np.isfinite(mean).all(), 'Invalid explicit source mean or scale')
+        actual = np.asarray(spec['covariance'], float)
+        require(actual.shape == (6, 6) and np.isfinite(actual).all(), 'Invalid explicit source covariance')
+        magnitude = float(np.max(np.abs(actual)))
+        require(magnitude > 0
+                and np.all(np.abs(actual-actual.T) <= 1e-12*(magnitude+np.abs(actual))),
+                'Asymmetric explicit source covariance')
+        try:
+            np.linalg.cholesky(.5*(actual+actual.T))
+        except np.linalg.LinAlgError as error:
+            raise ValueError('Explicit source covariance is not positive definite') from error
+        return actual
     ell, st, degrees = (float(spec[k]) for k in
                         ('angular_length', 'translation_sigma', 'rotation_scale_deg'))
     require(math.isfinite(ell) and ell > 0 and math.isfinite(st) and st > 0
@@ -61,7 +85,10 @@ class SourceDensity:
     def __init__(self, spec, source_pose, anchor_pose):
         self.ell = float(spec['angular_length'])
         self.covariance = expected_covariance(spec)
-        self.lower = np.linalg.cholesky(self.covariance)
+        self.mean = np.asarray(spec.get('explicit_gaussian', {}).get('mean', [0.]*6), float)
+        # The implemented strict Cholesky accepts small symmetry roundoff, then
+        # uses the symmetric average; no covariance ridge is introduced here.
+        self.lower = np.linalg.cholesky(.5*(self.covariance+self.covariance.T))
         self.logdet = float(np.log(np.diag(self.lower)).sum())
         self.anchor = anchor_pose
         self.center = relative(source_pose, anchor_pose)
@@ -74,7 +101,7 @@ class SourceDensity:
             return -math.inf
         u = q[:3]/q[3]
         x = np.r_[np.asarray(value['position'])-self.center['position'], self.ell*u]
-        standardized = solve_triangular(self.lower, x, lower=True)
+        standardized = solve_triangular(self.lower, x-self.mean, lower=True)
         log_normal = -.5*float(standardized@standardized)-3*math.log(2*math.pi)-self.logdet
         log_volume = -3*math.log(self.ell)-2*math.log(math.pi)-2*math.log1p(float(u@u))
         result = log_normal-log_volume
@@ -84,7 +111,7 @@ class SourceDensity:
     def decode(self, latent):
         z = np.asarray(latent, float)
         require(z.shape == (6,) and np.isfinite(z).all(), 'Invalid source latent')
-        x = self.lower@z
+        x = self.mean+self.lower@z
         local = pose(np.asarray(self.center['position'])+x[:3],
                      cayley(x[3:]/self.ell)@self.center_rotation)
         return compose(self.anchor, local)

@@ -45,9 +45,22 @@ enum Mode {
 #[serde(deny_unknown_fields)]
 struct SourceChart {
     angular_length: f64,
-    translation_sigma: f64,
-    rotation_scale_deg: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    translation_sigma: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rotation_scale_deg: Option<f64>,
     covariance: [[f64; 6]; 6],
+    /// A frozen chart supplied by an external calculation, never fitted here.
+    /// Absence preserves the original isotropic JSON representation verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    explicit_gaussian: Option<ExplicitSourceGaussian>,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct ExplicitSourceGaussian {
+    schema: String,
+    mean: [f64; 6],
+    provenance: String,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -156,40 +169,76 @@ fn world(relative: Pose, anchor: Pose) -> Pose {
 }
 fn source_parameters(source: Pose, spec: &SourceChart) -> Result<GaussianComponentParameters> {
     ensure!(
-        spec.angular_length.is_finite()
-            && spec.angular_length > 0.
-            && spec.translation_sigma.is_finite()
-            && spec.translation_sigma > 0.
-            && spec.rotation_scale_deg.is_finite()
-            && spec.rotation_scale_deg > 0.
-            && spec.rotation_scale_deg < 180.,
-        "Invalid chart scales"
+        spec.angular_length.is_finite() && spec.angular_length > 0.,
+        "Invalid chart angular length"
     );
-    let angular = spec.angular_length * (spec.rotation_scale_deg.to_radians() * 0.5).tan();
-    for i in 0..6 {
-        for j in 0..6 {
-            let want = if i != j {
-                0.
-            } else if i < 3 {
-                spec.translation_sigma.powi(2)
-            } else {
-                angular.powi(2)
-            };
-            let got = spec.covariance[i][j];
+    let mean = match &spec.explicit_gaussian {
+        Some(explicit) => {
             ensure!(
-                got.is_finite() && (got - want).abs() <= 2e-14 * want.abs().max(1e-20),
-                "Source covariance differs from fixed width at {i},{j}"
+                spec.translation_sigma.is_none() && spec.rotation_scale_deg.is_none(),
+                "Explicit Gaussian must omit legacy isotropic widths"
             );
+            ensure!(
+                explicit.schema == "source-gaussian-v1" && !explicit.provenance.trim().is_empty(),
+                "Invalid explicit source Gaussian schema or provenance"
+            );
+            explicit.mean
         }
-    }
+        None => {
+            let translation_sigma = spec
+                .translation_sigma
+                .context("Missing translation width")?;
+            let rotation_scale_deg = spec.rotation_scale_deg.context("Missing rotation width")?;
+            ensure!(
+                translation_sigma.is_finite()
+                    && translation_sigma > 0.
+                    && rotation_scale_deg.is_finite()
+                    && rotation_scale_deg > 0.
+                    && rotation_scale_deg < 180.,
+                "Invalid chart scales"
+            );
+            let angular = spec.angular_length * (rotation_scale_deg.to_radians() * 0.5).tan();
+            for i in 0..6 {
+                for j in 0..6 {
+                    let want = if i != j {
+                        0.
+                    } else if i < 3 {
+                        translation_sigma.powi(2)
+                    } else {
+                        angular.powi(2)
+                    };
+                    let got = spec.covariance[i][j];
+                    ensure!(
+                        got.is_finite() && (got - want).abs() <= 2e-14 * want.abs().max(1e-20),
+                        "Source covariance differs from fixed width at {i},{j}"
+                    );
+                }
+            }
+            [0.; 6]
+        }
+    };
     source.validate()?;
-    Ok(GaussianComponentParameters {
+    let parameters = GaussianComponentParameters {
         anchor_position: source.position,
         anchor_rotation: rotation(source.orientation),
-        mean: [0.; 6],
+        mean,
         covariance: spec.covariance,
         weight: 1.,
-    })
+    };
+    // Use the production chart constructor's finite, symmetry, and strict SPD
+    // checks. There is no ridge, clipping, fitted covariance, or silent fallback.
+    one_chart(parameters.clone(), spec.angular_length)?;
+    Ok(parameters)
+}
+fn source_manifest(parameters: &GaussianComponentParameters, spec: &SourceChart) -> Result<Value> {
+    let mut manifest = json!({"parameters":parameters,"angular_length":spec.angular_length,"reconstructed_map_lower":reconstructed_map_lower(parameters)?,"covariance_origin":"explicit fixed isotropic scales; no ridge, fitting, or optimizer"});
+    if let Some(explicit) = &spec.explicit_gaussian {
+        manifest["covariance_origin"] = json!(
+            "externally frozen full covariance; no ridge, fitting, or optimizer in this sampler"
+        );
+        manifest["explicit_gaussian"] = serde_json::to_value(explicit)?;
+    }
+    Ok(manifest)
 }
 fn one_chart(p: GaussianComponentParameters, ell: f64) -> Result<FixedBasinInvolution> {
     FixedBasinInvolution::new(
@@ -440,7 +489,7 @@ fn run(
         &cfg.source_chart,
     )?;
     let source = one_chart(parameters.clone(), cfg.source_chart.angular_length)?;
-    loaded.manifest["source_chart"] = json!({"parameters":parameters,"angular_length":cfg.source_chart.angular_length,"reconstructed_map_lower":reconstructed_map_lower(&parameters)?,"covariance_origin":"explicit fixed isotropic scales; no ridge, fitting, or optimizer"});
+    loaded.manifest["source_chart"] = source_manifest(&parameters, &cfg.source_chart)?;
     save(&args.out.join("chart-manifest.json"), &loaded.manifest)?;
     save(
         &args.out.join("protocol.json"),
@@ -690,8 +739,8 @@ mod source_guide_tests {
         let a = ell * (theta.to_radians() / 2.).tan();
         SourceChart {
             angular_length: ell,
-            translation_sigma: t,
-            rotation_scale_deg: theta,
+            translation_sigma: Some(t),
+            rotation_scale_deg: Some(theta),
             covariance: std::array::from_fn(|i| {
                 std::array::from_fn(|j| {
                     if i != j {
@@ -703,6 +752,7 @@ mod source_guide_tests {
                     }
                 })
             }),
+            explicit_gaussian: None,
         }
     }
     fn config() -> Config {
@@ -849,6 +899,214 @@ mod source_guide_tests {
         {
             near(*x, *y)
         }
+    }
+    fn correlated_spec() -> (SourceChart, [[f64; 6]; 6]) {
+        // Independent known Cholesky factor, including translation/rotation
+        // couplings; the stored input is the full product L L^T, never L.
+        let lower = [
+            [0.15, 0., 0., 0., 0., 0.],
+            [0.03, 0.25, 0., 0., 0., 0.],
+            [-0.02, 0.04, 0.35, 0., 0., 0.],
+            [0.01, 0., 0.005, 0.02, 0., 0.],
+            [0., -0.012, 0.003, 0.002, 0.03, 0.],
+            [0.015, 0., -0.02, 0.004, -0.003, 0.04],
+        ];
+        (
+            SourceChart {
+                angular_length: 1.3,
+                translation_sigma: None,
+                rotation_scale_deg: None,
+                covariance: std::array::from_fn(|i| {
+                    std::array::from_fn(|j| (0..6).map(|k| lower[i][k] * lower[j][k]).sum())
+                }),
+                explicit_gaussian: Some(ExplicitSourceGaussian {
+                    schema: "source-gaussian-v1".into(),
+                    mean: [0.04, -0.03, 0.02, 0.005, -0.006, 0.007],
+                    provenance: "synthetic known lower-triangular factor; frozen".into(),
+                }),
+            },
+            lower,
+        )
+    }
+    #[test]
+    fn legacy_chart_json_bytes_seeds_manifest_and_density_are_unchanged() -> Result<()> {
+        // This is the exact pre-extension field order and field types. Numeric
+        // Option serialization must not alter an existing configuration's bytes.
+        #[derive(Serialize)]
+        struct LegacySourceChart {
+            angular_length: f64,
+            translation_sigma: f64,
+            rotation_scale_deg: f64,
+            covariance: [[f64; 6]; 6],
+        }
+        let chart = spec();
+        let legacy = LegacySourceChart {
+            angular_length: chart.angular_length,
+            translation_sigma: chart.translation_sigma.unwrap(),
+            rotation_scale_deg: chart.rotation_scale_deg.unwrap(),
+            covariance: chart.covariance,
+        };
+        let old_bytes = serde_json::to_vec(&legacy)?;
+        let parsed: SourceChart = serde_json::from_slice(&old_bytes)?;
+        assert_eq!(old_bytes, serde_json::to_vec(&chart)?);
+        assert_eq!(old_bytes, serde_json::to_vec(&parsed)?);
+        let mut cfg = config();
+        let cfg_bytes = serde_json::to_vec(&cfg)?;
+        cfg.source_chart = parsed;
+        assert_eq!(cfg_bytes, serde_json::to_vec(&cfg)?);
+        let cfg_roundtrip: Config = serde_json::from_slice(&cfg_bytes)?;
+        for role in [
+            "component",
+            "label",
+            "latent",
+            "uniform",
+            "cloud0",
+            "cloud1",
+        ] {
+            assert_eq!(
+                seed(&cfg, &sha(&cfg_bytes), 7, role),
+                seed(
+                    &cfg_roundtrip,
+                    &sha(&serde_json::to_vec(&cfg_roundtrip)?),
+                    7,
+                    role
+                )
+            );
+        }
+        let center = pose([1., -2., 0.5], [0.2, 0.1, -0.3]);
+        let old_parameters = GaussianComponentParameters {
+            anchor_position: center.position,
+            anchor_rotation: rotation(center.orientation),
+            mean: [0.; 6],
+            covariance: legacy.covariance,
+            weight: 1.,
+        };
+        let parameters = source_parameters(center, &chart)?;
+        assert_eq!(
+            serde_json::to_vec(&old_parameters)?,
+            serde_json::to_vec(&parameters)?
+        );
+        let old_manifest = json!({"parameters":old_parameters,"angular_length":chart.angular_length,"reconstructed_map_lower":reconstructed_map_lower(&old_parameters)?,"covariance_origin":"explicit fixed isotropic scales; no ridge, fitting, or optimizer"});
+        assert_eq!(source_manifest(&parameters, &chart)?, old_manifest);
+        let old_map = one_chart(old_parameters, chart.angular_length)?;
+        let new_map = one_chart(parameters, chart.angular_length)?;
+        for z in [[0.; 6], [0.1, -0.3, 0.5, 2., -1., 0.2]] {
+            let a = old_map.decode(0, z)?;
+            let b = new_map.decode(0, z)?;
+            assert_eq!(a, b);
+            assert_eq!(
+                old_map.checked_log_density(0, a)?.to_bits(),
+                new_map.checked_log_density(0, b)?.to_bits()
+            );
+        }
+        Ok(())
+    }
+    #[test]
+    fn explicit_correlated_chart_uses_full_mean_covariance_and_haar_jacobian() -> Result<()> {
+        let (spec, lower) = correlated_spec();
+        let center = pose([1., -2., 0.5], [0.2, 0.1, -0.3]);
+        let parameters = source_parameters(center, &spec)?;
+        let explicit = spec.explicit_gaussian.as_ref().unwrap();
+        assert_eq!(parameters.mean, explicit.mean);
+        assert_eq!(parameters.covariance, spec.covariance);
+        let manifest = source_manifest(&parameters, &spec)?;
+        assert_eq!(
+            manifest["explicit_gaussian"],
+            serde_json::to_value(explicit)?
+        );
+        assert!(
+            !manifest["covariance_origin"]
+                .as_str()
+                .unwrap()
+                .contains("isotropic")
+        );
+        let recovered: [[f64; 6]; 6] =
+            serde_json::from_value(manifest["reconstructed_map_lower"].clone())?;
+        for i in 0..6 {
+            for j in 0..6 {
+                near(recovered[i][j], lower[i][j]);
+            }
+        }
+        let map = one_chart(parameters, spec.angular_length)?;
+        let log_det = (0..6).map(|i| lower[i][i].ln()).sum::<f64>();
+        for z in [
+            [0.; 6],
+            [1., 0., 0., 0., 0., 0.],
+            [0.3, -0.2, 0.5, -1., 0.7, 0.2],
+        ] {
+            let x: [f64; 6] = std::array::from_fn(|i| {
+                explicit.mean[i] + (0..6).map(|j| lower[i][j] * z[j]).sum::<f64>()
+            });
+            let u: [f64; 3] = std::array::from_fn(|i| x[i + 3] / spec.angular_length);
+            // Independent analytic Cayley quaternion, followed by the fixed
+            // source anchor. This does not use map.decode or a fitted factor.
+            let norm = (1. + u.iter().map(|v| v * v).sum::<f64>()).sqrt();
+            let relative_q = [1. / norm, u[0] / norm, u[1] / norm, u[2] / norm];
+            let expected = Pose {
+                position: std::array::from_fn(|i| center.position[i] + x[i]),
+                orientation: quaternion(matmul(rotation(relative_q), rotation(center.orientation))),
+            };
+            same_pose(map.decode(0, z)?, expected);
+            for (a, b) in map.encode(0, expected)?.into_iter().zip(z) {
+                near(a, b);
+            }
+            let log_jacobian = log_det
+                - 3. * spec.angular_length.ln()
+                - 2. * std::f64::consts::PI.ln()
+                - 4. * norm.ln();
+            let expected_log_density = -0.5 * z.iter().map(|v| v * v).sum::<f64>()
+                - 3. * (2. * std::f64::consts::PI).ln()
+                - log_jacobian;
+            near(map.checked_log_density(0, expected)?, expected_log_density);
+        }
+        Ok(())
+    }
+    #[test]
+    fn explicit_chart_rejects_ambiguous_missing_nonfinite_or_non_spd_inputs() -> Result<()> {
+        let center = pose([0.; 3], [0.; 3]);
+        let (chart, _) = correlated_spec();
+        let value = serde_json::to_value(&chart)?;
+        assert!(value.get("translation_sigma").is_none());
+        assert!(value.get("rotation_scale_deg").is_none());
+        let mut missing_covariance = value.clone();
+        missing_covariance
+            .as_object_mut()
+            .unwrap()
+            .remove("covariance");
+        assert!(serde_json::from_value::<SourceChart>(missing_covariance).is_err());
+        for field in ["mean", "schema", "provenance"] {
+            let mut missing = value.clone();
+            missing["explicit_gaussian"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(serde_json::from_value::<SourceChart>(missing).is_err());
+        }
+        for bad in 0..11 {
+            let mut invalid: SourceChart = serde_json::from_value(value.clone())?;
+            match bad {
+                0 => invalid.translation_sigma = Some(0.2),
+                1 => invalid.rotation_scale_deg = Some(1.),
+                2 => invalid.explicit_gaussian.as_mut().unwrap().schema = "unknown-v2".into(),
+                3 => invalid.explicit_gaussian.as_mut().unwrap().provenance = " \n ".into(),
+                4 => invalid.explicit_gaussian.as_mut().unwrap().mean[0] = f64::NAN,
+                5 => invalid.covariance[0][0] = f64::NAN,
+                6 => invalid.covariance = [[0.; 6]; 6],
+                7 => invalid.covariance[0][0] = -1.,
+                8 => invalid.covariance[0][1] += 0.01,
+                9 => invalid.angular_length = f64::INFINITY,
+                10 => invalid.explicit_gaussian = None,
+                _ => unreachable!(),
+            }
+            assert!(
+                source_parameters(center, &invalid).is_err(),
+                "accepted case {bad}"
+            );
+        }
+        let mut legacy = spec();
+        legacy.translation_sigma = None;
+        assert!(source_parameters(center, &legacy).is_err());
+        Ok(())
     }
     #[test]
     fn source_center_widths_and_haar_normalization() -> Result<()> {

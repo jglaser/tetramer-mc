@@ -1,5 +1,6 @@
 """Deterministic independent-density controls; no protein or random queries."""
 import math
+import copy
 import unittest
 
 import numpy as np
@@ -67,6 +68,38 @@ class SourceGuideReferenceTests(unittest.TestCase):
                      -2*math.log(math.pi)-2*math.log1p(u@u))
             expected = multivariate_normal.logpdf(z, mean=np.zeros(6), cov=np.eye(6))-log_j
             self.assertAlmostEqual(actual, expected, places=10)
+
+    def test_explicit_correlated_mean_and_haar_jacobian(self):
+        lower = np.diag([.2, .3, .1, .15, .2, .12])
+        lower[3, 0] = .08
+        lower[4, 1] = -.11
+        lower[5, 2] = .07
+        mean = np.array([.12, -.04, .07, .03, -.02, .06])
+        s = dict(angular_length=2., covariance=(lower@lower.T).tolist(),
+                 explicit_gaussian=dict(schema='source-gaussian-v1', mean=mean.tolist(),
+                                        provenance='synthetic fixed correlated chart'))
+        anchor = pose([2., -.4, .8], Rotation.from_rotvec([.2, -.7, .4]).as_matrix())
+        source = pose([1., 2., 3.], Rotation.from_rotvec([-.2, .1, .3]).as_matrix())
+        reference = SourceDensity(s, source, anchor)
+        np.testing.assert_allclose(reference.lower, lower, rtol=1e-14, atol=1e-16)
+        for z in (np.zeros(6), np.array([.3, -.6, .1, -.2, .5, -.4])):
+            x = mean+lower@z
+            u = x[3:]/2.
+            j = reference.logdet-3*math.log(2.)-2*math.log(math.pi)-2*math.log1p(u@u)
+            wanted = multivariate_normal.logpdf(z, mean=np.zeros(6), cov=np.eye(6))-j
+            self.assertAlmostEqual(reference.evaluate(reference.decode(z)), wanted, places=11)
+        pose_error(reference.decode(np.linalg.solve(lower, -mean)), source)
+
+        bad_specs = []
+        for key, value in [('translation_sigma', .2), ('rotation_scale_deg', 1.)]:
+            bad = copy.deepcopy(s);bad[key] = value;bad_specs.append(bad)
+        for key, value in [('schema', 'unversioned'), ('provenance', '  '), ('mean', [0.]*5)]:
+            bad = copy.deepcopy(s);bad['explicit_gaussian'][key] = value;bad_specs.append(bad)
+        for matrix in (np.zeros((6, 6)), np.eye(6)*-1,
+                       np.eye(6)+np.diag([.1]*5, 1), np.full((6, 6), np.nan)):
+            bad = copy.deepcopy(s);bad['covariance'] = matrix.tolist();bad_specs.append(bad)
+        for bad in bad_specs:
+            with self.assertRaises(ValueError):expected_covariance(bad)
 
 
 if __name__ == '__main__':

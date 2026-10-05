@@ -22,6 +22,18 @@ physical contact weights and patch-region coverage, rather than another
 correlation sweep. The original-condition sensitivity campaign remains active;
 the N=12/N=24 assembly bank remains held behind its convergence gates.
 
+The [completed saved-candidate audit](context-candidate-bank.md) now isolates a
+specific coverage failure. All 36,864 independent global proposals were retained
+and rescored, with a separate 512-pose density/geometry check. Context weighting
+increases contacted candidates from 103 to 613, but neither arm ever recovers the
+saved source's full secondary-contact pattern; the best context candidate retains
+only four of its sixteen patch tokens. This remains true outside the coarse A
+neighbor region. No depletion-cloud allocation is made on this bank: approximately
+200 million expected auxiliary points would not repair the missing pose coverage.
+The minimal next control is a frozen normalized source-centered component with
+fresh independent draws and complete mixture weights. It is a conditional,
+source-informed control, not geometry-only assembly or evidence against assembly.
+
 The newest controlled geometric result is a **5.08-fold increase in proposed
 hard-clear native extensions**, from 2.95% to 15.00%, after small adjustments
 of incoming-particle Gaussian centers. Four independent populations, identical

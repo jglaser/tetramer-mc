@@ -2,6 +2,13 @@
 
 This is a research note, not a sampling allocation or a convergence result. No new poses, geometry queries, Poisson clouds, or physical estimates were generated for this note.
 
+**Implementation update:** the separate [saved-candidate preflight](context-candidate-bank.md)
+is now implemented and complete. All 36,864 candidates and a 512-pose independent
+panel passed; neither proposal covers the source secondary-contact pocket.
+The absolute-cloud stage remains unimplemented and unallocated. The design below
+is retained to explain the density and estimator; its prospective implementation
+statements refer to that original design stage.
+
 The proposed check concerns one mobile tetramer, fixed spectators `C`, and fixed anchor 16, at depletant radius 1.5 Å and activity 0.035 Å⁻³. The neighborhood comes from the historical 500 μM snapshot. It is not the all-mobile 106.8 μM assembly system. Its A/B labels are the exact instantaneous neighbor sets `{16,217}` and `{16,56}`; Other contains every remaining physically valid pose, including unbound poses. None of these labels asserts native registry.
 
 ## Why the zero-correlation candidates are independent draws
@@ -151,7 +158,7 @@ The current `physical_step` has no correction-override mode. A future explicit, 
 
 Extra scoring cost and the deterministic four-local/one-global schedule matter: Peskun ordering of the reversible global kernel alone does not establish ordering of that full cycle composition or improvement per CPU. Saved correction/bath diagnostics should precede implementation and a matched benchmark. No refinement has been implemented or allocated by this note.
 
-## Minimum bank adapter and preflight gates — unimplemented, unallocated
+## Minimum bank adapter and preflight gates — original design
 
 The smallest useful implementation is a separate bank scorer, with no change
 to the production sampler. It would consume all 36,864 global candidates from

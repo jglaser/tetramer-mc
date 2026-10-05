@@ -168,8 +168,9 @@ existing F runner law and 2,048 from D. Each broadened population combines
 context branches; these counts are not promised source-branch hits. Reweight
 every draw by its arm's full deterministic-mixture density and divide by all
 4,096 attempts. No old draws are pooled into the new comparison. The unchanged
-runner can generate these strata; a new mixture-aware reduction and separately
-frozen seeds, execution limits and physical-cloud allocation are still needed.
+runner generated these strata. The [broader-guide comparison](context-broadened-guide.md)
+implements the complete-mixture reduction, independent density and geometry
+audit, frozen seeds and limits, and two-cloud scoring at every hard-valid draw.
 
 The completed physical panel's final host audit verified every owned process
 group had drained and the production binary and three pre-existing simulation

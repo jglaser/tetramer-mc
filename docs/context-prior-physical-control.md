@@ -187,7 +187,12 @@ of four alternative-start context streams therefore visit A, versus one of
 four original-prior streams. These are arrivals at the same **neighbor IDs**,
 not the same patch contacts. The two initializations have disjoint observed
 full-fingerprint supports in every arm, and some patch marginals differ by
-one. Local trajectories also remain initialization-dependent. No equilibrium
+one. This is not only sensitivity of an exact fingerprint to small changes:
+the median between-start mean absolute patch-occupancy difference remains
+0.420 for context, versus 0.047 for within-start comparisons. The corresponding
+between-start values are 0.912 for original and 0.915 for local. Thus context
+improves partial agreement while leaving substantial initialization dependence.
+No equilibrium
 contact weights or meaningful return-rate comparison follow from these runs.
 
 There is no consistent contact-sampling efficiency gain. From the saved A
@@ -219,3 +224,32 @@ proposal floor does not certify unseen pockets. The main independent
 native/contact-region weight campaign continues separately; neither this
 conditional pilot nor a future candidate-bank calculation decides finite-system
 assembly stability.
+
+## Saved acceptance diagnostic
+
+The subsequent [fixed saved-trace diagnostic](../results/context-prior-marginal-counterfactual-20261005/result/report.json)
+examined all 276,480 physical rows and all 36,864 global proposal attempts,
+with warmup and production reported separately. It used no new geometry,
+pose generation, density evaluations or Poisson clouds. Four synthetic tests
+passed; execution cost 7.93 CPU seconds and all processes drained.
+
+For each learned proposal, the diagnostic replaced the separate learned-branch
+ratio by the complete independent-mixture ratio, using the saved endpoint
+densities. Every existing bath estimate and acceptance uniform was retained.
+None of the 540 completed learned-gate decisions changed: five total accepted
+moves, zero counterfactual gains and zero losses. Uniform candidates lack saved
+learned densities, so their counterfactuals remain explicitly unknown. This
+is not a new trajectory or a full-kernel speedup test.
+
+The uniform floor is negligible at the sampled source contacts. Among gated
+production context proposals, median `log(G(old)/U)` is 30.04 from B and 26.54
+from A. Median learned proposal corrections are favorable, +4.42 and +0.93,
+while the median bath log factors are −35.17 and −94.00, respectively. The
+largest production change in the **gated** proposal correction is below
+`2.42e-7`. Thus this audit does not justify implementing marginal-mixture
+acceptance to rescue the observed transfers. It directs the next control
+toward preserving overlap during correlated transport. It does not convert
+these one-step acceptance factors into basin free energies.
+
+Diagnostic SHA256:
+`9bd64d872e15af59e0edb230c322c2c538951a34a9d6529939799c8c33b05632`.

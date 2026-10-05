@@ -6,7 +6,9 @@ per virtual branch. Every branch must remain positive. The serialized model,
 Gaussian factors, reciprocal inversion flags, correlation, defensive uniform
 branch and map support are unchanged. Direct-model and static-pair methods
 are rejected because their label drawers use different stored distributions.
-No production runner or checkpoint format currently enables this option.
+Existing assembly runners do not load this option. The separate
+[`context-docking-mc` control](context-prior-physical-control.md) binds it to an
+immutable neighborhood and its checkpoints.
 
 The shared vector enters ordinary posterior-source selection, independent
 destinations, single-body densities, independent singleton draws, member
@@ -44,8 +46,9 @@ contact discovery or an assembly result.
 
 The finite sum in the denominator is explicitly computable. There is no
 unknown configuration-volume normalization and no need to refit charts.
-The completed saved-data construction is recorded below. It does not supply a
-physical sampling allocation or complete the runner/checkpoint integration.
+The completed saved-data construction is recorded below. A separate frozen
+physical control now supplies the runner/checkpoint integration and allocation;
+the prior asset alone remains only a proposal construction.
 
 ## Balance and context
 
@@ -79,9 +82,9 @@ For changed chart parameters, the selected-chart correction in
 `context_transport` is still required; the shortcut above is justified here
 precisely because the charts generating and scoring `g_j` remain unchanged.
 
-## Required frozen binding before runner integration
+## Required frozen binding
 
-A future context-prior manifest and checkpoint binding must include:
+A context-prior manifest and checkpoint binding must include:
 
 - original model and physical-shape hashes, ordered virtual labels and exact
   reciprocal flags;
@@ -139,8 +142,8 @@ the saved center scores do not certify that pose. The reduction used 2.682 CPU
 seconds including its controller, with no geometry queries, new poses or
 physical draws. All process groups drained.
 
-The asset is ready for a bound conditional control after source/domain
-certification and runner/checkpoint integration. Existing production runners
+The asset is intended for a bound conditional control after source/domain
+certification and physical reference validation. Existing assembly runners
 do not load it. The original snapshot came from different density/bath
 conditions than the assembly decision conditions, and was selected using
 native diagnostics. Neither that selection nor the prior reduction supplies

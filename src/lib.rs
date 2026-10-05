@@ -8,6 +8,7 @@ pub mod capped_dimer;
 pub mod cayley_axis_geometry;
 pub mod circle_geometry;
 pub mod contact_distances;
+pub mod context_docking;
 pub mod context_transport;
 pub mod defensive_dimer_proposal;
 pub mod depletion;

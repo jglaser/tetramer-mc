@@ -108,6 +108,14 @@ Increasing cloud intensity or replication addresses the bracket's cloud multipli
 
 Inspect independent population spread, largest contributions, importance ESS, cloud-replicate variation and complete A/B/Other contributions. Finite-bank consistency alone cannot certify unseen modes. This check could distinguish rare conditional environments from ineffective accepted-state proposals; it cannot establish finite-system assembly or crystal stability.
 
+The completed pilot adds a specific coverage concern: trajectories can reach
+the same A neighbor IDs while retaining different surface-patch contacts.
+Any future absolute-weight calculation must retain patch-resolved coverage
+diagnostics within A/B/Other, including the strongly retained saved-source
+patch environment. Agreement of coarse A/B masses alone would not resolve
+that missing within-region coverage. A region with no sampled contribution
+cannot be declared absent on that basis.
+
 ## Possible refinement: accept the full proposal mixture
 
 At zero correlation, the same candidate generator also permits an alternative exact kernel: accept **every global candidate** using `log Q_C(old)-log Q_C(new)` plus the existing bath factor, instead of retaining separate uniform/learned acceptance labels. Candidate generation, reciprocal maps and the sampled physical gate remain unchanged. This marginalizes the proposal labels for acceptance; it does not add another Jacobian or source-label correction.

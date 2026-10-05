@@ -81,6 +81,26 @@ def expected_covariance(spec):
     return actual
 
 
+def chart_world_pose(spec, original_source):
+    """Resolve proposal origin without changing source/contact reference assets."""
+    if spec.get('chart_center') is None:
+        return original_source
+    center = spec['chart_center']
+    require(isinstance(center, dict)
+            and set(center) == {'schema', 'frame', 'pose', 'provenance'}
+            and center['schema'] == 'source-chart-center-v1'
+            and center['frame'] == 'saved-spherical-center'
+            and isinstance(center['provenance'], str) and bool(center['provenance'].strip()),
+            'Invalid chart center schema, physical frame, or provenance')
+    value = center['pose']
+    require(isinstance(value, dict) and {'position', 'orientation'} <= set(value),
+            'Invalid chart center pose')
+    position = np.asarray(value['position'], float)
+    require(position.shape == (3,) and np.isfinite(position).all(), 'Invalid chart center position')
+    rotation(value)  # The same strict finite/unit-quaternion contract as Rust.
+    return value
+
+
 class SourceDensity:
     def __init__(self, spec, source_pose, anchor_pose):
         self.ell = float(spec['angular_length'])
@@ -91,7 +111,8 @@ class SourceDensity:
         self.lower = np.linalg.cholesky(.5*(self.covariance+self.covariance.T))
         self.logdet = float(np.log(np.diag(self.lower)).sum())
         self.anchor = anchor_pose
-        self.center = relative(source_pose, anchor_pose)
+        self.chart_center_pose = chart_world_pose(spec, source_pose)
+        self.center = relative(self.chart_center_pose, anchor_pose)
         self.center_rotation = rotation(self.center)
 
     def evaluate(self, value):

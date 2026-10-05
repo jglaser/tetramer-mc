@@ -254,8 +254,9 @@ distinct contact environments. The partial-contact intervals [0.5,0.75)
 and [0.75,1) also have no sampled hits in either arm; their contribution
 remains unresolved.
 
-The next controlled geometric change is a separately centered competing-cage
-component, trained on completed pilot evidence and frozen before fresh
+The next controlled geometric change is a
+[separately centered competing-contact guide](context-competing-cage.md),
+trained on completed pilot evidence and frozen before fresh
 evaluation. It should retain existing components and the 50% uniform
 defense, use the complete mixture density, and predeclare pooled-count
 weights with arithmetic-pair weights as a control. It must preserve the

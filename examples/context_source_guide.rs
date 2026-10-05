@@ -54,6 +54,18 @@ struct SourceChart {
     /// Absence preserves the original isotropic JSON representation verbatim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     explicit_gaussian: Option<ExplicitSourceGaussian>,
+    /// Physical coordinates in the saved spherical-center frame. This changes
+    /// only the proposal chart, never the immutable source/region reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chart_center: Option<SourceChartCenter>,
+}
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SourceChartCenter {
+    schema: String,
+    frame: String,
+    pose: Pose,
+    provenance: String,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -167,6 +179,36 @@ fn world(relative: Pose, anchor: Pose) -> Pose {
         orientation: quaternion(matmul(r, rotation(relative.orientation))),
     }
 }
+fn chart_world_pose(original_source: Pose, spec: &SourceChart) -> Result<Pose> {
+    match &spec.chart_center {
+        None => Ok(original_source),
+        Some(center) => {
+            ensure!(
+                center.schema == "source-chart-center-v1"
+                    && center.frame == "saved-spherical-center"
+                    && !center.provenance.trim().is_empty(),
+                "Invalid chart center schema, physical frame, or provenance"
+            );
+            center.pose.validate()?;
+            let norm: f64 = center.pose.orientation.iter().map(|x| x * x).sum();
+            ensure!(
+                (norm - 1.).abs() < 2e-10,
+                "Chart center quaternion is not normalized"
+            );
+            Ok(center.pose)
+        }
+    }
+}
+fn chart_parameters(
+    original_source: Pose,
+    anchor: Pose,
+    spec: &SourceChart,
+) -> Result<GaussianComponentParameters> {
+    source_parameters(
+        relative(chart_world_pose(original_source, spec)?, anchor),
+        spec,
+    )
+}
 fn source_parameters(source: Pose, spec: &SourceChart) -> Result<GaussianComponentParameters> {
     ensure!(
         spec.angular_length.is_finite() && spec.angular_length > 0.,
@@ -237,6 +279,9 @@ fn source_manifest(parameters: &GaussianComponentParameters, spec: &SourceChart)
             "externally frozen full covariance; no ridge, fitting, or optimizer in this sampler"
         );
         manifest["explicit_gaussian"] = serde_json::to_value(explicit)?;
+    }
+    if let Some(center) = &spec.chart_center {
+        manifest["chart_center"] = serde_json::to_value(center)?;
     }
     Ok(manifest)
 }
@@ -481,11 +526,9 @@ fn run(
         cfg.source_chart.angular_length == loaded.angular_length,
         "Source/context angular lengths differ"
     );
-    let parameters = source_parameters(
-        relative(
-            loaded.geometry.source.pose,
-            loaded.geometry.source.anchor_pose,
-        ),
+    let parameters = chart_parameters(
+        loaded.geometry.source.pose,
+        loaded.geometry.source.anchor_pose,
         &cfg.source_chart,
     )?;
     let source = one_chart(parameters.clone(), cfg.source_chart.angular_length)?;
@@ -753,6 +796,7 @@ mod source_guide_tests {
                 })
             }),
             explicit_gaussian: None,
+            chart_center: None,
         }
     }
     fn config() -> Config {
@@ -924,6 +968,7 @@ mod source_guide_tests {
                     mean: [0.04, -0.03, 0.02, 0.005, -0.006, 0.007],
                     provenance: "synthetic known lower-triangular factor; frozen".into(),
                 }),
+                chart_center: None,
             },
             lower,
         )
@@ -1106,6 +1151,161 @@ mod source_guide_tests {
         let mut legacy = spec();
         legacy.translation_sigma = None;
         assert!(source_parameters(center, &legacy).is_err());
+        Ok(())
+    }
+    fn center_spec(value: Pose) -> SourceChartCenter {
+        SourceChartCenter {
+            schema: "source-chart-center-v1".into(),
+            frame: "saved-spherical-center".into(),
+            pose: value,
+            provenance: "synthetic frozen competing pose; no native labels".into(),
+        }
+    }
+    #[test]
+    fn own_world_chart_center_decodes_full_covariance_with_haar_jacobian() -> Result<()> {
+        let (mut spec, lower) = correlated_spec();
+        let original = pose([0.1, 0.2, 0.3], [0.1, 0., 0.]);
+        let anchor = pose([2., -1., 0.5], [0.3, -0.2, 0.4]);
+        let center = pose([-0.4, 0.7, 1.2], [-0.3, 0.4, 0.2]);
+        spec.chart_center = Some(center_spec(center));
+        let relative_center = relative(center, anchor);
+        let parameters = chart_parameters(original, anchor, &spec)?;
+        let map = one_chart(parameters.clone(), spec.angular_length)?;
+        assert_eq!(
+            source_manifest(&parameters, &spec)?["chart_center"],
+            serde_json::to_value(spec.chart_center.as_ref().unwrap())?
+        );
+        for z in [[0.; 6], [0.2, -0.3, 0.4, -0.5, 0.6, -0.7]] {
+            let x: [f64; 6] = std::array::from_fn(|i| {
+                parameters.mean[i] + (0..6).map(|j| lower[i][j] * z[j]).sum::<f64>()
+            });
+            let u: [f64; 3] = std::array::from_fn(|i| x[i + 3] / spec.angular_length);
+            let norm2 = 1. + u.iter().map(|v| v * v).sum::<f64>();
+            let q = [
+                1. / norm2.sqrt(),
+                u[0] / norm2.sqrt(),
+                u[1] / norm2.sqrt(),
+                u[2] / norm2.sqrt(),
+            ];
+            let wanted = Pose {
+                position: std::array::from_fn(|i| relative_center.position[i] + x[i]),
+                orientation: quaternion(matmul(rotation(q), rotation(relative_center.orientation))),
+            };
+            same_pose(world(map.decode(0, z)?, anchor), world(wanted, anchor));
+            let log_j = (0..6).map(|i| lower[i][i].ln()).sum::<f64>()
+                - 3. * spec.angular_length.ln()
+                - 2. * std::f64::consts::PI.ln()
+                - 2. * norm2.ln();
+            let log_p = -0.5 * z.iter().map(|v| v * v).sum::<f64>()
+                - 3. * (2. * std::f64::consts::PI).ln()
+                - log_j;
+            near(map.checked_log_density(0, wanted)?, log_p);
+        }
+        Ok(())
+    }
+    #[test]
+    fn chart_center_defaults_and_original_region_reference_remain_unchanged() -> Result<()> {
+        let (loaded, _, mut cfg) = fixture()?;
+        let original = loaded.geometry.source.pose;
+        let anchor = loaded.geometry.source.anchor_pose;
+        let old = source_parameters(relative(original, anchor), &cfg.source_chart)?;
+        let default = chart_parameters(original, anchor, &cfg.source_chart)?;
+        assert_eq!(serde_json::to_vec(&old)?, serde_json::to_vec(&default)?);
+        let before_inputs = serde_json::to_vec(&cfg.inputs)?;
+        let tokens: BTreeSet<_> = cfg
+            .inputs
+            .regions
+            .source_secondary_tokens
+            .iter()
+            .cloned()
+            .collect();
+        let before = region_data(
+            &tokens,
+            &cfg.inputs.regions.a_neighbors,
+            &cfg.inputs.regions,
+        )?;
+        assert_eq!(before.0, "A_patch_complete");
+        let bytes = serde_json::to_vec(&cfg.source_chart)?;
+        assert!(!String::from_utf8(bytes)?.contains("chart_center"));
+        cfg.source_chart.chart_center = Some(center_spec(original));
+        assert_eq!(
+            serde_json::to_vec(&old)?,
+            serde_json::to_vec(&chart_parameters(original, anchor, &cfg.source_chart)?)?
+        );
+        cfg.source_chart.chart_center = Some(center_spec(pose([0.2, -0.1, 0.3], [0.8, -0.3, 0.2])));
+        let changed = chart_parameters(original, anchor, &cfg.source_chart)?;
+        assert_ne!(changed.anchor_position, old.anchor_position);
+        assert_eq!(loaded.geometry.source.pose, original);
+        assert_eq!(serde_json::to_vec(&cfg.inputs)?, before_inputs);
+        assert_eq!(
+            region_data(
+                &tokens,
+                &cfg.inputs.regions.a_neighbors,
+                &cfg.inputs.regions
+            )?,
+            before
+        );
+        Ok(())
+    }
+    #[test]
+    fn independent_chart_center_removes_original_near_pi_coordinate_singularity() -> Result<()> {
+        let mut spec = spec();
+        let original = pose([0.; 3], [0.; 3]);
+        let anchor = pose([0.; 3], [0.; 3]);
+        let angle = std::f64::consts::PI - 1e-5;
+        let competing = Pose {
+            position: [0.1, -0.2, 0.3],
+            orientation: [(angle / 2.).cos(), (angle / 2.).sin(), 0., 0.],
+        };
+        let old = one_chart(
+            chart_parameters(original, anchor, &spec)?,
+            spec.angular_length,
+        )?;
+        assert!(old.encode(0, competing)?[3].abs() > 1e6);
+        spec.chart_center = Some(center_spec(competing));
+        let new = one_chart(
+            chart_parameters(original, anchor, &spec)?,
+            spec.angular_length,
+        )?;
+        same_pose(world(new.decode(0, [0.; 6])?, anchor), competing);
+        for coordinate in new.encode(0, competing)? {
+            near(coordinate, 0.);
+        }
+        assert!(new.checked_log_density(0, competing)?.is_finite());
+        assert_eq!(chart_world_pose(original, &spec)?, competing);
+        Ok(())
+    }
+    #[test]
+    fn chart_center_rejects_ambiguous_frame_nonfinite_or_unnormalized_pose() -> Result<()> {
+        let origin = pose([0.; 3], [0.; 3]);
+        let mut spec = spec();
+        spec.chart_center = Some(center_spec(origin));
+        let value = serde_json::to_value(&spec)?;
+        for field in ["schema", "frame", "pose", "provenance"] {
+            let mut missing = value.clone();
+            missing["chart_center"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert!(serde_json::from_value::<SourceChart>(missing).is_err());
+        }
+        for bad in 0..6 {
+            let mut invalid: SourceChart = serde_json::from_value(value.clone())?;
+            let center = invalid.chart_center.as_mut().unwrap();
+            match bad {
+                0 => center.schema = "unknown".into(),
+                1 => center.frame = "viewer-origin".into(),
+                2 => center.provenance = " ".into(),
+                3 => center.pose.position[0] = f64::NAN,
+                4 => center.pose.orientation = [0.; 4],
+                5 => center.pose.orientation[0] = 1. + 2e-9,
+                _ => unreachable!(),
+            }
+            assert!(
+                chart_parameters(origin, origin, &invalid).is_err(),
+                "case {bad}"
+            );
+        }
         Ok(())
     }
     #[test]

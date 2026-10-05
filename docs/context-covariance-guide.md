@@ -127,12 +127,18 @@ uncertain to interpret this as a statistically resolved bias.
 
 Evaluating two clouds at every valid pose in this saved allocation would
 require about 1.07 billion raw points in expectation under the current
-envelopes. **No such cloud allocation was launched.** The geometric weight
-concentration already demands better coverage. The next saved-data diagnostic
+envelopes. **No such cloud allocation was launched.** Poor hard-only ESS does
+not imply poor physical-weight ESS: depletion could suppress the large-volume
+tails, and these covariances were fitted from physical local trajectories.
+Conversely, those trajectories may have missed physically important tails.
+An overlap-weight diagnostic is needed to distinguish these cases before
+automatically broadening the guide or committing the full cloud expense.
+The next saved-data diagnostic
 combines only these two simultaneously frozen proposal arms with their exact
 equal-mixture denominator and locates the contributions in predeclared
 Mahalanobis-radius strata. This asks whether their complementary coverage
-helps and identifies tails for a later frozen proposal. It generates no new
+helps and identifies candidates for a later, separately frozen core/tail
+overlap comparison. It generates no new
 poses or geometry and cannot supply physical free energies.
 
 Evidence:

@@ -1,0 +1,10 @@
+import ReversibleSampling.SelectedChart
+
+#print axioms ReversibleSampling.SelectedChart.selection_nonnegative
+#print axioms ReversibleSampling.SelectedChart.selection_sum_one
+#print axioms ReversibleSampling.SelectedChart.selected_label_ratio
+#print axioms ReversibleSampling.SelectedChart.full_acceptance_ratio
+#print axioms ReversibleSampling.SelectedChart.matched_chart_cancellation
+#print axioms ReversibleSampling.SelectedChart.jacobian_weighted_flow
+#print axioms ReversibleSampling.SelectedChart.zero_reverse_acceptance
+#print axioms ReversibleSampling.SelectedChart.complete_selected_kernel

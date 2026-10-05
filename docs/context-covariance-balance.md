@@ -70,3 +70,9 @@ The predeclared radial partitions expose the concentration directly. Counts belo
 The six poses in the full-chart `[24,48)` stratum are therefore a small, explicit saved set for a separately designed core-versus-tail physical-overlap control. Their importance for **hard volume** does not establish their importance after depletion weighting. No such control or broader proposal has been executed or selected here.
 
 Evidence: `results/context-covariance-balance-20261005/result/report.json`, SHA256 `10d587d440368fcdae24425250846d8546abecd1e2d2f37bef2d79fc0374cf2b`; complete per-attempt density/weight records in `result/contributions.jsonl`, SHA256 `93d9a35b7f2fbdf17cb3390c351078afdbf4cde6e64e1df58569190e5a990092`. The passed execution status is SHA256 `37bb196118c42f679b7cecd4fa802d6b49437760e7e930dadf446c5cb7cdcac2`. The reduction took 1.00 CPU second after input authentication; tests took 0.006 CPU seconds.
+
+A subsequent [fixed core/tail overlap panel](context-overlap-panel.md) tests the
+physical-weight concern directly. Its two largest geometric-tail contributions
+remain larger than all six tested core contributions after depletion scoring,
+with simultaneous point-cloud intervals. This motivates broader prospective
+guidance; it still does not establish a regional mass or assembly outcome.

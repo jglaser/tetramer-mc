@@ -30,11 +30,22 @@ class ExactPointScorer:
     hinge is nondifferentiable: return the declared zero-direction convention
     and an explicit coincidence count. No completeness claim survives a cap.
     """
-    def __init__(self,context,*,margin=.002,max_candidates=65536,batch_size=64):
+    def __init__(self,context,*,margin=.002,max_candidates=65536,batch_size=64,attribute_bodies=False):
         require(math.isfinite(margin) and margin>0,'Positive finite margin required')
         require(type(max_candidates) is int and max_candidates>=0,'Invalid candidate cap')
         require(type(batch_size) is int and batch_size>0,'Invalid batch size')
         self.context=context;self.margin=margin;self.cap=max_candidates;self.batch=batch_size
+        require(type(attribute_bodies) is bool,'Body attribution must be boolean')
+        self.body_labels=None
+        if attribute_bodies:
+            labels=context.identity.get('outside_labels')
+            require(type(labels) is list and len(labels)>0 and all(type(k) is int and k>=0 for k in labels),
+                    'Attribution requires explicit outside body labels')
+            require(labels==sorted(set(labels)),'Outside labels must match sorted unique contiguous body blocks')
+            require(len(context.fixed)==len(labels)*len(context.atoms), 'Fixed atom blocks differ from body inventory')
+            require(np.array_equal(context.fixed_radii,np.tile(context.radii,len(labels))),
+                    'Fixed atom blocks must preserve the moving shape radius order')
+            self.body_labels=list(labels)
 
     def score(self,center):
         started=time.process_time();ctx=self.context;r,t=pose(center)
@@ -44,6 +55,10 @@ class ExactPointScorer:
         candidate_count=distance_tests=count_query_points=list_query_points=0
         exact_pairs=core=active=coincident=0;objective=0.;gradient=np.zeros(6);minimum=None
         query_cpu=filter_cpu=0.;complete=True;cap_batch=None;processed_atoms=0
+        if self.body_labels is not None:
+            body_count=len(self.body_labels)
+            body_core=np.zeros(body_count,dtype=np.int64);body_active=np.zeros(body_count,dtype=np.int64)
+            body_objective=np.zeros(body_count);body_minimum=np.full(body_count,np.inf)
         for first in range(0,len(points),self.batch):
             stop=min(first+self.batch,len(points));p=points[first:stop]
             radii=np.nextafter(ctx.radii[first:stop]+ctx.maximum_fixed_radius+self.margin+guard,np.inf)
@@ -78,13 +93,19 @@ class ExactPointScorer:
                 objective+=float(hinges@hinges)
                 gradient[:3]+=np.sum(force,axis=0)
                 gradient[3:]+=np.sum(np.cross(rotated[mi[mask]],force),axis=0)
+                if self.body_labels is not None:
+                    body=fi//len(ctx.atoms)
+                    body_core+=np.bincount(body[d2<radius_sum*radius_sum],minlength=body_count)
+                    body_active+=np.bincount(body[mask],minlength=body_count)
+                    body_objective+=np.bincount(body,weights=hinges*hinges,minlength=body_count)
+                    np.minimum.at(body_minimum,body[within],gap[within])
             processed_atoms=stop;filter_cpu+=time.process_time()-tick
         require(math.isfinite(objective) and np.isfinite(gradient).all(),'Nonfinite hinge result')
         fields=dict(core_overlap_pairs=core,active_hinge_pairs=active,within_individual_margin_pairs=exact_pairs,
                     objective_A2=objective,gradient_translation_A=gradient[:3].tolist(),
                     gradient_left_rotation_A2_per_rad=gradient[3:].tolist(),minimum_local_gap_A=minimum,
                     coincident_active_pairs=coincident)
-        return dict(status='complete' if complete else 'candidate_cap',complete_geometry=complete,
+        result=dict(status='complete' if complete else 'candidate_cap',complete_geometry=complete,
             **(fields if complete else {k:None for k in fields}),partial_values=None if complete else fields,
             minimum_gap_censored=complete and minimum is None,
             minimum_gap_censor_threshold_A=self.margin if complete and minimum is None else None,
@@ -93,6 +114,22 @@ class ExactPointScorer:
             count_query_atom_points=count_query_points,list_query_atom_points=list_query_points,
             atoms_processed=processed_atoms,total_moving_atoms=len(points),cap_batch=cap_batch,
             cpu_seconds=time.process_time()-started,query_cpu_seconds=query_cpu,filter_cpu_seconds=filter_cpu)
+        if self.body_labels is not None:
+            require(int(body_core.sum())==core and int(body_active.sum())==active,'Body count partition differs')
+            require(np.isfinite(body_objective).all(),'Nonfinite per-body objective')
+            censored=[complete and math.isinf(float(v)) for v in body_minimum]
+            attribution=dict(labels=self.body_labels,complete_geometry=complete,
+                fixed_atom_block_size=len(ctx.atoms),core_overlap_pairs=body_core.tolist(),
+                active_hinge_pairs=body_active.tolist(),objective_A2=body_objective.tolist(),
+                minimum_local_gap_A=[None if math.isinf(float(v)) else float(v) for v in body_minimum],
+                minimum_gap_censored=censored,
+                minimum_gap_censor_threshold_A=[self.margin if c else None for c in censored])
+            result.update(body_attribution=attribution if complete else None,
+                          partial_body_attribution=None if complete else attribution)
+            # Include attribution serialization in total score cost. The query
+            # and filter timers retain their original meanings.
+            result['cpu_seconds']=time.process_time()-started
+        return result
 
 
 def identities(source,exported):

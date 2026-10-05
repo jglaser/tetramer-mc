@@ -157,4 +157,93 @@ class PointwiseTests(unittest.TestCase):
         ref=np.concatenate([atoms,ar.inv().apply(br.apply(atoms)+bt-at)])
         np.testing.assert_allclose(got.fixed,ref,atol=3e-14,rtol=3e-14)
 
+
+class BodyAttributionTests(unittest.TestCase):
+    def make_context(self):
+        atoms=[[-.7,.2,.1],[.8,-.1,.3]];radii=[.6,.8]
+        shape=dict(atoms=[dict(center=a,radius=r) for a,r in zip(atoms,radii)])
+        poses=[(20,center([.8,.3,.2],[.3,-.1,.4])),(7,center()),(41,center([30,0,0],[.2,.4,-.2]))]
+        data=dict(schema='fixed-outside-context-v1',anchor_label=7,excluded_moving_labels=[99],
+            bodies=[dict(label=k,pose=p) for k,p in poses])
+        return OutsideContext.from_records(shape,data)
+
+    def test_per_body_against_independent_exhaustive_reference(self):
+        ctx=self.make_context();p=center([.2,-.05,.15],[.1,-.2,.3])
+        full=ExactPointScorer(ctx,attribute_bodies=True,batch_size=1).score(p);a=full['body_attribution']
+        self.assertEqual(a['labels'],[7,20,41]);self.assertTrue(a['complete_geometry'])
+        self.assertIsNone(full['partial_body_attribution'])
+        for i in range(3):
+            subset=context(ctx.atoms,ctx.radii,ctx.fixed[2*i:2*i+2],ctx.fixed_radii[2*i:2*i+2])
+            ref=brute(subset,p)
+            self.assertEqual(a['core_overlap_pairs'][i],ref['core_overlap_pairs'])
+            self.assertEqual(a['active_hinge_pairs'][i],ref['active_hinge_pairs'])
+            self.assertAlmostEqual(a['objective_A2'][i],ref['objective_A2'],places=12)
+            if ref['minimum_local_gap_A'] is None:
+                self.assertIsNone(a['minimum_local_gap_A'][i]);self.assertTrue(a['minimum_gap_censored'][i])
+                self.assertEqual(a['minimum_gap_censor_threshold_A'][i],.002)
+            else:
+                self.assertAlmostEqual(a['minimum_local_gap_A'][i],ref['minimum_local_gap_A'],places=12)
+                self.assertFalse(a['minimum_gap_censored'][i]);self.assertIsNone(a['minimum_gap_censor_threshold_A'][i])
+        self.assertEqual(sum(a['core_overlap_pairs']),full['core_overlap_pairs'])
+        self.assertEqual(sum(a['active_hinge_pairs']),full['active_hinge_pairs'])
+        self.assertAlmostEqual(math.fsum(a['objective_A2']),full['objective_A2'],places=12)
+        self.assertEqual(min(v for v in a['minimum_local_gap_A'] if v is not None),full['minimum_local_gap_A'])
+
+    def test_default_output_and_global_values_unchanged(self):
+        ctx=self.make_context();p=center([.2,0,0])
+        baseline=ExactPointScorer(ctx).score(p);explicit=ExactPointScorer(ctx,attribute_bodies=False).score(p)
+        attributed=ExactPointScorer(ctx,attribute_bodies=True).score(p)
+        self.assertNotIn('body_attribution',baseline);self.assertNotIn('partial_body_attribution',baseline)
+        for key in baseline:
+            if not key.endswith('cpu_seconds'):
+                self.assertEqual(baseline[key],explicit[key]);self.assertEqual(baseline[key],attributed[key])
+
+    def test_bad_mapping_rejected(self):
+        ctx=self.make_context()
+        for labels in (None,[],[7,7,41],[20,7,41],[7,20],[7,20,41.],[7,20,-1]):
+            with self.subTest(labels=labels):
+                ctx.identity['outside_labels']=labels
+                with self.assertRaises(ValueError):ExactPointScorer(ctx,attribute_bodies=True)
+        ctx=self.make_context()
+        broken=OutsideContext(ctx.atoms,ctx.radii,ctx.fixed,ctx.fixed_radii[::-1],ctx.identity)
+        with self.assertRaisesRegex(ValueError,'radius order'):ExactPointScorer(broken,attribute_bodies=True)
+        with self.assertRaisesRegex(ValueError,'boolean'):ExactPointScorer(ctx,attribute_bodies=1)
+
+    def test_cap_nulls_full_body_results_and_retains_partial(self):
+        ctx=OutsideContext([[0,0,0],[10,0,0]],[1,1],[[.1,0,0],[100,0,0],[10.1,0,0],[10.2,0,0]],
+            [1,1,1,1],dict(outside_labels=[5,7]))
+        full=ExactPointScorer(ctx,attribute_bodies=True,batch_size=1,max_candidates=1).score(center())
+        self.assertEqual(full['status'],'candidate_cap');self.assertIsNone(full['body_attribution'])
+        partial=full['partial_body_attribution'];self.assertFalse(partial['complete_geometry'])
+        self.assertEqual(partial['core_overlap_pairs'],[1,0]);self.assertEqual(partial['active_hinge_pairs'],[1,0])
+        self.assertEqual(partial['minimum_gap_censored'],[False,False])
+        self.assertEqual(partial['minimum_gap_censor_threshold_A'],[None,None])
+        self.assertIsNone(full['objective_A2']);self.assertEqual(math.fsum(partial['objective_A2']),full['partial_values']['objective_A2'])
+
+    def test_unvisited_bodies_censored_only_after_complete_query(self):
+        ctx=OutsideContext([[0,0,0]],[1],[[100,0,0],[200,0,0]],[1,1],dict(outside_labels=[3,8]))
+        result=ExactPointScorer(ctx,attribute_bodies=True).score(center())
+        a=result['body_attribution'];self.assertEqual(a['core_overlap_pairs'],[0,0])
+        self.assertEqual(a['active_hinge_pairs'],[0,0]);self.assertEqual(a['objective_A2'],[0.,0.])
+        self.assertEqual(a['minimum_local_gap_A'],[None,None]);self.assertEqual(a['minimum_gap_censored'],[True,True])
+        self.assertEqual(a['minimum_gap_censor_threshold_A'],[.002,.002])
+
+    def test_sorted_body_blocks_in_noncommuting_anchor_frame(self):
+        atoms=np.array([[-1,.2,.1],[.7,.1,-.2]]);radii=[.3,.4]
+        shape=dict(atoms=[dict(center=a.tolist(),radius=r) for a,r in zip(atoms,radii)])
+        ar=Rotation.from_rotvec([.5,-.2,.1]);br=Rotation.from_rotvec([-.1,.4,.3]);at=np.array([10.,2.,-1.]);bt=np.array([10.6,2.4,-.8])
+        def q(rot):return np.roll(rot.as_quat(),1).tolist()
+        data=dict(schema='fixed-outside-context-v1',anchor_label=7,excluded_moving_labels=[99],bodies=[
+            dict(label=20,pose=dict(position=bt.tolist(),orientation=q(br))),
+            dict(label=7,pose=dict(position=at.tolist(),orientation=q(ar)))])
+        ctx=OutsideContext.from_records(shape,data);p=center([.1,.1,0],[.05,-.1,.02])
+        out=ExactPointScorer(ctx,attribute_bodies=True).score(p)['body_attribution']
+        independent_fixed=[atoms,ar.inv().apply(br.apply(atoms)+bt-at)]
+        self.assertEqual(out['labels'],[7,20])
+        for k,fixed in enumerate(independent_fixed):
+            ref=brute(context(atoms,radii,fixed,radii),p)
+            self.assertEqual(out['core_overlap_pairs'][k],ref['core_overlap_pairs'])
+            self.assertEqual(out['active_hinge_pairs'][k],ref['active_hinge_pairs'])
+            self.assertAlmostEqual(out['objective_A2'][k],ref['objective_A2'],places=12)
+
 if __name__=='__main__':unittest.main()

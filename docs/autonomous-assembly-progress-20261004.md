@@ -35,15 +35,17 @@ between production Rust and independent Python, with maximum log-density
 disagreement `2.27e-13`. This checks finite-panel arithmetic, not mixing or
 physical occupancy; reciprocal-origin center coverage remains incomplete.
 
-A saved-coordinate proximity check gives a reason not to interpret every deep
-clash as a poor isolated-pair contact. Twelve labels carrying 13.878% of source
-weight put their origins within 2 Å of an existing quartet member's origin;
-125 labels carrying 19.064% lie within 10 Å of some fixed body. This is an
-occupied-origin signal, not an atomic blocker assignment. The next diagnostic
-should separate anchor, quartet-member and other-body clashes. A practical
-reversible construction can refit only two selected charts per attempt, using
-the original atlas for label selection and retaining the additional selection
-correction. That construction is documented but not yet a production kernel.
+A completed atomic blocker attribution resolves the earlier occupied-origin
+signal. Only **0.2845%** of parent label weight clashes with the anchor itself;
+**80.4301%** clashes with other members of the quartet and **51.9467%** with
+remaining fixed bodies. The latter groups overlap. All 2,066 queries completed,
+and an independent audit confirmed unchanged global scores and complete body
+attribution. These pair centers are therefore mostly usable in isolation;
+occupied surroundings dominate this particular destination-feasibility failure.
+The next proposal should account for the outside geometry with its exact
+forward/reverse selection correction. A practical reversible construction can
+refit only two selected charts per attempt, using the original atlas for label
+selection. It is not yet a production kernel or an observed mixing gain.
 An exact-rational displacement bound, conditional on the saved gap error being
 at most 0.01 Å, screens 95.736% of parent label mass as unrepairable within the
 current 1 Å / 2° box. All previously capped labels screen. Smaller declared
@@ -360,6 +362,7 @@ explicitly normalized ordinary Gaussian children whose centers are adjusted
 using outside atomic geometry. No native classifier or current moving pose
 enters that adjustment. The physical sampler must retain the complete proposal
 correction and defensive component. The native-informed coverage result does
-not establish this exporter's protein performance; a separately frozen
-application to the blind atlas is the next construction test. Original-condition
+not establish this exporter's protein performance. Its completed blind-atlas
+application, density audit and blocker attribution are summarized above and
+show why occupied destinations must be addressed. Original-condition
 physical-weight sensitivity calculations remain separate and active.

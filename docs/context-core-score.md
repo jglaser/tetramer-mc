@@ -2,9 +2,11 @@
 
 `tools/context_core_score.py` evaluates the core geometry of existing pose
 centers against a fixed outside environment. It provides a reusable
-`ExactPointScorer` and a bounded campaign CLI. The implementation was promoted
-from the completed October 4 diagnostic with only its module imports changed.
-It does not run an optimizer or change any pose, proposal or physical state.
+`ExactPointScorer` and a bounded campaign CLI. The initial implementation was
+promoted from the completed October 4 diagnostic with only its imports changed.
+An optional extension now attributes its existing observables to fixed bodies;
+it is disabled by default. The tool does not run an optimizer or change any
+pose, proposal or physical state.
 
 ## Observable and coordinate conventions
 
@@ -65,6 +67,41 @@ The count precheck bounds candidate-list materialization. The supervisor's
 time and address-space limits still cover KD traversal, fixed arrays and all
 other work. Floating-point guards are implementation safeguards, not a formal
 proof of exact real arithmetic.
+
+## Optional attribution to fixed bodies
+
+Pass `attribute_bodies=True` to `ExactPointScorer`, or set
+`"attribute_bodies": true` in the allocation's `settings`. With the default
+`false`, existing output fields and calculations remain unchanged.
+
+Attribution requires explicit sorted, unique `outside_labels` in the context
+identity. The fixed array must consist of one contiguous equal-shape atom
+block per label, preserving the shape's radius order. These inventory and
+radius checks are enforced. `OutsideContext.from_records` constructs the
+required ordering; a manually constructed context must honor the same
+contract. Atomic coordinates do not independently prove the correctness of
+caller-supplied body labels.
+
+`body_attribution` contains aligned arrays for `labels`,
+`core_overlap_pairs`, `active_hinge_pairs`, `objective_A2`,
+`minimum_local_gap_A`, `minimum_gap_censored`, and
+`minimum_gap_censor_threshold_A`. Their shared `complete_geometry` flag and
+`fixed_atom_block_size` make the mapping explicit. Every body is retained,
+including those with zero overlap and censored gaps. Body core and active
+counts partition their global counts exactly; hinge contributions sum to the
+global objective within floating-point summation error.
+
+On a candidate cap, `body_attribution` is null and
+`partial_body_attribution` retains only the incomplete prefix, with
+`complete_geometry=false` and no inferred censor bounds. This does not imply
+that bodies absent from the prefix are clear. Cached child identities reuse
+the complete per-body result of the corresponding identical parent center.
+
+The scorer assigns only fixed-body labels. Anchor/quartet/other-body groups
+belong to a separate reduction; native labels, fitted targets and optimizer
+outcomes do not select or filter its atomic work. Attribution can establish
+which fixed bodies contribute at these particular centers. It does not by
+itself measure finite-width coverage or distinguish a viable alternative pose.
 
 ## Identities, caching and failure records
 
@@ -192,6 +229,48 @@ Artifacts:
 The score report SHA-256 is
 `b352d1ab29977872dde9199743304698bdb2e85f1886460fb073f95f8d4eef97`.
 
+### Completed per-body attribution
+
+A separately frozen repeat enabled attribution for the same 2,066 scheduled
+queries and all 4,096 identities. All 264 fixed-body blocks were retained for
+every identity, with zero candidate caps. The repeat was necessary because
+the earlier report did not identify the blocking bodies; it introduced no new
+poses or stochastic draws.
+
+The independent saved-data audit found **exact equality** of all shared
+objectives, gaps, gradients, counts, predicates and cache identities with the
+previous scores. The largest difference between a summed body objective and
+the corresponding global objective was `2.91e-11 Å²`, within the predeclared
+summation tolerance. Both execution and audit completed and drained.
+
+For the original parent centers:
+
+| Blocking group | Labels with a strict core overlap | Source label weight |
+|---|---:|---:|
+| Anchor 16 | 6 | 0.2845% |
+| Other quartet members 77, 217, 237 | 1,577 | 80.4301% |
+| Remaining fixed bodies | 1,311 | 51.9467% |
+
+These groups overlap. Exclusive categories attribute 46.0297% of label weight
+to the other quartet members alone, 17.6748% to remaining bodies alone, and
+34.1785% to both groups without anchor clashes. The fully clear fraction is
+still 1.83245%. Thus almost all parent label weight is clear against its anchor
+at the chart center; the widespread clashes in this environment primarily
+involve additional bodies. This is evidence about these fixed centers, not
+the probability that a Gaussian draw will be valid or an equilibrium conclusion.
+
+The scorer recorded 44.26 CPU seconds before writing its final report. Total
+controller cost, including report serialization, was 50.15 CPU seconds and
+50.41 wall seconds, with approximately 349 MiB peak RSS. The independently
+checked artifacts are:
+
+- [Attribution allocation](../results/context-core-score-attribution-preparation-20261004/allocation.json)
+- [All per-body scores](../results/context-core-score-attribution-preparation-20261004/result/report.json),
+  SHA-256 `71274ec521fd0fd3c351312095552ceca34c8d2ee51e832ecdf9a41e21aaa7a3`
+- [Independent attribution audit](../results/context-relaxed-body-attribution-review-20261004/execution01/analysis.json),
+  SHA-256 `bd4ab53a09b510c08df07193e8c9f102e93bd9ace0afb33ad765ad77583b1e94`
+- [Independent audit receipt](../results/context-relaxed-body-attribution-review-20261004/execution01/receipt.json)
+
 ## CLI reproduction
 
 The CLI requires `--source-model`, `--exported-model`, `--shape`, `--context`,
@@ -241,7 +320,7 @@ promotion. It leaves the archived allocation, sources and results untouched.
 For strict replay, also retain the archived interpreter/library pins and
 supervisor receipts; a current-runtime reproduction alone is not such a replay.
 
-The same 14 synthetic tests cover exhaustive sphere/dumbbell references,
+The initial 14 synthetic tests cover exhaustive sphere/dumbbell references,
 noncommuting frame transforms, finite-difference gradients, tangencies,
 coincidences, radius filtering, censored gaps, caps, caching and failure
 prefixes. The promoted code passed all 14 with one thread and limits of
@@ -257,3 +336,11 @@ env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
   prlimit --cpu=30:30 --as=2147483648:2147483648 \
   /home/xvg/protein-nucleation/.venv/bin/python -B tools/test_context_core_score.py
 ```
+
+Six additional attribution tests cover independent per-body exhaustive
+references, group sums, unchanged default results, invalid label/block/radius
+mappings, capped partial results, censored bodies and noncommuting anchor
+frames. All **20 tests** passed under the same one-thread, 30-CPU-second,
+60-wall-second, 2-GiB limits, without repeating protein queries:
+[attribution validation receipt](../results/context-core-score-attribution-preparation-20261004/validation-attempt01/receipt.json),
+SHA-256 `c4d217abb33241dd6a371f66193cbf2599b50d77807d4fc645536ead5c012d76`.

@@ -136,3 +136,28 @@ alongside unconditional A/B/other occupancies. Thus a sequence such as
 `{16,217} -> {16} -> {16,56}` can count as a completed A-to-B passage without
 discarding the intermediate states from physical statistics. These are contact
 descriptors, not native-registry or metastability definitions.
+
+All 24 chains subsequently completed their full allocation: 276,480 attempted
+moves, with no retries, replacements, null proposals, or failed chains. The
+[host receipt](../results/context-prior-physical-pilot-execution-20261005/host-drained.json)
+records 2,629.88 CPU seconds and 739.66 wall seconds, with all child groups
+drained. This establishes execution completeness, not convergence.
+
+The saved-state observer passed ten synthetic tests, including global versus
+compact particle labels, every rejected residence, persistent autocorrelation,
+and A-to-B passage through other contact sets. The final
+[validation](../results/context-prior-observer-validation-20261005/attempt02/report.json)
+also authenticates the compiled shared-step schema. An earlier observer draft
+incorrectly expected the top-level proposal ratio to be absent on hard
+rejections; the held sampler records it before geometry. That observer draft
+and its unlaunched plan were retained and superseded before any protein
+observation. The physical sampler and its completed draws were unchanged.
+
+The corrected observer
+[manifest](../results/context-prior-physical-observers-20261005-v2/controller-manifest.json)
+binds all 24 chains and 758 source/input hashes. Each analysis has a 300 CPU
+second, 600 wall second, 4 GiB cap, using at most four single-thread workers.
+The all-stream comparator separately passed three synthetic tests and requires
+all 24 completed analyses. It preserves undefined ESS, individual stream
+ratios, all cross-start support comparisons, and missing shared construction
+costs instead of imputing them.

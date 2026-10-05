@@ -1,10 +1,10 @@
 # Correlated transport in the occupied neighborhood
 
-The next control tests whether retaining within-chart coordinates improves
+This completed control tests whether retaining within-chart coordinates improves
 physical contact-environment sampling. The completed independent-redraw pilot
 already supplies the local and correlation-zero baselines. It need not be
-repeated. This document specifies preparation and validation; it does not
-authorize another protein run.
+repeated. The frozen design and its validation are retained below, followed by
+the results. No further protein allocation follows from this document.
 
 The [completed comparison](../results/context-prior-physical-comparison-20261005/comparison.json)
 found 13 hard-valid learned proposals out of 8,226 production proposals with
@@ -203,3 +203,76 @@ paired seeds were independently checked. Four new controller tests passed,
 covering the changed 16-job inventory and failure/termination cleanup. The
 16-chain control was admitted after these checks; its outcomes remain a
 separate sampling-efficiency question.
+
+## Completed result: better access, unresolved patch mixing
+
+All 16 physical chains and all 16 observers completed and drained without
+retries or replacement streams. The physical allocation retained all 184,320
+attempts. The [comparison](../results/context-correlated-control-comparison-20261005/comparison.json)
+has SHA256
+`a6b369fc7638557d71d29f9c1cf4b2231f86069aa916ed2967056b94fbe4a803`.
+It reuses the 24 completed controls once, without new observations or physical
+draws for them.
+
+| Production learned branch | Original, rho=0 | Original, rho=.95 | Context, rho=0 | Context, rho=.95 |
+| --- | ---: | ---: | ---: | ---: |
+| Attempted proposals | 8,226 | 8,226 | 8,226 | 8,226 |
+| Hard-core and wall valid | 13 | 41 | 467 | 1,165 |
+| Accepted | 1 | 3 | 2 | 13 |
+| Confirmed B-to-A passages | 1 | 3 | 2 | 2 |
+| Confirmed A-to-B passages / roundtrips | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+
+The context-prior correlation control improves feasibility by 2.49 times
+relative to its independent-redraw control. All four B-start streams reach
+the A neighbor set, including two during warmup. The two production passages
+therefore do not count all initial relaxation. Between-start neighbor-set
+total variation decreases from 0.2711 to 0.0477. This is useful accessibility
+evidence for the supplied atlas in this fixed neighborhood.
+
+However, the exact patch-fingerprint supports observed from the two starts
+remain disjoint in every arm (total variation approximately one). Sharing
+neighbors `{16,217}` does not mean sharing their surface contacts. No learned
+move is accepted in any A-start stream, and its paired retained contact
+history is unchanged by correlation. These facts prevent interpreting the
+neighbor occupancy agreement as contact equilibration or native registry.
+
+The predeclared efficiency measure does not show a consistent benefit:
+
+| rho=.95 / rho=0, same prior | Median patch ESS/CPU ratio | Median fingerprint ESS/CPU ratio | Defined pairs |
+| --- | ---: | ---: | ---: |
+| Original, start A | 0.998 | 0.998 | 4 / 4 |
+| Original, start B | 0.433 | 0.497 | 4 / 4 |
+| Context, start A | 0.880 | 0.880 | 4 / 4 |
+| Context, start B | 0.533 | 0.343 | 3 / 4 |
+
+These are descriptive paired medians, not confidence intervals. In the last
+row the fourth baseline trace is constant, so its ESS and ratio remain
+undefined. The B-start ratios are heterogeneous, with large improvements in
+one stream and decreases in others. Finite-record ESS estimates from
+non-equilibrated starts cannot establish an equilibrium speedup.
+
+![Matched contact occupancy, apparent ESS per CPU, and runtime](../results/context-correlated-control-comparison-20261005/figures/correlated-contact-comparison.png)
+
+The new sampler invocations used 1,923.32 CPU seconds; including supervision,
+the physical execution used 1,964.17 CPU seconds and 536.19 wall seconds.
+Offline observers used 84.52 CPU seconds inside their analysis sections and
+187.07 CPU seconds including process startup and supervision. The final
+comparison used 7.44 CPU seconds. These costs are separate from preparation
+and reference validation. More valid proposals also incur more bath work;
+the gain in accepted count is not free. Dynamic context-prior construction
+in an all-mobile simulation remains unmeasured.
+
+The decision is to retain the validated correlated involution as a building
+block, but not promote rho=.95 as a demonstrated contact-sampling speedup or
+start a larger correlation sweep. Independent physical weights and important
+patch-region coverage are now more discriminating. The existing native/contact
+weight follow-up continues separately. For this occupied neighborhood,
+[reusing the complete rho=0 candidate bank](context-candidate-importance.md)
+can supply a second, explicitly conditional importance calculation once its
+absolute overlap estimator and full proposal density are validated. The
+rho=.95 proposals are state dependent and cannot be added to that independent
+bank using a rho=0 density.
+
+The assembly question remains unresolved. This conditional 500 micromolar
+neighborhood test neither establishes nor refutes finite-system assembly at
+the goal's 106.8 micromolar concentration.

@@ -8,6 +8,20 @@ The decision conditions remain the repaired rigid tetramer, depletant radius
 1.5 Å, activity 0.035 Å⁻³ and approximately 106.8 μM. The diagnostics below
 have different physical conditions and must remain separate.
 
+**5 October update:** the [completed physical comparison](context-prior-physical-control.md)
+and [matched correlation control](context-correlated-control.md) supersede the
+pending fixed-context-prior steps recorded below. All 40 chains completed,
+with 460,800 total attempted moves and all rejected residence retained.
+Context weighting improves geometric feasibility; retaining latent coordinates
+at rho=.95 further increases accepted learned moves from 2 to 13 in its
+matched comparison. Neighbor identities agree much better across starts, but
+surface-patch histories remain disjoint and apparent contact ESS per CPU does
+not improve consistently. These are conditional 500 micromolar neighborhood
+tests, not all-mobile assembly results. The next priority is independent
+physical contact weights and patch-region coverage, rather than another
+correlation sweep. The original-condition sensitivity campaign remains active;
+the N=12/N=24 assembly bank remains held behind its convergence gates.
+
 The newest controlled geometric result is a **5.08-fold increase in proposed
 hard-clear native extensions**, from 2.95% to 15.00%, after small adjustments
 of incoming-particle Gaussian centers. Four independent populations, identical

@@ -161,3 +161,61 @@ The all-stream comparator separately passed three synthetic tests and requires
 all 24 completed analyses. It preserves undefined ESS, individual stream
 ratios, all cross-start support comparisons, and missing shared construction
 costs instead of imputing them.
+
+## Completed comparison
+
+All 24 saved-state observers passed, retaining all 276,480 attempted endpoints.
+The [comparison](../results/context-prior-physical-comparison-20261005/comparison.json)
+has SHA256 `9ef364c36de0d10c4099e37df9cbae56dec2831f9932c8dfa6914009d57fb397`.
+The observers and their controllers used 311.46 CPU seconds and 109.40 wall
+seconds; the final comparison used 0.83 CPU seconds. No new physical draws,
+replacement chains, or accepted-state filtering entered the analysis.
+
+| Production diagnostic | Original prior | Context prior |
+|---|---:|---:|
+| Learned proposals | 8,226 | 8,226 |
+| Hard- and wall-valid learned proposals | 13 (0.158%) | 467 (5.677%) |
+| Accepted learned proposals | 1 | 2 |
+| Confirmed B-to-A passages | 1 | 2 |
+| Confirmed A-to-B passages / round trips | 0 / 0 | 0 / 0 |
+| Between-start neighbor-set total variation | 0.893 | 0.271 |
+| Between-start full-fingerprint total variation | 1.000 | 1.000 |
+
+The context prior improves learned-proposal feasibility **35.9-fold**. One
+additional context stream reaches neighbor environment A during warmup; three
+of four alternative-start context streams therefore visit A, versus one of
+four original-prior streams. These are arrivals at the same **neighbor IDs**,
+not the same patch contacts. The two initializations have disjoint observed
+full-fingerprint supports in every arm, and some patch marginals differ by
+one. Local trajectories also remain initialization-dependent. No equilibrium
+contact weights or meaningful return-rate comparison follow from these runs.
+
+There is no consistent contact-sampling efficiency gain. From the saved A
+start, context and original priors have identical retained patch histories
+within each paired stream; context's extra cost reduces patch and fingerprint
+ESS per CPU to a median 0.896 times the original. From B, context/original
+patch ESS per CPU has median ratio 2.26 among three defined streams, but one
+context trace is constant and undefined; the fingerprint ratio is only 0.953.
+The corresponding context/local patch ratio is 0.765 among the same three
+defined streams. These finite-record numbers cannot rank equilibrium mixing
+while contact coverage remains inconsistent.
+
+Most geometrically valid learned proposals still fail the physical acceptance
+step. For rejected valid context proposals, individual-stream median auxiliary
+depletion log factors are approximately −92 to −97 from the saved A start,
+and −26 to −47 from the B start. These are sampled **acceptance factors**,
+not integrated basin free energies. They suggest that clearance alone does
+not preserve enough exclusion overlap. A separate saved-trace diagnostic
+will compare proposal and bath terms on exactly the same gated candidates.
+
+![Matched contact-sampling comparison](../results/context-prior-physical-comparison-20261005/figures-v2/contact-prior-comparison.png)
+
+The next sampling control is to retain correlated within-chart coordinates
+during transfer, using the existing reversible transport, rather than fitting
+another center-only prior. Independently, the full-domain absolute-weight
+route in [the candidate-bank note](context-candidate-importance.md) could
+separate poor proposals from thermodynamically rare environments. Its positive
+proposal floor does not certify unseen pockets. The main independent
+native/contact-region weight campaign continues separately; neither this
+conditional pilot nor a future candidate-bank calculation decides finite-system
+assembly stability.

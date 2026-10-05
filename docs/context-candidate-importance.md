@@ -107,3 +107,38 @@ For one arm with `N` IID candidates and `m` clouds per valid candidate, the vari
 Increasing cloud intensity or replication addresses the bracket's cloud multiplier. It cannot fix a small proposal density on a high-weight contact basin. A single-anchor atlas and a vessel-wide uniform draw may miss relevant pockets around other spectators. Other can therefore remain poorly estimated even if A/B are sampled well. Zero hits do not bound a region's physical weight without additional geometric/weight bounds.
 
 Inspect independent population spread, largest contributions, importance ESS, cloud-replicate variation and complete A/B/Other contributions. Finite-bank consistency alone cannot certify unseen modes. This check could distinguish rare conditional environments from ineffective accepted-state proposals; it cannot establish finite-system assembly or crystal stability.
+
+## Possible refinement: accept the full proposal mixture
+
+At zero correlation, the same candidate generator also permits an alternative exact kernel: accept **every global candidate** using `log Q_C(old)-log Q_C(new)` plus the existing bath factor, instead of retaining separate uniform/learned acceptance labels. Candidate generation, reciprocal maps and the sampled physical gate remain unchanged. This marginalizes the proposal labels for acceptance; it does not add another Jacobian or source-label correction.
+
+The existing singleton gate depends on the fixed context and its two physical endpoints, not on the uniform/learned label. Given gained/lost overlap volumes `v+`, `v-`, its thinned counts are independent Poisson variables with means `lambda v+` and `(lambda+z) v-`. Swapping counts and endpoints gives the augmented target/proposal ratio
+
+\[
+\kappa=(1+z/\lambda)^{k_+-k_-}.
+\]
+
+The physical overlap-volume exponential cancels the ratio of the Poisson normalization factors. Zero-volume cases use their degenerate count laws, without division by a volume or zero probability. This is the identity formalized in [`ConditionalPoisson.lean`](../formal/ReversibleSampling/ConditionalPoisson.lean). Its application still requires correct thinning, geometry and complete clouds; resource failures cannot become ordinary rejections.
+
+For fixed valid endpoints `x,y` and fixed gained/lost counts, write `q_U=U`, `q_G=G_C`, and `w_U=w_G=1/2`. After factoring out the common forward physical density and forward count probability, the branch-separated accepted flow is
+
+\[
+F_{\mathrm{separate}}=\sum_b w_b\min\{q_b(y),\kappa q_b(x)\},
+\]
+
+whereas the marginalized kernel gives
+
+\[
+F_{\mathrm{full}}=\min\{\sum_b w_bq_b(y),\kappa\sum_b w_bq_b(x)\}
+\ \geq\ F_{\mathrm{separate}}.
+\]
+
+The inequality is the sum-of-minima bound. It remains valid with zero component support. Summing over the common endpoint-only count law proves off-diagonal accepted-flow dominance; the same Poisson balance identity proves reversibility of both kernels. Thus the full-mixture **elementary global kernel** Peskun-dominates the separate-branch kernel, with the usual stationary asymptotic-variance interpretation where applicable. It does not imply a better decision for every individually realized branch.
+
+For physical endpoints inside this runner's uniform cube, `U(x)=U(y)=u`. Improvement is strict precisely when the two nonzero branch ratios `kappa` and `kappa G_C(x)/G_C(y)` lie strictly on opposite sides of one. In particular, when `kappa=1`, the total off-diagonal flows are **equal**, even though individual branch acceptance decisions can change. A small learned density at the source is therefore not sufficient evidence of a net improvement. Favorable depletion canceled by an excessive learned reverse-density penalty is one relevant regime; a dominant unfavorable bath factor may remain limiting.
+
+This refinement is specific to the independent candidate law. Nonzero correlation requires the actual conditional transition density. General use must include the uniform cube indicator in `Q`; here all wall-valid endpoints lie inside the enclosing cube and invalid endpoints retain zero physical weight. If an anchor were randomized and marginalized too, its probabilities and all anchor densities would also enter `Q`.
+
+The current `physical_step` has no correction-override mode. A future explicit, checkpointed zero-correlation mode could retain the original trace correction and record the full-mixture correction separately. Learned traces already store both endpoint `log G_C` values: with `a=log G_C(x)-log u`, `b=log G_C(y)-log u`, the new correction is `softplus(a)-softplus(b)`. Saved complete bath counts and uniforms permit a one-step counterfactual at the saved source. Uniform candidates require additional map-density evaluations to measure their compensating changes. Such a replay is not a new trajectory or a mixing estimate.
+
+Extra scoring cost and the deterministic four-local/one-global schedule matter: Peskun ordering of the reversible global kernel alone does not establish ordering of that full cycle composition or improvement per CPU. Saved correction/bath diagnostics should precede implementation and a matched benchmark. No refinement has been implemented or allocated by this note.

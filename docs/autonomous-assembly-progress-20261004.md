@@ -8,6 +8,18 @@ The decision conditions remain the repaired rigid tetramer, depletant radius
 1.5 Å, activity 0.035 Å⁻³ and approximately 106.8 μM. The diagnostics below
 have different physical conditions and must remain separate.
 
+**6 October update:** the [competing-cage comparison](context-competing-cage.md#completed-prospective-comparison-6-october)
+completed all 32,768 fresh attempts and 15,968 independent depletion clouds.
+Separately centered contact guides expose approximately 224 times more
+competing-contact weight than the matched baseline, improving its observed
+importance ESS/CPU by 5.75 times. This is a coverage correction for the same
+conditional target, not a thermodynamic change. Source-contact sampling
+worsens and intermediate contact strata remain unobserved; neither arm
+passes the convergence gates. The next saved-data diagnostic separates
+cloud noise from pose-weight variance before another allocation. These
+calculations still concern one mobile tetramer in a frozen 500 μM
+environment. They do not open the finite-assembly production gate.
+
 **5 October update:** the [completed physical comparison](context-prior-physical-control.md)
 and [matched correlation control](context-correlated-control.md) supersede the
 pending fixed-context-prior steps recorded below. All 40 chains completed,

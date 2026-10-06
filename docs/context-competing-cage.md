@@ -242,3 +242,152 @@ The exact metrics are
 `results/context-competing-cage-observers-20261005/contact-summary.json`,
 SHA-256 `138258bada2425794d0d601b686b070bd9f28e0806e9bccb3da6473db04c594e`.
 All observer inputs and the protected assembly binary remain unchanged.
+
+## Frozen importance comparison
+
+The next comparison fixes four independent populations of 4,096 attempts
+per arm, with the following deterministic stratum counts in each
+population. F, D and B are the existing full-covariance, diagonal and
+four-times-covariance guides; C0 and C1 are the two new frozen fits.
+
+| Runner law | Baseline | With competing cages |
+|---|---:|---:|
+| F | 1,536 | 768 |
+| D | 1,536 | 768 |
+| B | 1,024 | 512 |
+| C0 | 0 | 1,024 |
+| C1 | 0 | 1,024 |
+| Total attempted poses | 4,096 | 4,096 |
+
+Each runner law is r_j=0.5 U+0.25 G+0.25 g_j. Thus 1,024 C0-runner
+attempts supply 256 expected direct C0 Gaussian draws, not 1,024. The
+comparison contains 32,768 fresh poses across 32 strata. Its independent
+audit reconstructs every pose and source density, and checks a fixed
+stride-64 panel of 512 poses against independent atlas and atomic geometry
+calculations. The complete remaining contact and unbound regions remain
+in the integration domain.
+
+Physical scoring is predeclared to use two independent clouds of intensity
+lambda=2.24 Å⁻³ for every valid pose. With a common certified overlap-volume
+lower bound L and cloud counts K0,K1, the primary estimator is
+
+\[
+\log\widehat W_{\rm RB}=zL+(K_0+K_1)\log(1+z/(2\lambda)).
+\]
+
+It is the conditional expectation of the earlier arithmetic-pair estimator
+given the pooled count; the arithmetic-pair result remains a separately
+labeled control. The [existing Poisson argument](context-broadened-guide.md)
+establishes unbiasedness and variance reduction at fixed pose. It cannot
+repair missing pose-space coverage. Zero-volume cloud records and every
+hard-invalid zero are retained. No outcome from this comparison has been
+used to choose its mixture weights, Gaussian widths or estimator.
+
+The five-guide manifest is
+`results/context-multicage-frozen-guides-20261005/result/mixture-manifest.json`,
+SHA-256 `7e54d2b6140806d8f917818e2072391df038e39d524346f8996aeb9527be0563`.
+Its 11 arithmetic and metadata controls passed; freezing it generated no
+poses or depletant clouds.
+
+## Completed prospective comparison, 6 October
+
+All 32 strata completed, retaining every one of the 32,768 attempted
+poses. Independent reconstruction checked the complete five-chart
+mixture density at every draw, and all 512 predeclared independent
+geometry checks passed. There were 7,984 hard-valid poses, each scored
+with two fresh independent clouds. The 15,968 clouds processed
+1,935,881,890 points. No failed draws were replaced or omitted.
+Geometry cost 498.50 CPU seconds; physical scoring cost 612.09 CPU
+seconds. All 37 owned producer process groups and both audit groups
+were confirmed drained. The assembly binary and ongoing campaigns were
+unchanged.
+
+**The competing guides improve coverage, but neither arm converges.**
+The table uses the primary pooled-count estimator and four independent
+population estimates. ESS/CPU is the arithmetic mean of each population's
+importance ESS divided by its geometry-plus-scoring CPU time. It is not
+trajectory contact ESS or an assembly speedup.
+
+| Conditional diagnostic | Existing guides | With competing cages |
+|---|---:|---:|
+| Contact mass outside source-complete A | 1.05 × 10¹⁴ | 2.35 × 10¹⁶ |
+| Relative population SE of that mass | 96.8% | 20.9% |
+| Importance ESS per population, that region | 1.00–3.18 | 4.14–17.63 |
+| Importance ESS/CPU, that region | 0.0139 | 0.0798 |
+| Importance ESS/CPU, neighbor environment B | 0.0103 | 0.1534 |
+| Source-complete A mass | 1.67 × 10³⁷ | 3.18 × 10³⁷ |
+| Relative population SE, source-complete A | 11.8% | 36.6% |
+| Importance ESS/CPU, source-complete A | 0.1835 | 0.0649 |
+
+Masses use translation volume times normalized Haar measure, with the
+same depletion reference in both arms. They are conditional integrals
+in this frozen environment, not chemical potentials or native assembly
+probabilities. Source-complete A means neighbors {16,217} with all
+sixteen original source patch tokens; it is not independently determined
+native registry.
+
+![Completed physical comparison](../results/context-multicage-physical-plot-20261006/result/comparison.png)
+
+The competing-contact estimate increases by approximately 224-fold
+(5.41 log units, 4.76 combined population SE), almost entirely from
+partial-A configurations reached by the new cage0 component. The largest
+competing contribution in each new population lies within that chart at
+squared Mahalanobis distance 2.92–10.27. The gain therefore comes from
+sampling a separately located contact basin. It cannot be interpreted
+as an equilibrium change: both arms integrate the same physical target.
+The baseline demonstrably lacks adequate coverage in this comparison.
+
+Source-complete A still has a serious tail problem. One broad-guide draw
+supplies 84.8% of its population's weight in the multicage arm. Its
+squared distances are 26.18 in the original full-covariance chart and
+6.55 in the broad chart; it is not a Cayley-seam excursion. Two auxiliary
+clouds at that pose do not by themselves identify whether cloud noise
+or pose-weight mismatch dominates its contribution. Saved pooled counts
+permit a separate second-moment diagnostic before spending on more
+clouds or changing the guide again.
+
+Both arms leave the 50–75% and 75–100% source-patch-completeness bins
+without observations, and each has only one observation in the 25–50%
+bin. Other-contact mass remains unstable (about 90% relative SE in the
+new arm). Unbound mass agrees within 0.0083 log units and passes the
+concentration/error checks, but that does not bound missed contact
+weight. Every contact-region concentration check fails. The approximate
+population-based free-energy interval half-widths are 2.75 and 1.67 kBT,
+above the required 0.5 kBT; their central values are not admitted as
+physical conclusions.
+
+The next diagnostic separates auxiliary-count variance from pose-weight
+variance using these saved clouds. It must retain fixed proposal strata,
+all zeros and the complete population denominators. Neither that
+diagnostic nor another conditional guide comparison can decide
+finite-system assembly. The original-condition contact campaign and
+subsequent finite-system checks remain necessary.
+
+### Reproducibility
+
+Fifteen additional physical-preparation and reduction controls passed.
+An earlier synthetic-test prefix contains two NumPy-scalar serialization
+fixture failures; the corrected fixtures were run under a fresh prefix.
+No physical job was launched from the failed prefix. The rendering
+preparation initially encountered the system interpreter's missing
+`hashlib.file_digest`, before copying inputs or launching any job; the
+project interpreter completed the unchanged plot preparation.
+
+- Geometry audit:
+  `results/context-multicage-guide-independent-audit-20261005/result/report.json`,
+  SHA-256 `c69a028219799009d79ef9355d2aa05a7e96e1fa795ff0b8a5852cd8a7232168`.
+- Physical manifest:
+  `results/context-multicage-guide-physical-20261005/controller-manifest.json`,
+  SHA-256 `a4d58b4fc628e1c42b3c96eba0bfa01538e26c61adb1103bfaf4f5096a4af822`.
+- Physical audit:
+  `results/context-multicage-physical-independent-audit-20261005/result/report.json`,
+  SHA-256 `952a1ca4e5325ee44c1ca81af2753e3cba456fcbc91050c4be325c54edd24dac`.
+- Producer drain receipt:
+  SHA-256 `3af03b4974d84b13aefd25401c920d31457684f4d3092c0e7d9581a019421386`.
+- Plot:
+  `results/context-multicage-physical-plot-20261006/result/comparison.png`,
+  SHA-256 `e00b07f599abe0599ec97a00cfbee8a0a006a2ad9f1c31fc6d3db5683846d877`.
+
+An audit's `passed` field means its reconstruction and accounting checks
+passed. Its separately reported physical convergence gates remain failed;
+the finite-system stability conclusion remains unresolved.

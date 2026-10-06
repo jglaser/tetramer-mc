@@ -15,8 +15,11 @@ competing-contact weight than the matched baseline, improving its observed
 importance ESS/CPU by 5.75 times. This is a coverage correction for the same
 conditional target, not a thermodynamic change. Source-contact sampling
 worsens and intermediate contact strata remain unobserved; neither arm
-passes the convergence gates. The next saved-data diagnostic separates
-cloud noise from pose-weight variance before another allocation. These
+passes the convergence gates. The [saved-data variance diagnostic](context-poisson-noise-budget.md)
+now separates cloud noise from pose-weight variance using a seven-theorem
+Lean identity and fifteen synthetic controls. Its descriptive cost
+forecasts favor better pose coverage over a substantial cloud-intensity
+increase; their ratio uncertainties remain unbounded. These
 calculations still concern one mobile tetramer in a frozen 500 μM
 environment. They do not open the finite-assembly production gate.
 

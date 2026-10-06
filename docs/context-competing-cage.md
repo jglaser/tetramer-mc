@@ -356,12 +356,14 @@ population-based free-energy interval half-widths are 2.75 and 1.67 kBT,
 above the required 0.5 kBT; their central values are not admitted as
 physical conclusions.
 
-The next diagnostic separates auxiliary-count variance from pose-weight
-variance using these saved clouds. It must retain fixed proposal strata,
-all zeros and the complete population denominators. Neither that
-diagnostic nor another conditional guide comparison can decide
-finite-system assembly. The original-condition contact campaign and
-subsequent finite-system checks remain necessary.
+The [completed saved-count diagnostic](context-poisson-noise-budget.md)
+separates auxiliary-count variance from pose-weight variance, retaining
+fixed proposal strata, all zeros and the complete population denominators.
+Its descriptive estimates favor improving pose coverage before buying
+substantially more clouds, although ratio uncertainties remain unbounded.
+Neither that diagnostic nor another conditional guide comparison can
+decide finite-system assembly. The original-condition contact campaign
+and subsequent finite-system checks remain necessary.
 
 ### Reproducibility
 

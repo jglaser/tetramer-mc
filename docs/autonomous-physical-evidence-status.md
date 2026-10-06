@@ -1,4 +1,112 @@
-# Physical evidence at the start of autonomous continuation
+# Physical evidence during autonomous continuation
+
+## Update, 2026-10-06
+
+**Finite-system native assembly remains unresolved.** The current regional
+follow-up is a sensitivity study at the original **1.5 Å, 0.035 Å⁻³** decision
+conditions. It measures one mobile tetramer against two fixed neighbors inside
+the unchanged R4 domain; it does not measure full-vessel contact weights or the
+free energy of creating that scaffold. The later all-mobile decision remains
+N=12/N=24 at approximately 106.8 μM.
+
+At **02:48 UTC**, the independently checked host process inventory and small
+terminal metadata showed **92/121 completed phases** in
+`/vast/xvg/tetramer-mc-runs/native-class-physical-followup-20261004`, with
+`class_intensity-r02-labels` active and no recorded failure. The larger-population
+and defensive-probability blocks had completed; cloud-intensity and final
+analysis work remained. The fixed allocation is 786,432 new attempted draws:
+eight populations each of 65,536, 16,384 and 16,384 for the three arms, retaining
+two clouds per valid pose and all invalid zeros. Completed primary populations
+remain external controls. The reviewed handoff waits for all stages and the
+controller to drain before admission and comparison. Completion alone cannot
+pass the scientific checks.
+
+The [completed primary calculation](native-class-physical-results-20261004.md)
+finds native-versus-competing contrasts of −18.7771 and −18.7718 kBT from two
+independent proposals. Aggregate regional quality is much improved, but material
+stratum checks, sensitivity checks and matching historical SMC discrepancies
+remain unresolved. This conditional preference is not a bound on competing
+contacts outside R4. All full-vessel and assembly gates remain closed.
+
+The full-wall implementation reference has advanced: the
+[wall-envelope sphere reference](wall-envelope-reference-result-20261004.md)
+completed **131,072 attempts and all 17 stages**, passing **47/47 fixed checks**.
+Its largest absolute log-mass error was 0.0220. The earlier
+[16,384-attempt cube reference](native-class-sphere-normalization-20261004.md)
+remains failed at 44/47; no finished allocation was extended or relabeled.
+Both proposal and allocation changed in the new reference, so this comparison
+does not isolate a speedup. These are analytic sphere implementation controls,
+not protein convergence results. No reference, raw-data audit, classifier or
+physical calculation was rerun for this document update.
+
+The latest reference removes the earlier normalization-reference blocker. It
+does **not** make the existing protein vessel preparation executable with the
+new guide. A source review identifies these remaining integration tasks:
+
+1. Freeze a **new** preparation using the 116-component native-class guide,
+   compiled native bytes and authenticated wall-envelope executable/reference
+   closure. The existing streaming preparation pins a 92-component hard-free
+   guide and schema-6 executable; it must remain unchanged. Freeze the baseline
+   proposal choice explicitly: replacing its cube component with a wall
+   envelope is a proposal change, even though the target is unchanged.
+2. Add bounded streaming audits for the class guide and, if selected, the
+   wall-envelope baseline. The complete class auditor already reconstructs
+   schema 7/8 densities, but loads all rows and does not produce the saved
+   `geometry.jsonl`/status/freeze contract consumed by the streaming partition.
+   The existing streaming baseline only accepts schema 4. Extend the partition
+   and authenticated stage loader to accept only the newly validated audit
+   contracts, retaining the complete fixed native classifier and every
+   attempted denominator. **Partial implementation completed later on October
+   6:** a separate [class-only streaming auditor](native-class-vessel-streaming-audit.md)
+   now supplies that contract. All 13 synthetic checks and the bounded
+   schema-7/8 saved-fixture equivalence passed, using 32 density reconstructions
+   of 16 existing sphere poses and no new draws/clouds. It is not yet registered
+   in the production partition or stage loader, and the schema-8 pure vessel
+   baseline remains outside this change.
+3. Define an authenticated, fail-closed admission adapter for the completed
+   primary and follow-up population reports plus the matching SMC comparison.
+   The legacy launcher requires `contact-confirmation-comparison-v1`; current
+   native-class reports use independent linear population means and separate
+   Qz/Q0, stratum and sensitivity diagnostics. Renaming fields or treating
+   `missing_studies=[]` as a scientific pass would be invalid. Preserve explicit
+   unresolved comparisons and the distinction between execution admission and
+   physical convergence.
+4. Connect a bounded one-shot dispatcher to those frozen inputs, audits,
+   partition and stage reader. The current streaming execution-plan module is
+   deliberately a pure scheduling declaration with no launch entry point or
+   gate authority. Reuse the tested fail/drain controller, authenticate source
+   and runtime closures, and retain the two predeclared allocations separately:
+   four populations of 65,536 per arm, then four fresh populations of 262,144
+   per arm. No new physical launch is authorized by this source review.
+
+The streaming arithmetic already compares independent **linear** masses,
+retains the native/contact/unbound partition, regional strata and explicit
+outside-R4/outside-pocket contributions. It can be reused behind an updated
+authenticated loader. The full-vessel remainder is a measurement still to be
+made, not something a regional success would certify absent. Historical
+[full-wall protein estimates](mobile-wall-contact-results.md) retain their
+large contribution concentration and unresolved coverage.
+
+The historical growth exploration at **rd=1.4 Å, z=0.025 Å⁻³, 500 μM** completed
+100,000 sweeps by 02:27 UTC. Its companion at **z=0.02625 Å⁻³** remained live at
+02:48 UTC, without a terminal summary. The two live scientific workers at that
+snapshot were the latter growth process (PID 228586, birth tick 177423486) and
+the regional label process (PID 3283735, birth tick 215868327), each one thread.
+These process and completion facts make no new trajectory or native-growth
+claim and do not substitute for the original decision conditions.
+
+| Current artifact | SHA-256 |
+|---|---|
+| [Primary regional statistics](/vast/xvg/tetramer-mc-runs/native-class-physical-primary-20261004/analysis/statistics.json) | `942b4f7fbe8bc8e163eb8c88a342c2e98432edfcece282a8e63374c87a4fb72c` |
+| [Running follow-up execution plan](/vast/xvg/tetramer-mc-runs/native-class-physical-followup-20261004/execution-plan.json) | `185b8f43095da1de70113ea1f8db27df765090acd7045d0b1105ff0b3c97973f` |
+| [Wall-envelope reference analysis](/vast/xvg/tetramer-mc-runs/wall-envelope-vessel-sphere-20261004/analysis/summary.json) | `6164ede77f8a7456eabc38db69e0644f976d3eeb14caac79eae21a01ef1d8366` |
+| [Wall-envelope terminal execution](/vast/xvg/tetramer-mc-runs/wall-envelope-vessel-sphere-20261004/execution/summary.json) | `352a0070e9e53ae2e28f25c60173367cae31847483ca0b9beac5d88ccd24cf53` |
+| [Wall-envelope execution plan](/vast/xvg/tetramer-mc-runs/wall-envelope-vessel-sphere-20261004/execution-plan.json) | `4fa24d933702fd8a991c3bec057d52bae628b0fa317564f6cdf8dc889db62f27` |
+| [Earlier failed cube analysis](/vast/xvg/tetramer-mc-runs/native-class-vessel-sphere-20261004-v2/analysis/summary.json) | `95f91bf96576bf69d2339fe2a5f5af6c8528c8c3569acaf3d4ab5f4876710c51` |
+| [Completed scalar comparison and plot receipt](../results/wall-envelope-completed-20261004/receipt.json) | `886a184eeedcb65eaf314ffed2c08181c33dda912af670e66041357d27a9f3df` |
+| [Completed z=.025 growth summary](/vast/xvg/tetramer-mc-runs/cluster-oligomer-seed8-free256-merged-z0025/summary.json) | `4fa18c79439450324ab265a34e9a0ec678f371f123f4b1e79bc4f03324af034a` |
+
+## Historical read-only review, 2026-10-01
 
 Read-only review, 2026-10-01. **The finite-system assembly verdict is unresolved.**
 The strongest completed calculation supports a large conditional preference for

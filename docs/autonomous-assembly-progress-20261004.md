@@ -23,6 +23,17 @@ increase; their ratio uncertainties remain unbounded. These
 calculations still concern one mobile tetramer in a frozen 500 μM
 environment. They do not open the finite-assembly production gate.
 
+The subsequent [frozen bridge pilot](context-bridge-guides.md) completed
+16,384 geometry-only attempts and 512 independent saved-pose checks.
+Coupled translation–rotation interpolation between the fitted source and
+competing means did not recover any valid configuration retaining 5–15 of
+the 16 source-contact tokens. Direct bridge draws mostly encountered core
+collisions. A broadened endpoint did discover an original-contact tail, but
+one pose supplied 87.9% of its pooled hard-volume estimate, leaving that
+estimate unconverged. No depletion clouds were allocated to this failed
+coverage pilot. This rules out promoting this particular bridge unchanged;
+it does not rule out other pose routes or finite-system assembly.
+
 **5 October update:** the [completed physical comparison](context-prior-physical-control.md)
 and [matched correlation control](context-correlated-control.md) supersede the
 pending fixed-context-prior steps recorded below. All 40 chains completed,

@@ -124,6 +124,15 @@ check used Lean's 4 GiB memory setting plus a 4 GiB process-group RSS
 watchdog, with the same 120 CPU / 240 wall-second caps. No dependency
 was upgraded and no physical calculation was rerun.
 
+With the existing cached dependencies, run from `formal/`:
+
+```bash
+ELAN_HOME="$PWD/.elan" .elan/bin/lake env lean -j1 -M4096 \
+  -o .lake/build/lib/lean/ReversibleSampling/PoissonNoise.olean \
+  ReversibleSampling/PoissonNoise.lean
+ELAN_HOME="$PWD/.elan" .elan/bin/lake env lean -j1 -M4096 PoissonNoiseAudit.lean
+```
+
 ## Completed saved-count diagnostic
 
 All 32,768 attempted poses and 15,968 cloud records were retained. The
@@ -156,7 +165,8 @@ do not support a precise efficiency prediction. Nevertheless, the
 observed budget does not justify substantially increasing cloud work
 as the next step: pose concentration and the empty intermediate contact
 regions remain even in the noise-free diagnostic. Keep the present
-cloud intensity while investigating proposal coverage. This is a
+cloud intensity while investigating proposal coverage with the
+[frozen geometric bridge probe](context-bridge-guides.md). This is a
 choice of the next experiment, not an assertion that more clouds can
 never help.
 

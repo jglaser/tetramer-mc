@@ -34,6 +34,19 @@ estimate unconverged. No depletion clouds were allocated to this failed
 coverage pilot. This rules out promoting this particular bridge unchanged;
 it does not rule out other pose routes or finite-system assembly.
 
+The [subsequent saved-bank depletion extension](context-bridge-physical-extension.md)
+changes the tail interpretation: that same pose supplies only **0.1683%**
+of the observed A_T physical weight, despite its 87.9% hard-volume share.
+All 3,727 valid poses received two independent clouds, retaining all 16,384
+attempts. Source-region estimates differ by 0.185 log units, while competing
+contact estimates still differ by 1.186 log units (3.27-fold); both remain
+unconverged. This postinspection diagnostic redirects effort toward competing
+physical contact coverage rather than broadening solely to capture hard
+volume. Direct reversible endpoint transport does not require an interpolating
+hard-free path. Separately, the new [native-class streaming vessel audit](native-class-vessel-streaming-audit.md)
+passed synthetic and saved-fixture controls; its partition/loader registration
+and the physical admission gate remain future integration work.
+
 **5 October update:** the [completed physical comparison](context-prior-physical-control.md)
 and [matched correlation control](context-correlated-control.md) supersede the
 pending fixed-context-prior steps recorded below. All 40 chains completed,

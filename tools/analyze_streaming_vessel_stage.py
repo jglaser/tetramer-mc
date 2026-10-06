@@ -20,6 +20,9 @@ from compare_full_vessel_stage import frozen_artifact, recorded, bind_source_clo
 from prepare_streaming_vessel_comparison import validate as validate_preparation, STAGES, ARMS
 from partition_vessel_streaming import AUDITS, SUPPORTS, PRIMARY
 from compare_streaming_vessel_statistics import compare, validate_partition
+import prepare_native_class_streaming_vessel_comparison as class_preparation
+from partition_vessel_streaming import native_class, bind_class_audit
+from audit_full_vessel_latent import AtomWallEnvelope
 
 
 def validate_manifest(plan,job,manifest):
@@ -34,6 +37,27 @@ def validate_manifest(plan,job,manifest):
         attempt_journal='attempts.jsonl; begin before each attempt; no retries',resume_supported=False)
     for name,value in expected.items(): require(name in manifest and manifest[name] == value,'Executed manifest differs: '+name)
     close(manifest['lambda'],physical['activity']*physical['lambda_ratio'],'Cloud intensity differs')
+    if plan.get('schema') == class_preparation.SCHEMA:
+        require(plan['proposal_contracts'] == class_preparation.proposal_contracts(), 'Unreviewed proposal contract')
+        require(job['arm'] in class_preparation.AUDIT_SCHEMAS, 'Unknown proposal arm')
+        for name, value in plan['proposal_contracts'][job['arm']].items():
+            require(manifest.get(name) == value, 'Executed class/wall-envelope law differs: '+name)
+        require(isinstance(manifest.get('vessel_uniform_envelope'), dict), 'Missing wall-envelope witness')
+        if job['arm'] == 'vessel':
+            require(not any(k.startswith(('outer_', 'latent_')) or k == 'compiled_native' for k in manifest),
+                    'Baseline conceals a guided law')
+        else:
+            for name, key in [('latent_region_sha256', 'current_R4.json'), ('latent_guide_sha256', 'guide.json')]:
+                require(manifest.get(name) == hashes[key], 'Executed class input differs: '+name)
+            require(manifest.get('latent_reference_ball_is_target_restriction') is False
+                and manifest.get('density_measure') == physical['measure']
+                and manifest.get('latent_source_capture') == dict(center=[0., 0., 0.], radius=170.,
+                    restricts_target=False, conditions_guide=True), 'Class source changed target/measure')
+            native = manifest['compiled_native']
+            require(native['compiled_sha256'] == hashes['compiled-native.json']
+                    and native['source_definition_sha256'] == plan['native_definition_sha256'],
+                    'Compiled native identity differs')
+        return
     if job['arm'] == 'vessel':
         require(manifest['schema'] == 4 and 'outer_mixture_schema' not in manifest,'Baseline law changed')
     else:
@@ -55,7 +79,9 @@ def load_population(preparation,plan,job,ledger):
     pf = frozen_artifact(ledger,part_root,('analysis.json','status.json','labels.jsonl'))
     audit_path,part_path = audit_root/'analysis.json',part_root/'analysis.json'
     audit,part = read(ledger.bind(audit_path)),read(ledger.bind(part_path))
-    expected_audit = AUDITS[0 if job['arm'] == 'vessel' else 1]
+    is_class = plan.get('schema') == class_preparation.SCHEMA
+    expected_audit = (class_preparation.AUDIT_SCHEMAS[job['arm']] if is_class
+                      else AUDITS[0 if job['arm'] == 'vessel' else 1])
     require(audit['schema'] == expected_audit and audit['complete'] is True and part['complete'] is True,
             'Wrong or incomplete population audit')
     for directory,analysis in ((audit_root,audit_path),(part_root,part_path)):
@@ -67,7 +93,8 @@ def load_population(preparation,plan,job,ledger):
     am,pm = audit['source_sha256'],part['input_sha256']
     recorded(ledger,audit_path,pm,sha(audit_path)); recorded(ledger,audit_root/'geometry.jsonl',pm,audit['geometry_sha256'])
     ledger.bind(audit_root/'geometry.jsonl',audit['geometry_sha256']); ledger.bind(part_root/'labels.jsonl',part['labels_sha256'])
-    audit_entry = 'audit_vessel_baseline_streaming.py' if job['arm'] == 'vessel' else 'audit_hard_free_vessel_streaming.py'
+    audit_entry = (class_preparation.AUDIT_ENTRIES[job['arm']] if is_class else
+                  'audit_vessel_baseline_streaming.py' if job['arm'] == 'vessel' else 'audit_hard_free_vessel_streaming.py')
     bind_source_closure(ledger,audit_root,am,common,plan,audit_entry,af)
     bind_source_closure(ledger,part_root,pm,common,plan,'partition_vessel_streaming.py',pf)
     manifest = read(recorded(ledger,root/'manifest.json',am))
@@ -106,6 +133,22 @@ def load_population(preparation,plan,job,ledger):
             and binding['runtime_sha256'] == definition['input_sha256']['source/native_contact_regions.py'],
             'Complete native observer binding differs')
     for name,digest in definition['input_sha256'].items(): recorded(ledger,definition_path.parent/'inputs'/name,pm,digest)
+    if is_class:
+        shape = read(recorded(ledger,root/'provenance/shape.json',am,manifest['shape_sha256']))
+        envelope = AtomWallEnvelope(shape, manifest['atomic_wall'], manifest['vessel_uniform_envelope'])
+        require(audit.get('vessel_uniform_envelope') == envelope.witness, 'Audited wall-envelope reconstruction differs')
+        if job['arm'] == 'half_mixture':
+            native = manifest['compiled_native']
+            require(native['source_input_sha256'] == definition['input_sha256'], 'Compiled original inputs differ')
+            recorded(ledger,root/'provenance/compiled-native.json',am,plan['input_sha256']['compiled-native.json'])
+            recorded(ledger,definition_path,am,plan['native_definition_sha256'])
+            for name, digest in definition['input_sha256'].items():
+                recorded(ledger,definition_path.parent/'inputs'/name,am,digest)
+            expected_binding = dict(compiled_sha256=native['compiled_sha256'],
+                source_definition_sha256=plan['native_definition_sha256'], shape_witness=plan['shape_witness'],
+                physical_classifier='original frozen native definition; compiled data used only for proposal audit')
+            require(part.get('proposal_native_binding') == expected_binding
+                    and audit.get('shape_witness') == plan['shape_witness'], 'Class proposal/physical observer bridge differs')
     require(set(part['region_paths']) == set(SUPPORTS),'Missing historical pocket definitions')
     for name in SUPPORTS:
         path = inputs/(name+'.json'); require(Path(part['region_paths'][name]).resolve() == path,'Pocket path changed')
@@ -138,7 +181,9 @@ def run(preparation,expected_plan_hash,stage,out):
     preparation,out = Path(preparation).resolve(),Path(out).resolve()
     require(not out.exists(),'Fresh stage analysis destination required'); require(stage in dict(STAGES),'Select one stage')
     started = time.process_time(); ledger = Ledger(); ledger.bind(preparation/'plan.json',expected_plan_hash)
-    plan = validate_preparation(preparation); ledger.frozen(preparation)
+    schema = read(preparation/'plan.json').get('schema')
+    plan = (class_preparation.validate(preparation) if schema == class_preparation.SCHEMA
+            else validate_preparation(preparation)); ledger.frozen(preparation)
     sources = local_sources(__file__)
     for name,path in sources.items():
         # The reader may be frozen later, but its shared statistical/audit code

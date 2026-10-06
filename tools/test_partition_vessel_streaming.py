@@ -10,16 +10,16 @@ from unittest.mock import patch
 import partition_vessel_streaming as part
 import audit_vessel_baseline_streaming as baseline
 import audit_hard_free_vessel_streaming as guided
-from test_audit_vessel_baseline_streaming import fixture
+from test_audit_vessel_baseline_streaming import fixture, envelope_fixture
 from test_audit_hard_free_vessel_streaming import complete_fixture
 
 
-def prepared(root, guided_arm=False, binary_path=None, native_directory='native'):
+def prepared(root, guided_arm=False, binary_path=None, native_directory='native', envelope=False):
     population = root/'population'
     if guided_arm:
         binary = complete_fixture(population); region_path = population/'provenance/latent-region.json'
     else:
-        binary, region_path = fixture(population)
+        binary, region_path = (envelope_fixture(population) if envelope else fixture(population))
     if binary_path is not None:
         shutil.copy2(binary,binary_path); binary = binary_path
     config = part.read(population/'config.json'); manifest = part.read(population/'manifest.json')
@@ -64,6 +64,122 @@ def prepared(root, guided_arm=False, binary_path=None, native_directory='native'
         criteria=dict(test_only=True), scope='Synthetic native predicate for deterministic software tests only')
     part.write(native_root/'definition.json', definition)
     return root/'audit/analysis.json', paths, native_root/'definition.json'
+
+
+def prepared_class(root, schema=7, binary_path=None, native_directory='native'):
+    """Orchestration fixture: reuse seven deterministic rows, not class sampling.
+
+    The geometry/weight records are existing hard-free toy controls. A small
+    compiled observer tests the new provenance adapter and physical partition;
+    complete native-class densities have their own saved-fixture audit suite.
+    """
+    audit, paths, definition = prepared(root, True, binary_path, native_directory)
+    population = root/'population'; value = part.read(audit); manifest = value['manifest']
+    shape = part.read(population/'provenance/shape.json')
+    shutil.copy2(population/'provenance/shape.json', definition.parent/'inputs/tetramer-shape.json')
+    native = part.read(definition)
+    native['input_sha256']['tetramer-shape.json'] = manifest['shape_sha256']; part.write(definition, native)
+    identity = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]]
+    compiled = dict(schema='native-entry-compiled-v1', source_definition_sha256=part.sha(definition),
+        source_input_sha256=native['input_sha256'], criteria=part.native_class.reference.line.CRITERIA,
+        fixed_poses=native['fixed_poses'], members=[dict(position=[0., 0., 0.], rotation=identity)],
+        monomer_atoms=[dict(a, residue=0) for a in shape['atoms']], residue_count=1, references=[], motifs=[])
+    compiled_path = population/'provenance/compiled-native.json'; part.write(compiled_path, compiled)
+    n_atoms = len(shape['atoms'])
+    witness = dict(compiled_sha256=part.sha(compiled_path), expected_shape_sha256=manifest['shape_sha256'],
+        center_tolerance_a=1e-10, radius_tolerance_a=1e-12, observer_hard_overlap_tolerance_a=1e-8,
+        native_atoms=n_atoms, physical_atoms=n_atoms, matched_atoms=n_atoms,
+        physical_index_by_native_atom=list(range(n_atoms)), compatible=True,
+        unmatched_native_atoms=[], unmatched_physical_atoms=[], matched_max_center_error_a=0.,
+        matched_max_radius_error_a=0., pair_overlap_slack_bound_a=0., hard_valid_implication_within_tolerance=True)
+    manifest.update(schema=schema, outer_mixture_schema=part.native_class.reference.SCHEMA,
+        latent_guide_schema=part.native_class.reference.line.SCHEMA,
+        attempt_journal='attempts.jsonl; begin before each attempt; no retries', resume_supported=False,
+        compiled_native=dict(compiled_sha256=part.sha(compiled_path), source_definition_sha256=part.sha(definition),
+            source_input_sha256=native['input_sha256'], shape_compatibility=witness))
+    manifest['latent_source_capture']['conditions_guide'] = True
+    if schema == 8:
+        from audit_full_vessel_latent import AtomWallEnvelope
+        import math
+        atom_index = max(range(n_atoms), key=lambda i: shape['atoms'][i]['radius']); atom = shape['atoms'][atom_index]
+        wall = manifest['atomic_wall']; radius = wall['radius']-atom['radius']
+        envelope = dict(atom_index=atom_index, atom_center=atom['center'], atom_radius=atom['radius'],
+            wall_center=wall['center'], wall_radius=wall['radius'], envelope_radius=radius,
+            log_volume=math.log(4*math.pi/3)+3*math.log(radius))
+        manifest.update(pre_envelope_schema=7, vessel_uniform_schema='one-atom-wall-envelope-v1',
+                        vessel_uniform_envelope=envelope)
+        value['vessel_uniform_envelope'] = AtomWallEnvelope(shape, wall, envelope).witness
+    part.write(population/'manifest.json', manifest)
+    summary = part.read(population/'summary.json'); summary['manifest'] = manifest; part.write(population/'summary.json', summary)
+    value.update(schema=part.native_class.SCHEMA, manifest=manifest,
+        shape_witness=part.native_class.reference.regional.validate_shape_witness(compiled, shape, witness,
+            part.sha(compiled_path), manifest['shape_sha256']),
+        geometry_reconstruction=dict(physical_pose_checks=7, density_pose_checks=7),
+        new_pose_draws=0, new_Poisson_clouds=0, new_native_classifier_calls=0)
+    sources = part.local_sources(Path(part.native_class.__file__))
+    for name, path in sources.items():
+        shutil.copy2(path, audit.parent/'provenance'/name); value['source_sha256'][str(path.resolve())] = part.sha(path)
+    for path in [definition, compiled_path, *[definition.parent/'inputs'/n for n in native['input_sha256']]]:
+        value['source_sha256'][str(path.resolve())] = part.sha(path)
+    value['source_sha256'] = {p: part.sha(p) for p in value['source_sha256']}
+    part.write(audit, value)
+    status = part.read(audit.parent/'status.json'); status['analysis_sha256'] = part.sha(audit); part.write(audit.parent/'status.json', status)
+    refreeze(audit.parent)
+    observer = part.native_class.reference.line.observer_from_compiled_for_synthetic(compiled)
+    observer.definition = native; observer.definition_sha256 = part.sha(definition)
+    observer.classify = lambda pose: dict(native_any=pose['position'][0] < 3.1)
+    _, binding = part.load_classifier(definition)
+    return audit, paths, definition, observer, binding
+
+
+def refreeze(root):
+    part.write(root/'freeze.json', dict(files={str(p.relative_to(root)): part.sha(p)
+        for p in root.rglob('*') if p.is_file() and p.name != 'freeze.json'}))
+
+
+class NativeClassAdapterTests(unittest.TestCase):
+    def test_class_schema7_and8_preserve_partition_denominator_and_original_classifier(self):
+        for schema in (7, 8):
+            with self.subTest(schema=schema), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); audit, paths, definition, observer, binding = prepared_class(root, schema)
+                with patch.object(part, 'load_classifier', return_value=(observer, binding)):
+                    result = part.analyze(audit, paths, definition, root/'partition')
+                self.assertEqual(result['samples'], 7)
+                self.assertEqual(result['invalid_draws'], 3)
+                self.assertEqual(result['new_native_classifier_calls'], 4)
+                self.assertEqual(result['new_geometry_queries'], 0)
+                self.assertEqual(result['proposal_native_binding']['source_definition_sha256'], part.sha(definition))
+                self.assertAlmostEqual(result['estimates']['total']['Qz']['logQ'],
+                                       part.read(audit)['estimates']['total']['Qz']['logQ'], places=12)
+
+    def test_native_source_mapping_compilation_shape_and_attempt_coverage_rejected(self):
+        for defect in ('definition_binding', 'compiled_binding', 'source_archive', 'shape_mapping', 'coverage'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); audit, _, definition, observer, _ = prepared_class(root)
+                value = part.read(audit)
+                if defect == 'definition_binding': value['source_sha256'].pop(str(definition.resolve()))
+                elif defect == 'compiled_binding': value['manifest']['compiled_native']['compiled_sha256'] = '0'*64
+                elif defect == 'source_archive':
+                    path = audit.parent/'provenance/audit_native_class_vessel_streaming.py'
+                    path.write_text(path.read_text()+'\n# tampered archive\n')
+                elif defect == 'shape_mapping': value['manifest']['compiled_native']['shape_compatibility']['matched_atoms'] += 1
+                else: value['geometry_reconstruction']['physical_pose_checks'] = 6
+                # Keep the completion snapshot consistent so rejection reaches
+                # the identity check rather than a generic stale-summary check.
+                summary = part.read(root/'population/summary.json'); summary['manifest'] = value['manifest']
+                part.write(root/'population/summary.json', summary)
+                value['source_sha256'][str((root/'population/summary.json').resolve())] = part.sha(root/'population/summary.json')
+                refreeze(audit.parent)
+                with self.assertRaises(ValueError):
+                    part.bind_class_audit(part.Ledger(), audit, value, part.read(audit.parent/'freeze.json')['files'], definition, observer)
+
+    def test_missing_external_original_and_unfrozen_extra_file_are_not_synthetic_escape_hatches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); audit, _, definition, observer, _ = prepared_class(root)
+            value = part.read(audit); frozen = part.read(audit.parent/'freeze.json')['files']
+            (audit.parent/'extra.json').write_text('{}')
+            with self.assertRaisesRegex(ValueError, 'unfrozen'):
+                part.bind_class_audit(part.Ledger(), audit, value, frozen, definition, observer)
 
 
 class ReportingTests(unittest.TestCase):

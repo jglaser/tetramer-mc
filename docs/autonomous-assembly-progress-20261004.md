@@ -8,6 +8,16 @@ The decision conditions remain the repaired rigid tetramer, depletant radius
 1.5 Å, activity 0.035 Å⁻³ and approximately 106.8 μM. The diagnostics below
 have different physical conditions and must remain separate.
 
+The [full-vessel integration](native-class-vessel-integration.md) now connects
+the new native-class audit to partitioning and population analysis, including
+the validated wall-envelope baseline. The next protein comparison has a fresh
+immutable preparation, but no physical job has launched. The new prerequisites
+adapter retains primary failures, all sensitivity comparisons, the finite
+absolute unbound bound and matching SMC discrepancies. Its implementation tests
+pass; the running sensitivity calculation and subsequent scientific admission
+remain incomplete. This is progress toward measuring the missing contribution,
+not new evidence for assembly or instability.
+
 **6 October update:** the [competing-cage comparison](context-competing-cage.md#completed-prospective-comparison-6-october)
 completed all 32,768 fresh attempts and 15,968 independent depletion clouds.
 Separately centered contact guides expose approximately 224 times more

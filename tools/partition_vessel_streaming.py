@@ -21,9 +21,12 @@ from scipy.special import logsumexp
 from analyze_mobile_native_pocket import load_classifier, local_sources
 from analyze_r4_smc_control import Ledger, close, read, require, sha, write
 from vessel_contact_partition import Mass, PRIMARY, SUPPORTS, RegionSupport, partition
+import audit_native_class_vessel_streaming as native_class
 
 SCHEMA = 'full-vessel-streaming-native-partition-v1'
-AUDITS = ('full-vessel-baseline-streaming-audit-v1', 'full-vessel-hard-free-line-streaming-audit-v1')
+AUDITS = ('full-vessel-baseline-streaming-audit-v1', 'full-vessel-hard-free-line-streaming-audit-v1',
+          native_class.SCHEMA)
+BASELINE_AUDITS = (AUDITS[0],)
 KINDS = ('Qz', 'Q0')
 REGIONAL = ('registered_native_entry', 'contact_no_native_entry',
             'old_R5_intersection_native', 'remaining_R4_native', 'unbound_no_native_entry')
@@ -86,6 +89,71 @@ def bind_native(ledger, definition_path, config, manifest):
     return load_classifier(definition_path)
 
 
+def bind_class_audit(ledger, audit_path, audit, frozen, definition_path, classifier):
+    """Authenticate the class-law geometry contract without replaying any pose.
+
+    Compiled native data select proposal intervals only. The later physical
+    classifier remains the original frozen observer supplied to bind_native.
+    Synthetic compiled-only audits deliberately cannot pass this adapter.
+    """
+    root = Path(audit['population']).resolve()
+    manifest = audit['manifest']; mapping = audit['source_sha256']
+    actual = {str(p.relative_to(audit_path.parent)) for p in audit_path.parent.rglob('*')
+              if p.is_file() and p.name != 'freeze.json'}
+    require(actual == set(frozen), 'Class audit contains unfrozen or missing files')
+    native_class.validate_manifest(manifest, read(root/'summary.json'))
+    for path, digest in mapping.items():
+        require(Path(path).is_absolute(), 'Nonabsolute class audit binding')
+        ledger.bind(path, digest)
+    binding = audit['executable_binding']; binary = Path(binding['path']).resolve()
+    require(binding['artifact_verified'] is True and binding['sha256'] == manifest['executable_sha256']
+            and mapping.get(str(binary)) == binding['sha256'], 'Class executable binding differs')
+    bundle = root/'provenance/source-bundle.json'
+    require(mapping.get(str(bundle)) == manifest['source_bundle_sha256'], 'Class bundle binding differs')
+    archived = audit_path.parent/'provenance'
+    entry = archived/'audit_native_class_vessel_streaming.py'
+    require(entry.is_file(), 'Missing archived class audit entry')
+    for name, path in local_sources(entry).items():
+        require('provenance/'+name in frozen, 'Missing frozen class audit source: '+name)
+        digest = sha(path)
+        require(any(Path(p).name == name and h == digest for p, h in mapping.items()),
+                'Class audit source omitted from bindings: '+name)
+        ledger.bind(path, digest)
+    provenance = manifest['compiled_native']
+    compiled_path = root/'provenance/compiled-native.json'
+    definition_path = Path(definition_path).resolve()
+    for path, digest in ((compiled_path, provenance['compiled_sha256']),
+                         (definition_path, provenance['source_definition_sha256'])):
+        require(mapping.get(str(path.resolve())) == digest, 'Class native input omitted or changed: '+str(path))
+        ledger.bind(path, digest)
+    compiled = read(compiled_path)
+    require(provenance['source_input_sha256'] == compiled['source_input_sha256']
+            == classifier.definition['input_sha256']
+            and compiled['source_definition_sha256'] == provenance['source_definition_sha256'],
+            'Class compiled native provenance differs')
+    for name, digest in classifier.definition['input_sha256'].items():
+        path = (definition_path.parent/'inputs'/name).resolve()
+        require(mapping.get(str(path)) == digest, 'Class native source input omitted: '+name)
+        ledger.bind(path, digest)
+    native_class.reference.line.compare_compiled_definition(compiled, classifier)
+    shape_path = root/'provenance/shape.json'
+    require(mapping.get(str(shape_path)) == manifest['shape_sha256'], 'Class physical shape binding missing')
+    shape = read(ledger.bind(shape_path, manifest['shape_sha256']))
+    witness = native_class.reference.regional.validate_shape_witness(compiled, shape,
+        provenance['shape_compatibility'], provenance['compiled_sha256'], manifest['shape_sha256'])
+    require(audit['shape_witness'] == witness, 'Class shape correspondence differs')
+    n = manifest['samples']
+    require(audit['geometry_reconstruction']['physical_pose_checks'] == n
+            and audit['geometry_reconstruction']['density_pose_checks'] == n
+            and audit['density_audit']['checked_attempts'] == n,
+            'Incomplete class audit attempted-pose coverage')
+    require(audit['new_pose_draws'] == audit['new_Poisson_clouds'] == audit['new_native_classifier_calls'] == 0,
+            'Class geometry audit changed its role')
+    return dict(compiled_sha256=provenance['compiled_sha256'],
+        source_definition_sha256=provenance['source_definition_sha256'], shape_witness=witness,
+        physical_classifier='original frozen native definition; compiled data used only for proposal audit')
+
+
 def pair():
     return {kind: Mass() for kind in KINDS}
 
@@ -129,13 +197,15 @@ def analyze(audit_path, region_paths, definition_path, out):
     geometry = ledger.bind(audit_path.parent/'geometry.jsonl', audit['geometry_sha256'])
     config_path = (root/'config.json').resolve()
     config = read(ledger.bind(config_path, audit['source_sha256'][str(config_path)]))
-    current_sha = (audit['reporting_region_binding']['sha256'] if audit['schema'] == AUDITS[0]
+    current_sha = (audit['reporting_region_binding']['sha256'] if audit['schema'] in BASELINE_AUDITS
                    else manifest['latent_region_sha256'])
     require(set(region_paths) == set(SUPPORTS), 'Freeze all current and historical supports')
     ledger.bind(region_paths['current_R4'], current_sha)
     regions = {k: read(ledger.bind(v)) for k, v in region_paths.items()}
     supports = validate_supports(regions, config, manifest)
     classifier, native_binding = bind_native(ledger, definition_path, config, manifest)
+    class_binding = (bind_class_audit(ledger, audit_path, audit, frozen, definition_path, classifier)
+                     if audit['schema'] == native_class.SCHEMA else None)
     sources = local_sources(__file__)
     for path in sources.values(): ledger.bind(path)
     estimates = {k: pair() for k in partition(False, dict.fromkeys(PRIMARY, False), dict.fromkeys(SUPPORTS, False))}
@@ -205,6 +275,7 @@ def analyze(audit_path, region_paths, definition_path, out):
             samples=n, invalid_draws=invalid, estimates=estimates, regional_estimates=regional, strata=strata,
             stratum_definition=STRATA, region_paths={k: str(Path(v).resolve()) for k, v in region_paths.items()},
             native_binding=native_binding, native_definition_sha256=native_binding['definition_sha256'],
+            proposal_native_binding=class_binding,
             new_native_classifier_calls=calls, native_unbound_anomalies=anomalies,
             new_geometry_queries=0, new_pose_draws=0, new_clouds=0,
             input_sha256=ledger.files, labels_sha256=sha(out/'labels.jsonl'), analysis_CPU_seconds=time.process_time()-started,

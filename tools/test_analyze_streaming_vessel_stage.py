@@ -8,34 +8,82 @@ from unittest.mock import patch
 
 import analyze_streaming_vessel_stage as analysis
 import partition_vessel_streaming as partition
-from test_partition_vessel_streaming import prepared
+from test_partition_vessel_streaming import prepared, prepared_class, refreeze
 from test_prepare_streaming_vessel_comparison import prep
 
 
-def fixture(root,guided=False):
+def fixture(root,guided=False,class_arm=False,envelope=False):
     common,inputs = root/'common',root/'inputs'; common.mkdir(); inputs.mkdir()
-    audit,paths,definition = prepared(inputs,guided_arm=guided,binary_path=common/'basin-normalizer',native_directory='native-region')
-    output = root/'partition'; partition.analyze(audit,paths,definition,output)
+    output = root/'partition'
+    if class_arm:
+        guided = True
+        audit,paths,definition,observer,binding = prepared_class(inputs,8,binary_path=common/'basin-normalizer',native_directory='native-region')
+        with patch.object(partition,'load_classifier',return_value=(observer,binding)):
+            partition.analyze(audit,paths,definition,output)
+    else:
+        audit,paths,definition = prepared(inputs,guided_arm=guided,binary_path=common/'basin-normalizer',native_directory='native-region',envelope=envelope)
+        partition.analyze(audit,paths,definition,output)
     population = inputs/'population'; manifest = analysis.read(population/'manifest.json')
     for saved,name in [('shape.json','shape.json'),('model.json','model.json')]:
         shutil.copy2(population/'provenance'/saved,inputs/name)
     shutil.copy2(population/'config.json',inputs/'config.json')
     shutil.copy2(population/'provenance/source-bundle.json',common/'source-bundle.json')
     if guided: shutil.copy2(population/'provenance/latent-guide.json',inputs/'guide.json')
+    if class_arm:
+        shutil.copy2(population/'provenance/compiled-native.json',inputs/'compiled-native.json')
     sources = {}
-    for entry in ('audit_hard_free_vessel_streaming.py','audit_vessel_baseline_streaming.py','partition_vessel_streaming.py'):
+    for entry in ('audit_hard_free_vessel_streaming.py','audit_vessel_baseline_streaming.py',
+                  'audit_native_class_vessel_streaming.py','partition_vessel_streaming.py'):
         sources.update(analysis.local_sources(Path(__file__).parent/entry))
     for name,path in sources.items(): (common/name).symlink_to(path)
     plan = dict(sources={name:analysis.sha(path) for name,path in sources.items()},
         binary_sha256=manifest['executable_sha256'],source_bundle_sha256=manifest['source_bundle_sha256'],
         input_sha256={str(p.relative_to(inputs)):analysis.sha(p) for p in inputs.rglob('*') if p.is_file()},
         native_definition_sha256=analysis.sha(definition))
+    if class_arm or envelope:
+        plan.update(schema=analysis.class_preparation.SCHEMA,
+            proposal_contracts=analysis.class_preparation.proposal_contracts(),
+            shape_witness=analysis.read(audit).get('shape_witness'))
     job = dict(id='synthetic',arm='half_mixture' if guided else 'vessel',stage='standard',population=0,seed=123,
         samples=7,directory=str(population),audit_directory=str(audit.parent),partition_directory=str(output))
     return plan,job
 
 
 class AuthenticationTests(unittest.TestCase):
+    def test_schema8_baseline_complete_partition_and_loader_keep_unequal_cloud_weights(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); plan,job = fixture(root,envelope=True)
+            with patch.object(analysis,'validate_manifest'):
+                result = analysis.load_population(root,plan,job,analysis.Ledger())
+            self.assertEqual(result['samples'],7)
+            self.assertEqual(result['partition_data']['manifest']['pre_envelope_schema'],4)
+            self.assertEqual(result['partition_data']['new_native_classifier_calls'],4)
+            self.assertGreater(result['estimates']['total']['Qz']['logQ'],result['estimates']['total']['Q0']['logQ'])
+    def test_native_class_lineage_loader_does_not_repeat_saved_geometry_or_classification(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); plan,job = fixture(root,class_arm=True)
+            with patch.object(analysis,'validate_manifest') as check, \
+                 patch.object(partition,'load_classifier',side_effect=AssertionError('repeated classifier')):
+                result = analysis.load_population(root,plan,job,analysis.Ledger())
+            check.assert_called_once()
+            self.assertEqual(result['samples'],7)
+            self.assertEqual(result['partition_data']['new_native_classifier_calls'],4)
+            self.assertEqual(result['partition_data']['new_geometry_queries'],0)
+            self.assertEqual(result['partition_data']['proposal_native_binding']['shape_witness'],plan['shape_witness'])
+
+    def test_native_class_loader_rejects_compiled_bytes_and_partition_bridge_tampering(self):
+        for defect in ('compiled','bridge'):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); plan,job = fixture(root,class_arm=True)
+                if defect == 'compiled':
+                    (root/'inputs/population/provenance/compiled-native.json').write_text('{}')
+                else:
+                    path = root/'partition/analysis.json'; value = analysis.read(path)
+                    value['proposal_native_binding']['compiled_sha256'] = '0'*64; analysis.write(path,value)
+                    status_path = root/'partition/status.json'; status = analysis.read(status_path)
+                    status['analysis_sha256'] = analysis.sha(path); analysis.write(status_path,status); refreeze(root/'partition')
+                with patch.object(analysis,'validate_manifest'), self.assertRaises(ValueError):
+                    analysis.load_population(root,plan,job,analysis.Ledger())
     def test_complete_lineage_both_arms_without_replaying_geometry_or_native_search(self):
         for guided in (False,True):
             with self.subTest(guided=guided), tempfile.TemporaryDirectory() as temporary:
@@ -95,6 +143,25 @@ class AuthenticationTests(unittest.TestCase):
         baseline['schema'] = 4
         analysis.validate_manifest(plan,dict(job,arm='vessel'),baseline)
         with self.assertRaises(ValueError): analysis.validate_manifest(plan,dict(job,arm='vessel'),manifest)
+
+        # Explicit new preparation selects both changed schema-8 proposal laws;
+        # the same manifest must remain rejected under the legacy preparation.
+        plan.update(schema=analysis.class_preparation.SCHEMA,proposal_contracts=analysis.class_preparation.proposal_contracts(),
+            native_definition_sha256='definition')
+        plan['physical']['measure'] = 'Lebesgue center volume times normalized SO(3) Haar measure'
+        plan['input_sha256']['compiled-native.json'] = 'compiled'
+        updated = dict(manifest,**plan['proposal_contracts']['half_mixture'],vessel_uniform_envelope={},
+            compiled_native=dict(compiled_sha256='compiled',source_definition_sha256='definition'))
+        analysis.validate_manifest(plan,job,updated)
+        baseline = {k:v for k,v in updated.items() if not k.startswith(('outer_','latent_')) and k!='compiled_native'}
+        baseline['pre_envelope_schema'] = 4
+        analysis.validate_manifest(plan,dict(job,arm='vessel'),baseline)
+        for key,value in [('pre_envelope_schema',6),('latent_gaussian_component_count',92),
+                          ('vessel_uniform_schema','cube'),('latent_guide_sha256','other')]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                analysis.validate_manifest(plan,job,dict(updated,**{key:value}))
+        with self.assertRaisesRegex(ValueError,'conceals'):
+            analysis.validate_manifest(plan,dict(job,arm='vessel'),dict(baseline,latent_guide_sha256='hidden'))
 
 
 if __name__ == '__main__': unittest.main()

@@ -2,6 +2,18 @@
 
 ## Update, 2026-10-06
 
+**Streaming integration update:** the new guide and schema-8 baseline now feed
+the authenticated partition and stage reader. A fresh 16-job/2,621,440-draw
+protein preparation is frozen and its archived validator passes. Forty-nine
+focused tests across the baseline, integration and prerequisites components
+passed, plus 32 archived sphere-pose checks. No protein samples were generated.
+The [integration record](native-class-vessel-integration.md) supersedes the
+implementation gaps in items 1–2 below, and implements the regional
+prerequisites assessment in item 3. That assessment has not been applied to an
+unfinished follow-up or treated as admission. A reviewed dispatcher and the
+actual completed-evidence decision remain outstanding. The verdict is still
+unresolved.
+
 **Finite-system native assembly remains unresolved.** The current regional
 follow-up is a sensitivity study at the original **1.5 Å, 0.035 Å⁻³** decision
 conditions. It measures one mobile tetramer against two fixed neighbors inside

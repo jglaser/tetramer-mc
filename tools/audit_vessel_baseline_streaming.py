@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Full-wall baseline audit with batched records and a reporting-only R4 chart.
+"""Schema-4/8 full-wall baseline audit with a reporting-only R4 chart.
 
 The chart never supplies a proposal density or target restriction. The baseline
 must provide an attempted-draw journal and completion hashes. Native labels are
@@ -19,14 +19,91 @@ import sys
 import time
 from types import SimpleNamespace
 
+import numpy as np
+from scipy.special import logsumexp
+
 import audit_full_vessel_baseline as baseline
 from audit_hard_free_vessel_streaming import WallOracle, attempt_batches, row_counts
 from analyze_mobile_native_pocket import local_sources
 from analyze_r4_smc_control import Chart, Ledger, close, read, require, sha, write
 from streaming_weight_moments import RegionMoments
+from prepare_deep_far_normalizer_atlas import registration
 
 SCHEMA = 'full-vessel-baseline-streaming-audit-v1'
 CLASSES = ('total','inside_R4','outside_R4','exclusion_contact','unbound')
+
+
+def validate_proposal_contract(manifest):
+    """The envelope changes only the defensive vessel law, never the target."""
+    require(type(manifest.get('schema')) is int and manifest['schema'] in (4,8),
+            'Schema-4 cube or schema-8 wall-envelope baseline required')
+    require(not any(k.startswith(('outer_', 'latent_')) for k in manifest),
+            'Baseline cannot contain an outer or regional mixture')
+    envelope_fields = ('pre_envelope_schema','vessel_uniform_schema','vessel_uniform_envelope')
+    if manifest['schema'] == 8:
+        require(type(manifest.get('pre_envelope_schema')) is int
+                and manifest['pre_envelope_schema'] == 4
+                and manifest.get('vessel_uniform_schema') == 'one-atom-wall-envelope-v1'
+                and isinstance(manifest.get('vessel_uniform_envelope'),dict),
+                'Schema 8 needs the pure-vessel wall-envelope contract')
+    else:
+        require(not any(k in manifest for k in envelope_fields),
+                'Schema 4 cannot conceal a wall-envelope proposal')
+
+
+def check_rows(config, manifest, rows, vessel, reporting):
+    """Schema-aware original-vessel algebra; no relabeling of schema-8 inputs.
+
+    The complete anchor-averaged density already includes the learned chart
+    Jacobian and normalized Haar law. The envelope adds a unit-Jacobian shift
+    at each orientation. No reporting-chart Jacobian enters these weights.
+    This retains the schema-4 reference's row checks and adds strict exclusion
+    of outer-mixture fields and checked envelope presence.
+    """
+    validate_proposal_contract(manifest)
+    require((manifest['schema'] == 8) == (vessel.envelope is not None),
+            'Declared vessel law and reconstructed envelope differ')
+    require(rows and [r['draw'] for r in rows] == list(range(manifest['samples'])),
+            'Missing attempted draw')
+    require(all(r.get('pose') is not None for r in rows),'Censored numerical null')
+    require(all(not any(k.startswith(('outer_', 'latent_', 'log_latent_'))
+                        or k == 'log_vessel_proposal_density' for k in row) for row in rows),
+            'Baseline has outer-mixture generation metadata')
+    poses = [row['pose'] for row in rows]
+    logs,geometry = vessel.evaluate(poses)
+    require(np.isfinite(logs).all(),'Generated pose lacks vessel support')
+    coordinates = reporting.evaluate_many(poses)
+    metric = registration(poses,config['metadata']); errors = []
+    for i,row in enumerate(rows):
+        require(row.get('proposal') is not None,'Missing vessel generation metadata')
+        errors.append(baseline.log_close(row['log_proposal_density'],logs[i],
+                                        'Full original vessel density differs'))
+        require(type(row['capture_valid']) is bool and row['capture_valid'] == bool(geometry['capture'][i]),
+                'Capture predicate differs')
+        require(type(row['hard_valid']) is bool and type(row['wall_valid']) is bool,
+                'Non-Boolean hard/wall flag')
+        if row['hard_valid']:
+            require(row['capture_valid'] and row['wall_valid'],'Hard-valid row leaves physical domain')
+            close(row['log_hard_weight'],-float(logs[i]),
+                  'Baseline hard weight must use original vessel density, no mixture or extra J')
+            close(row['q'],float(metric[i]),'Original physical registration metric differs')
+            require(len(row['clouds']) == manifest['cloud_replicates'] == 2,'Two independent clouds required')
+            for cloud in row['clouds']:
+                require(type(cloud['overlap_points']) is int and cloud['overlap_points'] >= 0
+                        and math.isfinite(cloud['lower_volume']) and cloud['lower_volume'] >= 0
+                        and math.isfinite(cloud['uncertain_volume']) and cloud['uncertain_volume'] >= 0,
+                        'Invalid cloud count/volume')
+                z,lam = manifest['activity'],manifest['lambda']
+                factor = z*cloud['lower_volume']+cloud['overlap_points']*math.log1p(z/lam) if z else 0.
+                close(cloud['log_weight'],factor,'Poisson estimator count identity differs')
+            expected = float(logsumexp([c['log_weight'] for c in row['clouds']])-math.log(2)-logs[i])
+            close(row['log_importance_weight'],expected,'Arithmetic cloud-mean weight differs')
+        else:
+            require(all(row[k] is None for k in ('log_hard_weight','log_importance_weight','q','region','depletion_contact'))
+                    and not row['clouds'],'Invalid attempted draw lost its explicit zero')
+    return dict(checked_attempts=len(rows),maximum_log_density_error=max(errors),
+        valid_outside_R4=sum(r['hard_valid'] and not c.in_reference_ball for r,c in zip(rows,coordinates)),
+        scope='Original vessel density only on every attempted world pose; regional coordinates are reporting labels.'),coordinates
 
 
 class ReportingChart:
@@ -46,8 +123,7 @@ def audit(directory, out, binary, region_path, batch_size=64):
     started = time.process_time(); ledger = Ledger(); sources = local_sources(__file__)
     for path in sources.values(): ledger.bind(path)
     manifest = read(ledger.bind(root/'manifest.json')); summary = read(ledger.bind(root/'summary.json'))
-    require(manifest['schema'] == 4 and 'outer_mixture_schema' not in manifest,
-            'Original schema-4 baseline required')
+    validate_proposal_contract(manifest)
     require(summary['complete'] is True and summary['manifest'] == manifest and summary['numerical_nulls'] == 0
             and not (root/'failure.json').exists(), 'Incomplete or failed population')
     require(type(manifest['samples']) is int and manifest['samples'] > 0 and manifest['cloud_replicates'] == 2,
@@ -78,8 +154,11 @@ def audit(directory, out, binary, region_path, batch_size=64):
     if 'physical_metric' in region:
         require(region['physical_metric'] == config['metadata'],'Reporting registration metric differs')
     reporting = ReportingChart(region)
-    vessel = baseline.VesselDensity(config,manifest,read(root/'provenance/model.json'),bundle)
-    shape = read(root/'provenance/shape.json'); wall = WallOracle(config,manifest,shape,read(bundle))
+    shape = read(root/'provenance/shape.json')
+    vessel = baseline.VesselDensity(config,manifest,read(root/'provenance/model.json'),bundle,shape=shape)
+    require((manifest['schema'] == 8) == (vessel.envelope is not None),
+            'Declared vessel law and reconstructed envelope differ')
+    wall = WallOracle(config,manifest,shape,read(bundle))
     contact = baseline.PrunedExclusionContact(shape,config['fixed_poses'],config['depletant_radius'])
     reducers = {name:RegionMoments(manifest['samples']) for name in CLASSES}
     counters = Counter(); processed = near = generation_count = outside = batches = peak = 0
@@ -94,7 +173,7 @@ def audit(directory, out, binary, region_path, batch_size=64):
         with (out/'geometry.jsonl').open('x') as output:
             for rows in attempt_batches(samples,attempts,manifest['samples'],batch_size):
                 local = dict(manifest,samples=len(rows)); adapted = [dict(r,draw=i) for i,r in enumerate(rows)]
-                density,coordinates = baseline.check_rows(config,local,adapted,vessel,reporting)
+                density,coordinates = check_rows(config,local,adapted,vessel,reporting)
                 max_density_error = max(max_density_error,density['maximum_log_density_error'])
                 outside += density['valid_outside_R4']
                 generation = baseline.check_generation_metadata(config,local,
@@ -147,6 +226,8 @@ def audit(directory, out, binary, region_path, batch_size=64):
             scope='Independent full-wall baseline audit, preserving every attempted zero and original denominator. '
                   'Reporting chart labels do not change target or proposal. No convergence or assembly claim. '
                   'RNG, exact thinning/envelope certification and floating-point execution remain obligations.')
+        if vessel.envelope is not None:
+            result['vessel_uniform_envelope'] = vessel.envelope.witness
         write(out/'analysis.json',result); status('complete',analysis_sha256=sha(out/'analysis.json'))
         write(out/'freeze.json',dict(files={str(p.relative_to(out)):sha(p) for p in out.rglob('*') if p.is_file()}))
         return result

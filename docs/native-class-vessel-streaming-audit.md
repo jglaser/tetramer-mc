@@ -81,6 +81,16 @@ The independent code review found no blocker before execution.
 
 ## Integration still required
 
+**Subsequent integration:** the class schema is now registered in the partition
+and stage reader, with twenty passing integration controls. The baseline
+auditor now supports schema 8, and a new immutable 116-component protein
+preparation has been created and validated. A separate regional-prerequisites
+adapter preserves the unresolved scientific evidence. See the
+[integration record](native-class-vessel-integration.md). Scientific admission
+and the reviewed dispatcher still remain; no full-vessel protein job has been
+launched. The following paragraph records the state when this auditor was first
+validated.
+
 The new audit schema is deliberately **not yet registered** in
 `partition_vessel_streaming.py` or `analyze_streaming_vessel_stage.py`. A reviewed
 adapter must bind its geometry records, source closure and compiled-native

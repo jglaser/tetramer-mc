@@ -47,6 +47,10 @@ struct Args {
     threads: usize,
     #[arg(long, default_value_t = 7)]
     seed: u64,
+    /// Instead of basin constants: B22 from this many uniform relative poses (centre in the
+    /// interaction ball, Haar orientation); --poses is then ignored.
+    #[arg(long)]
+    virial: Option<usize>,
 }
 
 fn exp_rot(w: Vec3) -> [f64; 4] {
@@ -111,6 +115,102 @@ fn cholesky(a: &[[f64; 6]; 6]) -> Option<[[f64; 6]; 6]> {
         }
     }
     Some(l)
+}
+
+fn make_pair(a: &Args, tree: &SphereTree) -> Result<Pair> {
+    let n = tree.shape.atoms.len();
+    let centers: Vec<Vec3> = tree.shape.atoms.iter().map(|x| x.center).collect();
+    let radii: Vec<f64> = tree.shape.atoms.iter().map(|x| x.radius).collect();
+    let id = Pose { position: [0.; 3], orientation: [1., 0., 0., 0.] };
+    let far = Pose { position: [1e5, 0., 0.], orientation: [1., 0., 0., 0.] };
+    let model = SolvationModel {
+        probe: 1.4,
+        pressure: 0.2090,
+        coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+        atom_types: vec![0; n],
+        gauss_convention: GaussConvention::PatchGaussBonnet,
+    };
+    let solv = SolvationState::new(model.clone(), &centers, &radii, &[id, far])?;
+    let wall = Container::new(1e6, tree)?;
+    let mc = MorphMc::new(tree.clone(), wall, SolvationModel { pressure: 0., coefficients: vec![[0.; 3]], ..model },
+        SquareWell { epsilon: 1., width: a.width }, vec![id, far], vec![true, true])?;
+    Ok(Pair { solv, mc, tree: tree.clone(), a: Placed::new(id) })
+}
+
+/// B22 = -(V_c / 2) <exp(-E) - 1> over uniform relative poses in the interaction ball of
+/// radius R_c (no term acts beyond it): E = F_solv - eps n, hard overlap -> -1.
+fn run_virial(a: &Args, tree: &SphereTree, samples: usize) -> Result<Value> {
+    let ext = tree.shape.atoms.iter().map(|x| norm(x.center)).fold(0., f64::max);
+    let rmax = tree.shape.atoms.iter().map(|x| x.radius).fold(0., f64::max);
+    let rc = 2. * (ext + rmax + f64::max(1.4, a.width / 2.)) + 0.5;
+    let vc = 4. / 3. * PI * rc * rc * rc;
+    let per = samples.div_ceil(a.threads);
+    // Per thread: overlaps and, per eps, the list of exp(-E) - 1 of non-overlapping samples
+    // that interact (others contribute 0).
+    let parts: Vec<Result<(usize, Vec<Vec<f64>>)>> = std::thread::scope(|sc| {
+        let hs: Vec<_> = (0..a.threads)
+            .map(|k| {
+                sc.spawn(move || -> Result<(usize, Vec<Vec<f64>>)> {
+                    let pair = make_pair(a, tree)?;
+                    let mut rng = StdRng::seed_from_u64(a.seed * 7919 + k as u64);
+                    let mut overlaps = 0;
+                    let mut f: Vec<Vec<f64>> = vec![Vec::new(); a.epsilons.len()];
+                    for _ in 0..per {
+                        let t = loop {
+                            let x: Vec3 = std::array::from_fn(|_| (2. * rng.random::<f64>() - 1.) * rc);
+                            if norm(x) <= rc {
+                                break x;
+                            }
+                        };
+                        let q: [f64; 4] = std::array::from_fn(|_| StandardNormal.sample(&mut rng));
+                        let qn = q.iter().map(|v| v * v).sum::<f64>().sqrt();
+                        let g = Pose { position: t, orientation: q.map(|v| v / qn) };
+                        match pair.energy(g)? {
+                            None => overlaps += 1,
+                            Some((fs, np)) => {
+                                if fs != 0. || np != 0. {
+                                    for (e, out) in a.epsilons.iter().zip(f.iter_mut()) {
+                                        out.push((-(fs - e * np)).exp() - 1.);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok((overlaps, f))
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let mut overlaps = 0;
+    let mut f: Vec<Vec<f64>> = vec![Vec::new(); a.epsilons.len()];
+    for p in parts {
+        let (o, v) = p?;
+        overlaps += o;
+        for (dst, src) in f.iter_mut().zip(v) {
+            dst.extend(src);
+        }
+    }
+    let total = per * a.threads;
+    let mut out = Vec::new();
+    for (e, v) in a.epsilons.iter().zip(&f) {
+        // Mean and standard error of exp(-E) - 1 over all samples (overlap -1, far 0).
+        let s: f64 = v.iter().sum::<f64>() - overlaps as f64;
+        let s2: f64 = v.iter().map(|x| x * x).sum::<f64>() + overlaps as f64;
+        let mean = s / total as f64;
+        let var = (s2 / total as f64 - mean * mean).max(0.);
+        let mut top = v.clone();
+        top.sort_by(|x, y| y.partial_cmp(x).unwrap());
+        let top10: f64 = top.iter().take(10).sum();
+        out.push(json!({"epsilon": e, "B22_A3": -vc / 2. * mean,
+            "B22_se_A3": vc / 2. * (var / total as f64).sqrt(),
+            "attractive_part_A3": -vc / 2. * v.iter().filter(|x| **x > 0.).sum::<f64>() / total as f64,
+            "top10_share_of_attraction": top10.max(0.) / v.iter().filter(|x| **x > 0.).sum::<f64>().max(1e-300),
+            "max_weight": top.first().copied().unwrap_or(0.) + 1.}));
+    }
+    Ok(json!({"samples": total, "R_c": rc, "V_c": vc, "overlap_fraction": overlaps as f64 / total as f64,
+        "excluded_volume_part_A3": vc / 2. * overlaps as f64 / total as f64,
+        "interacting_fraction": f[0].len() as f64 / total as f64, "width": a.width, "B22": out}))
 }
 
 fn run_contact(a: &Args, tree: &SphereTree, label: &str, g0: Pose, seed: u64) -> Result<Value> {
@@ -243,6 +343,10 @@ fn run_contact(a: &Args, tree: &SphereTree, label: &str, g0: Pose, seed: u64) ->
 fn main() -> Result<()> {
     let a = Args::parse();
     let tree = SphereTree::new(serde_json::from_slice::<Shape>(&fs::read(&a.shape)?)?)?;
+    if let Some(n) = a.virial {
+        println!("{}", serde_json::to_string_pretty(&run_virial(&a, &tree, n)?)?);
+        return Ok(());
+    }
     let poses: Vec<Value> = serde_json::from_slice(&fs::read(&a.poses)?)?;
     let jobs: Vec<(String, Pose)> = poses
         .iter()

@@ -337,6 +337,22 @@ impl BallGrid {
     fn key(c: &Vec3, cell: f64) -> [i64; 3] {
         c.map(|x| (x / cell).floor() as i64)
     }
+    /// Move ball `i` from `old` to `new` without rebuilding the grid.
+    pub fn relocate(&mut self, i: usize, old: &Vec3, new: &Vec3) {
+        let (ko, kn) = (Self::key(old, self.cell), Self::key(new, self.cell));
+        if ko == kn {
+            return;
+        }
+        if let Some(v) = self.cells.get_mut(&ko) {
+            if let Some(pos) = v.iter().position(|&x| x == i) {
+                v.swap_remove(pos);
+            }
+            if v.is_empty() {
+                self.cells.remove(&ko);
+            }
+        }
+        self.cells.entry(kn).or_default().push(i);
+    }
     /// Indices of balls whose cells lie within one cell of `c`.
     pub fn near(&self, c: &Vec3) -> impl Iterator<Item = usize> + '_ {
         let k = Self::key(c, self.cell);

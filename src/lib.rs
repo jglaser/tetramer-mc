@@ -49,6 +49,7 @@ pub mod contact_memory;
 pub mod cluster_phase;
 pub mod oligomer_proposal;
 pub mod morphometry;
+pub mod morph_mc;
 pub mod rigid_subset;
 pub mod solvation;
 pub mod rigid_surrogate_chain;

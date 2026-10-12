@@ -105,6 +105,9 @@ pub struct SolvationState {
     cell: f64,
     grid: BallGrid,
     energy: f64,
+    /// Largest distance from a body origin to a dilated atom surface; bodies whose
+    /// origins are farther apart than twice this cannot overlap.
+    reach: f64,
 }
 
 /// A proposed move: new poses and recomputed atom parts; apply with `commit`.
@@ -142,6 +145,11 @@ impl SolvationState {
             .collect();
         let rmax = radii.iter().copied().fold(0., f64::max);
         let cell = 2. * rmax;
+        let reach = atom_centers
+            .iter()
+            .zip(&radii)
+            .map(|(c, r)| norm(*c) + r)
+            .fold(0., f64::max);
         let mut s = Self {
             model,
             template: atom_centers.to_vec(),
@@ -154,6 +162,7 @@ impl SolvationState {
             cell,
             grid: BallGrid::new(&[], cell),
             energy: 0.,
+            reach,
         };
         s.world = (0..poses.len()).map(|b| s.place(b, poses[b])).collect();
         s.rebuild_grid();
@@ -263,6 +272,22 @@ impl SolvationState {
         // Atoms with an overlap across bodies before or after the move.
         let mut affected: BTreeSet<(usize, usize)> = BTreeSet::new();
         for (&b, w) in &moved {
+            // Body-level pre-check: no other body within reach before or after the move.
+            let (po, pn) = (
+                self.poses[b].position,
+                moves.iter().find(|m| m.0 == b).unwrap().1.position,
+            );
+            let near = (0..nb).any(|c| {
+                if c == b {
+                    return false;
+                }
+                let qo = self.poses[c].position;
+                let qn = moves.iter().find(|m| m.0 == c).map_or(qo, |m| m.1.position);
+                norm(sub(qo, po)) < 2. * self.reach || norm(sub(qn, pn)) < 2. * self.reach
+            });
+            if !near {
+                continue;
+            }
             for i in 0..self.template.len() {
                 let old = self.inter_neighbours(b, i, self.world[b][i], &none);
                 let new = self.inter_neighbours(b, i, w[i], &moved);
@@ -309,16 +334,20 @@ impl SolvationState {
     }
 
     pub fn commit(&mut self, update: SolvationUpdate) {
+        let n = self.template.len();
         for &(b, p) in &update.poses {
+            let new = self.place(b, p);
+            for (i, (o, w)) in self.world[b].iter().zip(&new).enumerate() {
+                self.grid.relocate(b * n + i, o, w);
+            }
             self.poses[b] = p;
             self.rotations[b] = rotation(p.orientation);
-            self.world[b] = self.place(b, p);
+            self.world[b] = new;
         }
         for ((b, i), m) in update.balls {
             self.balls[b][i] = m;
         }
         self.energy += update.delta;
-        self.rebuild_grid();
     }
 
     /// Full recomputation from scratch (for checks).

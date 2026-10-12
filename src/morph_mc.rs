@@ -56,7 +56,8 @@ pub struct MorphMc {
     poses: Vec<Pose>,
     placed: Vec<Placed>,
     fixed: Vec<bool>,
-    well_energy: f64,
+    /// Square-well atom pairs between different bodies, each pair once.
+    pair_count: i64,
     pub stats: MoveStats,
 }
 
@@ -94,7 +95,7 @@ impl MorphMc {
             poses,
             placed,
             fixed,
-            well_energy: 0.,
+            pair_count: 0,
             stats: MoveStats::default(),
         };
         for (b, &p) in s.poses.iter().enumerate() {
@@ -108,11 +109,11 @@ impl MorphMc {
                 );
             }
         }
-        let mut pairs = 0.;
+        let mut pairs = 0;
         for a in 0..s.poses.len() {
-            pairs += s.well_pairs(a, s.poses[a]) as f64;
+            pairs += s.well_pairs(a, s.poses[a]);
         }
-        s.well_energy = -s.well.epsilon * pairs / 2.;
+        s.pair_count = (pairs / 2) as i64;
         Ok(s)
     }
 
@@ -123,14 +124,18 @@ impl MorphMc {
         self.solv.energy()
     }
     pub fn well_energy(&self) -> f64 {
-        self.well_energy
+        -self.well.epsilon * self.pair_count as f64
+    }
+    pub fn pair_count(&self) -> i64 {
+        self.pair_count
+    }
+    /// Change the well depth (replica exchange in epsilon); the configuration is kept.
+    pub fn set_epsilon(&mut self, epsilon: f64) {
+        self.well.epsilon = epsilon;
     }
 
     /// Square-well atom pairs between body `b` placed at `p` and all other bodies.
     pub fn well_pairs(&self, b: usize, p: Pose) -> usize {
-        if self.well.epsilon == 0. {
-            return 0;
-        }
         let reach = 2. * self.tree.bound + self.well.width;
         let rb = rotation(p.orientation);
         let mut count = 0;
@@ -212,14 +217,14 @@ impl MorphMc {
             self.stats.hard_rejected += 1;
             return Ok(false);
         }
-        let d_well =
-            -self.well.epsilon * (self.well_pairs(b, new) as f64 - self.well_pairs(b, old) as f64);
+        let dp = self.well_pairs(b, new) as i64 - self.well_pairs(b, old) as i64;
+        let d_well = -self.well.epsilon * dp as f64;
         let update = self.solv.propose(&[(b, new)])?;
         let de = update.delta + d_well;
         ensure!(de.is_finite(), "nonfinite energy change");
         if de <= 0. || rng.random::<f64>() < (-de).exp() {
             self.solv.commit(update);
-            self.well_energy += d_well;
+            self.pair_count += dp;
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
             self.stats.accepted += 1;

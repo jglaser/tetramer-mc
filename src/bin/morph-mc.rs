@@ -32,6 +32,39 @@ enum Cmd {
         #[arg(long, default_value_t = 1.0)]
         width: f64,
     },
+    /// Replica exchange in epsilon: one replica per well depth on a uniform ladder,
+    /// neighbour swaps accepted with min(1, exp((eps_hi - eps_lo)(n_lo - n_hi))) where n is
+    /// the replica's square-well pair count (the solvation term is the same in both).
+    Rex {
+        #[arg(long)]
+        shape: PathBuf,
+        #[arg(long)]
+        seed_config: PathBuf,
+        #[arg(long, default_value_t = 32)]
+        seed_count: usize,
+        #[arg(long)]
+        free_bodies: usize,
+        #[arg(long)]
+        concentration_um: f64,
+        #[arg(long)]
+        eps_min: f64,
+        #[arg(long)]
+        eps_max: f64,
+        #[arg(long)]
+        replicas: usize,
+        #[arg(long, default_value_t = 1.0)]
+        width: f64,
+        #[arg(long)]
+        sweeps: usize,
+        #[arg(long, default_value_t = 10)]
+        swap_every: usize,
+        #[arg(long, default_value_t = 500)]
+        sample_every: usize,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        #[arg(long)]
+        out: PathBuf,
+    },
     Run {
         #[arg(long)]
         shape: PathBuf,
@@ -81,6 +114,61 @@ fn hard_sphere(n: usize, on: bool) -> SolvationModel {
     }
 }
 
+/// Fixed native seed (first `seed_count` poses of the config, recentred) plus free bodies
+/// placed uniformly without contact in a vessel sized for the free-body concentration.
+fn start_state(
+    tree: &SphereTree,
+    seed_config: &PathBuf,
+    seed_count: usize,
+    free_bodies: usize,
+    concentration_um: f64,
+    seed: u64,
+) -> Result<(Vec<Pose>, Vec<bool>, f64)> {
+    let cfg: Value = serde_json::from_slice(&fs::read(seed_config)?)?;
+    let mut seedp: Vec<Pose> = serde_json::from_value(cfg["initial_poses"].clone())?;
+    seedp.truncate(seed_count);
+    let c: [f64; 3] = std::array::from_fn(|k| {
+        seedp.iter().map(|p| p.position[k]).sum::<f64>() / seedp.len() as f64
+    });
+    for p in &mut seedp {
+        p.position = sub(p.position, c);
+    }
+    let rho = concentration_um * 1e-6 * 6.02214076e23 / 1e27; // A^-3
+    let volume = free_bodies as f64 / rho;
+    let radius = (3. * volume / (4. * std::f64::consts::PI)).cbrt();
+    let wall = Container::new(radius, tree)?;
+    let mut rng = StdRng::seed_from_u64(seed ^ 0x5eed_5eed);
+    let mut poses = seedp.clone();
+    let mut placed: Vec<Placed> = poses.iter().map(|&p| Placed::new(p)).collect();
+    while poses.len() < seed_count + free_bodies {
+        let x: [f64; 3] = std::array::from_fn(|_| (2. * rng.random::<f64>() - 1.) * radius);
+        let q: [f64; 4] = std::array::from_fn(|_| StandardNormal.sample(&mut rng));
+        let qn = q.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let p = Pose {
+            position: x,
+            orientation: q.map(|v| v / qn),
+        };
+        if norm(x) > radius || !wall.contains(p) {
+            continue;
+        }
+        // Start free bodies out of contact (centres at least 2 bound + 4 A apart).
+        if poses
+            .iter()
+            .any(|o| norm(sub(o.position, x)) < 2. * tree.bound + 4.)
+        {
+            continue;
+        }
+        let pl = Placed::new(p);
+        if placed.iter().any(|o| tree.overlaps(&pl, o)) {
+            continue;
+        }
+        poses.push(p);
+        placed.push(pl);
+    }
+    let fixed = (0..poses.len()).map(|i| i < seed_count).collect();
+    Ok((poses, fixed, radius))
+}
+
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Calibrate {
@@ -114,6 +202,179 @@ fn main() -> Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&rows)?);
         }
+        Cmd::Rex {
+            shape,
+            seed_config,
+            seed_count,
+            free_bodies,
+            concentration_um,
+            eps_min,
+            eps_max,
+            replicas,
+            width,
+            sweeps,
+            swap_every,
+            sample_every,
+            seed,
+            out,
+        } => {
+            ensure!(
+                replicas >= 2 && swap_every > 0 && sample_every % swap_every == 0,
+                "invalid replica settings"
+            );
+            fs::create_dir_all(&out)?;
+            let tree = shape_tree(&shape)?;
+            let n = tree.shape.atoms.len();
+            let ladder: Vec<f64> = (0..replicas)
+                .map(|k| eps_min + (eps_max - eps_min) * k as f64 / (replicas - 1) as f64)
+                .collect();
+            let mut mcs = Vec::new();
+            let mut radius = 0.;
+            for k in 0..replicas {
+                let (poses, fixed, r) = start_state(
+                    &tree,
+                    &seed_config,
+                    seed_count,
+                    free_bodies,
+                    concentration_um,
+                    seed * 1000 + k as u64,
+                )?;
+                radius = r;
+                let wall = Container::new(r, &tree)?;
+                mcs.push(MorphMc::new(
+                    tree.clone(),
+                    wall,
+                    hard_sphere(n, true),
+                    SquareWell {
+                        epsilon: ladder[k],
+                        width,
+                    },
+                    poses,
+                    fixed,
+                )?);
+            }
+            let mut rngs: Vec<StdRng> = (0..replicas)
+                .map(|k| StdRng::seed_from_u64(seed * 7919 + k as u64))
+                .collect();
+            let mut master = StdRng::seed_from_u64(seed ^ 0xabcdef);
+            // level -> replica holding it
+            let mut holder: Vec<usize> = (0..replicas).collect();
+            let mut swaps = vec![(0u64, 0u64); replicas - 1];
+            let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
+                "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
+                "ladder": ladder, "width": width, "sweeps": sweeps, "swap_every": swap_every,
+                "sample_every": sample_every, "seed": seed,
+                "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",
+                "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well; exact hard cores and wall"});
+            fs::write(
+                out.join("config.json"),
+                serde_json::to_string_pretty(&meta)?,
+            )?;
+            let mut trajs = Vec::new();
+            for l in 0..replicas {
+                let d = out.join(format!("level{l:02}"));
+                fs::create_dir_all(&d)?;
+                trajs.push(fs::File::create(d.join("trajectory.jsonl"))?);
+            }
+            let mut log = fs::File::create(out.join("progress.jsonl"))?;
+            let t0 = Instant::now();
+            let tiny = MoveSettings {
+                translation: 0.1,
+                rotation: 1f64.to_radians(),
+                reinsertion_probability: 0.,
+            };
+            let medium = MoveSettings {
+                translation: 0.5,
+                rotation: 4f64.to_radians(),
+                reinsertion_probability: 0.,
+            };
+            let reinsert = MoveSettings {
+                translation: 0.,
+                rotation: 0.,
+                reinsertion_probability: 1.,
+            };
+            let mut sweep = 0;
+            let mut parity = 0;
+            loop {
+                if sweep % sample_every == 0 {
+                    for l in 0..replicas {
+                        let r = holder[l];
+                        writeln!(
+                            trajs[l],
+                            "{}",
+                            json!({"sweep": sweep, "replica": r, "epsilon": ladder[l],
+                            "pairs": mcs[r].pair_count(), "solvation": mcs[r].solvation_energy(), "poses": mcs[r].poses()})
+                        )?;
+                        trajs[l].flush()?;
+                    }
+                    writeln!(
+                        log,
+                        "{}",
+                        json!({"sweep": sweep, "seconds": t0.elapsed().as_secs_f64(),
+                        "holder": holder, "pairs": holder.iter().map(|&r| mcs[r].pair_count()).collect::<Vec<_>>(),
+                        "swap_accepted": swaps.iter().map(|s| s.1).collect::<Vec<_>>(),
+                        "swap_attempts": swaps.iter().map(|s| s.0).collect::<Vec<_>>()})
+                    )?;
+                    log.flush()?;
+                }
+                if sweep >= sweeps {
+                    break;
+                }
+                std::thread::scope(|sc| -> Result<()> {
+                    let handles: Vec<_> = mcs
+                        .iter_mut()
+                        .zip(rngs.iter_mut())
+                        .map(|(mc, rng)| {
+                            sc.spawn(move || -> Result<()> {
+                                for _ in 0..swap_every * free_bodies {
+                                    let u = rng.random::<f64>();
+                                    let mv = if u < 0.5 {
+                                        tiny
+                                    } else if u < 0.95 {
+                                        medium
+                                    } else {
+                                        reinsert
+                                    };
+                                    mc.step(rng, mv)?;
+                                }
+                                Ok(())
+                            })
+                        })
+                        .collect();
+                    for h in handles {
+                        h.join()
+                            .map_err(|_| anyhow::anyhow!("replica thread panicked"))??;
+                    }
+                    Ok(())
+                })?;
+                sweep += swap_every;
+                for l in (parity..replicas - 1).step_by(2) {
+                    let (a, b) = (holder[l], holder[l + 1]);
+                    let x = (ladder[l + 1] - ladder[l])
+                        * (mcs[a].pair_count() - mcs[b].pair_count()) as f64;
+                    swaps[l].0 += 1;
+                    if x >= 0. || master.random::<f64>() < x.exp() {
+                        swaps[l].1 += 1;
+                        holder.swap(l, l + 1);
+                        mcs[a].set_epsilon(ladder[l + 1]);
+                        mcs[b].set_epsilon(ladder[l]);
+                    }
+                }
+                parity = 1 - parity;
+            }
+            let checks: Vec<Value> = mcs
+                .iter()
+                .map(|mc| {
+                    let (sf, sw) = mc.recompute();
+                    json!({"solvation_cached": mc.solvation_energy(), "solvation_recomputed": sf,
+                    "well_cached": mc.well_energy(), "well_recomputed": sw})
+                })
+                .collect();
+            fs::write(
+                out.join("final_check.json"),
+                serde_json::to_string_pretty(&checks)?,
+            )?;
+        }
         Cmd::Run {
             shape,
             seed_config,
@@ -131,49 +392,16 @@ fn main() -> Result<()> {
             fs::create_dir_all(&out)?;
             let tree = shape_tree(&shape)?;
             let n = tree.shape.atoms.len();
-            let cfg: Value = serde_json::from_slice(&fs::read(&seed_config)?)?;
-            let mut seedp: Vec<Pose> = serde_json::from_value(cfg["initial_poses"].clone())?;
-            seedp.truncate(seed_count);
-            let c: [f64; 3] = std::array::from_fn(|k| {
-                seedp.iter().map(|p| p.position[k]).sum::<f64>() / seedp.len() as f64
-            });
-            for p in &mut seedp {
-                p.position = sub(p.position, c);
-            }
-            let rho = concentration_um * 1e-6 * 6.02214076e23 / 1e27; // A^-3
-            let volume = free_bodies as f64 / rho;
-            let radius = (3. * volume / (4. * std::f64::consts::PI)).cbrt();
+            let (poses, fixed, radius) = start_state(
+                &tree,
+                &seed_config,
+                seed_count,
+                free_bodies,
+                concentration_um,
+                seed,
+            )?;
             let wall = Container::new(radius, &tree)?;
             let mut rng = StdRng::seed_from_u64(seed);
-            let mut poses = seedp.clone();
-            let placed: Vec<Placed> = poses.iter().map(|&p| Placed::new(p)).collect();
-            let mut placed = placed;
-            while poses.len() < seed_count + free_bodies {
-                let x: [f64; 3] = std::array::from_fn(|_| (2. * rng.random::<f64>() - 1.) * radius);
-                let q: [f64; 4] = std::array::from_fn(|_| StandardNormal.sample(&mut rng));
-                let qn = q.iter().map(|v| v * v).sum::<f64>().sqrt();
-                let p = Pose {
-                    position: x,
-                    orientation: q.map(|v| v / qn),
-                };
-                if norm(x) > radius || !wall.contains(p) {
-                    continue;
-                }
-                let pl = Placed::new(p);
-                // Start free bodies out of contact (centres at least 2 bound + 4 A apart).
-                if poses
-                    .iter()
-                    .any(|o| norm(sub(o.position, x)) < 2. * tree.bound + 4.)
-                {
-                    continue;
-                }
-                if placed.iter().any(|o| tree.overlaps(&pl, o)) {
-                    continue;
-                }
-                poses.push(p);
-                placed.push(pl);
-            }
-            let fixed: Vec<bool> = (0..poses.len()).map(|i| i < seed_count).collect();
             let model = hard_sphere(n, !no_solvation);
             let t0 = Instant::now();
             let mut mc = MorphMc::new(

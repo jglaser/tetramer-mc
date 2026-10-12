@@ -88,6 +88,9 @@ enum Cmd {
         /// JSON list of relative poses (B relative to A) for docking proposals.
         #[arg(long)]
         dock_components: Option<PathBuf>,
+        /// Frozen learned relative-pose model (e.g. a blind contact map) for docking instead.
+        #[arg(long)]
+        dock_model: Option<PathBuf>,
         /// Probability that a step is a docking Metropolis-Hastings step.
         #[arg(long, default_value_t = 0.)]
         dock_probability: f64,
@@ -415,6 +418,7 @@ fn main() -> Result<()> {
             width,
             no_solvation,
             dock_components,
+            dock_model,
             dock_probability,
             dock_sigma_translation,
             dock_sigma_rotation_degrees,
@@ -457,19 +461,47 @@ fn main() -> Result<()> {
                 out.join("config.json"),
                 serde_json::to_string_pretty(&meta)?,
             )?;
-            let dock = match &dock_components {
-                Some(f) if dock_probability > 0. => Some(DockSettings {
-                    components: serde_json::from_slice(&fs::read(f)?)?,
+            let learned = match &dock_model {
+                Some(f) => {
+                    let raw = fs::read(f)?;
+                    let sha = tetramer_mc::simulation::hash_bytes(&fs::read(&shape)?);
+                    let frozen =
+                        tetramer_mc::proposal::FrozenRelativePoseProposal::from_json_str_open(
+                            std::str::from_utf8(&raw)?,
+                            [2. * radius; 3],
+                            0.1,
+                            &sha,
+                        )?;
+                    Some(std::sync::Arc::new(
+                        tetramer_mc::docking::DockingProposal::new(
+                            frozen,
+                            tetramer_mc::docking::DockingMethod::PosteriorInvolution,
+                            0.9,
+                            [0.; 3],
+                        )?,
+                    ))
+                }
+                None => None,
+            };
+            let dock = if dock_probability > 0. && (learned.is_some() || dock_components.is_some())
+            {
+                Some(DockSettings {
+                    learned,
+                    components: match &dock_components {
+                        Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+                        None => Vec::new(),
+                    },
                     sigma_translation: dock_sigma_translation,
                     sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
                     uniform_weight: dock_uniform_weight,
-                }),
-                _ => None,
+                })
+            } else {
+                None
             };
             fs::write(
                 out.join("dock.json"),
                 serde_json::to_string_pretty(
-                    &json!({"components": dock_components, "probability": dock_probability,
+                    &json!({"components": dock_components, "model": dock_model, "probability": dock_probability,
                     "sigma_translation": dock_sigma_translation, "sigma_rotation_degrees": dock_sigma_rotation_degrees,
                     "uniform_weight": dock_uniform_weight}),
                 )?,

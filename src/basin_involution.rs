@@ -255,6 +255,18 @@ impl FixedBasinInvolution {
         self.charts.len()
     }
 
+    /// Translational centre of chart i (anchor position + mean) and `k` times its largest
+    /// translational standard deviation (from the chart's own Cholesky factor).
+    pub fn translation_window(&self, chart_index: usize, k: f64) -> ([f64; 3], f64) {
+        let c = &self.charts[chart_index];
+        let center =
+            std::array::from_fn(|i| c.parameters.anchor_position[i] + c.parameters.mean[i]);
+        let var = (0..3)
+            .map(|i| (0..=i).map(|j| c.lower[i][j] * c.lower[i][j]).sum::<f64>())
+            .fold(0., f64::max);
+        (center, k * var.sqrt())
+    }
+
     /// This is the only random direction selection in the kernel. Positive
     /// direction weights cannot accidentally differ: the same coin is used.
     pub fn draw_trace(&self, rng: &mut StdRng) -> BasinTrace {

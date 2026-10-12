@@ -40,8 +40,12 @@ pub struct MoveSettings {
 /// (k uniform) in the frame of an anchor body chosen uniformly among the other bodies.
 /// The full mixture density Q is evaluated at both endpoints (the anchor set is the same),
 /// so the acceptance is min(1, exp(-beta dE) Q(old) / Q(new)).
-#[derive(Clone, Debug)]
+///
+/// With `learned`, G is instead a frozen learned relative-pose mixture (e.g. a blind contact
+/// map): its exact independent draw and normalized density over the same anchors.
+#[derive(Clone)]
 pub struct DockSettings {
+    pub learned: Option<std::sync::Arc<crate::docking::DockingProposal>>,
     pub components: Vec<Pose>,
     pub sigma_translation: f64,
     pub sigma_rotation: f64,
@@ -257,6 +261,30 @@ impl MorphMc {
         } else {
             f64::NEG_INFINITY
         };
+        if let Some(m) = &d.learned {
+            // G = (1/A) sum over all A anchors; anchors farther than 2 bound + 20 A carry
+            // contributions below exp(-100) and are skipped, with the 1/A normalization kept.
+            let all = self.poses.len() - 1;
+            let cut = 2. * self.tree.bound + 20.;
+            let near: Vec<Pose> = (0..self.poses.len())
+                .filter(|&a| a != b && norm(sub(self.poses[a].position, x.position)) < cut)
+                .map(|a| self.poses[a])
+                .collect();
+            let g = if near.is_empty() {
+                f64::NEG_INFINITY
+            } else {
+                m.members_log_density_pruned(&[x], &near)
+                    .unwrap_or(f64::NEG_INFINITY)
+                    + (near.len() as f64).ln()
+                    - (all as f64).ln()
+            };
+            let l = (1. - d.uniform_weight).ln() + g;
+            let hi = uniform.max(l);
+            if !hi.is_finite() {
+                return hi;
+            }
+            return hi + ((uniform - hi).exp() + (l - hi).exp()).ln();
+        }
         let rx = rotation(x.orientation);
         let (st, sr) = (d.sigma_translation, d.sigma_rotation);
         let norm_t = -1.5 * (2. * std::f64::consts::PI * st * st).ln();
@@ -305,7 +333,9 @@ impl MorphMc {
     pub fn step_dock(&mut self, rng: &mut StdRng, d: &DockSettings) -> Result<bool> {
         let free: Vec<usize> = (0..self.poses.len()).filter(|&b| !self.fixed[b]).collect();
         ensure!(
-            !free.is_empty() && self.poses.len() > 1 && !d.components.is_empty(),
+            !free.is_empty()
+                && self.poses.len() > 1
+                && (d.learned.is_some() || !d.components.is_empty()),
             "invalid docking setup"
         );
         ensure!(
@@ -328,6 +358,15 @@ impl MorphMc {
             Pose {
                 position,
                 orientation: q.map(|x| x / n),
+            }
+        } else if let Some(m) = &d.learned {
+            let anchors: Vec<Pose> = (0..self.poses.len())
+                .filter(|&a| a != b)
+                .map(|a| self.poses[a])
+                .collect();
+            match m.draw_singleton_independent(rng, &anchors)?.0 {
+                Some(p) => p,
+                None => return Ok(false),
             }
         } else {
             let others: Vec<usize> = (0..self.poses.len()).filter(|&a| a != b).collect();
@@ -518,6 +557,7 @@ mod tests {
 
         // Same target with docking proposals mixed in: Q at both endpoints must keep it exact.
         let dock = DockSettings {
+            learned: None,
             components: vec![Pose {
                 position: [2.4, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -549,6 +589,136 @@ mod tests {
             assert!(
                 (p - expect[k]).abs() < 2.5e-3,
                 "dock bin {k}: sampled {p:.4}, expected {:.4}",
+                expect[k]
+            );
+        }
+    }
+    /// Docking from a learned relative-pose mixture (exact independent draw and density over
+    /// all other bodies as anchors) keeps the analytic two-ball distance distribution.
+    #[test]
+    fn learned_docking_keeps_two_ball_distribution() {
+        use crate::docking::{DockingMethod, DockingProposal};
+        use crate::math::{IDENTITY, cayley};
+        use crate::proposal::FrozenRelativePoseProposal;
+        use crate::simulation::hash_bytes;
+        let r = 1.0;
+        let probe = 1.4;
+        let shape = Shape {
+            name: "ball".into(),
+            volume: 4. / 3. * std::f64::consts::PI,
+            atoms: vec![Atom {
+                center: [0.; 3],
+                radius: r,
+            }],
+        };
+        let tree = SphereTree::new(shape).unwrap();
+        let sha = hash_bytes(&serde_json::to_vec(&tree.shape).unwrap());
+        let cov = |d: [f64; 6]| -> [[f64; 6]; 6] {
+            std::array::from_fn(|i| std::array::from_fn(|j| if i == j { d[i] * d[i] } else { 0. }))
+        };
+        let model = serde_json::json!({
+            "angular_length": 1., "shape_sha256": sha, "coordinate_convention": "anchor-body-relative",
+            "anchors": [{"position": [2.3, 0., 0.], "rotation": IDENTITY}, {"position": [0., 2.6, 0.], "rotation": cayley([0.3, -0.5, 0.2])}],
+            "means": [[0., 0., 0., 0., 0., 0.], [0., 0., 0., 0., 0., 0.]],
+            "covariances": [cov([0.3, 0.4, 0.35, 0.6, 0.5, 0.7]), cov([0.5, 0.3, 0.4, 0.4, 0.8, 0.6])],
+            "weights": [0.4, 0.6]
+        });
+        let frozen =
+            FrozenRelativePoseProposal::from_json_str_open(&model.to_string(), [14.; 3], 0.1, &sha)
+                .unwrap();
+        let learned =
+            DockingProposal::new(frozen, DockingMethod::PosteriorInvolution, 0.5, [0.; 3]).unwrap();
+        let wall = Container::new(7.0, &tree).unwrap();
+        let sm = SolvationModel {
+            probe,
+            pressure: 0.209,
+            coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+            atom_types: vec![0],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 1.2,
+            width: 0.6,
+        };
+        let start = vec![
+            Pose {
+                position: [0.; 3],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [4., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+        ];
+        let mut mc = MorphMc::new(tree, wall, sm.clone(), well, start, vec![true, false]).unwrap();
+        let energy = |d: f64| {
+            let rr = r + probe;
+            let one = union_measures(&[[0.; 3]], &[rr]).unwrap();
+            let two = union_measures(&[[0.; 3], [d, 0., 0.]], &[rr, rr]).unwrap();
+            let c = sm.coefficients[0];
+            let f = |m: &crate::morphometry::UnionMeasures| {
+                sm.pressure * m.volume + c[0] * m.area + c[1] * m.mean + c[2] * m.gauss
+            };
+            let sw = if d < 2. * r + well.width {
+                -well.epsilon
+            } else {
+                0.
+            };
+            f(&two) - 2. * f(&one) + sw
+        };
+        let (lo, hi) = (2. * r, 7.0 - r);
+        let bins = 20;
+        let mut expect = vec![0.; bins];
+        let fine = 4000;
+        for k in 0..fine {
+            let d = lo + (k as f64 + 0.5) * (hi - lo) / fine as f64;
+            expect[((d - lo) / (hi - lo) * bins as f64) as usize] += d * d * (-energy(d)).exp();
+        }
+        let z: f64 = expect.iter().sum();
+        expect.iter_mut().for_each(|e| *e /= z);
+        let dock = DockSettings {
+            learned: Some(std::sync::Arc::new(learned)),
+            components: Vec::new(),
+            sigma_translation: 0.,
+            sigma_rotation: 0.,
+            uniform_weight: 0.3,
+        };
+        let mv = MoveSettings {
+            translation: 0.6,
+            rotation: 0.3,
+            reinsertion_probability: 0.3,
+        };
+        let mut rng = StdRng::seed_from_u64(9);
+        let mut hist = vec![0u64; bins];
+        let (burn, n) = (5_000, 1_200_000);
+        for t in 0..burn + n {
+            if t % 2 == 0 {
+                mc.step_dock(&mut rng, &dock).unwrap();
+            } else {
+                mc.step(&mut rng, mv).unwrap();
+            }
+            if t >= burn {
+                let d = norm(mc.poses()[1].position);
+                hist[(((d - lo) / (hi - lo) * bins as f64) as usize).min(bins - 1)] += 1;
+            }
+        }
+        assert!(
+            mc.stats.dock_accepted > 10_000,
+            "learned docking must be accepted: {:?}",
+            mc.stats
+        );
+        for k in 0..bins {
+            eprintln!(
+                "learned dock bin {k:2}: sampled {:.4} expected {:.4}",
+                hist[k] as f64 / n as f64,
+                expect[k]
+            );
+        }
+        for k in 0..bins {
+            let p = hist[k] as f64 / n as f64;
+            assert!(
+                (p - expect[k]).abs() < 2.5e-3,
+                "learned dock bin {k}: sampled {p:.4}, expected {:.4}",
                 expect[k]
             );
         }

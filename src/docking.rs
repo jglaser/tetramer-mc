@@ -721,6 +721,36 @@ impl DockingProposal {
         Ok(log_sum(&self.member_label_logs(members, pool)?))
     }
 
+    /// `members_log_density` with chart branches skipped when the pose lies more than 12
+    /// translational standard deviations from the branch centre (contributions below
+    /// exp(-72) of the branch peak). Callers that mix in a uniform floor see no change.
+    pub fn members_log_density_pruned(&self, members: &[Pose], pool: &[Pose]) -> Result<f64> {
+        ensure!(
+            !members.is_empty() && !pool.is_empty(),
+            "Member charts need members and anchors"
+        );
+        let offset = ((members.len() * pool.len()) as f64).ln();
+        let mut out = Vec::new();
+        for &m in members {
+            for &a in pool {
+                let relative = anchor_relative(a, m);
+                for (b, w) in self.log_component_weights.iter().enumerate() {
+                    let pose = if self.branches[b].inverted {
+                        invert_relative_pose(relative)
+                    } else {
+                        relative
+                    };
+                    let (c, rad) = self.map.translation_window(b, 12.);
+                    if norm(sub(pose.position, c)) > rad {
+                        continue;
+                    }
+                    out.push(w + self.map.log_density(b, pose) - offset);
+                }
+            }
+        }
+        Ok(log_sum(&out))
+    }
+
     /// State-independent weight of the defensive uniform member proposal.
     /// Callers may choose this branch before selecting a state-dependent
     /// primary anchor; the uniform branch has no anchor-selection factor.

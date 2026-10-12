@@ -10,7 +10,7 @@ use std::{fs, io::Write, path::PathBuf, time::Instant};
 use tetramer_mc::{
     geometry::{Placed, Shape, SphereTree},
     math::{Pose, norm, sub},
-    morph_mc::{MorphMc, MoveSettings, SquareWell},
+    morph_mc::{DockSettings, MorphMc, MoveSettings, SquareWell},
     solvation::{GaussConvention, SolvationModel},
     spherical::Container,
 };
@@ -85,6 +85,18 @@ enum Cmd {
         /// Hard-sphere morphometric solvation on (default) or off (square well only).
         #[arg(long)]
         no_solvation: bool,
+        /// JSON list of relative poses (B relative to A) for docking proposals.
+        #[arg(long)]
+        dock_components: Option<PathBuf>,
+        /// Probability that a step is a docking Metropolis-Hastings step.
+        #[arg(long, default_value_t = 0.)]
+        dock_probability: f64,
+        #[arg(long, default_value_t = 0.25)]
+        dock_sigma_translation: f64,
+        #[arg(long, default_value_t = 2.0)]
+        dock_sigma_rotation_degrees: f64,
+        #[arg(long, default_value_t = 0.5)]
+        dock_uniform_weight: f64,
         #[arg(long)]
         sweeps: usize,
         #[arg(long, default_value_t = 50)]
@@ -402,6 +414,11 @@ fn main() -> Result<()> {
             epsilon,
             width,
             no_solvation,
+            dock_components,
+            dock_probability,
+            dock_sigma_translation,
+            dock_sigma_rotation_degrees,
+            dock_uniform_weight,
             sweeps,
             sample_every,
             seed,
@@ -440,6 +457,23 @@ fn main() -> Result<()> {
                 out.join("config.json"),
                 serde_json::to_string_pretty(&meta)?,
             )?;
+            let dock = match &dock_components {
+                Some(f) if dock_probability > 0. => Some(DockSettings {
+                    components: serde_json::from_slice(&fs::read(f)?)?,
+                    sigma_translation: dock_sigma_translation,
+                    sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
+                    uniform_weight: dock_uniform_weight,
+                }),
+                _ => None,
+            };
+            fs::write(
+                out.join("dock.json"),
+                serde_json::to_string_pretty(
+                    &json!({"components": dock_components, "probability": dock_probability,
+                    "sigma_translation": dock_sigma_translation, "sigma_rotation_degrees": dock_sigma_rotation_degrees,
+                    "uniform_weight": dock_uniform_weight}),
+                )?,
+            )?;
             let mut traj = fs::File::create(out.join("trajectory.jsonl"))?;
             let mut log = fs::File::create(out.join("progress.jsonl"))?;
             ensure!(free_bodies > 0, "no free bodies");
@@ -469,7 +503,7 @@ fn main() -> Result<()> {
                         "solvation": mc.solvation_energy(), "well": mc.well_energy(),
                         "attempts": s.attempts, "accepted": s.accepted, "hard_rejected": s.hard_rejected,
                         "wall_rejected": s.wall_rejected, "reinsertion_attempts": s.reinsertion_attempts,
-                        "reinsertion_accepted": s.reinsertion_accepted})
+                        "reinsertion_accepted": s.reinsertion_accepted, "dock_attempts": s.dock_attempts, "dock_accepted": s.dock_accepted})
                     )?;
                     log.flush()?;
                     traj.flush()?;
@@ -478,6 +512,12 @@ fn main() -> Result<()> {
                     break;
                 }
                 for _ in 0..free_bodies {
+                    if let Some(d) = &dock {
+                        if rng.random::<f64>() < dock_probability {
+                            mc.step_dock(&mut rng, d)?;
+                            continue;
+                        }
+                    }
                     let u = rng.random::<f64>();
                     let mv = if u < 0.5 {
                         tiny

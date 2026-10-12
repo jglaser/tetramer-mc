@@ -35,8 +35,23 @@ pub struct MoveSettings {
     pub reinsertion_probability: f64,
 }
 
+/// Independent docking proposal: with probability `uniform_weight` a uniform pose in the
+/// vessel ball (Haar orientation), otherwise a Gaussian about relative pose `components[k]`
+/// (k uniform) in the frame of an anchor body chosen uniformly among the other bodies.
+/// The full mixture density Q is evaluated at both endpoints (the anchor set is the same),
+/// so the acceptance is min(1, exp(-beta dE) Q(old) / Q(new)).
+#[derive(Clone, Debug)]
+pub struct DockSettings {
+    pub components: Vec<Pose>,
+    pub sigma_translation: f64,
+    pub sigma_rotation: f64,
+    pub uniform_weight: f64,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MoveStats {
+    pub dock_attempts: u64,
+    pub dock_accepted: u64,
     pub attempts: u64,
     pub wall_rejected: u64,
     pub hard_rejected: u64,
@@ -234,6 +249,143 @@ impl MorphMc {
         Ok(false)
     }
 
+    /// Log of the docking mixture density of pose `x` of body `b` (anchors: all others).
+    fn dock_log_density(&self, b: usize, x: Pose, d: &DockSettings) -> f64 {
+        let r = self.wall.radius;
+        let uniform = if norm(x.position) <= r {
+            d.uniform_weight.ln() - (4. / 3. * std::f64::consts::PI * r * r * r).ln()
+        } else {
+            f64::NEG_INFINITY
+        };
+        let rx = rotation(x.orientation);
+        let (st, sr) = (d.sigma_translation, d.sigma_rotation);
+        let norm_t = -1.5 * (2. * std::f64::consts::PI * st * st).ln();
+        let norm_r = (8. * std::f64::consts::PI * std::f64::consts::PI).ln()
+            - 1.5 * (2. * std::f64::consts::PI * sr * sr).ln();
+        let mut terms = Vec::new();
+        let anchors = self.poses.len() - 1;
+        let lw = (1. - d.uniform_weight).ln() - ((anchors * d.components.len()) as f64).ln();
+        for (a, pa) in self.poses.iter().enumerate() {
+            if a == b {
+                continue;
+            }
+            let rat = transpose(rotation(pa.orientation));
+            let trel = matvec(rat, sub(x.position, pa.position));
+            let rrel = matmul(rat, rx);
+            for c in &d.components {
+                let dt = sub(trel, c.position);
+                let t2 = dt[0] * dt[0] + dt[1] * dt[1] + dt[2] * dt[2];
+                if t2 > 100. * st * st {
+                    continue;
+                }
+                let delta = matmul(transpose(rotation(c.orientation)), rrel);
+                let q = quaternion(delta);
+                let theta = 2. * q[0].clamp(-1., 1.).acos();
+                // Exponential coordinates: Haar factor theta^2 / (2 (1 - cos theta)).
+                let jac = if theta < 1e-8 {
+                    1.
+                } else {
+                    theta * theta / (2. * (1. - theta.cos()))
+                };
+                terms.push(
+                    lw + norm_t - t2 / (2. * st * st) + norm_r - theta * theta / (2. * sr * sr)
+                        + jac.ln(),
+                );
+            }
+        }
+        terms.push(uniform);
+        let m = terms.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if !m.is_finite() {
+            return m;
+        }
+        m + terms.iter().map(|t| (t - m).exp()).sum::<f64>().ln()
+    }
+
+    /// One docking Metropolis-Hastings step on a uniformly chosen non-fixed body.
+    pub fn step_dock(&mut self, rng: &mut StdRng, d: &DockSettings) -> Result<bool> {
+        let free: Vec<usize> = (0..self.poses.len()).filter(|&b| !self.fixed[b]).collect();
+        ensure!(
+            !free.is_empty() && self.poses.len() > 1 && !d.components.is_empty(),
+            "invalid docking setup"
+        );
+        ensure!(
+            d.uniform_weight > 0. && d.uniform_weight < 1.,
+            "docking uniform weight must lie in (0, 1)"
+        );
+        let b = free[rng.random_range(0..free.len())];
+        let old = self.poses[b];
+        self.stats.dock_attempts += 1;
+        let new = if rng.random::<f64>() < d.uniform_weight {
+            let r = self.wall.radius;
+            let position = loop {
+                let x: Vec3 = std::array::from_fn(|_| (2. * rng.random::<f64>() - 1.) * r);
+                if norm(x) <= r {
+                    break x;
+                }
+            };
+            let q: [f64; 4] = std::array::from_fn(|_| StandardNormal.sample(rng));
+            let n = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+            Pose {
+                position,
+                orientation: q.map(|x| x / n),
+            }
+        } else {
+            let others: Vec<usize> = (0..self.poses.len()).filter(|&a| a != b).collect();
+            let a = others[rng.random_range(0..others.len())];
+            let c = d.components[rng.random_range(0..d.components.len())];
+            let t: Vec3 = std::array::from_fn(|k| {
+                let z: f64 = StandardNormal.sample(rng);
+                c.position[k] + z * d.sigma_translation
+            });
+            let w: Vec3 = std::array::from_fn(|_| {
+                let z: f64 = StandardNormal.sample(rng);
+                z * d.sigma_rotation
+            });
+            let theta = norm(w);
+            if theta >= std::f64::consts::PI {
+                return Ok(false);
+            }
+            let e = if theta < 1e-12 {
+                [1., 0., 0., 0.]
+            } else {
+                let s = (theta / 2.).sin() / theta;
+                [(theta / 2.).cos(), w[0] * s, w[1] * s, w[2] * s]
+            };
+            let rrel = matmul(rotation(c.orientation), rotation(e));
+            let pa = self.poses[a];
+            let ra = rotation(pa.orientation);
+            Pose {
+                position: add(pa.position, matvec(ra, t)),
+                orientation: quaternion(matmul(ra, rrel)),
+            }
+        };
+        self.stats.attempts += 1;
+        if !self.wall.contains(new) {
+            self.stats.wall_rejected += 1;
+            return Ok(false);
+        }
+        if !self.hard_valid(b, new) {
+            self.stats.hard_rejected += 1;
+            return Ok(false);
+        }
+        let dp = self.well_pairs(b, new) as i64 - self.well_pairs(b, old) as i64;
+        let d_well = -self.well.epsilon * dp as f64;
+        let update = self.solv.propose(&[(b, new)])?;
+        let log_ratio = self.dock_log_density(b, old, d) - self.dock_log_density(b, new, d);
+        let a = -(update.delta + d_well) + log_ratio;
+        ensure!(!a.is_nan(), "NaN docking acceptance");
+        if a >= 0. || rng.random::<f64>() < a.exp() {
+            self.solv.commit(update);
+            self.pair_count += dp;
+            self.poses[b] = new;
+            self.placed[b] = Placed::new(new);
+            self.stats.accepted += 1;
+            self.stats.dock_accepted += 1;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Recompute both energies from scratch (for checks).
     pub fn recompute(&self) -> (f64, f64) {
         let mut pairs = 0.;
@@ -363,5 +515,42 @@ mod tests {
             "contact bin must carry weight: {}",
             expect[0]
         );
+
+        // Same target with docking proposals mixed in: Q at both endpoints must keep it exact.
+        let dock = DockSettings {
+            components: vec![Pose {
+                position: [2.4, 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            }],
+            sigma_translation: 0.3,
+            sigma_rotation: 0.2,
+            uniform_weight: 0.3,
+        };
+        let mut hist = vec![0u64; bins];
+        for t in 0..burn + n {
+            if t % 2 == 0 {
+                mc.step_dock(&mut rng, &dock).unwrap();
+            } else {
+                mc.step(&mut rng, mv).unwrap();
+            }
+            if t >= burn {
+                let d = norm(mc.poses()[1].position);
+                hist[(((d - lo) / (hi - lo) * bins as f64) as usize).min(bins - 1)] += 1;
+            }
+        }
+        assert!(
+            mc.stats.dock_accepted > 10_000,
+            "docking must be accepted: {:?}",
+            mc.stats
+        );
+        for k in 0..bins {
+            let p = hist[k] as f64 / n as f64;
+            eprintln!("dock bin {k:2}: sampled {p:.4} expected {:.4}", expect[k]);
+            assert!(
+                (p - expect[k]).abs() < 2.5e-3,
+                "dock bin {k}: sampled {p:.4}, expected {:.4}",
+                expect[k]
+            );
+        }
     }
 }

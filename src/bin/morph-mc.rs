@@ -140,6 +140,24 @@ fn start_state(
     let mut rng = StdRng::seed_from_u64(seed ^ 0x5eed_5eed);
     let mut poses = seedp.clone();
     let mut placed: Vec<Placed> = poses.iter().map(|&p| Placed::new(p)).collect();
+    // Optional free bodies at given poses (recentred seed frame), e.g. lattice sites.
+    if let Some(v) = cfg.get("placed_free_poses") {
+        let given: Vec<Pose> = serde_json::from_value(v.clone())?;
+        ensure!(
+            given.len() <= free_bodies,
+            "more placed free poses than free bodies"
+        );
+        for p in given {
+            let pl = Placed::new(p);
+            ensure!(wall.contains(p), "placed free pose outside the wall");
+            ensure!(
+                !placed.iter().any(|o| tree.overlaps(&pl, o)),
+                "placed free pose overlaps"
+            );
+            poses.push(p);
+            placed.push(pl);
+        }
+    }
     while poses.len() < seed_count + free_bodies {
         let x: [f64; 3] = std::array::from_fn(|_| (2. * rng.random::<f64>() - 1.) * radius);
         let q: [f64; 4] = std::array::from_fn(|_| StandardNormal.sample(&mut rng));

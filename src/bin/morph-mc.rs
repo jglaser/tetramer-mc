@@ -10,7 +10,7 @@ use std::{fs, io::Write, path::PathBuf, time::Instant};
 use tetramer_mc::{
     geometry::{Placed, Shape, SphereTree},
     math::{Pose, norm, sub},
-    morph_mc::{DockSettings, MorphMc, MoveSettings, SquareWell},
+    morph_mc::{ChargeGroup, DockSettings, LikeCharge, MorphMc, MoveSettings, SquareWell},
     solvation::{GaussConvention, SolvationModel},
     spherical::Container,
 };
@@ -100,6 +100,15 @@ enum Cmd {
         dock_sigma_rotation_degrees: f64,
         #[arg(long, default_value_t = 0.5)]
         dock_uniform_weight: f64,
+        /// JSON list of charged groups {atoms, sign, fraction} for the like-charge penalty.
+        #[arg(long)]
+        charge_groups: Option<PathBuf>,
+        /// kT per pair of full like charges in contact (requires --charge-groups).
+        #[arg(long, default_value_t = 0.)]
+        like_charge_weight: f64,
+        /// Closest atom-centre distance for a like-charge contact, A.
+        #[arg(long, default_value_t = 5.0)]
+        like_charge_cutoff: f64,
         #[arg(long)]
         sweeps: usize,
         #[arg(long, default_value_t = 50)]
@@ -423,6 +432,9 @@ fn main() -> Result<()> {
             dock_sigma_translation,
             dock_sigma_rotation_degrees,
             dock_uniform_weight,
+            charge_groups,
+            like_charge_weight,
+            like_charge_cutoff,
             sweeps,
             sample_every,
             seed,
@@ -443,7 +455,7 @@ fn main() -> Result<()> {
             let mut rng = StdRng::seed_from_u64(seed);
             let model = hard_sphere(n, !no_solvation);
             let t0 = Instant::now();
-            let mut mc = MorphMc::new(
+            let mc = MorphMc::new(
                 tree,
                 wall,
                 model,
@@ -451,9 +463,24 @@ fn main() -> Result<()> {
                 poses,
                 fixed,
             )?;
+            ensure!(
+                like_charge_weight == 0. || charge_groups.is_some(),
+                "--like-charge-weight needs --charge-groups"
+            );
+            let groups: Vec<ChargeGroup> = match &charge_groups {
+                Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+                None => Vec::new(),
+            };
+            let mut mc = mc.with_like_charge(LikeCharge {
+                weight: like_charge_weight,
+                cutoff: like_charge_cutoff,
+                groups,
+            })?;
             let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
+                "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,
+                "like_charge_cutoff": like_charge_cutoff,
                 "sample_every": sample_every, "seed": seed,
                 "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",
                 "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well; exact hard cores and wall"});
@@ -532,7 +559,7 @@ fn main() -> Result<()> {
                         log,
                         "{}",
                         json!({"sweep": sweep, "seconds": t0.elapsed().as_secs_f64(),
-                        "solvation": mc.solvation_energy(), "well": mc.well_energy(),
+                        "solvation": mc.solvation_energy(), "well": mc.well_energy(), "like_charge": mc.like_energy(),
                         "attempts": s.attempts, "accepted": s.accepted, "hard_rejected": s.hard_rejected,
                         "wall_rejected": s.wall_rejected, "reinsertion_attempts": s.reinsertion_attempts,
                         "reinsertion_accepted": s.reinsertion_accepted, "dock_attempts": s.dock_attempts, "dock_accepted": s.dock_accepted})
@@ -566,7 +593,8 @@ fn main() -> Result<()> {
                 out.join("final_check.json"),
                 serde_json::to_string_pretty(&json!({
                 "solvation_cached": mc.solvation_energy(), "solvation_recomputed": sf,
-                "well_cached": mc.well_energy(), "well_recomputed": sw}))?,
+                "well_cached": mc.well_energy(), "well_recomputed": sw,
+                "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like()}))?,
             )?;
         }
     }

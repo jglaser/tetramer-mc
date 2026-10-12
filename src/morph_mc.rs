@@ -28,6 +28,26 @@ pub struct SquareWell {
     pub width: f64,
 }
 
+/// A charged group of the body template: atom indices, sign and fractional charge.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ChargeGroup {
+    pub atoms: Vec<usize>,
+    pub sign: i8,
+    pub fraction: f64,
+}
+
+/// Like-charge contact penalty:
+///   + weight * sum f_g f_h over like-signed groups g, h on different bodies
+///     whose closest atom centres are nearer than `cutoff`.
+#[derive(Clone, Debug, Default)]
+pub struct LikeCharge {
+    /// kT per pair of full like charges in contact.
+    pub weight: f64,
+    /// Closest atom-centre distance for contact, A.
+    pub cutoff: f64,
+    pub groups: Vec<ChargeGroup>,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct MoveSettings {
     pub translation: f64,
@@ -77,6 +97,11 @@ pub struct MorphMc {
     fixed: Vec<bool>,
     /// Square-well atom pairs between different bodies, each pair once.
     pair_count: i64,
+    like: LikeCharge,
+    /// Largest distance of a charged-group atom from the body origin.
+    charge_extent: f64,
+    /// sum f_g f_h over like-charge contacts between different bodies, each pair once.
+    like_sum: f64,
     pub stats: MoveStats,
 }
 
@@ -115,6 +140,9 @@ impl MorphMc {
             placed,
             fixed,
             pair_count: 0,
+            like: LikeCharge::default(),
+            charge_extent: 0.,
+            like_sum: 0.,
             stats: MoveStats::default(),
         };
         for (b, &p) in s.poses.iter().enumerate() {
@@ -136,8 +164,80 @@ impl MorphMc {
         Ok(s)
     }
 
+    /// Switch on the like-charge contact penalty.
+    pub fn with_like_charge(mut self, like: LikeCharge) -> Result<Self> {
+        ensure!(
+            like.weight.is_finite() && like.cutoff >= 0.,
+            "invalid like-charge penalty"
+        );
+        for g in &like.groups {
+            ensure!(
+                !g.atoms.is_empty()
+                    && g.atoms.iter().all(|&i| i < self.centers.len())
+                    && (g.sign == 1 || g.sign == -1)
+                    && g.fraction.is_finite(),
+                "invalid charge group {g:?}"
+            );
+        }
+        self.charge_extent = like
+            .groups
+            .iter()
+            .flat_map(|g| g.atoms.iter().map(|&i| norm(self.centers[i])))
+            .fold(0., f64::max);
+        self.like = like;
+        let mut sum = 0.;
+        for a in 0..self.poses.len() {
+            sum += self.like_pairs(a, self.poses[a]);
+        }
+        self.like_sum = sum / 2.;
+        Ok(self)
+    }
+
     pub fn poses(&self) -> &[Pose] {
         &self.poses
+    }
+    pub fn like_energy(&self) -> f64 {
+        self.like.weight * self.like_sum
+    }
+
+    /// sum f_g f_h over like-charge contacts between body `b` placed at `p` and all others.
+    pub fn like_pairs(&self, b: usize, p: Pose) -> f64 {
+        if self.like.weight == 0. || self.like.groups.is_empty() {
+            return 0.;
+        }
+        let cut = self.like.cutoff;
+        let reach = 2. * self.charge_extent + cut;
+        let rb = rotation(p.orientation);
+        let mut sum = 0.;
+        for (c, q) in self.poses.iter().enumerate() {
+            if c == b || norm(sub(q.position, p.position)) > reach {
+                continue;
+            }
+            let rct = transpose(rotation(q.orientation));
+            for g in &self.like.groups {
+                // Atoms of group g of b in the frame of body c.
+                let y: Vec<Vec3> = g
+                    .atoms
+                    .iter()
+                    .map(|&i| matvec(rct, sub(add(matvec(rb, self.centers[i]), p.position), q.position)))
+                    .collect();
+                if y.iter().all(|&v| norm(v) > self.charge_extent + cut) {
+                    continue;
+                }
+                for h in &self.like.groups {
+                    if h.sign == g.sign
+                        && y.iter().any(|&v| {
+                            h.atoms
+                                .iter()
+                                .any(|&j| norm(sub(self.centers[j], v)) < cut)
+                        })
+                    {
+                        sum += g.fraction * h.fraction;
+                    }
+                }
+            }
+        }
+        sum
     }
     pub fn solvation_energy(&self) -> f64 {
         self.solv.energy()
@@ -238,12 +338,14 @@ impl MorphMc {
         }
         let dp = self.well_pairs(b, new) as i64 - self.well_pairs(b, old) as i64;
         let d_well = -self.well.epsilon * dp as f64;
+        let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
         let update = self.solv.propose(&[(b, new)])?;
-        let de = update.delta + d_well;
+        let de = update.delta + d_well + self.like.weight * dl;
         ensure!(de.is_finite(), "nonfinite energy change");
         if de <= 0. || rng.random::<f64>() < (-de).exp() {
             self.solv.commit(update);
             self.pair_count += dp;
+            self.like_sum += dl;
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
             self.stats.accepted += 1;
@@ -409,13 +511,15 @@ impl MorphMc {
         }
         let dp = self.well_pairs(b, new) as i64 - self.well_pairs(b, old) as i64;
         let d_well = -self.well.epsilon * dp as f64;
+        let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
         let update = self.solv.propose(&[(b, new)])?;
         let log_ratio = self.dock_log_density(b, old, d) - self.dock_log_density(b, new, d);
-        let a = -(update.delta + d_well) + log_ratio;
+        let a = -(update.delta + d_well + self.like.weight * dl) + log_ratio;
         ensure!(!a.is_nan(), "NaN docking acceptance");
         if a >= 0. || rng.random::<f64>() < a.exp() {
             self.solv.commit(update);
             self.pair_count += dp;
+            self.like_sum += dl;
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
             self.stats.accepted += 1;
@@ -432,6 +536,14 @@ impl MorphMc {
             pairs += self.well_pairs(a, self.poses[a]) as f64;
         }
         (self.solv.recompute(), -self.well.epsilon * pairs / 2.)
+    }
+
+    /// Recompute the like-charge energy from scratch (for checks).
+    pub fn recompute_like(&self) -> f64 {
+        let sum: f64 = (0..self.poses.len())
+            .map(|a| self.like_pairs(a, self.poses[a]))
+            .sum();
+        self.like.weight * sum / 2.
     }
 }
 
@@ -593,6 +705,127 @@ mod tests {
             );
         }
     }
+    /// Two balls, each carrying one like-charged group: the penalty is a step
+    /// weight f^2 [d < cutoff] on top of solvation and well; local and docking moves.
+    #[test]
+    fn like_charge_two_ball_distribution_is_exact() {
+        let r = 1.0;
+        let probe = 1.4;
+        let shape = Shape {
+            name: "ball".into(),
+            volume: 4. / 3. * std::f64::consts::PI,
+            atoms: vec![Atom {
+                center: [0.; 3],
+                radius: r,
+            }],
+        };
+        let tree = SphereTree::new(shape).unwrap();
+        let wall = Container::new(7.0, &tree).unwrap();
+        let model = SolvationModel {
+            probe,
+            pressure: 0.209,
+            coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+            atom_types: vec![0],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 1.2,
+            width: 0.6,
+        };
+        let like = LikeCharge {
+            weight: 2.5,
+            cutoff: 3.4,
+            groups: vec![ChargeGroup {
+                atoms: vec![0],
+                sign: 1,
+                fraction: 0.8,
+            }],
+        };
+        let start = vec![
+            Pose {
+                position: [0.; 3],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [4., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+        ];
+        let mut mc = MorphMc::new(tree, wall, model.clone(), well, start, vec![true, false])
+            .unwrap()
+            .with_like_charge(like.clone())
+            .unwrap();
+        let energy = |d: f64| {
+            let rr = r + probe;
+            let one = union_measures(&[[0.; 3]], &[rr]).unwrap();
+            let two = union_measures(&[[0.; 3], [d, 0., 0.]], &[rr, rr]).unwrap();
+            let c = model.coefficients[0];
+            let f = |m: &crate::morphometry::UnionMeasures| {
+                model.pressure * m.volume + c[0] * m.area + c[1] * m.mean + c[2] * m.gauss
+            };
+            let sw = if d < 2. * r + well.width {
+                -well.epsilon
+            } else {
+                0.
+            };
+            let lc = if d < like.cutoff {
+                like.weight * 0.64
+            } else {
+                0.
+            };
+            f(&two) - 2. * f(&one) + sw + lc
+        };
+        let (lo, hi) = (2. * r, 7.0 - r);
+        let bins = 20;
+        let mut expect = vec![0.; bins];
+        let fine = 4000;
+        for k in 0..fine {
+            let d = lo + (k as f64 + 0.5) * (hi - lo) / fine as f64;
+            expect[((d - lo) / (hi - lo) * bins as f64) as usize] += d * d * (-energy(d)).exp();
+        }
+        let z: f64 = expect.iter().sum();
+        expect.iter_mut().for_each(|e| *e /= z);
+        let mv = MoveSettings {
+            translation: 0.6,
+            rotation: 0.3,
+            reinsertion_probability: 0.3,
+        };
+        let dock = DockSettings {
+            learned: None,
+            components: vec![Pose {
+                position: [2.4, 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            }],
+            sigma_translation: 0.3,
+            sigma_rotation: 0.2,
+            uniform_weight: 0.3,
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let mut hist = vec![0u64; bins];
+        let (burn, n) = (5_000, 600_000);
+        for t in 0..burn + n {
+            if t % 2 == 0 {
+                mc.step_dock(&mut rng, &dock).unwrap();
+            } else {
+                mc.step(&mut rng, mv).unwrap();
+            }
+            if t >= burn {
+                let d = norm(mc.poses()[1].position);
+                hist[(((d - lo) / (hi - lo) * bins as f64) as usize).min(bins - 1)] += 1;
+            }
+        }
+        assert!((mc.recompute_like() - mc.like_energy()).abs() < 1e-9);
+        for k in 0..bins {
+            let p = hist[k] as f64 / n as f64;
+            eprintln!("like bin {k:2}: sampled {p:.4} expected {:.4}", expect[k]);
+            assert!(
+                (p - expect[k]).abs() < 2.5e-3,
+                "like bin {k}: sampled {p:.4}, expected {:.4}",
+                expect[k]
+            );
+        }
+    }
+
     /// Docking from a learned relative-pose mixture (exact independent draw and density over
     /// all other bodies as anchors) keeps the analytic two-ball distance distribution.
     #[test]

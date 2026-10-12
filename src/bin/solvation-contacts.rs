@@ -29,6 +29,9 @@ struct Args {
     /// Coefficients: harano (octanol -> water, typed) or hard-sphere (White Bear II).
     #[arg(long, default_value = "harano")]
     model: String,
+    /// Solvent (probe) radius for --model measures.
+    #[arg(long, default_value_t = 1.4)]
+    probe: f64,
 }
 
 fn main() -> Result<()> {
@@ -71,6 +74,15 @@ fn main() -> Result<()> {
                     probe: 1.4,
                     pressure: 0.2090,
                     coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+                    atom_types: vec![0; centers.len()],
+                    gauss_convention: GaussConvention::PatchGaussBonnet,
+                },
+                // Unit coefficients: the per-term columns are the raw measure changes
+                // dA, dM, dX = 4 pi dchi and dV of the accessible union at --probe.
+                "measures" => SolvationModel {
+                    probe: a.probe,
+                    pressure: 1.,
+                    coefficients: vec![[1., 1., 1.]],
                     atom_types: vec![0; centers.len()],
                     gauss_convention: GaussConvention::PatchGaussBonnet,
                 },

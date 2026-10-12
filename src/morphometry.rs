@@ -93,6 +93,10 @@ pub struct BallMeasures {
     pub gauss: f64,
     /// Inflation (Steiner) mean curvature, edges weighted by tan(psi/2); diagnostic.
     pub mean_steiner: f64,
+    /// Exposed moment int_E n dOmega on the unit sphere. Under a rigid motion that
+    /// keeps the ball's neighbourhood, it rotates and only `volume` changes:
+    /// volume = (r^3 |E| + r^2 c . moment) / 3.
+    pub moment: Vec3,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -152,6 +156,7 @@ pub fn ball_measures(c: Vec3, r: f64, neighbours: &[(Vec3, f64)]) -> BallMeasure
             mean: r * e,
             gauss: e,
             mean_steiner: r * e,
+            moment: [0.; 3],
         };
     }
     let largest = caps
@@ -261,6 +266,7 @@ pub fn ball_measures(c: Vec3, r: f64, neighbours: &[(Vec3, f64)]) -> BallMeasure
         mean: r * area - edge_mean,
         gauss: area - geodesic + vertex,
         mean_steiner: r * area - edge_steiner,
+        moment,
     }
 }
 

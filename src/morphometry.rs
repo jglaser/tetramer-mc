@@ -90,7 +90,18 @@ pub struct BallMeasures {
     pub volume: f64,
     pub area: f64,
     pub mean: f64,
+    /// Patch Gauss-Bonnet share of the Gaussian curvature,
+    /// gauss = gauss_face + gauss_edge + gauss_vertex = 2 pi chi(E) - (pi/3) corners.
     pub gauss: f64,
+    /// Face part |E| (area on the unit sphere): owned by this ball alone.
+    pub gauss_face: f64,
+    /// Own boundary arcs: minus the geodesic curvature integral, -sum cos(beta) dt.
+    pub gauss_edge: f64,
+    /// Own corners: sum (theta - pi/3), the equal three-way split of each vertex.
+    pub gauss_vertex: f64,
+    /// Akopyan-Edelsbrunner (AlphaMol) share: face, half of each arc's total edge
+    /// curvature, and the circumcentre split of each corner's normal triangle.
+    pub gauss_alphamol: f64,
     /// Inflation (Steiner) mean curvature, edges weighted by tan(psi/2); diagnostic.
     pub mean_steiner: f64,
     /// Exposed moment int_E n dOmega on the unit sphere. Under a rigid motion that
@@ -155,6 +166,10 @@ pub fn ball_measures(c: Vec3, r: f64, neighbours: &[(Vec3, f64)]) -> BallMeasure
             area: r * r * e,
             mean: r * e,
             gauss: e,
+            gauss_face: e,
+            gauss_edge: 0.,
+            gauss_vertex: 0.,
+            gauss_alphamol: e,
             mean_steiner: r * e,
             moment: [0.; 3],
         };
@@ -168,6 +183,7 @@ pub fn ball_measures(c: Vec3, r: f64, neighbours: &[(Vec3, f64)]) -> BallMeasure
     let mut area = 0.;
     let mut moment = [0.; 3];
     let (mut edge_mean, mut edge_steiner, mut geodesic, mut vertex) = (0., 0., 0., 0.);
+    let (mut edge_equal, mut vertex_cc) = (0., 0.);
     let mut any_arc = false;
     for (k, cap) in caps.iter().enumerate() {
         let (u, a) = (cap.u, cap.a);
@@ -217,8 +233,35 @@ pub fn ball_measures(c: Vec3, r: f64, neighbours: &[(Vec3, f64)]) -> BallMeasure
             let th = (dot(pk, pm) / (norm(pk) * norm(pm))).clamp(-1., 1.).acos();
             0.5 * (th - PI / 3.)
         };
+        // Akopyan-Edelsbrunner corner share: the vertex curvature is the area of the
+        // spherical triangle of the outward normals; ball i gets the two half triangles
+        // (z, n_k, n_i)/2 + (z, n_i, n_j)/2 at the circumcentre z. Each corner is the
+        // endpoint of two arcs of this patch, so each endpoint carries half of it.
+        let corner_cc = |tc: f64, m: usize| {
+            let ni = point(tc);
+            let p = add(c, scale(ni, r));
+            let (cj, rj) = neighbours[cap.j];
+            let (cm, rm) = neighbours[caps[m].j];
+            let mut nj = scale(sub(p, cj), 1. / rj);
+            let mut nm = scale(sub(p, cm), 1. / rm);
+            if dot(ni, cross(nj, nm)) < 0. {
+                std::mem::swap(&mut nj, &mut nm);
+            }
+            let tri = |a: Vec3, b: Vec3, cc: Vec3| {
+                2. * dot(a, cross(b, cc)).atan2(1. + dot(a, b) + dot(b, cc) + dot(cc, a))
+            };
+            let mut z = cross(sub(nj, ni), sub(nm, ni));
+            z = scale(z, 1. / norm(z));
+            if dot(z, add(add(ni, nj), nm)) < 0. {
+                z = scale(z, -1.);
+            }
+            0.25 * (tri(z, nm, ni) + tri(z, ni, nj))
+        };
         let (cj, rj) = neighbours[cap.j];
         let dd = norm(sub(cj, c));
+        // Partner side of the same physical arc, for the equal edge split.
+        let aj = (rj * rj + dd * dd - r * r) / (2. * rj * dd);
+        let sj = (1. - aj * aj).max(0.).sqrt();
         let psi = ((r * r + rj * rj - dd * dd) / (2. * r * rj))
             .clamp(-1., 1.)
             .acos();
@@ -250,8 +293,11 @@ pub fn ball_measures(c: Vec3, r: f64, neighbours: &[(Vec3, f64)]) -> BallMeasure
             edge_mean += 0.25 * psi * length;
             edge_steiner += 0.5 * (psi / 2.).tan() * length;
             geodesic += a * (t_hi - t_lo);
+            let partner = if sj > 0. { aj * length / (rj * sj) } else { 0. };
+            edge_equal -= 0.5 * (a * (t_hi - t_lo) + partner);
             if let (Some(ml), Some(mh)) = (m_lo, m_hi) {
                 vertex += corner(t_lo, ml) + corner(t_hi, mh);
+                vertex_cc += corner_cc(t_lo, ml) + corner_cc(t_hi, mh);
             }
         }
     }
@@ -265,6 +311,10 @@ pub fn ball_measures(c: Vec3, r: f64, neighbours: &[(Vec3, f64)]) -> BallMeasure
         area: r * r * area,
         mean: r * area - edge_mean,
         gauss: area - geodesic + vertex,
+        gauss_face: area,
+        gauss_edge: -geodesic,
+        gauss_vertex: vertex,
+        gauss_alphamol: area + edge_equal + vertex_cc,
         mean_steiner: r * area - edge_steiner,
         moment,
     }
@@ -393,6 +443,17 @@ mod tests {
             ));
             let chi = m0.gauss / (4. * PI);
             assert!((chi - chi.round()).abs() < 1e-6, "non-integer chi {chi}");
+            let alpha: f64 = m0.balls.iter().map(|b| b.gauss_alphamol).sum();
+            assert!(
+                (alpha - m0.gauss).abs() < 1e-6 * (1. + m0.gauss.abs()),
+                "AlphaMol shares {alpha} vs {}",
+                m0.gauss
+            );
+            // Patch Gauss-Bonnet: each ball's share is 2 pi chi(E_i) - (pi/3) corners.
+            for b in &m0.balls {
+                let k = b.gauss / (PI / 3.);
+                assert!((k - k.round()).abs() < 1e-6, "ball Gaussian share {k} pi/3");
+            }
         }
     }
 

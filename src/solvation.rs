@@ -26,6 +26,21 @@ pub struct SolvationModel {
     /// [sigma, kappa, kbar] per type.
     pub coefficients: Vec<[f64; 3]>,
     pub atom_types: Vec<usize>,
+    /// Which local share of the Gaussian curvature each atom carries.
+    pub gauss_convention: GaussConvention,
+}
+
+/// Local per-atom shares of the integrated Gaussian curvature. The union total is
+/// 4 pi chi only for `PatchGaussBonnet` (faces, own arcs and corners); `Face` keeps
+/// only the exposed patch |E_i|, and `FaceEdge` adds the own-arc geodesic term.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GaussConvention {
+    #[default]
+    PatchGaussBonnet,
+    /// Akopyan and Edelsbrunner (2020), as implemented in AlphaMol (P. Koehl).
+    AlphaMol,
+    FaceEdge,
+    Face,
 }
 
 /// Harano, Roth, Chiba, J. Comput. Chem. 34, 1969 (2013), Table 1: octanol -> water
@@ -61,11 +76,18 @@ impl SolvationModel {
             pressure: 0.,
             coefficients,
             atom_types,
+            gauss_convention: GaussConvention::PatchGaussBonnet,
         })
     }
     fn ball_energy(&self, atom: usize, b: &BallMeasures) -> f64 {
         let c = self.coefficients[self.atom_types[atom]];
-        c[0] * b.area + c[1] * b.mean + c[2] * b.gauss
+        let x = match self.gauss_convention {
+            GaussConvention::PatchGaussBonnet => b.gauss,
+            GaussConvention::AlphaMol => b.gauss_alphamol,
+            GaussConvention::FaceEdge => b.gauss_face + b.gauss_edge,
+            GaussConvention::Face => b.gauss_face,
+        };
+        c[0] * b.area + c[1] * b.mean + c[2] * x
     }
 }
 
@@ -345,6 +367,7 @@ mod tests {
             pressure: 0.21,
             coefficients: vec![[0.3, -0.2, 0.05], [-0.4, 0.3, -0.1], [0.1, 0.15, 0.2]],
             atom_types: t.clone(),
+            gauss_convention: GaussConvention::PatchGaussBonnet,
         };
         let box_l = [13.; 3];
         let poses: Vec<Pose> = (0..6).map(|_| uniform_pose(&mut rng, box_l)).collect();

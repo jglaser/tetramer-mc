@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use std::{fs, io::Write, path::PathBuf, time::Instant};
 use tetramer_mc::{
     geometry::{Placed, Shape, SphereTree},
-    math::{Pose, norm, sub},
+    math::{Pose, cayley, matmul, matvec, norm, quaternion, sub, transpose},
     morph_mc::{
         ChargeGroup, DockSettings, LikeCharge, MemorySettings, MorphMc, MoveSettings, SquareWell,
     },
@@ -67,6 +67,37 @@ enum Cmd {
         like_charge_weight: f64,
         #[arg(long, default_value_t = 5.0)]
         like_charge_cutoff: f64,
+        /// Docking from the contact library (and memory) on this fraction of the steps; the
+        /// docking and memory terms do not depend on eps, so swaps are unchanged.
+        #[arg(long, default_value_t = 0.)]
+        dock_probability: f64,
+        #[arg(long, default_value_t = 2.8)]
+        dock_library_gap: f64,
+        #[arg(long, default_value_t = 0.15)]
+        dock_sigma_translation: f64,
+        #[arg(long, default_value_t = 1.0)]
+        dock_sigma_rotation_degrees: f64,
+        #[arg(long, default_value_t = 0.5)]
+        dock_uniform_weight: f64,
+        /// Poisson memory per replica (see `run`); > 0 switches it on (needs docking).
+        #[arg(long, default_value_t = 0.)]
+        memory_lambda_floor: f64,
+        #[arg(long, default_value_t = 0.)]
+        memory_lambda: f64,
+        #[arg(long, default_value_t = 0.)]
+        memory_lambda_prior: f64,
+        #[arg(long)]
+        memory_prior_model: Option<PathBuf>,
+        #[arg(long, default_value_t = 0.005)]
+        memory_death: f64,
+        #[arg(long, default_value_t = 0.3)]
+        memory_sigma_translation: f64,
+        #[arg(long, default_value_t = 3.0)]
+        memory_sigma_rotation_degrees: f64,
+        #[arg(long, default_value_t = 20.0)]
+        memory_floor_sigma: f64,
+        #[arg(long, default_value_t = 1)]
+        memory_refresh_per_sweep: usize,
         #[arg(long, default_value_t = 500)]
         sample_every: usize,
         #[arg(long, default_value_t = 1)]
@@ -124,6 +155,13 @@ enum Cmd {
         /// Floor intensity (expected number of floor slots); > 0 switches memory on.
         #[arg(long, default_value_t = 0.)]
         memory_lambda_floor: f64,
+        /// Prior intensity: expected number of slots drawn from the prior centres.
+        #[arg(long, default_value_t = 0.)]
+        memory_lambda_prior: f64,
+        /// Frozen relative-pose model (e.g. a blind contact map) whose component centres form
+        /// the memory prior.
+        #[arg(long)]
+        memory_prior_model: Option<PathBuf>,
         /// Death probability of each slot per refresh (memory lifetime ~ 1 / death refreshes).
         #[arg(long, default_value_t = 0.01)]
         memory_death: f64,
@@ -155,6 +193,39 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+}
+
+/// Centres and weights of the (virtual, reciprocal-split) components of a frozen relative-pose
+/// model, as a memory prior: t = anchor + mean[0..3], R = cayley(mean[3..6] / L) R_anchor;
+/// an inverse branch carries half the component weight at the inverse pose.
+fn prior_from_model(model: &PathBuf, shape: &PathBuf, radius: f64) -> Result<Vec<(Pose, f64)>> {
+    let raw = fs::read(model)?;
+    let sha = tetramer_mc::simulation::hash_bytes(&fs::read(shape)?);
+    let frozen = tetramer_mc::proposal::FrozenRelativePoseProposal::from_json_str_open(
+        std::str::from_utf8(&raw)?,
+        [2. * radius; 3],
+        0.1,
+        &sha,
+    )?;
+    let l = frozen.angular_length();
+    let reciprocal = frozen.reciprocal_components();
+    let mut out = Vec::new();
+    for (i, c) in frozen.component_parameters().iter().enumerate() {
+        let t: [f64; 3] = std::array::from_fn(|k| c.anchor_position[k] + c.mean[k]);
+        let r = matmul(cayley(std::array::from_fn(|k| c.mean[k + 3] / l)), c.anchor_rotation);
+        let pose = Pose { position: t, orientation: quaternion(r) };
+        if reciprocal[i] {
+            out.push((pose, c.weight / 2.));
+            let ri = transpose(r);
+            out.push((
+                Pose { position: matvec(ri, t).map(|x| -x), orientation: quaternion(ri) },
+                c.weight / 2.,
+            ));
+        } else {
+            out.push((pose, c.weight));
+        }
+    }
+    Ok(out)
 }
 
 fn shape_tree(path: &PathBuf) -> Result<SphereTree> {
@@ -296,6 +367,20 @@ fn main() -> Result<()> {
             charge_groups,
             like_charge_weight,
             like_charge_cutoff,
+            dock_probability,
+            dock_library_gap,
+            dock_sigma_translation,
+            dock_sigma_rotation_degrees,
+            dock_uniform_weight,
+            memory_lambda_floor,
+            memory_lambda,
+            memory_lambda_prior,
+            memory_prior_model,
+            memory_death,
+            memory_sigma_translation,
+            memory_sigma_rotation_degrees,
+            memory_floor_sigma,
+            memory_refresh_per_sweep,
             sample_every,
             seed,
             out,
@@ -320,6 +405,21 @@ fn main() -> Result<()> {
                 .collect();
             let mut mcs = Vec::new();
             let mut radius = 0.;
+            let mut rngs: Vec<StdRng> = (0..replicas)
+                .map(|k| StdRng::seed_from_u64(seed * 7919 + k as u64))
+                .collect();
+            ensure!(
+                memory_lambda_floor == 0. || dock_probability > 0.,
+                "rex memory needs docking (--dock-probability > 0)"
+            );
+            let dock = DockSettings {
+                learned: None,
+                library: true,
+                components: Vec::new(),
+                sigma_translation: dock_sigma_translation,
+                sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
+                uniform_weight: dock_uniform_weight,
+            };
             for k in 0..replicas {
                 let (poses, fixed, r) = start_state(
                     &tree,
@@ -347,10 +447,31 @@ fn main() -> Result<()> {
                     cutoff: like_charge_cutoff,
                     groups: groups.clone(),
                 })?);
+                if dock_probability > 0. {
+                    let mc = mcs.pop().expect("replica");
+                    let mut mc = mc.with_contact_library(dock_library_gap)?;
+                    if memory_lambda_floor > 0. {
+                        let prior = match &memory_prior_model {
+                            Some(f) => prior_from_model(f, &shape, r)?,
+                            None => Vec::new(),
+                        };
+                        mc = mc.with_memory(
+                            MemorySettings {
+                                lambda_floor: memory_lambda_floor,
+                                lambda_prior: memory_lambda_prior,
+                                lambda: memory_lambda,
+                                death: memory_death,
+                                sigma_translation: memory_sigma_translation,
+                                sigma_rotation: memory_sigma_rotation_degrees.to_radians(),
+                                floor_sigma: memory_floor_sigma,
+                            },
+                            prior,
+                            &mut rngs[k],
+                        )?;
+                    }
+                    mcs.push(mc);
+                }
             }
-            let mut rngs: Vec<StdRng> = (0..replicas)
-                .map(|k| StdRng::seed_from_u64(seed * 7919 + k as u64))
-                .collect();
             let mut master = StdRng::seed_from_u64(seed ^ 0xabcdef);
             // level -> replica holding it
             let mut holder: Vec<usize> = (0..replicas).collect();
@@ -359,6 +480,15 @@ fn main() -> Result<()> {
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "ladder": ladder, "width": width, "sweeps": sweeps, "swap_every": swap_every,
                 "sample_every": sample_every, "seed": seed, "charge_groups": charge_groups,
+                "dock_probability": dock_probability, "dock_library_gap": dock_library_gap,
+                "dock_sigma_translation": dock_sigma_translation,
+                "dock_sigma_rotation_degrees": dock_sigma_rotation_degrees,
+                "dock_uniform_weight": dock_uniform_weight, "memory_lambda_floor": memory_lambda_floor,
+                "memory_lambda": memory_lambda, "memory_lambda_prior": memory_lambda_prior,
+                "memory_prior_model": memory_prior_model, "memory_death": memory_death,
+                "memory_sigma_translation": memory_sigma_translation,
+                "memory_sigma_rotation_degrees": memory_sigma_rotation_degrees,
+                "memory_floor_sigma": memory_floor_sigma, "memory_refresh_per_sweep": memory_refresh_per_sweep,
                 "like_charge_weight": like_charge_weight, "like_charge_cutoff": like_charge_cutoff,
                 "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",
                 "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well; exact hard cores and wall"});
@@ -416,6 +546,7 @@ fn main() -> Result<()> {
                 if sweep >= sweeps {
                     break;
                 }
+                let dock = &dock;
                 std::thread::scope(|sc| -> Result<()> {
                     let handles: Vec<_> = mcs
                         .iter_mut()
@@ -423,6 +554,10 @@ fn main() -> Result<()> {
                         .map(|(mc, rng)| {
                             sc.spawn(move || -> Result<()> {
                                 for _ in 0..swap_every * free_bodies {
+                                    if dock_probability > 0. && rng.random::<f64>() < dock_probability {
+                                        mc.step_dock(rng, dock)?;
+                                        continue;
+                                    }
                                     let u = rng.random::<f64>();
                                     let mv = if u < 0.5 {
                                         tiny
@@ -433,6 +568,10 @@ fn main() -> Result<()> {
                                     };
                                     mc.step(rng, mv)?;
                                 }
+                                for _ in 0..swap_every * memory_refresh_per_sweep {
+                                    mc.refresh_memory(rng);
+                                }
+                                mc.recompute_memory();
                                 Ok(())
                             })
                         })
@@ -464,7 +603,8 @@ fn main() -> Result<()> {
                     let (sf, sw) = mc.recompute();
                     json!({"solvation_cached": mc.solvation_energy(), "solvation_recomputed": sf,
                     "well_cached": mc.well_energy(), "well_recomputed": sw,
-                    "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like()})
+                    "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like(),
+                    "memory_sum_relative_error": mc.memory_sum_error()})
                 })
                 .collect();
             fs::write(
@@ -491,6 +631,8 @@ fn main() -> Result<()> {
             dock_library_gap,
             memory_lambda,
             memory_lambda_floor,
+            memory_lambda_prior,
+            memory_prior_model,
             memory_death,
             memory_sigma_translation,
             memory_sigma_rotation_degrees,
@@ -549,15 +691,21 @@ fn main() -> Result<()> {
             let mut rng = StdRng::seed_from_u64(seed);
             if memory_lambda_floor > 0. {
                 ensure!(dock_library, "memory needs --dock-library");
+                let prior = match &memory_prior_model {
+                    Some(f) => prior_from_model(f, &shape, radius)?,
+                    None => Vec::new(),
+                };
                 mc = mc.with_memory(
                     MemorySettings {
                         lambda_floor: memory_lambda_floor,
+                        lambda_prior: memory_lambda_prior,
                         lambda: memory_lambda,
                         death: memory_death,
                         sigma_translation: memory_sigma_translation,
                         sigma_rotation: memory_sigma_rotation_degrees.to_radians(),
                         floor_sigma: memory_floor_sigma,
                     },
+                    prior,
                     &mut rng,
                 )?;
             }
@@ -566,7 +714,8 @@ fn main() -> Result<()> {
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
                 "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,
                 "like_charge_cutoff": like_charge_cutoff, "memory_lambda": memory_lambda,
-                "memory_lambda_floor": memory_lambda_floor, "memory_death": memory_death,
+                "memory_lambda_floor": memory_lambda_floor, "memory_lambda_prior": memory_lambda_prior,
+                "memory_prior_model": memory_prior_model, "memory_death": memory_death,
                 "memory_sigma_translation": memory_sigma_translation,
                 "memory_sigma_rotation_degrees": memory_sigma_rotation_degrees,
                 "memory_floor_sigma": memory_floor_sigma,

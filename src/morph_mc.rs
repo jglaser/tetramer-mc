@@ -49,12 +49,14 @@ pub struct LikeCharge {
 }
 
 /// Finite memory as a Poisson point process of relative poses with intensity
-///   mu_x(m) = lambda_floor floor(m) + lambda sum_e kernel(m; g_e),
+///   mu_x(m) = lambda_floor floor(m) + lambda_prior P(m) + lambda sum_e kernel(m; g_e),
+/// where P(m) = sum_c w_c kernel(m; p_c) is an optional fixed prior (e.g. the centres of a
+/// blind contact map, weights summing to one), independent of x,
 /// where g_e runs over the relative poses of the N current contact entries (both orders),
 /// kernel = normalized Gaussian in translation (sigma_translation) times a Gaussian in
 /// exponential coordinates of the rotation (sigma_rotation <= 20 deg, so its truncation at pi
 /// is below 1e-16), and floor = Gaussian in translation (floor_sigma) times uniform rotation.
-/// Total intensity Lambda(x) = lambda_floor + lambda N. The joint target is
+/// Total intensity Lambda(x) = lambda_floor + lambda_prior + lambda N. The joint target is
 /// pi(x) exp(-Lambda(x)) prod_{m in M} mu_x(m), whose x-marginal is pi. A physical move carries
 /// exp(-lambda (N' - N)) prod_m mu_x'(m) / mu_x(m): a fixed cost per contact formed, and
 /// coupling only to slots that sit on changed contacts. The memory is refreshed at fixed x by
@@ -64,6 +66,7 @@ pub struct LikeCharge {
 #[derive(Clone, Copy, Debug)]
 pub struct MemorySettings {
     pub lambda_floor: f64,
+    pub lambda_prior: f64,
     pub lambda: f64,
     pub death: f64,
     pub sigma_translation: f64,
@@ -74,6 +77,10 @@ pub struct MemorySettings {
 #[derive(Clone, Debug)]
 struct Memory {
     s: MemorySettings,
+    /// Fixed prior centres and normalized weights.
+    prior: Vec<(Pose, f64)>,
+    /// P(m_k) for every slot (independent of x).
+    prior_values: Vec<f64>,
     slots: Vec<Pose>,
     /// S_k = sum over current contact entries of kernel(m_k; g_e).
     sums: Vec<f64>,
@@ -122,12 +129,16 @@ impl MemorySettings {
         let t2 = m.position.iter().map(|x| x * x).sum::<f64>();
         (2. * std::f64::consts::PI * s2).powf(-1.5) * (-t2 / (2. * s2)).exp()
     }
-    /// Log intensity at `m` given its kernel sum over the current contact entries.
-    fn log_mu(&self, m: Pose, sum: f64) -> f64 {
-        (self.lambda_floor * self.floor(m) + self.lambda * sum.max(0.)).ln()
+    /// Log intensity at `m` given its prior value and kernel sum over the contact entries.
+    fn log_mu(&self, m: Pose, prior: f64, sum: f64) -> f64 {
+        (self.lambda_floor * self.floor(m) + self.lambda_prior * prior + self.lambda * sum.max(0.))
+            .ln()
     }
     fn total(&self, entries: usize) -> f64 {
-        self.lambda_floor + self.lambda * entries as f64
+        self.lambda_floor + self.lambda_prior + self.lambda * entries as f64
+    }
+    fn prior_value(&self, prior: &[(Pose, f64)], m: Pose) -> f64 {
+        prior.iter().map(|&(c, w)| w * self.kernel(m, c)).sum()
     }
     /// Number of births: Poisson with the given mean.
     fn poisson(rng: &mut StdRng, mean: f64) -> usize {
@@ -137,10 +148,14 @@ impl MemorySettings {
         let n: f64 = rand_distr::Poisson::new(mean).expect("finite mean").sample(rng);
         n as usize
     }
-    /// Exact draw from mu_x / Lambda(x) given the contact entries of x.
-    fn draw(&self, rng: &mut StdRng, entries: &[Pose]) -> Pose {
+    /// Exact draw from mu_x / Lambda(x) given the contact entries of x and the prior.
+    fn draw(&self, rng: &mut StdRng, entries: &[Pose], prior: &[(Pose, f64)]) -> Pose {
         let normal = |rng: &mut StdRng| -> f64 { StandardNormal.sample(rng) };
-        if entries.is_empty() || rng.random::<f64>() < self.lambda_floor / self.total(entries.len()) {
+        let total = self.total(entries.len());
+        let u = rng.random::<f64>() * total;
+        let use_floor = u < self.lambda_floor || (entries.is_empty() && prior.is_empty());
+        let use_prior = !use_floor && u < self.lambda_floor + self.lambda_prior && !prior.is_empty();
+        if use_floor || (!use_prior && entries.is_empty()) {
             let position: Vec3 = std::array::from_fn(|_| self.floor_sigma * normal(rng));
             let q: [f64; 4] = std::array::from_fn(|_| normal(rng));
             let n = q.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -149,7 +164,20 @@ impl MemorySettings {
                 orientation: q.map(|x| x / n),
             };
         }
-        let g = entries[rng.random_range(0..entries.len())];
+        let g = if use_prior {
+            let mut v = rng.random::<f64>();
+            let mut pick = prior[prior.len() - 1].0;
+            for &(c, w) in prior {
+                if v < w {
+                    pick = c;
+                    break;
+                }
+                v -= w;
+            }
+            pick
+        } else {
+            entries[rng.random_range(0..entries.len())]
+        };
         let w: Vec3 = loop {
             let w: Vec3 = std::array::from_fn(|_| self.sigma_rotation * normal(rng));
             if norm(w) < std::f64::consts::PI {
@@ -405,10 +433,24 @@ impl MorphMc {
 
     /// Switch on finite memory (requires the contact library); the memory starts from an
     /// exact draw of the Poisson process with intensity mu_x.
-    pub fn with_memory(mut self, s: MemorySettings, rng: &mut StdRng) -> Result<Self> {
+    pub fn with_memory(
+        mut self,
+        s: MemorySettings,
+        prior: Vec<(Pose, f64)>,
+        rng: &mut StdRng,
+    ) -> Result<Self> {
         ensure!(self.contact_gap.is_some(), "memory needs with_contact_library");
+        let wsum: f64 = prior.iter().map(|p| p.1).sum();
+        ensure!(
+            prior.iter().all(|p| p.1 >= 0. && p.1.is_finite())
+                && (prior.is_empty() || wsum > 0.)
+                && (s.lambda_prior == 0. || !prior.is_empty()),
+            "invalid memory prior"
+        );
+        let prior: Vec<(Pose, f64)> = prior.into_iter().map(|(c, w)| (c, w / wsum)).collect();
         ensure!(
             s.lambda_floor > 0.
+                && s.lambda_prior >= 0.
                 && s.lambda >= 0.
                 && s.death > 0.
                 && s.death <= 1.
@@ -420,9 +462,12 @@ impl MorphMc {
         );
         let entries = self.library(usize::MAX);
         let n0 = MemorySettings::poisson(rng, s.total(entries.len()));
-        let slots: Vec<Pose> = (0..n0).map(|_| s.draw(rng, &entries)).collect();
+        let slots: Vec<Pose> = (0..n0).map(|_| s.draw(rng, &entries, &prior)).collect();
+        let prior_values = slots.iter().map(|&m| s.prior_value(&prior, m)).collect();
         self.memory = Some(Memory {
             s,
+            prior,
+            prior_values,
             sums: vec![0.; slots.len()],
             slots,
             entries: entries.len(),
@@ -464,20 +509,24 @@ impl MorphMc {
         if let Some(mem) = &mut self.memory {
             let mut slots = Vec::with_capacity(mem.slots.len());
             let mut sums = Vec::with_capacity(mem.slots.len());
-            for (m, sum) in mem.slots.iter().zip(&mem.sums) {
+            let mut prior_values = Vec::with_capacity(mem.slots.len());
+            for ((m, sum), pv) in mem.slots.iter().zip(&mem.sums).zip(&mem.prior_values) {
                 if rng.random::<f64>() >= mem.s.death {
                     slots.push(*m);
                     sums.push(*sum);
+                    prior_values.push(*pv);
                 }
             }
             let births = MemorySettings::poisson(rng, mem.s.death * mem.s.total(entries.len()));
             for _ in 0..births {
-                let m = mem.s.draw(rng, &entries);
+                let m = mem.s.draw(rng, &entries, &mem.prior);
                 sums.push(entries.iter().map(|&g| mem.s.kernel(m, g)).sum());
+                prior_values.push(mem.s.prior_value(&mem.prior, m));
                 slots.push(m);
             }
             mem.slots = slots;
             mem.sums = sums;
+            mem.prior_values = prior_values;
             mem.entries = entries.len();
         }
     }
@@ -523,7 +572,8 @@ impl MorphMc {
                 continue;
             }
             let s_new = (mem.sums[k] - removed + added).max(0.);
-            d += mem.s.log_mu(*m, s_new) - mem.s.log_mu(*m, mem.sums[k]);
+            let pv = mem.prior_values[k];
+            d += mem.s.log_mu(*m, pv, s_new) - mem.s.log_mu(*m, pv, mem.sums[k]);
             sums[k] = s_new;
         }
         (d, sums, n_new, partners)
@@ -1370,8 +1420,17 @@ mod tests {
                 orientation: [1., 0., 0., 0.],
             },
         ];
+        // A fixed prior centre at contact distance exercises the prior term.
+        let prior = vec![(
+            Pose {
+                position: [2.3, 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+            1.,
+        )];
         let mem = MemorySettings {
             lambda_floor: 2.,
+            lambda_prior: 1.,
             lambda: 0.5,
             death: 0.3,
             sigma_translation: 0.3,
@@ -1408,7 +1467,7 @@ mod tests {
             .with_contact_library(0.6)
             .unwrap();
             if with_memory {
-                mc = mc.with_memory(mem, &mut rng).unwrap();
+                mc = mc.with_memory(mem, prior.clone(), &mut rng).unwrap();
             }
             let mut h = vec![0u64; 3 * bins];
             let mut contacts = 0u64;

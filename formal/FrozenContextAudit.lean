@@ -1,0 +1,11 @@
+import ReversibleSampling.FrozenContext
+
+#print axioms ReversibleSampling.frozenAcceptance_measurable
+#print axioms ReversibleSampling.lintegral_frozenProposal
+#print axioms ReversibleSampling.frozen_flow
+#print axioms ReversibleSampling.frozen_mh_accepted_flow_symmetric
+#print axioms ReversibleSampling.frozen_metropolis_hastings_correct
+#print axioms ReversibleSampling.reversible_transport
+#print axioms ReversibleSampling.reversible_const_weight
+#print axioms ReversibleSampling.reversible_finset_sum
+#print axioms ReversibleSampling.random_scan_correct

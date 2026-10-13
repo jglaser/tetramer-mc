@@ -465,6 +465,53 @@ on this host needed `CURL_CA_BUNDLE` set to that path. Download staging used
 `MATHLIB_CACHE_DIR=/tmp/tetramer-formal-mathlib-cache` to limit home-directory
 disk use; these settings affect downloads, not proof checking.
 
+## Context-frozen proposals (contact-library docking)
+
+`ReversibleSampling/FrozenContext.lean` covers Metropolis--Hastings updates of one block of the
+state whose proposal depends on the rest of the state. The state is `Y × Z`: `Y` is the moved
+block (the pose of one rigid body) and `Z` the context (the poses of all other bodies). The
+proposal `frozenProposal κ` draws `y'` from `κ (y, z)` and copies `z`. The kernel `κ` has a
+density `q z y` with respect to a reference measure `μ` on `Y`, and may depend on the context
+`z` in any measurable way; it may be sub-Markov (lost mass is a rejection). The acceptance
+
+\[
+ \alpha((y,z),(y',z))=\min\left(1,\frac{p(y',z)\,q_z(y',y)}{p(y,z)\,q_z(y,y')}\right)
+\]
+
+uses the proposal density of the *same* context in both directions, which is legitimate because
+the move leaves `z` unchanged. With s-finite `μ` on `Y` and `ν` on `Z`, measurable finite
+densities `p` and `q`:
+
+- `frozen_flow` writes the accepted flow from `s` to `t` as the iterated integral
+  `∫ν dz ∫μ dy ∫μ dy' 1_s(y,z) 1_t(y',z) p(y,z) q_z(y,y') α`;
+- `frozen_mh_accepted_flow_symmetric` proves the flow symmetric (Tonelli in the two moved-block
+  variables at fixed context, and `min` symmetry);
+- `frozen_metropolis_hastings_correct` concludes that the completed kernel is Markov,
+  reversible and invariant for `(μ ⊗ ν).withDensity p`.
+
+Composition lemmas cover the sampler's structure: `reversible_transport` carries reversibility
+along a measurable relabelling `X ≃ᵐ Y × Z` (body `b` versus the others);
+`reversible_const_weight` and `reversible_finset_sum` give reversibility of weighted finite
+mixtures, and `random_scan_correct` concludes reversibility and, for a Markov mixture,
+invariance of a random scan over bodies and move types.
+
+Implementation correspondence (`src/morph_mc.rs`, `MorphMc::step_dock` with `library`): `z`
+is the poses of the bodies other than the chosen body `b`; the library is the set of relative
+poses of the current contacts between those bodies (`MorphMc::library(b)`), so `q_z` is the
+uniform-plus-Gaussian mixture over library entries and anchors, a function of `z` alone. The
+Lean result does not certify that the contact test, the library construction, the SE(3)
+Gaussian/Haar density formula, floating-point arithmetic or the random draws are implemented
+correctly. Those obligations are checked empirically by
+`morph_mc::tests::library_docking_matches_local_moves` (three balls; local moves alone versus
+local moves plus library docking agree in all distance histograms and in the contact
+fraction), whose negative controls fail it: dropping the Hastings ratio moves the contact bin
+from 0.560 to 0.623, and letting the library include the moved body's own contacts (so that
+it is no longer a function of `z`) halves the mean contact number (1.85 to 0.88).
+
+Focused check: `lake build ReversibleSampling.FrozenContext`, then
+`lake env lean FrozenContextAudit.lean` (output in `frozen-context-audit.txt`: only `propext`,
+`Classical.choice` and `Quot.sound`).
+
 ## Concrete implementation obligations
 
 `SelectionCorrection.lean` supplies the state-dependent selection bridge for

@@ -10,7 +10,9 @@ use std::{fs, io::Write, path::PathBuf, time::Instant};
 use tetramer_mc::{
     geometry::{Placed, Shape, SphereTree},
     math::{Pose, norm, sub},
-    morph_mc::{ChargeGroup, DockSettings, LikeCharge, MorphMc, MoveSettings, SquareWell},
+    morph_mc::{
+        ChargeGroup, DockSettings, LikeCharge, MemorySettings, MorphMc, MoveSettings, SquareWell,
+    },
     solvation::{GaussConvention, SolvationModel},
     spherical::Container,
 };
@@ -114,6 +116,23 @@ enum Cmd {
         /// Atom-gap threshold of a library contact, A.
         #[arg(long, default_value_t = 2.8)]
         dock_library_gap: f64,
+        /// Finite memory: number of auxiliary relative-pose slots (0: off; needs
+        /// --dock-library). Slots join the docking components.
+        #[arg(long, default_value_t = 0)]
+        memory_slots: usize,
+        #[arg(long, default_value_t = 0.3)]
+        memory_sigma_translation: f64,
+        #[arg(long, default_value_t = 3.0)]
+        memory_sigma_rotation_degrees: f64,
+        /// Weight of the floor density in the memory conditional.
+        #[arg(long, default_value_t = 0.5)]
+        memory_uniform_weight: f64,
+        /// Translation sd of the floor density, A.
+        #[arg(long, default_value_t = 20.0)]
+        memory_floor_sigma: f64,
+        /// Gibbs refreshes of single slots per sweep (memory lifetime ~ slots / refreshes).
+        #[arg(long, default_value_t = 1)]
+        memory_refresh_per_sweep: usize,
         /// JSON list of charged groups {atoms, sign, fraction} for the like-charge penalty.
         #[arg(long)]
         charge_groups: Option<PathBuf>,
@@ -466,6 +485,12 @@ fn main() -> Result<()> {
             dock_uniform_weight,
             dock_library,
             dock_library_gap,
+            memory_slots,
+            memory_sigma_translation,
+            memory_sigma_rotation_degrees,
+            memory_uniform_weight,
+            memory_floor_sigma,
+            memory_refresh_per_sweep,
             charge_groups,
             like_charge_weight,
             like_charge_cutoff,
@@ -486,7 +511,6 @@ fn main() -> Result<()> {
                 seed,
             )?;
             let wall = Container::new(radius, &tree)?;
-            let mut rng = StdRng::seed_from_u64(seed);
             let model = hard_sphere(n, !no_solvation);
             let t0 = Instant::now();
             let mc = MorphMc::new(
@@ -517,11 +541,29 @@ fn main() -> Result<()> {
                 );
                 mc = mc.with_contact_library(dock_library_gap)?;
             }
+            let mut rng = StdRng::seed_from_u64(seed);
+            if memory_slots > 0 {
+                ensure!(dock_library, "--memory-slots needs --dock-library");
+                mc = mc.with_memory(
+                    MemorySettings {
+                        slots: memory_slots,
+                        sigma_translation: memory_sigma_translation,
+                        sigma_rotation: memory_sigma_rotation_degrees.to_radians(),
+                        uniform_weight: memory_uniform_weight,
+                        floor_sigma: memory_floor_sigma,
+                    },
+                    &mut rng,
+                )?;
+            }
             let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
                 "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,
-                "like_charge_cutoff": like_charge_cutoff,
+                "like_charge_cutoff": like_charge_cutoff, "memory_slots": memory_slots,
+                "memory_sigma_translation": memory_sigma_translation,
+                "memory_sigma_rotation_degrees": memory_sigma_rotation_degrees,
+                "memory_uniform_weight": memory_uniform_weight, "memory_floor_sigma": memory_floor_sigma,
+                "memory_refresh_per_sweep": memory_refresh_per_sweep,
                 "sample_every": sample_every, "seed": seed,
                 "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",
                 "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well; exact hard cores and wall"});
@@ -597,7 +639,7 @@ fn main() -> Result<()> {
             };
             for sweep in 0..=sweeps {
                 if sweep % sample_every == 0 {
-                    writeln!(traj, "{}", json!({"sweep": sweep, "poses": mc.poses()}))?;
+                    writeln!(traj, "{}", json!({"sweep": sweep, "poses": mc.poses(), "memory": mc.memory_slots()}))?;
                     let s = mc.stats;
                     writeln!(
                         log,
@@ -631,6 +673,10 @@ fn main() -> Result<()> {
                     };
                     mc.step(&mut rng, mv)?;
                 }
+                for _ in 0..memory_refresh_per_sweep {
+                    mc.refresh_memory(&mut rng);
+                }
+                mc.recompute_memory();
             }
             let (sf, sw) = mc.recompute();
             fs::write(
@@ -638,7 +684,8 @@ fn main() -> Result<()> {
                 serde_json::to_string_pretty(&json!({
                 "solvation_cached": mc.solvation_energy(), "solvation_recomputed": sf,
                 "well_cached": mc.well_energy(), "well_recomputed": sw,
-                "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like()}))?,
+                "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like(),
+                "memory_sum_relative_error": mc.memory_sum_error()}))?,
             )?;
         }
     }

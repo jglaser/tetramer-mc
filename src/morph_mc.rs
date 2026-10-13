@@ -48,6 +48,119 @@ pub struct LikeCharge {
     pub groups: Vec<ChargeGroup>,
 }
 
+/// Finite memory: K auxiliary relative-pose slots m_k with the conditional law
+///   q(m | x) = (1 - u) (1/N) sum_e kernel(m; g_e) + u floor(m)   (floor alone if N = 0),
+/// where g_e runs over the relative poses of the N current contact entries (both orders),
+/// kernel = normalized Gaussian in translation (sigma_translation) times a Gaussian in
+/// exponential coordinates of the rotation (sigma_rotation <= 20 deg, so its truncation at pi
+/// is below 1e-16), and floor = Gaussian in translation (floor_sigma) times uniform rotation.
+/// The joint target is pi(x) prod_k q(m_k | x), whose x-marginal is pi. Physical moves carry
+/// the factor prod_k q(m_k | x') / q(m_k | x); slots are refreshed by exact draws from
+/// q(. | x) (Gibbs, always accepted); docking proposes from the library and the slots.
+#[derive(Clone, Copy, Debug)]
+pub struct MemorySettings {
+    pub slots: usize,
+    pub sigma_translation: f64,
+    pub sigma_rotation: f64,
+    pub uniform_weight: f64,
+    pub floor_sigma: f64,
+}
+
+#[derive(Clone, Debug)]
+struct Memory {
+    s: MemorySettings,
+    slots: Vec<Pose>,
+    /// S_k = sum over current contact entries of kernel(m_k; g_e).
+    sums: Vec<f64>,
+    /// Number of contact entries N (twice the number of contacts).
+    entries: usize,
+}
+
+/// Relative pose of `pj` in the frame of `pi`.
+fn rel_pose(pi: Pose, pj: Pose) -> Pose {
+    let ri = rotation(pi.orientation);
+    Pose {
+        position: matvec(transpose(ri), sub(pj.position, pi.position)),
+        orientation: quaternion(matmul(transpose(ri), rotation(pj.orientation))),
+    }
+}
+
+/// Rotation angle in [0, pi] of a rotation given by a (not necessarily canonical) quaternion.
+fn rotation_angle(q: [f64; 4]) -> f64 {
+    2. * q[0].abs().min(1.).acos()
+}
+
+impl MemorySettings {
+    fn kernel(&self, m: Pose, g: Pose) -> f64 {
+        let (st, sr) = (self.sigma_translation, self.sigma_rotation);
+        let d = sub(m.position, g.position);
+        let t2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        if t2 > 144. * st * st {
+            return 0.;
+        }
+        let delta = matmul(transpose(rotation(g.orientation)), rotation(m.orientation));
+        let theta = rotation_angle(quaternion(delta));
+        if theta > 12. * sr {
+            return 0.;
+        }
+        let jac = if theta < 1e-8 {
+            1.
+        } else {
+            theta * theta / (2. * (1. - theta.cos()))
+        };
+        let pi = std::f64::consts::PI;
+        let c = (2. * pi * st * st).powf(-1.5) * 8. * pi * pi * (2. * pi * sr * sr).powf(-1.5);
+        c * (-t2 / (2. * st * st) - theta * theta / (2. * sr * sr)).exp() * jac
+    }
+    fn floor(&self, m: Pose) -> f64 {
+        let s2 = self.floor_sigma * self.floor_sigma;
+        let t2 = m.position.iter().map(|x| x * x).sum::<f64>();
+        (2. * std::f64::consts::PI * s2).powf(-1.5) * (-t2 / (2. * s2)).exp()
+    }
+    fn log_q(&self, m: Pose, sum: f64, entries: usize) -> f64 {
+        if entries == 0 {
+            self.floor(m).ln()
+        } else {
+            (self.uniform_weight * self.floor(m)
+                + (1. - self.uniform_weight) * sum.max(0.) / entries as f64)
+                .ln()
+        }
+    }
+    /// Exact draw from q(. | x) given the contact entries of x.
+    fn draw(&self, rng: &mut StdRng, entries: &[Pose]) -> Pose {
+        let normal = |rng: &mut StdRng| -> f64 { StandardNormal.sample(rng) };
+        if entries.is_empty() || rng.random::<f64>() < self.uniform_weight {
+            let position: Vec3 = std::array::from_fn(|_| self.floor_sigma * normal(rng));
+            let q: [f64; 4] = std::array::from_fn(|_| normal(rng));
+            let n = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+            return Pose {
+                position,
+                orientation: q.map(|x| x / n),
+            };
+        }
+        let g = entries[rng.random_range(0..entries.len())];
+        let w: Vec3 = loop {
+            let w: Vec3 = std::array::from_fn(|_| self.sigma_rotation * normal(rng));
+            if norm(w) < std::f64::consts::PI {
+                break w;
+            }
+        };
+        let theta = norm(w);
+        let e = if theta < 1e-12 {
+            [1., 0., 0., 0.]
+        } else {
+            let s = (theta / 2.).sin() / theta;
+            [(theta / 2.).cos(), w[0] * s, w[1] * s, w[2] * s]
+        };
+        let position: Vec3 =
+            std::array::from_fn(|k| g.position[k] + self.sigma_translation * normal(rng));
+        Pose {
+            position,
+            orientation: quaternion(matmul(rotation(g.orientation), rotation(e))),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct MoveSettings {
     pub translation: f64,
@@ -114,6 +227,7 @@ pub struct MorphMc {
     contact_gap: Option<f64>,
     contact_grid: Option<BallGrid>,
     contact: Vec<Vec<bool>>,
+    memory: Option<Memory>,
     pub stats: MoveStats,
 }
 
@@ -158,6 +272,7 @@ impl MorphMc {
             contact_gap: None,
             contact_grid: None,
             contact: Vec::new(),
+            memory: None,
             stats: MoveStats::default(),
         };
         for (b, &p) in s.poses.iter().enumerate() {
@@ -261,7 +376,8 @@ impl MorphMc {
     }
 
     /// Relative poses (j in the frame of i, both orders) of the current contacts between
-    /// bodies other than `b`: a function of the other bodies only.
+    /// bodies other than `b`: a function of the other bodies only. With `b` out of range,
+    /// all contacts.
     pub fn library(&self, b: usize) -> Vec<Pose> {
         let mut out = Vec::new();
         for i in 0..self.poses.len() {
@@ -269,20 +385,131 @@ impl MorphMc {
                 if i == b || j == b || !self.contact[i][j] {
                     continue;
                 }
-                let (pi, pj) = (self.poses[i], self.poses[j]);
-                let (ri, rj) = (rotation(pi.orientation), rotation(pj.orientation));
-                let d = sub(pj.position, pi.position);
-                out.push(Pose {
-                    position: matvec(transpose(ri), d),
-                    orientation: quaternion(matmul(transpose(ri), rj)),
-                });
-                out.push(Pose {
-                    position: matvec(transpose(rj), scale(d, -1.)),
-                    orientation: quaternion(matmul(transpose(rj), ri)),
-                });
+                out.push(rel_pose(self.poses[i], self.poses[j]));
+                out.push(rel_pose(self.poses[j], self.poses[i]));
             }
         }
         out
+    }
+
+    /// Switch on finite memory (requires the contact library); slots start from exact draws
+    /// of q(. | x).
+    pub fn with_memory(mut self, s: MemorySettings, rng: &mut StdRng) -> Result<Self> {
+        ensure!(self.contact_gap.is_some(), "memory needs with_contact_library");
+        ensure!(
+            s.slots > 0
+                && s.sigma_translation > 0.
+                && s.sigma_rotation > 0.
+                && s.sigma_rotation <= 20f64.to_radians()
+                && s.uniform_weight > 0.
+                && s.uniform_weight < 1.
+                && s.floor_sigma > 0.,
+            "invalid memory settings"
+        );
+        let entries = self.library(usize::MAX);
+        let slots: Vec<Pose> = (0..s.slots).map(|_| s.draw(rng, &entries)).collect();
+        self.memory = Some(Memory {
+            s,
+            slots,
+            sums: vec![0.; s.slots],
+            entries: entries.len(),
+        });
+        self.recompute_memory();
+        Ok(self)
+    }
+
+    /// Recompute the cached kernel sums exactly (bounds rounding drift).
+    pub fn recompute_memory(&mut self) {
+        let entries = self.library(usize::MAX);
+        if let Some(mem) = &mut self.memory {
+            mem.entries = entries.len();
+            for (k, m) in mem.slots.iter().enumerate() {
+                mem.sums[k] = entries.iter().map(|&g| mem.s.kernel(*m, g)).sum();
+            }
+        }
+    }
+
+    /// Largest relative deviation of the cached kernel sums from a fresh evaluation.
+    pub fn memory_sum_error(&self) -> f64 {
+        let entries = self.library(usize::MAX);
+        let Some(mem) = &self.memory else {
+            return 0.;
+        };
+        let mut worst: f64 = if mem.entries == entries.len() { 0. } else { f64::INFINITY };
+        for (k, m) in mem.slots.iter().enumerate() {
+            let fresh: f64 = entries.iter().map(|&g| mem.s.kernel(*m, g)).sum();
+            worst = worst.max((fresh - mem.sums[k]).abs() / fresh.abs().max(1e-300));
+        }
+        worst
+    }
+
+    /// Gibbs refresh of one uniformly chosen slot: an exact draw from q(. | x).
+    pub fn refresh_memory(&mut self, rng: &mut StdRng) {
+        let entries = self.library(usize::MAX);
+        if let Some(mem) = &mut self.memory {
+            let k = rng.random_range(0..mem.slots.len());
+            let m = mem.s.draw(rng, &entries);
+            mem.slots[k] = m;
+            mem.sums[k] = entries.iter().map(|&g| mem.s.kernel(m, g)).sum();
+            mem.entries = entries.len();
+        }
+    }
+
+    /// Memory slots (relative poses).
+    pub fn memory_slots(&self) -> Option<&[Pose]> {
+        self.memory.as_ref().map(|m| m.slots.as_slice())
+    }
+
+    /// Log of prod_k q(m_k | x') / q(m_k | x) for body `b` moving to `new`, with the
+    /// updated sums, entry count and new contact partners of `b`. Without memory: zero.
+    fn memory_delta(&self, b: usize, new: Pose) -> (f64, Vec<f64>, usize, Vec<usize>) {
+        let Some(mem) = &self.memory else {
+            return (0., Vec::new(), 0, Vec::new());
+        };
+        let old = self.poses[b];
+        let partners: Vec<usize> = (0..self.poses.len())
+            .filter(|&c| c != b && self.in_contact(b, new, c))
+            .collect();
+        let mut old_g = Vec::new();
+        for c in 0..self.poses.len() {
+            if c != b && self.contact[b][c] {
+                old_g.push(rel_pose(old, self.poses[c]));
+                old_g.push(rel_pose(self.poses[c], old));
+            }
+        }
+        let mut new_g = Vec::new();
+        for &c in &partners {
+            new_g.push(rel_pose(new, self.poses[c]));
+            new_g.push(rel_pose(self.poses[c], new));
+        }
+        let n_new = mem.entries + new_g.len() - old_g.len();
+        let mut sums = mem.sums.clone();
+        let mut d = 0.;
+        for (k, m) in mem.slots.iter().enumerate() {
+            let removed: f64 = old_g.iter().map(|&g| mem.s.kernel(*m, g)).sum();
+            let added: f64 = new_g.iter().map(|&g| mem.s.kernel(*m, g)).sum();
+            let s_new = (mem.sums[k] - removed + added).max(0.);
+            d += mem.s.log_q(*m, s_new, n_new) - mem.s.log_q(*m, mem.sums[k], mem.entries);
+            sums[k] = s_new;
+        }
+        (d, sums, n_new, partners)
+    }
+
+    /// Commit the contacts (and memory sums) of an accepted move of body `b`.
+    fn commit_memory(&mut self, b: usize, sums: Vec<f64>, entries: usize, partners: &[usize]) {
+        if let Some(mem) = &mut self.memory {
+            mem.sums = sums;
+            mem.entries = entries;
+            for c in 0..self.poses.len() {
+                if c != b {
+                    let k = partners.contains(&c);
+                    self.contact[b][c] = k;
+                    self.contact[c][b] = k;
+                }
+            }
+        } else {
+            self.update_contacts(b);
+        }
     }
 
     /// Number of contacts between different bodies (each pair once).
@@ -437,15 +664,17 @@ impl MorphMc {
         let d_well = -self.well.epsilon * dp as f64;
         let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
         let update = self.solv.propose(&[(b, new)])?;
-        let de = update.delta + d_well + self.like.weight * dl;
-        ensure!(de.is_finite(), "nonfinite energy change");
+        let (dm, sums, n_entries, partners) = self.memory_delta(b, new);
+        // Minus the log joint-target ratio: energy change minus the memory-conditional ratio.
+        let de = update.delta + d_well + self.like.weight * dl - dm;
+        ensure!(!de.is_nan(), "NaN energy change");
         if de <= 0. || rng.random::<f64>() < (-de).exp() {
             self.solv.commit(update);
             self.pair_count += dp;
             self.like_sum += dl;
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
-            self.update_contacts(b);
+            self.commit_memory(b, sums, n_entries, &partners);
             self.stats.accepted += 1;
             self.stats.reinsertion_accepted += u64::from(reinsertion);
             return Ok(true);
@@ -512,7 +741,7 @@ impl MorphMc {
                 }
                 let delta = matmul(transpose(rotation(c.orientation)), rrel);
                 let q = quaternion(delta);
-                let theta = 2. * q[0].clamp(-1., 1.).acos();
+                let theta = 2. * q[0].abs().min(1.).acos();
                 // Exponential coordinates: Haar factor theta^2 / (2 (1 - cos theta)).
                 let jac = if theta < 1e-8 {
                     1.
@@ -555,7 +784,15 @@ impl MorphMc {
         self.stats.dock_attempts += 1;
         // Components: the contact library of the other bodies (unchanged by this move), or
         // the fixed list. Without components the proposal is uniform with probability one.
-        let library = if d.library { Some(self.library(b)) } else { None };
+        let library = if d.library {
+            let mut lib = self.library(b);
+            if let Some(slots) = self.memory_slots() {
+                lib.extend_from_slice(slots);
+            }
+            Some(lib)
+        } else {
+            None
+        };
         let comps: &[Pose] = library.as_deref().unwrap_or(&d.components);
         let u = if d.learned.is_none() && comps.is_empty() { 1. } else { d.uniform_weight };
         let new = if rng.random::<f64>() < u {
@@ -626,7 +863,8 @@ impl MorphMc {
         let update = self.solv.propose(&[(b, new)])?;
         let log_ratio =
             self.dock_log_density(b, old, d, comps, u) - self.dock_log_density(b, new, d, comps, u);
-        let a = -(update.delta + d_well + self.like.weight * dl) + log_ratio;
+        let (dm, sums, n_entries, partners) = self.memory_delta(b, new);
+        let a = -(update.delta + d_well + self.like.weight * dl) + dm + log_ratio;
         ensure!(!a.is_nan(), "NaN docking acceptance");
         if a >= 0. || rng.random::<f64>() < a.exp() {
             self.solv.commit(update);
@@ -634,7 +872,7 @@ impl MorphMc {
             self.like_sum += dl;
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
-            self.update_contacts(b);
+            self.commit_memory(b, sums, n_entries, &partners);
             self.stats.accepted += 1;
             self.stats.dock_accepted += 1;
             return Ok(true);
@@ -1057,6 +1295,143 @@ mod tests {
         }
         assert!((ca - cb).abs() < 0.02, "contact fraction {ca:.4} vs {cb:.4}");
         assert!(*ca > 0.1, "contacts must carry weight: {ca}");
+    }
+
+    /// Finite memory: with slot refreshes and library+memory docking, the x-marginal must
+    /// equal the local-move distribution (three balls), and the cached kernel sums must equal
+    /// a fresh evaluation.
+    #[test]
+    fn memory_keeps_marginal() {
+        let r = 1.0;
+        let shape = Shape {
+            name: "ball".into(),
+            volume: 4. / 3. * std::f64::consts::PI,
+            atoms: vec![Atom {
+                center: [0.; 3],
+                radius: r,
+            }],
+        };
+        let model = SolvationModel {
+            probe: 1.4,
+            pressure: 0.209,
+            coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+            atom_types: vec![0],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 1.5,
+            width: 0.6,
+        };
+        let start = vec![
+            Pose {
+                position: [0.; 3],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [3., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [-3., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+        ];
+        let mem = MemorySettings {
+            slots: 3,
+            sigma_translation: 0.3,
+            sigma_rotation: 10f64.to_radians(),
+            uniform_weight: 0.3,
+            floor_sigma: 3.,
+        };
+        let mv = MoveSettings {
+            translation: 0.5,
+            rotation: 0.3,
+            reinsertion_probability: 0.2,
+        };
+        let dock = DockSettings {
+            learned: None,
+            library: true,
+            components: Vec::new(),
+            sigma_translation: 0.3,
+            sigma_rotation: 0.3,
+            uniform_weight: 0.3,
+        };
+        let (bins, lo, hi) = (12usize, 2.0, 8.0);
+        let (burn, n) = (10_000, 1_000_000);
+        let mut out = Vec::new();
+        // Independent chains on each side; compare group means against the between-chain
+        // spread (memory pins remembered contacts, so samples are more correlated).
+        let chains = [(21u64, false), (26, false), (27, false), (22, true), (23, true), (24, true)];
+        for (seed, with_memory) in chains {
+            let tree = SphereTree::new(shape.clone()).unwrap();
+            let wall = Container::new(5.0, &tree).unwrap();
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut mc = MorphMc::new(tree, wall, model.clone(), well, start.clone(), vec![
+                true, false, false,
+            ])
+            .unwrap()
+            .with_contact_library(0.6)
+            .unwrap();
+            if with_memory {
+                mc = mc.with_memory(mem, &mut rng).unwrap();
+            }
+            let mut h = vec![0u64; 3 * bins];
+            let mut contacts = 0u64;
+            for t in 0..burn + n {
+                if with_memory {
+                    match t % 3 {
+                        0 => {
+                            mc.step_dock(&mut rng, &dock).unwrap();
+                        }
+                        1 => {
+                            mc.step(&mut rng, mv).unwrap();
+                        }
+                        _ => mc.refresh_memory(&mut rng),
+                    }
+                } else {
+                    mc.step(&mut rng, mv).unwrap();
+                }
+                if t >= burn {
+                    let p = mc.poses();
+                    for (k, (i, j)) in [(0, 1), (0, 2), (1, 2)].into_iter().enumerate() {
+                        let d = norm(sub(p[i].position, p[j].position));
+                        let bin = (((d - lo) / (hi - lo) * bins as f64) as usize).min(bins - 1);
+                        h[k * bins + bin] += 1;
+                    }
+                    contacts += mc.contact_count() as u64;
+                }
+            }
+            if with_memory {
+                assert!(
+                    mc.memory_sum_error() < 1e-9,
+                    "cached memory sums drift: {}",
+                    mc.memory_sum_error()
+                );
+                assert!(mc.stats.dock_accepted > 10_000, "docking must be accepted: {:?}", mc.stats);
+            }
+            out.push((h, contacts as f64 / n as f64));
+        }
+        let stats = |group: &[usize], k: usize| -> (f64, f64) {
+            let v: Vec<f64> = group.iter().map(|&c| out[c].0[k] as f64 / n as f64).collect();
+            let m = v.iter().sum::<f64>() / v.len() as f64;
+            let var = v.iter().map(|x| (x - m) * (x - m)).sum::<f64>() / (v.len() - 1) as f64;
+            (m, (var / v.len() as f64).sqrt())
+        };
+        let (local, memory) = ([0usize, 1, 2], [3usize, 4, 5]);
+        for c in 0..chains.len() {
+            eprintln!("chain {c} (memory {}): bin0 {:.4} bin12 {:.4} contacts {:.4}", chains[c].1,
+                out[c].0[0] as f64 / n as f64, out[c].0[12] as f64 / n as f64, out[c].1);
+        }
+        for k in 0..3 * bins {
+            let ((ma, sa), (mb, sb)) = (stats(&local, k), stats(&memory, k));
+            let tol = 4. * (sa * sa + sb * sb).sqrt() + 2e-3;
+            eprintln!("bin {k:2}: local {ma:.4}+-{sa:.4} memory {mb:.4}+-{sb:.4} (tol {tol:.4})");
+            assert!((ma - mb).abs() < tol, "bin {k}: local {ma:.4} vs memory {mb:.4}");
+        }
+        let ca = local.iter().map(|&c| out[c].1).sum::<f64>() / 3.;
+        let cb = memory.iter().map(|&c| out[c].1).sum::<f64>() / 3.;
+        eprintln!("mean contacts: local {ca:.4}, with memory {cb:.4}");
+        assert!((ca - cb).abs() < 0.03, "contact fraction {ca:.4} vs {cb:.4}");
     }
 
     /// Docking from a learned relative-pose mixture (exact independent draw and density over

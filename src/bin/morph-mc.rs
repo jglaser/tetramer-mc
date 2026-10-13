@@ -58,6 +58,13 @@ enum Cmd {
         sweeps: usize,
         #[arg(long, default_value_t = 10)]
         swap_every: usize,
+        /// Like-charge penalty (eps-independent, so swaps are unchanged); see `run`.
+        #[arg(long)]
+        charge_groups: Option<PathBuf>,
+        #[arg(long, default_value_t = 0.)]
+        like_charge_weight: f64,
+        #[arg(long, default_value_t = 5.0)]
+        like_charge_cutoff: f64,
         #[arg(long, default_value_t = 500)]
         sample_every: usize,
         #[arg(long, default_value_t = 1)]
@@ -256,6 +263,9 @@ fn main() -> Result<()> {
             width,
             sweeps,
             swap_every,
+            charge_groups,
+            like_charge_weight,
+            like_charge_cutoff,
             sample_every,
             seed,
             out,
@@ -264,6 +274,14 @@ fn main() -> Result<()> {
                 replicas >= 2 && swap_every > 0 && sample_every % swap_every == 0,
                 "invalid replica settings"
             );
+            ensure!(
+                like_charge_weight == 0. || charge_groups.is_some(),
+                "--like-charge-weight needs --charge-groups"
+            );
+            let groups: Vec<ChargeGroup> = match &charge_groups {
+                Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+                None => Vec::new(),
+            };
             fs::create_dir_all(&out)?;
             let tree = shape_tree(&shape)?;
             let n = tree.shape.atoms.len();
@@ -293,7 +311,12 @@ fn main() -> Result<()> {
                     },
                     poses,
                     fixed,
-                )?);
+                )?
+                .with_like_charge(LikeCharge {
+                    weight: like_charge_weight,
+                    cutoff: like_charge_cutoff,
+                    groups: groups.clone(),
+                })?);
             }
             let mut rngs: Vec<StdRng> = (0..replicas)
                 .map(|k| StdRng::seed_from_u64(seed * 7919 + k as u64))
@@ -305,7 +328,8 @@ fn main() -> Result<()> {
             let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "ladder": ladder, "width": width, "sweeps": sweeps, "swap_every": swap_every,
-                "sample_every": sample_every, "seed": seed,
+                "sample_every": sample_every, "seed": seed, "charge_groups": charge_groups,
+                "like_charge_weight": like_charge_weight, "like_charge_cutoff": like_charge_cutoff,
                 "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",
                 "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well; exact hard cores and wall"});
             fs::write(
@@ -409,7 +433,8 @@ fn main() -> Result<()> {
                 .map(|mc| {
                     let (sf, sw) = mc.recompute();
                     json!({"solvation_cached": mc.solvation_energy(), "solvation_recomputed": sf,
-                    "well_cached": mc.well_energy(), "well_recomputed": sw})
+                    "well_cached": mc.well_energy(), "well_recomputed": sw,
+                    "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like()})
                 })
                 .collect();
             fs::write(

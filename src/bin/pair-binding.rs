@@ -1,5 +1,7 @@
-//! Pair association constants of contact basins under exact hard-sphere morphometry plus the
-//! atom square well (the morph-mc energy): K(eps) = int_W exp(-F_solv(g) + eps n(g)) dg over
+//! Pair and site association constants of contact basins under exact hard-sphere morphometry
+//! plus the atom square well and an optional like-charge penalty (the morph-mc energy). A job
+//! may give a fixed `environment` (poses of several bodies); K is then the site constant of
+//! one more body inserted at `pose` next to that cluster (default: one body at the origin): K(eps) = int_W exp(-F_solv(g) + eps n(g)) dg over
 //! relative poses g of body B in the frame of body A within a window W around a contact pose
 //! g0 (|dt| <= window_t, rotation angle <= window_r), with translation volume times normalized
 //! Haar measure (A^3). A Metropolis walk at eps_walk inside W maps the basin; a 6D Gaussian in
@@ -15,7 +17,7 @@ use std::{f64::consts::PI, fs, path::PathBuf};
 use tetramer_mc::{
     geometry::{Placed, Shape, SphereTree},
     math::{Pose, Vec3, add, matmul, matvec, norm, quaternion, rotation, sub, transpose},
-    morph_mc::{MorphMc, SquareWell},
+    morph_mc::{ChargeGroup, LikeCharge, MorphMc, SquareWell},
     solvation::{GaussConvention, SolvationModel, SolvationState},
     spherical::Container,
 };
@@ -51,6 +53,13 @@ struct Args {
     /// interaction ball, Haar orientation); --poses is then ignored.
     #[arg(long)]
     virial: Option<usize>,
+    /// Like-charge penalty (as in morph-mc): charged groups, weight and cutoff.
+    #[arg(long)]
+    charge_groups: Option<PathBuf>,
+    #[arg(long, default_value_t = 0.)]
+    like_charge_weight: f64,
+    #[arg(long, default_value_t = 5.0)]
+    like_charge_cutoff: f64,
 }
 
 fn exp_rot(w: Vec3) -> [f64; 4] {
@@ -78,17 +87,22 @@ struct Pair {
     solv: SolvationState,
     mc: MorphMc,
     tree: SphereTree,
-    a: Placed,
+    env: Vec<Placed>,
+    like_weight: f64,
 }
 
 impl Pair {
-    /// (F_solv, n_pairs) at relative pose g, or None for a hard overlap.
+    /// (F_solv + like-charge penalty, n_pairs) of the moved body at pose g next to the fixed
+    /// environment, or None for a hard overlap.
     fn energy(&self, g: Pose) -> Result<Option<(f64, f64)>> {
-        if self.tree.overlaps(&self.a, &Placed::new(g)) {
+        let pg = Placed::new(g);
+        if self.env.iter().any(|e| self.tree.overlaps(e, &pg)) {
             return Ok(None);
         }
-        let f = self.solv.propose(&[(1, g)])?.delta;
-        Ok(Some((f, self.mc.well_pairs(1, g) as f64)))
+        let moved = self.env.len();
+        let f = self.solv.propose(&[(moved, g)])?.delta;
+        let like = if self.like_weight != 0. { self.like_weight * self.mc.like_pairs(moved, g) } else { 0. };
+        Ok(Some((f + like, self.mc.well_pairs(moved, g) as f64)))
     }
 }
 
@@ -117,11 +131,10 @@ fn cholesky(a: &[[f64; 6]; 6]) -> Option<[[f64; 6]; 6]> {
     Some(l)
 }
 
-fn make_pair(a: &Args, tree: &SphereTree) -> Result<Pair> {
+fn make_pair(a: &Args, tree: &SphereTree, env: &[Pose]) -> Result<Pair> {
     let n = tree.shape.atoms.len();
     let centers: Vec<Vec3> = tree.shape.atoms.iter().map(|x| x.center).collect();
     let radii: Vec<f64> = tree.shape.atoms.iter().map(|x| x.radius).collect();
-    let id = Pose { position: [0.; 3], orientation: [1., 0., 0., 0.] };
     let far = Pose { position: [1e5, 0., 0.], orientation: [1., 0., 0., 0.] };
     let model = SolvationModel {
         probe: 1.4,
@@ -130,11 +143,24 @@ fn make_pair(a: &Args, tree: &SphereTree) -> Result<Pair> {
         atom_types: vec![0; n],
         gauss_convention: GaussConvention::PatchGaussBonnet,
     };
-    let solv = SolvationState::new(model.clone(), &centers, &radii, &[id, far])?;
+    let mut bodies = env.to_vec();
+    bodies.push(far);
+    let solv = SolvationState::new(model.clone(), &centers, &radii, &bodies)?;
     let wall = Container::new(1e6, tree)?;
+    let groups: Vec<ChargeGroup> = match &a.charge_groups {
+        Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+        None => Vec::new(),
+    };
     let mc = MorphMc::new(tree.clone(), wall, SolvationModel { pressure: 0., coefficients: vec![[0.; 3]], ..model },
-        SquareWell { epsilon: 1., width: a.width }, vec![id, far], vec![true, true])?;
-    Ok(Pair { solv, mc, tree: tree.clone(), a: Placed::new(id) })
+        SquareWell { epsilon: 1., width: a.width }, bodies.clone(), vec![true; bodies.len()])?
+        .with_like_charge(LikeCharge { weight: 1., cutoff: a.like_charge_cutoff, groups })?;
+    Ok(Pair {
+        solv,
+        mc,
+        tree: tree.clone(),
+        env: env.iter().map(|&p| Placed::new(p)).collect(),
+        like_weight: a.like_charge_weight,
+    })
 }
 
 /// B22 = -(V_c / 2) <exp(-E) - 1> over uniform relative poses in the interaction ball of
@@ -151,7 +177,8 @@ fn run_virial(a: &Args, tree: &SphereTree, samples: usize) -> Result<Value> {
         let hs: Vec<_> = (0..a.threads)
             .map(|k| {
                 sc.spawn(move || -> Result<(usize, Vec<Vec<f64>>)> {
-                    let pair = make_pair(a, tree)?;
+                    let id = Pose { position: [0.; 3], orientation: [1., 0., 0., 0.] };
+                    let pair = make_pair(a, tree, &[id])?;
                     let mut rng = StdRng::seed_from_u64(a.seed * 7919 + k as u64);
                     let mut overlaps = 0;
                     let mut f: Vec<Vec<f64>> = vec![Vec::new(); a.epsilons.len()];
@@ -213,24 +240,8 @@ fn run_virial(a: &Args, tree: &SphereTree, samples: usize) -> Result<Value> {
         "interacting_fraction": f[0].len() as f64 / total as f64, "width": a.width, "B22": out}))
 }
 
-fn run_contact(a: &Args, tree: &SphereTree, label: &str, g0: Pose, seed: u64) -> Result<Value> {
-    let n = tree.shape.atoms.len();
-    let centers: Vec<Vec3> = tree.shape.atoms.iter().map(|x| x.center).collect();
-    let radii: Vec<f64> = tree.shape.atoms.iter().map(|x| x.radius).collect();
-    let id = Pose { position: [0.; 3], orientation: [1., 0., 0., 0.] };
-    let far = Pose { position: [1e5, 0., 0.], orientation: [1., 0., 0., 0.] };
-    let model = SolvationModel {
-        probe: 1.4,
-        pressure: 0.2090,
-        coefficients: vec![[-0.1564, 0.1362, -0.0369]],
-        atom_types: vec![0; n],
-        gauss_convention: GaussConvention::PatchGaussBonnet,
-    };
-    let solv = SolvationState::new(model.clone(), &centers, &radii, &[id, far])?;
-    let wall = Container::new(1e6, tree)?;
-    let mc = MorphMc::new(tree.clone(), wall, SolvationModel { pressure: 0., coefficients: vec![[0.; 3]], ..model },
-        SquareWell { epsilon: 1., width: a.width }, vec![id, far], vec![true, true])?;
-    let pair = Pair { solv, mc, tree: tree.clone(), a: Placed::new(id) };
+fn run_contact(a: &Args, tree: &SphereTree, label: &str, env: &[Pose], g0: Pose, seed: u64) -> Result<Value> {
+    let pair = make_pair(a, tree, env)?;
     let wr = a.window_r_degrees.to_radians();
     let inside = |t: Vec3, w: Vec3| norm(sub(t, g0.position)) <= a.window_t && norm(w) <= wr;
     let mut rng = StdRng::seed_from_u64(seed);
@@ -348,9 +359,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let poses: Vec<Value> = serde_json::from_slice(&fs::read(&a.poses)?)?;
-    let jobs: Vec<(String, Pose)> = poses
+    let id = Pose { position: [0.; 3], orientation: [1., 0., 0., 0.] };
+    let jobs: Vec<(String, Vec<Pose>, Pose)> = poses
         .iter()
-        .map(|p| Ok((p["label"].as_str().unwrap_or("").to_string(), serde_json::from_value(p["pose"].clone())?)))
+        .map(|p| {
+            let env: Vec<Pose> = match p.get("environment") {
+                Some(e) => serde_json::from_value(e.clone())?,
+                None => vec![id],
+            };
+            Ok((p["label"].as_str().unwrap_or("").to_string(), env, serde_json::from_value(p["pose"].clone())?))
+        })
         .collect::<Result<_>>()?;
     let mut results: Vec<Option<Value>> = vec![None; jobs.len()];
     for chunk in (0..jobs.len()).collect::<Vec<_>>().chunks(a.threads) {
@@ -359,7 +377,7 @@ fn main() -> Result<()> {
                 .iter()
                 .map(|&i| {
                     let (a, tree, job) = (&a, &tree, &jobs[i]);
-                    sc.spawn(move || (i, run_contact(a, tree, &job.0, job.1, a.seed * 1000 + i as u64)))
+                    sc.spawn(move || (i, run_contact(a, tree, &job.0, &job.1, job.2, a.seed * 1000 + i as u64)))
                 })
                 .collect();
             hs.into_iter().map(|h| h.join().unwrap()).collect()

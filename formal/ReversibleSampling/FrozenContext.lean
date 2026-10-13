@@ -171,6 +171,30 @@ theorem frozen_metropolis_hastings_correct (μ : Measure Y) [SFinite μ] (ν : M
   exact ⟨complete_markov A hAmass, complete_reversible A _ hrev,
     complete_invariant A _ hAmass hrev⟩
 
+omit [MeasurableSpace Y] [MeasurableSpace Z] in
+/-- Gibbs refresh as a frozen-context move: if the target factorizes as
+`p (y, z) = r z * g z y` and the proposal density is the conditional `q z y y' = g z y'`
+(independent of the old `y`), the frozen MH acceptance is one wherever the context weight
+`r z` and the conditional densities are positive and finite. This is the memory-slot refresh:
+`y` is one slot, `z` the configuration and the other slots, `g z` the slot law `q(· | x)` and
+`r z = π(x) ∏_{j ≠ k} q(m_j | x)`. States with `r z = 0` (hard overlaps) carry no target
+mass and are never occupied, so on every reachable state the refresh of
+`frozen_metropolis_hastings_correct` is accepted with probability one. -/
+theorem frozenAcceptance_gibbs (p : Y × Z → ℝ≥0∞) (q : Z → Y → Y → ℝ≥0∞)
+    (r : Z → ℝ≥0∞) (g : Z → Y → ℝ≥0∞)
+    (hp : ∀ y z, p (y, z) = r z * g z y) (hq : ∀ z y y', q z y y' = g z y')
+    {y y' : Y} {z : Z} (hr : r z ≠ 0) (hr' : r z ≠ ⊤)
+    (hg : g z y ≠ 0) (hg' : g z y ≠ ⊤) (hgy : g z y' ≠ 0) (hgy' : g z y' ≠ ⊤) :
+    frozenAcceptance p q (y, z) (y', z) = 1 := by
+  have hnum : p (y', z) * q z y' y = r z * (g z y' * g z y) := by
+    rw [hp, hq]; ring
+  have hden : p (y, z) * q z y y' = r z * (g z y' * g z y) := by
+    rw [hp, hq]; ring
+  have hne : r z * (g z y' * g z y) ≠ 0 := mul_ne_zero hr (mul_ne_zero hgy hg)
+  have hnt : r z * (g z y' * g z y) ≠ ⊤ :=
+    ENNReal.mul_ne_top hr' (ENNReal.mul_ne_top hgy' hg')
+  simp only [frozenAcceptance, hnum, hden, ENNReal.div_self hne hnt, min_self]
+
 /-! ## Composition: relabelling the moved block, and random-scan mixtures
 
 For a configuration of several bodies, the update of body `b` acts on `X` through a measurable

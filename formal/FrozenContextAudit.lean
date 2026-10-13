@@ -9,3 +9,4 @@ import ReversibleSampling.FrozenContext
 #print axioms ReversibleSampling.reversible_const_weight
 #print axioms ReversibleSampling.reversible_finset_sum
 #print axioms ReversibleSampling.random_scan_correct
+#print axioms ReversibleSampling.frozenAcceptance_gibbs

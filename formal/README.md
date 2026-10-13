@@ -508,6 +508,33 @@ fraction), whose negative controls fail it: dropping the Hastings ratio moves th
 from 0.560 to 0.623, and letting the library include the moved body's own contacts (so that
 it is no longer a function of `z`) halves the mean contact number (1.85 to 0.88).
 
+### Finite memory as an auxiliary ensemble
+
+The sampler's finite memory (`MemorySettings`, `MorphMc::with_memory`) adds `K` relative-pose
+slots `m_k` with the configuration-dependent conditional law
+
+\[
+ q(m\mid x)=(1-u)\,\frac1N\sum_e K(m;g_e)+u\,F(m),
+\]
+
+a kernel mixture over the `N` current contact entries `g_e` plus a normalized floor `F`,
+normalized for every `x`. The joint target is `π(x) ∏_k q(m_k | x)`; its `x`-marginal is `π`
+by `conditional_auxiliary_marginal` in `Balance.lean`. All moves are instances of the
+frozen-context theorem:
+
+- physical moves of body `b` (local or docking) have context `z` = (other bodies, all slots);
+  the joint density contributes `∏_k q(m_k | x') / q(m_k | x)` to the acceptance, and
+  docking may propose from slots because they belong to the frozen context;
+- the refresh of slot `k` has `y = m_k` and context `z` = (configuration, other slots) and
+  proposes from `q(· | x)` itself; `frozenAcceptance_gibbs` shows its acceptance is exactly one
+  wherever the remaining target factor is positive, i.e. on every reachable state.
+
+Empirical check: `morph_mc::tests::memory_keeps_marginal` (three balls, three independent chains
+with and three without memory) agrees in all distance histograms and the contact number;
+dropping the memory ratio fails it (contact bin 0.559 → 0.347). Memory is kinetically
+"sticky": breaking a contact that a slot remembers costs up to `ln(peak/floor)` until the slot
+is refreshed. This changes autocorrelations, not the stationary law.
+
 Focused check: `lake build ReversibleSampling.FrozenContext`, then
 `lake env lean FrozenContextAudit.lean` (output in `frozen-context-audit.txt`: only `propext`,
 `Classical.choice` and `Quot.sound`).

@@ -7,3 +7,4 @@
 'ReversibleSampling.reversible_const_weight' depends on axioms: [propext, Classical.choice, Quot.sound]
 'ReversibleSampling.reversible_finset_sum' depends on axioms: [propext, Classical.choice, Quot.sound]
 'ReversibleSampling.random_scan_correct' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.frozenAcceptance_gibbs' depends on axioms: [propext, Classical.choice, Quot.sound]

@@ -510,30 +510,40 @@ it is no longer a function of `z`) halves the mean contact number (1.85 to 0.88)
 
 ### Finite memory as an auxiliary ensemble
 
-The sampler's finite memory (`MemorySettings`, `MorphMc::with_memory`) adds `K` relative-pose
-slots `m_k` with the configuration-dependent conditional law
+The sampler's memory (`MemorySettings`, `MorphMc::with_memory`) is a Poisson point process
+`M` of relative poses with configuration-dependent intensity
 
 \[
- q(m\mid x)=(1-u)\,\frac1N\sum_e K(m;g_e)+u\,F(m),
+ \mu_x(m)=\lambda_0F(m)+\lambda\sum_e K(m;g_e),\qquad \Lambda(x)=\lambda_0+\lambda N(x),
 \]
 
-a kernel mixture over the `N` current contact entries `g_e` plus a normalized floor `F`,
-normalized for every `x`. The joint target is `π(x) ∏_k q(m_k | x)`; its `x`-marginal is `π`
-by `conditional_auxiliary_marginal` in `Balance.lean`. All moves are instances of the
-frozen-context theorem:
+a normalized floor `F` plus normalized kernels about the `N` current contact entries `g_e`. The
+joint target is `π(x) e^{-Λ(x)} ∏_{m∈M} μ_x(m)`; for every `x` the memory factor is the
+Poisson-process law, so the `x`-marginal is `π` (`conditional_auxiliary_marginal`).
+(A first version used a fixed number of slots with the normalized conditional
+`(1-u) N⁻¹ Σ_e K + u F`. It is exact as well, but every contact change rescales all slots, and
+with no contacts the first contact costs `K ln(1/u)`, about 89 kT for `K = 128`, `u = 1/2`, so
+seedless runs never formed a contact. The Poisson version couples a move only to the slots that
+sit on changed contacts, plus `e^{-λ ΔN}`.)
 
-- physical moves of body `b` (local or docking) have context `z` = (other bodies, all slots);
-  the joint density contributes `∏_k q(m_k | x') / q(m_k | x)` to the acceptance, and
-  docking may propose from slots because they belong to the frozen context;
-- the refresh of slot `k` has `y = m_k` and context `z` = (configuration, other slots) and
-  proposes from `q(· | x)` itself; `frozenAcceptance_gibbs` shows its acceptance is exactly one
-  wherever the remaining target factor is positive, i.e. on every reachable state.
+- Physical moves of body `b` (local or docking) have context `z` = (other bodies, memory) and
+  are frozen-context moves; the joint density contributes `e^{-λ(N'-N)} ∏_m μ_{x'}(m)/μ_x(m)`,
+  and docking may propose from memory slots because they belong to the frozen context.
+- The refresh at fixed `x` is Poisson thinning (each slot dies with probability `δ`) and
+  superposition (`Poisson(δΛ)` births from `μ_x/Λ`). `PoissonMemory.lean` proves the count part
+  of its reversibility: `count_detailed_balance` (the chain `n → n'` with `k` kept slots,
+  `Binom(n, 1-δ)` times `Poi(δΛ)`, is reversible for `Poi(Λ)`), via the termwise symmetric
+  closed form `flow_term_closed_form`. The mark part (kept slots a uniform subset, new slots
+  i.i.d. from `μ_x/Λ`, symmetric by exchangeability) is argued, not formalized; nor is the
+  general Poisson-process measure theory.
 
 Empirical check: `morph_mc::tests::memory_keeps_marginal` (three balls, three independent chains
-with and three without memory) agrees in all distance histograms and the contact number;
-dropping the memory ratio fails it (contact bin 0.559 → 0.347). Memory is kinetically
-"sticky": breaking a contact that a slot remembers costs up to `ln(peak/floor)` until the slot
-is refreshed. This changes autocorrelations, not the stationary law.
+with and three without memory) agrees in all distance histograms and the contact number, with
+smaller between-chain spread than the fixed-slot version; dropping the memory factor fails it
+(contact bin 0.559 → 0.387). Memory remains kinetically "sticky" for remembered contacts (until
+their slots die); this changes autocorrelations, not the stationary law.
+
+Focused checks: `lake env lean PoissonMemoryAudit.lean` (`poisson-memory-audit.txt`).
 
 Focused check: `lake build ReversibleSampling.FrozenContext`, then
 `lake env lean FrozenContextAudit.lean` (output in `frozen-context-audit.txt`: only `propext`,

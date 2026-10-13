@@ -11,3 +11,4 @@ import ReversibleSampling.ClusterRates
 import ReversibleSampling.ClusterMeasureRates
 import ReversibleSampling.CappedIndependent
 import ReversibleSampling.FrozenContext
+import ReversibleSampling.PoissonMemory

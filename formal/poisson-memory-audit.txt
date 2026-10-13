@@ -1,0 +1,3 @@
+'ReversibleSampling.PoissonMemory.flow_term_closed_form' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.PoissonMemory.flow_term_symmetric' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.PoissonMemory.count_detailed_balance' depends on axioms: [propext, Classical.choice, Quot.sound]

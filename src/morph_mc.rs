@@ -48,21 +48,26 @@ pub struct LikeCharge {
     pub groups: Vec<ChargeGroup>,
 }
 
-/// Finite memory: K auxiliary relative-pose slots m_k with the conditional law
-///   q(m | x) = (1 - u) (1/N) sum_e kernel(m; g_e) + u floor(m)   (floor alone if N = 0),
+/// Finite memory as a Poisson point process of relative poses with intensity
+///   mu_x(m) = lambda_floor floor(m) + lambda sum_e kernel(m; g_e),
 /// where g_e runs over the relative poses of the N current contact entries (both orders),
 /// kernel = normalized Gaussian in translation (sigma_translation) times a Gaussian in
 /// exponential coordinates of the rotation (sigma_rotation <= 20 deg, so its truncation at pi
 /// is below 1e-16), and floor = Gaussian in translation (floor_sigma) times uniform rotation.
-/// The joint target is pi(x) prod_k q(m_k | x), whose x-marginal is pi. Physical moves carry
-/// the factor prod_k q(m_k | x') / q(m_k | x); slots are refreshed by exact draws from
-/// q(. | x) (Gibbs, always accepted); docking proposes from the library and the slots.
+/// Total intensity Lambda(x) = lambda_floor + lambda N. The joint target is
+/// pi(x) exp(-Lambda(x)) prod_{m in M} mu_x(m), whose x-marginal is pi. A physical move carries
+/// exp(-lambda (N' - N)) prod_m mu_x'(m) / mu_x(m): a fixed cost per contact formed, and
+/// coupling only to slots that sit on changed contacts. The memory is refreshed at fixed x by
+/// Poisson thinning and superposition (each slot dies with probability `death`, then
+/// Poisson(death Lambda) births from mu_x / Lambda), which is reversible for the Poisson law.
+/// Docking proposes from the library and the slots.
 #[derive(Clone, Copy, Debug)]
 pub struct MemorySettings {
-    pub slots: usize,
+    pub lambda_floor: f64,
+    pub lambda: f64,
+    pub death: f64,
     pub sigma_translation: f64,
     pub sigma_rotation: f64,
-    pub uniform_weight: f64,
     pub floor_sigma: f64,
 }
 
@@ -117,19 +122,25 @@ impl MemorySettings {
         let t2 = m.position.iter().map(|x| x * x).sum::<f64>();
         (2. * std::f64::consts::PI * s2).powf(-1.5) * (-t2 / (2. * s2)).exp()
     }
-    fn log_q(&self, m: Pose, sum: f64, entries: usize) -> f64 {
-        if entries == 0 {
-            self.floor(m).ln()
-        } else {
-            (self.uniform_weight * self.floor(m)
-                + (1. - self.uniform_weight) * sum.max(0.) / entries as f64)
-                .ln()
-        }
+    /// Log intensity at `m` given its kernel sum over the current contact entries.
+    fn log_mu(&self, m: Pose, sum: f64) -> f64 {
+        (self.lambda_floor * self.floor(m) + self.lambda * sum.max(0.)).ln()
     }
-    /// Exact draw from q(. | x) given the contact entries of x.
+    fn total(&self, entries: usize) -> f64 {
+        self.lambda_floor + self.lambda * entries as f64
+    }
+    /// Number of births: Poisson with the given mean.
+    fn poisson(rng: &mut StdRng, mean: f64) -> usize {
+        if mean <= 0. {
+            return 0;
+        }
+        let n: f64 = rand_distr::Poisson::new(mean).expect("finite mean").sample(rng);
+        n as usize
+    }
+    /// Exact draw from mu_x / Lambda(x) given the contact entries of x.
     fn draw(&self, rng: &mut StdRng, entries: &[Pose]) -> Pose {
         let normal = |rng: &mut StdRng| -> f64 { StandardNormal.sample(rng) };
-        if entries.is_empty() || rng.random::<f64>() < self.uniform_weight {
+        if entries.is_empty() || rng.random::<f64>() < self.lambda_floor / self.total(entries.len()) {
             let position: Vec3 = std::array::from_fn(|_| self.floor_sigma * normal(rng));
             let q: [f64; 4] = std::array::from_fn(|_| normal(rng));
             let n = q.iter().map(|x| x * x).sum::<f64>().sqrt();
@@ -392,26 +403,28 @@ impl MorphMc {
         out
     }
 
-    /// Switch on finite memory (requires the contact library); slots start from exact draws
-    /// of q(. | x).
+    /// Switch on finite memory (requires the contact library); the memory starts from an
+    /// exact draw of the Poisson process with intensity mu_x.
     pub fn with_memory(mut self, s: MemorySettings, rng: &mut StdRng) -> Result<Self> {
         ensure!(self.contact_gap.is_some(), "memory needs with_contact_library");
         ensure!(
-            s.slots > 0
+            s.lambda_floor > 0.
+                && s.lambda >= 0.
+                && s.death > 0.
+                && s.death <= 1.
                 && s.sigma_translation > 0.
                 && s.sigma_rotation > 0.
                 && s.sigma_rotation <= 20f64.to_radians()
-                && s.uniform_weight > 0.
-                && s.uniform_weight < 1.
                 && s.floor_sigma > 0.,
             "invalid memory settings"
         );
         let entries = self.library(usize::MAX);
-        let slots: Vec<Pose> = (0..s.slots).map(|_| s.draw(rng, &entries)).collect();
+        let n0 = MemorySettings::poisson(rng, s.total(entries.len()));
+        let slots: Vec<Pose> = (0..n0).map(|_| s.draw(rng, &entries)).collect();
         self.memory = Some(Memory {
             s,
+            sums: vec![0.; slots.len()],
             slots,
-            sums: vec![0.; s.slots],
             entries: entries.len(),
         });
         self.recompute_memory();
@@ -443,14 +456,28 @@ impl MorphMc {
         worst
     }
 
-    /// Gibbs refresh of one uniformly chosen slot: an exact draw from q(. | x).
+    /// Memory refresh at fixed configuration: Poisson thinning (each slot dies with
+    /// probability `death`) and superposition (Poisson(death Lambda) births from mu_x /
+    /// Lambda). Reversible for the Poisson process with intensity mu_x.
     pub fn refresh_memory(&mut self, rng: &mut StdRng) {
         let entries = self.library(usize::MAX);
         if let Some(mem) = &mut self.memory {
-            let k = rng.random_range(0..mem.slots.len());
-            let m = mem.s.draw(rng, &entries);
-            mem.slots[k] = m;
-            mem.sums[k] = entries.iter().map(|&g| mem.s.kernel(m, g)).sum();
+            let mut slots = Vec::with_capacity(mem.slots.len());
+            let mut sums = Vec::with_capacity(mem.slots.len());
+            for (m, sum) in mem.slots.iter().zip(&mem.sums) {
+                if rng.random::<f64>() >= mem.s.death {
+                    slots.push(*m);
+                    sums.push(*sum);
+                }
+            }
+            let births = MemorySettings::poisson(rng, mem.s.death * mem.s.total(entries.len()));
+            for _ in 0..births {
+                let m = mem.s.draw(rng, &entries);
+                sums.push(entries.iter().map(|&g| mem.s.kernel(m, g)).sum());
+                slots.push(m);
+            }
+            mem.slots = slots;
+            mem.sums = sums;
             mem.entries = entries.len();
         }
     }
@@ -460,8 +487,9 @@ impl MorphMc {
         self.memory.as_ref().map(|m| m.slots.as_slice())
     }
 
-    /// Log of prod_k q(m_k | x') / q(m_k | x) for body `b` moving to `new`, with the
-    /// updated sums, entry count and new contact partners of `b`. Without memory: zero.
+    /// Log of the memory factor exp(-lambda (N' - N)) prod_m mu_x'(m) / mu_x(m) for body `b`
+    /// moving to `new`, with the updated sums, entry count and new contact partners of `b`.
+    /// Without memory: zero.
     fn memory_delta(&self, b: usize, new: Pose) -> (f64, Vec<f64>, usize, Vec<usize>) {
         let Some(mem) = &self.memory else {
             return (0., Vec::new(), 0, Vec::new());
@@ -484,12 +512,18 @@ impl MorphMc {
         }
         let n_new = mem.entries + new_g.len() - old_g.len();
         let mut sums = mem.sums.clone();
-        let mut d = 0.;
+        let mut d = -mem.s.lambda * (n_new as f64 - mem.entries as f64);
         for (k, m) in mem.slots.iter().enumerate() {
+            if old_g.is_empty() && new_g.is_empty() {
+                break;
+            }
             let removed: f64 = old_g.iter().map(|&g| mem.s.kernel(*m, g)).sum();
             let added: f64 = new_g.iter().map(|&g| mem.s.kernel(*m, g)).sum();
+            if removed == 0. && added == 0. {
+                continue;
+            }
             let s_new = (mem.sums[k] - removed + added).max(0.);
-            d += mem.s.log_q(*m, s_new, n_new) - mem.s.log_q(*m, mem.sums[k], mem.entries);
+            d += mem.s.log_mu(*m, s_new) - mem.s.log_mu(*m, mem.sums[k]);
             sums[k] = s_new;
         }
         (d, sums, n_new, partners)
@@ -1337,10 +1371,11 @@ mod tests {
             },
         ];
         let mem = MemorySettings {
-            slots: 3,
+            lambda_floor: 2.,
+            lambda: 0.5,
+            death: 0.3,
             sigma_translation: 0.3,
             sigma_rotation: 10f64.to_radians(),
-            uniform_weight: 0.3,
             floor_sigma: 3.,
         };
         let mv = MoveSettings {

@@ -116,21 +116,25 @@ enum Cmd {
         /// Atom-gap threshold of a library contact, A.
         #[arg(long, default_value_t = 2.8)]
         dock_library_gap: f64,
-        /// Finite memory: number of auxiliary relative-pose slots (0: off; needs
-        /// --dock-library). Slots join the docking components.
-        #[arg(long, default_value_t = 0)]
-        memory_slots: usize,
+        /// Poisson memory: intensity per contact entry (0 with --memory-lambda-floor 0: off;
+        /// needs --dock-library). Memory slots join the docking components; each contact
+        /// formed costs 2 lambda kT in the acceptance (exactly compensated in equilibrium).
+        #[arg(long, default_value_t = 0.)]
+        memory_lambda: f64,
+        /// Floor intensity (expected number of floor slots); > 0 switches memory on.
+        #[arg(long, default_value_t = 0.)]
+        memory_lambda_floor: f64,
+        /// Death probability of each slot per refresh (memory lifetime ~ 1 / death refreshes).
+        #[arg(long, default_value_t = 0.01)]
+        memory_death: f64,
         #[arg(long, default_value_t = 0.3)]
         memory_sigma_translation: f64,
         #[arg(long, default_value_t = 3.0)]
         memory_sigma_rotation_degrees: f64,
-        /// Weight of the floor density in the memory conditional.
-        #[arg(long, default_value_t = 0.5)]
-        memory_uniform_weight: f64,
         /// Translation sd of the floor density, A.
         #[arg(long, default_value_t = 20.0)]
         memory_floor_sigma: f64,
-        /// Gibbs refreshes of single slots per sweep (memory lifetime ~ slots / refreshes).
+        /// Memory refreshes per sweep.
         #[arg(long, default_value_t = 1)]
         memory_refresh_per_sweep: usize,
         /// JSON list of charged groups {atoms, sign, fraction} for the like-charge penalty.
@@ -485,10 +489,11 @@ fn main() -> Result<()> {
             dock_uniform_weight,
             dock_library,
             dock_library_gap,
-            memory_slots,
+            memory_lambda,
+            memory_lambda_floor,
+            memory_death,
             memory_sigma_translation,
             memory_sigma_rotation_degrees,
-            memory_uniform_weight,
             memory_floor_sigma,
             memory_refresh_per_sweep,
             charge_groups,
@@ -542,14 +547,15 @@ fn main() -> Result<()> {
                 mc = mc.with_contact_library(dock_library_gap)?;
             }
             let mut rng = StdRng::seed_from_u64(seed);
-            if memory_slots > 0 {
-                ensure!(dock_library, "--memory-slots needs --dock-library");
+            if memory_lambda_floor > 0. {
+                ensure!(dock_library, "memory needs --dock-library");
                 mc = mc.with_memory(
                     MemorySettings {
-                        slots: memory_slots,
+                        lambda_floor: memory_lambda_floor,
+                        lambda: memory_lambda,
+                        death: memory_death,
                         sigma_translation: memory_sigma_translation,
                         sigma_rotation: memory_sigma_rotation_degrees.to_radians(),
-                        uniform_weight: memory_uniform_weight,
                         floor_sigma: memory_floor_sigma,
                     },
                     &mut rng,
@@ -559,10 +565,11 @@ fn main() -> Result<()> {
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
                 "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,
-                "like_charge_cutoff": like_charge_cutoff, "memory_slots": memory_slots,
+                "like_charge_cutoff": like_charge_cutoff, "memory_lambda": memory_lambda,
+                "memory_lambda_floor": memory_lambda_floor, "memory_death": memory_death,
                 "memory_sigma_translation": memory_sigma_translation,
                 "memory_sigma_rotation_degrees": memory_sigma_rotation_degrees,
-                "memory_uniform_weight": memory_uniform_weight, "memory_floor_sigma": memory_floor_sigma,
+                "memory_floor_sigma": memory_floor_sigma,
                 "memory_refresh_per_sweep": memory_refresh_per_sweep,
                 "sample_every": sample_every, "seed": seed,
                 "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",

@@ -107,6 +107,13 @@ enum Cmd {
         dock_sigma_rotation_degrees: f64,
         #[arg(long, default_value_t = 0.5)]
         dock_uniform_weight: f64,
+        /// Dock from the current contact library (contacts between the other bodies) instead
+        /// of a fixed component list or learned model.
+        #[arg(long)]
+        dock_library: bool,
+        /// Atom-gap threshold of a library contact, A.
+        #[arg(long, default_value_t = 2.8)]
+        dock_library_gap: f64,
         /// JSON list of charged groups {atoms, sign, fraction} for the like-charge penalty.
         #[arg(long)]
         charge_groups: Option<PathBuf>,
@@ -457,6 +464,8 @@ fn main() -> Result<()> {
             dock_sigma_translation,
             dock_sigma_rotation_degrees,
             dock_uniform_weight,
+            dock_library,
+            dock_library_gap,
             charge_groups,
             like_charge_weight,
             like_charge_cutoff,
@@ -501,6 +510,13 @@ fn main() -> Result<()> {
                 cutoff: like_charge_cutoff,
                 groups,
             })?;
+            if dock_library {
+                ensure!(
+                    dock_model.is_none() && dock_components.is_none(),
+                    "--dock-library excludes --dock-model and --dock-components"
+                );
+                mc = mc.with_contact_library(dock_library_gap)?;
+            }
             let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
@@ -535,10 +551,12 @@ fn main() -> Result<()> {
                 }
                 None => None,
             };
-            let dock = if dock_probability > 0. && (learned.is_some() || dock_components.is_some())
+            let dock = if dock_probability > 0.
+                && (learned.is_some() || dock_components.is_some() || dock_library)
             {
                 Some(DockSettings {
                     learned,
+                    library: dock_library,
                     components: match &dock_components {
                         Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                         None => Vec::new(),
@@ -553,7 +571,8 @@ fn main() -> Result<()> {
             fs::write(
                 out.join("dock.json"),
                 serde_json::to_string_pretty(
-                    &json!({"components": dock_components, "model": dock_model, "probability": dock_probability,
+                    &json!({"components": dock_components, "model": dock_model, "library": dock_library,
+                    "library_gap": dock_library_gap, "probability": dock_probability,
                     "sigma_translation": dock_sigma_translation, "sigma_rotation_degrees": dock_sigma_rotation_degrees,
                     "uniform_weight": dock_uniform_weight}),
                 )?,
@@ -584,7 +603,7 @@ fn main() -> Result<()> {
                         log,
                         "{}",
                         json!({"sweep": sweep, "seconds": t0.elapsed().as_secs_f64(),
-                        "solvation": mc.solvation_energy(), "well": mc.well_energy(), "like_charge": mc.like_energy(),
+                        "solvation": mc.solvation_energy(), "well": mc.well_energy(), "like_charge": mc.like_energy(), "contacts": mc.contact_count(),
                         "attempts": s.attempts, "accepted": s.accepted, "hard_rejected": s.hard_rejected,
                         "wall_rejected": s.wall_rejected, "reinsertion_attempts": s.reinsertion_attempts,
                         "reinsertion_accepted": s.reinsertion_accepted, "dock_attempts": s.dock_attempts, "dock_accepted": s.dock_accepted})

@@ -63,9 +63,17 @@ pub struct MoveSettings {
 ///
 /// With `learned`, G is instead a frozen learned relative-pose mixture (e.g. a blind contact
 /// map): its exact independent draw and normalized density over the same anchors.
+///
+/// With `library` (requires `MorphMc::with_contact_library`), the components are instead the
+/// relative poses of the current contacts between bodies other than the moved body b, in both
+/// directions. They are a function of the other bodies only, which the move leaves unchanged,
+/// so the same library enters Q at both endpoints and the move is Metropolis-within-Gibbs for
+/// body b with an exact acceptance (formal/ReversibleSampling/FrozenContext.lean). An empty
+/// library makes the proposal purely uniform.
 #[derive(Clone)]
 pub struct DockSettings {
     pub learned: Option<std::sync::Arc<crate::docking::DockingProposal>>,
+    pub library: bool,
     pub components: Vec<Pose>,
     pub sigma_translation: f64,
     pub sigma_rotation: f64,
@@ -102,6 +110,10 @@ pub struct MorphMc {
     charge_extent: f64,
     /// sum f_g f_h over like-charge contacts between different bodies, each pair once.
     like_sum: f64,
+    /// Contact library: atom-gap threshold, its grid, and the symmetric contact matrix.
+    contact_gap: Option<f64>,
+    contact_grid: Option<BallGrid>,
+    contact: Vec<Vec<bool>>,
     pub stats: MoveStats,
 }
 
@@ -143,6 +155,9 @@ impl MorphMc {
             like: LikeCharge::default(),
             charge_extent: 0.,
             like_sum: 0.,
+            contact_gap: None,
+            contact_grid: None,
+            contact: Vec::new(),
             stats: MoveStats::default(),
         };
         for (b, &p) in s.poses.iter().enumerate() {
@@ -191,6 +206,88 @@ impl MorphMc {
         }
         self.like_sum = sum / 2.;
         Ok(self)
+    }
+
+    /// Track contacts (some atom pair with |x_i - x_j| < r_i + r_j + gap) for library docking.
+    pub fn with_contact_library(mut self, gap: f64) -> Result<Self> {
+        ensure!(gap.is_finite() && gap >= 0., "invalid contact gap");
+        let vmax = self.vdw.iter().copied().fold(0., f64::max);
+        self.contact_grid = Some(BallGrid::new(&self.centers, 2. * vmax + gap));
+        self.contact_gap = Some(gap);
+        let n = self.poses.len();
+        self.contact = vec![vec![false; n]; n];
+        for a in 0..n {
+            for c in a + 1..n {
+                let k = self.in_contact(a, self.poses[a], c);
+                self.contact[a][c] = k;
+                self.contact[c][a] = k;
+            }
+        }
+        Ok(self)
+    }
+
+    /// Whether body `a` placed at `p` is in contact with body `c` at its current pose.
+    fn in_contact(&self, a: usize, p: Pose, c: usize) -> bool {
+        let (Some(gap), Some(grid)) = (self.contact_gap, &self.contact_grid) else {
+            return false;
+        };
+        let q = self.poses[c];
+        if a == c || norm(sub(q.position, p.position)) > 2. * self.tree.bound + gap {
+            return false;
+        }
+        let ra = rotation(p.orientation);
+        let rct = transpose(rotation(q.orientation));
+        self.centers.iter().enumerate().any(|(i, &x)| {
+            let y = matvec(rct, sub(add(matvec(ra, x), p.position), q.position));
+            norm(y) <= self.tree.bound + self.vdw[i] + gap
+                && grid
+                    .near(&y)
+                    .any(|j| norm(sub(self.centers[j], y)) < self.vdw[i] + self.vdw[j] + gap)
+        })
+    }
+
+    /// Refresh the contacts of body `b` after it moved.
+    fn update_contacts(&mut self, b: usize) {
+        if self.contact_gap.is_none() {
+            return;
+        }
+        for c in 0..self.poses.len() {
+            if c != b {
+                let k = self.in_contact(b, self.poses[b], c);
+                self.contact[b][c] = k;
+                self.contact[c][b] = k;
+            }
+        }
+    }
+
+    /// Relative poses (j in the frame of i, both orders) of the current contacts between
+    /// bodies other than `b`: a function of the other bodies only.
+    pub fn library(&self, b: usize) -> Vec<Pose> {
+        let mut out = Vec::new();
+        for i in 0..self.poses.len() {
+            for j in i + 1..self.poses.len() {
+                if i == b || j == b || !self.contact[i][j] {
+                    continue;
+                }
+                let (pi, pj) = (self.poses[i], self.poses[j]);
+                let (ri, rj) = (rotation(pi.orientation), rotation(pj.orientation));
+                let d = sub(pj.position, pi.position);
+                out.push(Pose {
+                    position: matvec(transpose(ri), d),
+                    orientation: quaternion(matmul(transpose(ri), rj)),
+                });
+                out.push(Pose {
+                    position: matvec(transpose(rj), scale(d, -1.)),
+                    orientation: quaternion(matmul(transpose(rj), ri)),
+                });
+            }
+        }
+        out
+    }
+
+    /// Number of contacts between different bodies (each pair once).
+    pub fn contact_count(&self) -> usize {
+        self.contact.iter().map(|r| r.iter().filter(|&&k| k).count()).sum::<usize>() / 2
     }
 
     pub fn poses(&self) -> &[Pose] {
@@ -348,6 +445,7 @@ impl MorphMc {
             self.like_sum += dl;
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
+            self.update_contacts(b);
             self.stats.accepted += 1;
             self.stats.reinsertion_accepted += u64::from(reinsertion);
             return Ok(true);
@@ -355,11 +453,12 @@ impl MorphMc {
         Ok(false)
     }
 
-    /// Log of the docking mixture density of pose `x` of body `b` (anchors: all others).
-    fn dock_log_density(&self, b: usize, x: Pose, d: &DockSettings) -> f64 {
+    /// Log of the docking mixture density of pose `x` of body `b` (anchors: all others), with
+    /// Gaussian components `comps` and uniform weight `u` (1 when there are no components).
+    fn dock_log_density(&self, b: usize, x: Pose, d: &DockSettings, comps: &[Pose], u: f64) -> f64 {
         let r = self.wall.radius;
         let uniform = if norm(x.position) <= r {
-            d.uniform_weight.ln() - (4. / 3. * std::f64::consts::PI * r * r * r).ln()
+            u.ln() - (4. / 3. * std::f64::consts::PI * r * r * r).ln()
         } else {
             f64::NEG_INFINITY
         };
@@ -380,7 +479,7 @@ impl MorphMc {
                     + (near.len() as f64).ln()
                     - (all as f64).ln()
             };
-            let l = (1. - d.uniform_weight).ln() + g;
+            let l = (1. - u).ln() + g;
             let hi = uniform.max(l);
             if !hi.is_finite() {
                 return hi;
@@ -394,7 +493,10 @@ impl MorphMc {
             - 1.5 * (2. * std::f64::consts::PI * sr * sr).ln();
         let mut terms = Vec::new();
         let anchors = self.poses.len() - 1;
-        let lw = (1. - d.uniform_weight).ln() - ((anchors * d.components.len()) as f64).ln();
+        if comps.is_empty() {
+            return uniform;
+        }
+        let lw = (1. - u).ln() - ((anchors * comps.len()) as f64).ln();
         for (a, pa) in self.poses.iter().enumerate() {
             if a == b {
                 continue;
@@ -402,7 +504,7 @@ impl MorphMc {
             let rat = transpose(rotation(pa.orientation));
             let trel = matvec(rat, sub(x.position, pa.position));
             let rrel = matmul(rat, rx);
-            for c in &d.components {
+            for c in comps {
                 let dt = sub(trel, c.position);
                 let t2 = dt[0] * dt[0] + dt[1] * dt[1] + dt[2] * dt[2];
                 if t2 > 100. * st * st {
@@ -437,8 +539,12 @@ impl MorphMc {
         ensure!(
             !free.is_empty()
                 && self.poses.len() > 1
-                && (d.learned.is_some() || !d.components.is_empty()),
+                && (d.learned.is_some() || d.library || !d.components.is_empty()),
             "invalid docking setup"
+        );
+        ensure!(
+            !d.library || (self.contact_gap.is_some() && d.learned.is_none()),
+            "library docking needs with_contact_library and no learned model"
         );
         ensure!(
             d.uniform_weight > 0. && d.uniform_weight < 1.,
@@ -447,7 +553,12 @@ impl MorphMc {
         let b = free[rng.random_range(0..free.len())];
         let old = self.poses[b];
         self.stats.dock_attempts += 1;
-        let new = if rng.random::<f64>() < d.uniform_weight {
+        // Components: the contact library of the other bodies (unchanged by this move), or
+        // the fixed list. Without components the proposal is uniform with probability one.
+        let library = if d.library { Some(self.library(b)) } else { None };
+        let comps: &[Pose] = library.as_deref().unwrap_or(&d.components);
+        let u = if d.learned.is_none() && comps.is_empty() { 1. } else { d.uniform_weight };
+        let new = if rng.random::<f64>() < u {
             let r = self.wall.radius;
             let position = loop {
                 let x: Vec3 = std::array::from_fn(|_| (2. * rng.random::<f64>() - 1.) * r);
@@ -473,7 +584,7 @@ impl MorphMc {
         } else {
             let others: Vec<usize> = (0..self.poses.len()).filter(|&a| a != b).collect();
             let a = others[rng.random_range(0..others.len())];
-            let c = d.components[rng.random_range(0..d.components.len())];
+            let c = comps[rng.random_range(0..comps.len())];
             let t: Vec3 = std::array::from_fn(|k| {
                 let z: f64 = StandardNormal.sample(rng);
                 c.position[k] + z * d.sigma_translation
@@ -513,7 +624,8 @@ impl MorphMc {
         let d_well = -self.well.epsilon * dp as f64;
         let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
         let update = self.solv.propose(&[(b, new)])?;
-        let log_ratio = self.dock_log_density(b, old, d) - self.dock_log_density(b, new, d);
+        let log_ratio =
+            self.dock_log_density(b, old, d, comps, u) - self.dock_log_density(b, new, d, comps, u);
         let a = -(update.delta + d_well + self.like.weight * dl) + log_ratio;
         ensure!(!a.is_nan(), "NaN docking acceptance");
         if a >= 0. || rng.random::<f64>() < a.exp() {
@@ -522,6 +634,7 @@ impl MorphMc {
             self.like_sum += dl;
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
+            self.update_contacts(b);
             self.stats.accepted += 1;
             self.stats.dock_accepted += 1;
             return Ok(true);
@@ -670,6 +783,7 @@ mod tests {
         // Same target with docking proposals mixed in: Q at both endpoints must keep it exact.
         let dock = DockSettings {
             learned: None,
+            library: false,
             components: vec![Pose {
                 position: [2.4, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -792,6 +906,7 @@ mod tests {
         };
         let dock = DockSettings {
             learned: None,
+            library: false,
             components: vec![Pose {
                 position: [2.4, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -824,6 +939,124 @@ mod tests {
                 expect[k]
             );
         }
+    }
+
+    /// Three balls (one fixed, two mobile): library docking (proposals from the contact of the
+    /// two bodies not being moved) must sample the same distribution as local moves alone.
+    /// Compared: histograms of d(0,1), d(0,2) and d(1,2), and the contact fraction.
+    #[test]
+    fn library_docking_matches_local_moves() {
+        let r = 1.0;
+        let shape = Shape {
+            name: "ball".into(),
+            volume: 4. / 3. * std::f64::consts::PI,
+            atoms: vec![Atom {
+                center: [0.; 3],
+                radius: r,
+            }],
+        };
+        let model = SolvationModel {
+            probe: 1.4,
+            pressure: 0.209,
+            coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+            atom_types: vec![0],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 1.5,
+            width: 0.6,
+        };
+        let start = vec![
+            Pose {
+                position: [0.; 3],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [3., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [-3., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+        ];
+        let make = || {
+            let tree = SphereTree::new(shape.clone()).unwrap();
+            let wall = Container::new(5.0, &tree).unwrap();
+            MorphMc::new(tree, wall, model.clone(), well, start.clone(), vec![true, false, false])
+                .unwrap()
+                .with_contact_library(0.6)
+                .unwrap()
+        };
+        let mv = MoveSettings {
+            translation: 0.5,
+            rotation: 0.3,
+            reinsertion_probability: 0.2,
+        };
+        let dock = DockSettings {
+            learned: None,
+            library: true,
+            components: Vec::new(),
+            sigma_translation: 0.3,
+            sigma_rotation: 0.3,
+            uniform_weight: 0.3,
+        };
+        let (bins, lo, hi) = (12usize, 2.0, 8.0);
+        let observe = |mc: &MorphMc, h: &mut Vec<u64>, contacts: &mut u64| {
+            let p = mc.poses();
+            for (k, (i, j)) in [(0, 1), (0, 2), (1, 2)].into_iter().enumerate() {
+                let d = norm(sub(p[i].position, p[j].position));
+                let bin = (((d - lo) / (hi - lo) * bins as f64) as usize).min(bins - 1);
+                h[k * bins + bin] += 1;
+            }
+            *contacts += mc.contact_count() as u64;
+        };
+        let (burn, n) = (10_000, 1_500_000);
+        let mut out = Vec::new();
+        for (seed, with_dock) in [(11u64, false), (12, true)] {
+            let mut mc = make();
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut h = vec![0u64; 3 * bins];
+            let mut contacts = 0u64;
+            for t in 0..burn + n {
+                if with_dock && t % 2 == 0 {
+                    mc.step_dock(&mut rng, &dock).unwrap();
+                } else {
+                    mc.step(&mut rng, mv).unwrap();
+                }
+                if t >= burn {
+                    observe(&mc, &mut h, &mut contacts);
+                }
+            }
+            if with_dock {
+                assert!(
+                    mc.stats.dock_accepted > 20_000,
+                    "library docking must be accepted: {:?}",
+                    mc.stats
+                );
+            }
+            // The cached contact matrix must equal a fresh evaluation.
+            let fresh = make();
+            let mut check = fresh;
+            check.poses = mc.poses.clone();
+            check.placed = mc.placed.clone();
+            let check = check.with_contact_library(0.6).unwrap();
+            assert_eq!(check.contact, mc.contact, "cached contacts differ from recomputed");
+            out.push((h, contacts as f64 / n as f64));
+        }
+        let (ha, ca) = &out[0];
+        let (hb, cb) = &out[1];
+        eprintln!("mean contacts: local {ca:.4}, with library docking {cb:.4}");
+        for k in 0..3 * bins {
+            let (pa, pb) = (ha[k] as f64 / n as f64, hb[k] as f64 / n as f64);
+            eprintln!("bin {k:2}: local {pa:.4} library {pb:.4}");
+            assert!(
+                (pa - pb).abs() < 6e-3,
+                "bin {k}: local {pa:.4} vs library docking {pb:.4}"
+            );
+        }
+        assert!((ca - cb).abs() < 0.02, "contact fraction {ca:.4} vs {cb:.4}");
+        assert!(*ca > 0.1, "contacts must carry weight: {ca}");
     }
 
     /// Docking from a learned relative-pose mixture (exact independent draw and density over
@@ -911,6 +1144,7 @@ mod tests {
         expect.iter_mut().for_each(|e| *e /= z);
         let dock = DockSettings {
             learned: Some(std::sync::Arc::new(learned)),
+            library: false,
             components: Vec::new(),
             sigma_translation: 0.,
             sigma_rotation: 0.,

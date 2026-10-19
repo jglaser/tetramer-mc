@@ -11,7 +11,8 @@ use tetramer_mc::{
     geometry::{Placed, Shape, SphereTree},
     math::{Pose, cayley, matmul, matvec, norm, quaternion, sub, transpose},
     morph_mc::{
-        ChargeGroup, DockSettings, LikeCharge, MemorySettings, MorphMc, MoveSettings, SquareWell,
+        ChargeGroup, ChemistryModel, ClusterSettings, DockSettings, LikeCharge, MemorySettings,
+        MorphMc, MoveSettings, SquareWell,
     },
     solvation::{GaussConvention, SolvationModel},
     spherical::Container,
@@ -67,6 +68,39 @@ enum Cmd {
         like_charge_weight: f64,
         #[arg(long, default_value_t = 5.0)]
         like_charge_cutoff: f64,
+        /// Optional SE(3)-invariant interface chemistry residual model JSON (eps-independent).
+        #[arg(long)]
+        chemistry_model: Option<PathBuf>,
+        /// Probability per step of an FK-bonded rigid cluster move (`step_cluster`).
+        #[arg(long, default_value_t = 0.)]
+        cluster_probability: f64,
+        /// Maximum cluster size `k_max` for FK rigid cluster moves (0 disables size cap).
+        #[arg(long, default_value_t = 6)]
+        cluster_max_size: usize,
+        /// Inverse-temperature scale `beta_fk` for FK bond recruitment (`1.0` = exact cancellation, `0.0` = singleton ablation).
+        #[arg(long, default_value_t = 1.0)]
+        cluster_fk_beta: f64,
+        /// Fraction of FK cluster moves that propose rigid cluster docking onto spectator anchors.
+        #[arg(long, default_value_t = 0.5)]
+        cluster_dock_probability: f64,
+        /// Fraction of non-docking FK cluster moves that propose rigid uniform reinsertion.
+        #[arg(long, default_value_t = 0.2)]
+        cluster_reinsertion_probability: f64,
+        /// Base COM translation step size (A) for local FK cluster diffusion.
+        #[arg(long, default_value_t = 0.5)]
+        cluster_translation: f64,
+        /// Base COM rotation step size (degrees) for local FK cluster diffusion.
+        #[arg(long, default_value_t = 10.0)]
+        cluster_rotation_degrees: f64,
+        /// Disable `|C|^-0.5` step-size scaling on local FK cluster diffusion (ablation).
+        #[arg(long)]
+        cluster_no_size_scaling: bool,
+        /// Probability per step of a centered proper half-turn GCA move (`step_gca`).
+        #[arg(long, default_value_t = 0.)]
+        gca_probability: f64,
+        /// Inverse-temperature scale `beta_fk` for half-turn GCA bond recruitment.
+        #[arg(long, default_value_t = 1.0)]
+        gca_fk_beta: f64,
         /// Docking from the contact library (and memory) on this fraction of the steps; the
         /// docking and memory terms do not depend on eps, so swaps are unchanged.
         #[arg(long, default_value_t = 0.)]
@@ -184,6 +218,39 @@ enum Cmd {
         /// Closest atom-centre distance for a like-charge contact, A.
         #[arg(long, default_value_t = 5.0)]
         like_charge_cutoff: f64,
+        /// Optional SE(3)-invariant interface chemistry residual model JSON.
+        #[arg(long)]
+        chemistry_model: Option<PathBuf>,
+        /// Probability per step of an FK-bonded rigid cluster move (`step_cluster`).
+        #[arg(long, default_value_t = 0.)]
+        cluster_probability: f64,
+        /// Maximum cluster size `k_max` for FK rigid cluster moves (0 disables size cap).
+        #[arg(long, default_value_t = 6)]
+        cluster_max_size: usize,
+        /// Inverse-temperature scale `beta_fk` for FK bond recruitment (`1.0` = exact cancellation, `0.0` = singleton ablation).
+        #[arg(long, default_value_t = 1.0)]
+        cluster_fk_beta: f64,
+        /// Fraction of FK cluster moves that propose rigid cluster docking onto spectator anchors.
+        #[arg(long, default_value_t = 0.5)]
+        cluster_dock_probability: f64,
+        /// Fraction of non-docking FK cluster moves that propose rigid uniform reinsertion.
+        #[arg(long, default_value_t = 0.2)]
+        cluster_reinsertion_probability: f64,
+        /// Base COM translation step size (A) for local FK cluster diffusion.
+        #[arg(long, default_value_t = 0.5)]
+        cluster_translation: f64,
+        /// Base COM rotation step size (degrees) for local FK cluster diffusion.
+        #[arg(long, default_value_t = 10.0)]
+        cluster_rotation_degrees: f64,
+        /// Disable `|C|^-0.5` step-size scaling on local FK cluster diffusion (ablation).
+        #[arg(long)]
+        cluster_no_size_scaling: bool,
+        /// Probability per step of a centered proper half-turn GCA move (`step_gca`).
+        #[arg(long, default_value_t = 0.)]
+        gca_probability: f64,
+        /// Inverse-temperature scale `beta_fk` for half-turn GCA bond recruitment.
+        #[arg(long, default_value_t = 1.0)]
+        gca_fk_beta: f64,
         #[arg(long)]
         sweeps: usize,
         #[arg(long, default_value_t = 50)]
@@ -367,6 +434,17 @@ fn main() -> Result<()> {
             charge_groups,
             like_charge_weight,
             like_charge_cutoff,
+            chemistry_model,
+            cluster_probability,
+            cluster_max_size,
+            cluster_fk_beta,
+            cluster_dock_probability,
+            cluster_reinsertion_probability,
+            cluster_translation,
+            cluster_rotation_degrees,
+            cluster_no_size_scaling,
+            gca_probability,
+            gca_fk_beta,
             dock_probability,
             dock_library_gap,
             dock_sigma_translation,
@@ -397,6 +475,10 @@ fn main() -> Result<()> {
                 Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                 None => Vec::new(),
             };
+            let chem: ChemistryModel = match &chemistry_model {
+                Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+                None => ChemistryModel::default(),
+            };
             fs::create_dir_all(&out)?;
             let tree = shape_tree(&shape)?;
             let n = tree.shape.atoms.len();
@@ -419,6 +501,15 @@ fn main() -> Result<()> {
                 sigma_translation: dock_sigma_translation,
                 sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
                 uniform_weight: dock_uniform_weight,
+            };
+            let cs = ClusterSettings {
+                max_size: cluster_max_size,
+                fk_beta: cluster_fk_beta,
+                dock_probability: cluster_dock_probability,
+                reinsertion_probability: cluster_reinsertion_probability,
+                translation: cluster_translation,
+                rotation: cluster_rotation_degrees.to_radians(),
+                size_scaling: !cluster_no_size_scaling,
             };
             for k in 0..replicas {
                 let (poses, fixed, r) = start_state(
@@ -446,8 +537,9 @@ fn main() -> Result<()> {
                     weight: like_charge_weight,
                     cutoff: like_charge_cutoff,
                     groups: groups.clone(),
-                })?);
-                if dock_probability > 0. {
+                })?
+                .with_chemistry_model(chem.clone())?);
+                if dock_probability > 0. || (cluster_probability > 0. && cluster_dock_probability > 0.) {
                     let mc = mcs.pop().expect("replica");
                     let mut mc = mc.with_contact_library(dock_library_gap)?;
                     if memory_lambda_floor > 0. {
@@ -547,6 +639,7 @@ fn main() -> Result<()> {
                     break;
                 }
                 let dock = &dock;
+                let cs = &cs;
                 std::thread::scope(|sc| -> Result<()> {
                     let handles: Vec<_> = mcs
                         .iter_mut()
@@ -554,6 +647,14 @@ fn main() -> Result<()> {
                         .map(|(mc, rng)| {
                             sc.spawn(move || -> Result<()> {
                                 for _ in 0..swap_every * free_bodies {
+                                    if gca_probability > 0. && rng.random::<f64>() < gca_probability {
+                                        mc.step_gca(rng, gca_fk_beta)?;
+                                        continue;
+                                    }
+                                    if cluster_probability > 0. && rng.random::<f64>() < cluster_probability {
+                                        mc.step_cluster(rng, cs, Some(dock))?;
+                                        continue;
+                                    }
                                     if dock_probability > 0. && rng.random::<f64>() < dock_probability {
                                         mc.step_dock(rng, dock)?;
                                         continue;
@@ -604,6 +705,7 @@ fn main() -> Result<()> {
                     json!({"solvation_cached": mc.solvation_energy(), "solvation_recomputed": sf,
                     "well_cached": mc.well_energy(), "well_recomputed": sw,
                     "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like(),
+                    "chemistry_cached": mc.chem_energy(), "chemistry_recomputed": mc.recompute_chem(),
                     "memory_sum_relative_error": mc.memory_sum_error()})
                 })
                 .collect();
@@ -641,6 +743,17 @@ fn main() -> Result<()> {
             charge_groups,
             like_charge_weight,
             like_charge_cutoff,
+            chemistry_model,
+            cluster_probability,
+            cluster_max_size,
+            cluster_fk_beta,
+            cluster_dock_probability,
+            cluster_reinsertion_probability,
+            cluster_translation,
+            cluster_rotation_degrees,
+            cluster_no_size_scaling,
+            gca_probability,
+            gca_fk_beta,
             sweeps,
             sample_every,
             seed,
@@ -676,11 +789,17 @@ fn main() -> Result<()> {
                 Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                 None => Vec::new(),
             };
-            let mut mc = mc.with_like_charge(LikeCharge {
-                weight: like_charge_weight,
-                cutoff: like_charge_cutoff,
-                groups,
-            })?;
+            let chem: ChemistryModel = match &chemistry_model {
+                Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+                None => ChemistryModel::default(),
+            };
+            let mut mc = mc
+                .with_like_charge(LikeCharge {
+                    weight: like_charge_weight,
+                    cutoff: like_charge_cutoff,
+                    groups,
+                })?
+                .with_chemistry_model(chem)?;
             if dock_library {
                 ensure!(
                     dock_model.is_none() && dock_components.is_none(),
@@ -713,7 +832,15 @@ fn main() -> Result<()> {
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
                 "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,
-                "like_charge_cutoff": like_charge_cutoff, "memory_lambda": memory_lambda,
+                "like_charge_cutoff": like_charge_cutoff, "chemistry_model": chemistry_model,
+                "cluster_probability": cluster_probability, "cluster_max_size": cluster_max_size,
+                "cluster_fk_beta": cluster_fk_beta, "cluster_dock_probability": cluster_dock_probability,
+                "cluster_reinsertion_probability": cluster_reinsertion_probability,
+                "cluster_translation": cluster_translation,
+                "cluster_rotation_degrees": cluster_rotation_degrees,
+                "cluster_size_scaling": !cluster_no_size_scaling,
+                "gca_probability": gca_probability, "gca_fk_beta": gca_fk_beta,
+                "memory_lambda": memory_lambda,
                 "memory_lambda_floor": memory_lambda_floor, "memory_lambda_prior": memory_lambda_prior,
                 "memory_prior_model": memory_prior_model, "memory_death": memory_death,
                 "memory_sigma_translation": memory_sigma_translation,
@@ -721,8 +848,8 @@ fn main() -> Result<()> {
                 "memory_floor_sigma": memory_floor_sigma,
                 "memory_refresh_per_sweep": memory_refresh_per_sweep,
                 "sample_every": sample_every, "seed": seed,
-                "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",
-                "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well; exact hard cores and wall"});
+                "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion; optional FK rigid cluster + half-turn GCA",
+                "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well + like-charge + chemistry residual; exact hard cores and wall"});
             fs::write(
                 out.join("config.json"),
                 serde_json::to_string_pretty(&meta)?,
@@ -749,7 +876,7 @@ fn main() -> Result<()> {
                 }
                 None => None,
             };
-            let dock = if dock_probability > 0.
+            let dock = if (dock_probability > 0. || (cluster_probability > 0. && cluster_dock_probability > 0.))
                 && (learned.is_some() || dock_components.is_some() || dock_library)
             {
                 Some(DockSettings {
@@ -765,6 +892,15 @@ fn main() -> Result<()> {
                 })
             } else {
                 None
+            };
+            let cs = ClusterSettings {
+                max_size: cluster_max_size,
+                fk_beta: cluster_fk_beta,
+                dock_probability: cluster_dock_probability,
+                reinsertion_probability: cluster_reinsertion_probability,
+                translation: cluster_translation,
+                rotation: cluster_rotation_degrees.to_radians(),
+                size_scaling: !cluster_no_size_scaling,
             };
             fs::write(
                 out.join("dock.json"),
@@ -801,10 +937,16 @@ fn main() -> Result<()> {
                         log,
                         "{}",
                         json!({"sweep": sweep, "seconds": t0.elapsed().as_secs_f64(),
-                        "solvation": mc.solvation_energy(), "well": mc.well_energy(), "like_charge": mc.like_energy(), "contacts": mc.contact_count(),
+                        "solvation": mc.solvation_energy(), "well": mc.well_energy(), "like_charge": mc.like_energy(), "chemistry": mc.chem_energy(), "contacts": mc.contact_count(),
                         "attempts": s.attempts, "accepted": s.accepted, "hard_rejected": s.hard_rejected,
                         "wall_rejected": s.wall_rejected, "reinsertion_attempts": s.reinsertion_attempts,
-                        "reinsertion_accepted": s.reinsertion_accepted, "dock_attempts": s.dock_attempts, "dock_accepted": s.dock_accepted})
+                        "reinsertion_accepted": s.reinsertion_accepted, "dock_attempts": s.dock_attempts, "dock_accepted": s.dock_accepted,
+                        "cluster_attempts": s.cluster_attempts, "cluster_accepted": s.cluster_accepted,
+                        "cluster_multibody_attempts": s.cluster_multibody_attempts, "cluster_multibody_accepted": s.cluster_multibody_accepted,
+                        "cluster_dock_attempts": s.cluster_dock_attempts, "cluster_dock_accepted": s.cluster_dock_accepted,
+                        "cluster_reinsertion_attempts": s.cluster_reinsertion_attempts, "cluster_reinsertion_accepted": s.cluster_reinsertion_accepted,
+                        "cluster_pinned_rejected": s.cluster_pinned_rejected, "cluster_cap_rejected": s.cluster_cap_rejected,
+                        "gca_attempts": s.gca_attempts, "gca_accepted": s.gca_accepted, "gca_moved_bodies": s.gca_moved_bodies})
                     )?;
                     log.flush()?;
                     traj.flush()?;
@@ -813,8 +955,16 @@ fn main() -> Result<()> {
                     break;
                 }
                 for _ in 0..free_bodies {
+                    if gca_probability > 0. && rng.random::<f64>() < gca_probability {
+                        mc.step_gca(&mut rng, gca_fk_beta)?;
+                        continue;
+                    }
+                    if cluster_probability > 0. && rng.random::<f64>() < cluster_probability {
+                        mc.step_cluster(&mut rng, &cs, dock.as_ref())?;
+                        continue;
+                    }
                     if let Some(d) = &dock {
-                        if rng.random::<f64>() < dock_probability {
+                        if dock_probability > 0. && rng.random::<f64>() < dock_probability {
                             mc.step_dock(&mut rng, d)?;
                             continue;
                         }
@@ -841,6 +991,7 @@ fn main() -> Result<()> {
                 "solvation_cached": mc.solvation_energy(), "solvation_recomputed": sf,
                 "well_cached": mc.well_energy(), "well_recomputed": sw,
                 "like_charge_cached": mc.like_energy(), "like_charge_recomputed": mc.recompute_like(),
+                "chemistry_cached": mc.chem_energy(), "chemistry_recomputed": mc.recompute_chem(),
                 "memory_sum_relative_error": mc.memory_sum_error()}))?,
             )?;
         }

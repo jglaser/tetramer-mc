@@ -1,0 +1,10 @@
+'ReversibleSampling.FkClusterMove.attractive_add_repulsive' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.FkClusterMove.fkCutSurvival_pos' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.FkClusterMove.fkCutSurvival_le_one' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.FkClusterMove.boltzmann_mul_fkCutSurvival' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]
+'ReversibleSampling.FkClusterMove.fk_boundary_flow_balance' depends on axioms: [propext, Classical.choice, Quot.sound]
+'ReversibleSampling.FkClusterMove.fk_surrogate_residual_correct' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound]

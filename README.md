@@ -497,3 +497,10 @@ See [third-party provenance](vendor/README.md), [input provenance](examples/READ
 the [validation and benchmark report](docs/validation.md), and the
 [RJ derivation](docs/rjmcmc.md). This repository is local; nothing has
 been published remotely.
+
+## 6 A runs - final (60k sweeps unless noted)
+native docking: 1.0 eps_c lattice 6 | 1.05: 12 | 1.1: 11 | 1.14 (52k): 18 | 1.2 (47k): 21; non-native seed 2-4, free 31-59.
+blind map: 0.8: 0 | 0.9: 3 | 1.0: 5 | 1.05: 6 | 1.1: 8 | 1.14: 6 | 1.2 (57k): 10; no-penalty control 1.14 (55k): 5, 37 non-native ff.
+library docking (running): 1.05 eps_c 11 at 26k, 1.14 eps_c 15 at 20k (native docking 1.14 reached 15 at ~26k).
+seedless library nucleation (1.2 / 1.3 eps_c, ~31k): no native contact, 22 / 30 non-native contacts.
+observe_growth.py now reads seed_count from the run's config (was hard-coded 32; seedless runs were misreported).

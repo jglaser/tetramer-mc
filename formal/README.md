@@ -549,6 +549,32 @@ Focused check: `lake build ReversibleSampling.FrozenContext`, then
 `lake env lean FrozenContextAudit.lean` (output in `frozen-context-audit.txt`: only `propext`,
 `Classical.choice` and `Quot.sound`).
 
+### Fortuin--Kasteleyn rigid-cluster moves and surrogate-residual GCA
+
+`ReversibleSampling/FkClusterMove.lean` proves the algebraic and measure-theoretic
+foundations for collective cluster updates (`MorphMc::step_cluster` and `MorphMc::step_gca`
+in `src/morph_mc.rs`) under the pairwise square-well + like-charge + SE(3) chemistry
+surrogate plus many-body morphometric solvation residual:
+
+- `attractive_add_repulsive` and `boltzmann_mul_fkCutSurvival` prove that for any boundary
+  cut $B$, the product of the pairwise Boltzmann weight $\exp(-E_{\mathrm{cut}})$ and the
+  Fortuin--Kasteleyn cut survival probability $\prod_{e \in B} \exp(\min(0, E_e))$ collapses
+  to $\exp(-E_{\mathrm{cut}}^+)$, cancelling all attractive bond-breaking terms across the cut.
+- `fk_boundary_flow_balance` proves exact detailed-balance flow symmetry
+  $\pi(x) P_{\mathrm{cut}}(x) q(x,y) \alpha(x,y) = \pi(y) P_{\mathrm{cut}}(y) q(y,x) \alpha(y,x)$
+  for any rigid-cluster proposal $q(x,y)$ (both asymmetric spectator-anchored cluster docking
+  and symmetric local COM / reinsertion / half-turn involution moves) when accepted with the
+  residual ratio $\min(1, \frac{q(y,x)}{q(x,y)} \exp(-(E_{\mathrm{cut}}^+(y) - E_{\mathrm{cut}}^+(x) + E_{\mathrm{res}}(y) - E_{\mathrm{res}}(x))))$.
+- `fk_surrogate_residual_correct` lifts any proposal kernel $K_{\mathrm{fk}}$ that is
+  reversible for a pairwise FK surrogate measure $\mu_{\mathrm{fk}}$ (such as `HalfTurn` GCA
+  or FK cluster transport) to a rejection-completed Markov kernel that is reversible and
+  invariant for the full target $\mu_{\mathrm{fk}}.\mathrm{withDensity}(\exp(-E_{\mathrm{res}}))$,
+  where $E_{\mathrm{res}}$ contains the non-pairwise morphometric solvation free energy and
+  any active Poisson memory correction.
+
+Focused check: `lake build ReversibleSampling.FkClusterMove`, then
+`lake env lean FkClusterMoveAudit.lean` (and included in the 84-theorem `Audit.lean` / `check.py` receipt).
+
 ## Concrete implementation obligations
 
 `SelectionCorrection.lean` supplies the state-dependent selection bridge for

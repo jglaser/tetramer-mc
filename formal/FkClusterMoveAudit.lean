@@ -1,0 +1,8 @@
+import ReversibleSampling.FkClusterMove
+
+#print axioms ReversibleSampling.FkClusterMove.attractive_add_repulsive
+#print axioms ReversibleSampling.FkClusterMove.fkCutSurvival_pos
+#print axioms ReversibleSampling.FkClusterMove.fkCutSurvival_le_one
+#print axioms ReversibleSampling.FkClusterMove.boltzmann_mul_fkCutSurvival
+#print axioms ReversibleSampling.FkClusterMove.fk_boundary_flow_balance
+#print axioms ReversibleSampling.FkClusterMove.fk_surrogate_residual_correct

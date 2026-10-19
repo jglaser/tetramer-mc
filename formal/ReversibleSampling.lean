@@ -12,3 +12,4 @@ import ReversibleSampling.ClusterMeasureRates
 import ReversibleSampling.CappedIndependent
 import ReversibleSampling.FrozenContext
 import ReversibleSampling.PoissonMemory
+import ReversibleSampling.FkClusterMove

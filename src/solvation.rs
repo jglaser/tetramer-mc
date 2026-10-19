@@ -272,7 +272,8 @@ impl SolvationState {
         // Atoms with an overlap across bodies before or after the move.
         let mut affected: BTreeSet<(usize, usize)> = BTreeSet::new();
         for (&b, w) in &moved {
-            // Body-level pre-check: no other body within reach before or after the move.
+            // Body-level pre-check: only recompute balls if a body is near a spectator
+            // (outside `moved`) before or after the move, or if `moved` is non-rigid.
             let (po, pn) = (
                 self.poses[b].position,
                 moves.iter().find(|m| m.0 == b).unwrap().1.position,
@@ -283,6 +284,11 @@ impl SolvationState {
                 }
                 let qo = self.poses[c].position;
                 let qn = moves.iter().find(|m| m.0 == c).map_or(qo, |m| m.1.position);
+                if moved.contains_key(&c)
+                    && (norm(sub(qo, po)) - norm(sub(qn, pn))).abs() < 1e-9
+                {
+                    return false;
+                }
                 norm(sub(qo, po)) < 2. * self.reach || norm(sub(qn, pn)) < 2. * self.reach
             });
             if !near {

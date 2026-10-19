@@ -17,7 +17,7 @@ use std::{f64::consts::PI, fs, path::PathBuf};
 use tetramer_mc::{
     geometry::{Placed, Shape, SphereTree},
     math::{Pose, Vec3, add, matmul, matvec, norm, quaternion, rotation, sub, transpose},
-    morph_mc::{ChargeGroup, LikeCharge, MorphMc, SquareWell},
+    morph_mc::{ChargeGroup, ChemistryModel, LikeCharge, MorphMc, SquareWell},
     solvation::{GaussConvention, SolvationModel, SolvationState},
     spherical::Container,
 };
@@ -53,6 +53,15 @@ struct Args {
     /// interaction ball, Haar orientation); --poses is then ignored.
     #[arg(long)]
     virial: Option<usize>,
+    /// Hard-sphere morphometric solvation off (Baseline 1: hard shape + square well only).
+    #[arg(long)]
+    no_solvation: bool,
+    /// Ideal Asakura-Oosawa depletion baseline (Baseline 2: F_solv = z * dV_excl(r_d) with probe
+    /// radius --depletion-probe; overrides White Bear II solvation when given).
+    #[arg(long)]
+    depletion_z: Option<f64>,
+    #[arg(long, default_value_t = 1.4)]
+    depletion_probe: f64,
     /// Like-charge penalty (as in morph-mc): charged groups, weight and cutoff.
     #[arg(long)]
     charge_groups: Option<PathBuf>,
@@ -60,6 +69,9 @@ struct Args {
     like_charge_weight: f64,
     #[arg(long, default_value_t = 5.0)]
     like_charge_cutoff: f64,
+    /// Optional SE(3)-invariant interface chemistry residual model JSON.
+    #[arg(long)]
+    chemistry_model: Option<PathBuf>,
 }
 
 fn exp_rot(w: Vec3) -> [f64; 4] {
@@ -92,8 +104,8 @@ struct Pair {
 }
 
 impl Pair {
-    /// (F_solv + like-charge penalty, n_pairs) of the moved body at pose g next to the fixed
-    /// environment, or None for a hard overlap.
+    /// (F_solv + like-charge + chemistry residual, n_pairs) of the moved body at pose g next to
+    /// the fixed environment, or None for a hard overlap.
     fn energy(&self, g: Pose) -> Result<Option<(f64, f64)>> {
         let pg = Placed::new(g);
         if self.env.iter().any(|e| self.tree.overlaps(e, &pg)) {
@@ -102,7 +114,8 @@ impl Pair {
         let moved = self.env.len();
         let f = self.solv.propose(&[(moved, g)])?.delta;
         let like = if self.like_weight != 0. { self.like_weight * self.mc.like_pairs(moved, g) } else { 0. };
-        Ok(Some((f + like, self.mc.well_pairs(moved, g) as f64)))
+        let chem = self.mc.chem_pairs(moved, g);
+        Ok(Some((f + like + chem, self.mc.well_pairs(moved, g) as f64)))
     }
 }
 
@@ -136,12 +149,30 @@ fn make_pair(a: &Args, tree: &SphereTree, env: &[Pose]) -> Result<Pair> {
     let centers: Vec<Vec3> = tree.shape.atoms.iter().map(|x| x.center).collect();
     let radii: Vec<f64> = tree.shape.atoms.iter().map(|x| x.radius).collect();
     let far = Pose { position: [1e5, 0., 0.], orientation: [1., 0., 0., 0.] };
-    let model = SolvationModel {
-        probe: 1.4,
-        pressure: 0.2090,
-        coefficients: vec![[-0.1564, 0.1362, -0.0369]],
-        atom_types: vec![0; n],
-        gauss_convention: GaussConvention::PatchGaussBonnet,
+    let model = if a.no_solvation {
+        SolvationModel {
+            probe: 1.4,
+            pressure: 0.,
+            coefficients: vec![[0.; 3]],
+            atom_types: vec![0; n],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        }
+    } else if let Some(z) = a.depletion_z {
+        SolvationModel {
+            probe: a.depletion_probe,
+            pressure: z,
+            coefficients: vec![[0.; 3]],
+            atom_types: vec![0; n],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        }
+    } else {
+        SolvationModel {
+            probe: 1.4,
+            pressure: 0.2090,
+            coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+            atom_types: vec![0; n],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        }
     };
     let mut bodies = env.to_vec();
     bodies.push(far);
@@ -151,9 +182,14 @@ fn make_pair(a: &Args, tree: &SphereTree, env: &[Pose]) -> Result<Pair> {
         Some(f) => serde_json::from_slice(&fs::read(f)?)?,
         None => Vec::new(),
     };
+    let chem: ChemistryModel = match &a.chemistry_model {
+        Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+        None => ChemistryModel::default(),
+    };
     let mc = MorphMc::new(tree.clone(), wall, SolvationModel { pressure: 0., coefficients: vec![[0.; 3]], ..model },
         SquareWell { epsilon: 1., width: a.width }, bodies.clone(), vec![true; bodies.len()])?
-        .with_like_charge(LikeCharge { weight: 1., cutoff: a.like_charge_cutoff, groups })?;
+        .with_like_charge(LikeCharge { weight: 1., cutoff: a.like_charge_cutoff, groups })?
+        .with_chemistry_model(chem)?;
     Ok(Pair {
         solv,
         mc,

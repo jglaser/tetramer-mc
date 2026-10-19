@@ -87,3 +87,11 @@ import ReversibleSampling
 #print axioms ReversibleSampling.measurable_count_mixture_correct
 #print axioms ReversibleSampling.measurableKernelIterate_invariant
 #print axioms ReversibleSampling.measurable_poisson_phase_correct
+
+/-! Fortuin-Kasteleyn rigid cluster boundary cancellation and surrogate-residual GCA balance. -/
+#print axioms ReversibleSampling.FkClusterMove.attractive_add_repulsive
+#print axioms ReversibleSampling.FkClusterMove.fkCutSurvival_pos
+#print axioms ReversibleSampling.FkClusterMove.fkCutSurvival_le_one
+#print axioms ReversibleSampling.FkClusterMove.boltzmann_mul_fkCutSurvival
+#print axioms ReversibleSampling.FkClusterMove.fk_boundary_flow_balance
+#print axioms ReversibleSampling.FkClusterMove.fk_surrogate_residual_correct

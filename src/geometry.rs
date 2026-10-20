@@ -279,30 +279,135 @@ impl SphereTree {
     }
     /// Strict atomic-interior overlap, with BVH spheres only excluding pairs.
     pub fn overlaps(&self, a: &Placed, b: &Placed) -> bool {
-        self.overlap_nodes(0, 0, a, b)
+        let rbt = transpose(b.rotation);
+        let r_rel = matmul(rbt, a.rotation);
+        let t_rel = matvec(rbt, sub(a.position, b.position));
+        let guard = 512. * f64::EPSILON * (1. + norm(a.position) + norm(b.position) + self.bound);
+        self.overlap_nodes_rel(0, 0, &r_rel, &t_rel, guard)
     }
-    fn overlap_nodes(&self, i: usize, j: usize, a: &Placed, b: &Placed) -> bool {
+    fn overlap_nodes_rel(
+        &self,
+        i: usize,
+        j: usize,
+        r_rel: &Mat3,
+        t_rel: &Vec3,
+        guard: f64,
+    ) -> bool {
         let na = &self.nodes[i];
         let nb = &self.nodes[j];
-        let delta = sub(a.apply(na.center), b.apply(nb.center));
-        let r = na.radius + nb.radius;
-        let guard = 512. * f64::EPSILON * (1. + norm(a.position) + norm(b.position) + self.bound);
-        if dot(delta, delta) > (r + guard).powi(2) {
+        let ca = add(matvec(*r_rel, na.center), *t_rel);
+        let delta = sub(ca, nb.center);
+        let r = na.radius + nb.radius + guard;
+        if dot(delta, delta) > r * r {
             return false;
         }
         if let (Some(ai), Some(bi)) = (na.atom, nb.atom) {
             let aa = &self.shape.atoms[ai];
             let bb = &self.shape.atoms[bi];
-            let d = sub(a.apply(aa.center), b.apply(bb.center));
-            return dot(d, d) < (aa.radius + bb.radius).powi(2);
+            let pa = add(matvec(*r_rel, aa.center), *t_rel);
+            let d = sub(pa, bb.center);
+            let r_ab = aa.radius + bb.radius;
+            return dot(d, d) < r_ab * r_ab;
         }
         if na.children.is_some() && (nb.children.is_none() || na.radius >= nb.radius) {
             let (l, r) = na.children.unwrap();
-            self.overlap_nodes(l, j, a, b) || self.overlap_nodes(r, j, a, b)
+            self.overlap_nodes_rel(l, j, r_rel, t_rel, guard)
+                || self.overlap_nodes_rel(r, j, r_rel, t_rel, guard)
         } else {
             let (l, r) = nb.children.unwrap();
-            self.overlap_nodes(i, l, a, b) || self.overlap_nodes(i, r, a, b)
+            self.overlap_nodes_rel(i, l, r_rel, t_rel, guard)
+                || self.overlap_nodes_rel(i, r, r_rel, t_rel, guard)
         }
+    }
+
+    /// Whether any atom pair `(i in a, j in b)` has surface gap `|x_i - x_j| < r_i + r_j + gap`.
+    pub fn within_gap(&self, a: Pose, b: Pose, gap: f64) -> bool {
+        let reach = 2. * self.bound + gap;
+        let dp = sub(b.position, a.position);
+        if dot(dp, dp) > reach * reach {
+            return false;
+        }
+        let ra = rotation(a.orientation);
+        let rbt = transpose(rotation(b.orientation));
+        let r_rel = matmul(rbt, ra);
+        let t_rel = matvec(rbt, sub(a.position, b.position));
+        let guard =
+            512. * f64::EPSILON * (1. + norm(a.position) + norm(b.position) + self.bound + gap);
+        self.within_gap_nodes(0, 0, &r_rel, &t_rel, gap, guard)
+    }
+    fn within_gap_nodes(
+        &self,
+        i: usize,
+        j: usize,
+        r_rel: &Mat3,
+        t_rel: &Vec3,
+        gap: f64,
+        guard: f64,
+    ) -> bool {
+        let na = &self.nodes[i];
+        let nb = &self.nodes[j];
+        let ca = add(matvec(*r_rel, na.center), *t_rel);
+        let delta = sub(ca, nb.center);
+        let r = na.radius + nb.radius + gap + guard;
+        if dot(delta, delta) > r * r {
+            return false;
+        }
+        if let (Some(ai), Some(bi)) = (na.atom, nb.atom) {
+            let aa = &self.shape.atoms[ai];
+            let bb = &self.shape.atoms[bi];
+            let pa = add(matvec(*r_rel, aa.center), *t_rel);
+            let d = sub(pa, bb.center);
+            let r_cut = aa.radius + bb.radius + gap;
+            return dot(d, d) < r_cut * r_cut;
+        }
+        if na.children.is_some() && (nb.children.is_none() || na.radius >= nb.radius) {
+            let (l, r) = na.children.unwrap();
+            self.within_gap_nodes(l, j, r_rel, t_rel, gap, guard)
+                || self.within_gap_nodes(r, j, r_rel, t_rel, gap, guard)
+        } else {
+            let (l, r) = nb.children.unwrap();
+            self.within_gap_nodes(i, l, r_rel, t_rel, gap, guard)
+                || self.within_gap_nodes(i, r, r_rel, t_rel, gap, guard)
+        }
+    }
+
+    /// Collect all atom indices `i` of body `a` (with transformed position `ya = r_rel * x_i + t_rel`
+    /// in body `b`'s frame) that can lie within `extra` of body `b`'s bounding sphere,
+    /// using the BVH of `a`.
+    pub fn active_atoms_in_frame(
+        &self,
+        r_rel: &Mat3,
+        t_rel: &Vec3,
+        q_in_p: &Vec3,
+        extra: f64,
+        out: &mut Vec<(usize, Vec3)>,
+    ) {
+        out.clear();
+        self.collect_active_atoms(0, r_rel, t_rel, q_in_p, extra, out);
+    }
+    fn collect_active_atoms(
+        &self,
+        node_idx: usize,
+        r_rel: &Mat3,
+        t_rel: &Vec3,
+        q_in_p: &Vec3,
+        extra: f64,
+        out: &mut Vec<(usize, Vec3)>,
+    ) {
+        let n = &self.nodes[node_idx];
+        let dx = sub(n.center, *q_in_p);
+        let r_bound = self.bound + n.radius + extra;
+        if dot(dx, dx) > r_bound * r_bound {
+            return;
+        }
+        if let Some(ai) = n.atom {
+            let x = self.shape.atoms[ai].center;
+            out.push((ai, add(matvec(*r_rel, x), *t_rel)));
+            return;
+        }
+        let (l, r) = n.children.unwrap();
+        self.collect_active_atoms(l, r_rel, t_rel, q_in_p, extra, out);
+        self.collect_active_atoms(r, r_rel, t_rel, q_in_p, extra, out);
     }
 
     /// Outermost radial contact, found by a best-first two-body BVH traversal.

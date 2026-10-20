@@ -280,6 +280,16 @@ impl SolvationState {
     pub fn propose(&self, moves: &[(usize, Pose)]) -> Result<SolvationUpdate> {
         let nb = self.poses.len();
         if self.model.is_zero() {
+            if moves.len() == 1 {
+                let (b, p) = moves[0];
+                ensure!(b < nb, "invalid moved body");
+                p.validate()?;
+                return Ok(SolvationUpdate {
+                    delta: 0.,
+                    poses: vec![(b, p)],
+                    balls: Vec::new(),
+                });
+            }
             let mut seen = BTreeSet::new();
             for &(b, p) in moves {
                 ensure!(b < nb && seen.insert(b), "invalid or repeated moved body");

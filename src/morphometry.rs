@@ -355,10 +355,15 @@ impl BallGrid {
     }
     /// Indices of balls whose cells lie within one cell of `c`.
     pub fn near(&self, c: &Vec3) -> impl Iterator<Item = usize> + '_ {
+        self.near_within(c, self.cell)
+    }
+    /// Indices of balls whose cells can lie within distance `radius` of `c`.
+    pub fn near_within(&self, c: &Vec3, radius: f64) -> impl Iterator<Item = usize> + '_ {
         let k = Self::key(c, self.cell);
-        (-1..=1).flat_map(move |dx| {
-            (-1..=1).flat_map(move |dy| {
-                (-1..=1).flat_map(move |dz| {
+        let span = (radius / self.cell).ceil().max(1.) as i64;
+        (-span..=span).flat_map(move |dx| {
+            (-span..=span).flat_map(move |dy| {
+                (-span..=span).flat_map(move |dz| {
                     self.cells
                         .get(&[k[0] + dx, k[1] + dy, k[2] + dz])
                         .into_iter()

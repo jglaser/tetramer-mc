@@ -694,6 +694,8 @@ struct Memory {
     /// P(m_k) for every slot (independent of x).
     prior_values: Vec<f64>,
     slots: Vec<Pose>,
+    /// Cached monomer-monomer pair surrogate energy `E_pair(identity, m_k)` for every slot (independent of x).
+    slot_energies: Vec<f64>,
     /// S_k = sum over current contact entries of kernel(m_k; g_e).
     sums: Vec<f64>,
     /// Number of contact entries N (twice the number of contacts).
@@ -1348,14 +1350,15 @@ impl MorphMc {
                 tilt_sd * z
             });
             let r_rel = matmul(
-                cayley( scale(w_tilt, 0.5) ),
+                cayley(scale(w_tilt, 0.5)),
                 matmul(rotation(q_twist), r_align),
             );
             let gap = rng.random::<f64>() * gap_max;
             let sep = self.vdw[i] + self.vdw[j] + gap;
+            let n_dir = matvec(cayley(scale(w_tilt, 0.5)), ni);
             let rj_rot = matvec(r_rel, self.centers[j]);
-            let pos = sub(add(self.centers[i], scale(ni, sep)), rj_rot);
-            let pose = Pose {
+            let pos = sub(add(self.centers[i], scale(n_dir, sep)), rj_rot);
+            let mut pose = Pose {
                 position: pos,
                 orientation: quaternion(r_rel),
             };
@@ -1363,20 +1366,50 @@ impl MorphMc {
             if self.tree.overlaps(&placed_id, &placed_p) {
                 continue;
             }
-            let e_pair = self.pair_surrogate_energy(identity, pose);
+            let mut e_pair = self.pair_surrogate_energy(identity, pose);
+            // Short greedy local contact relaxation (8 steps) under the monomer-monomer pair potential.
+            for _ in 0..8 {
+                let dt: Vec3 = std::array::from_fn(|_| {
+                    let z: f64 = StandardNormal.sample(rng);
+                    0.35 * z
+                });
+                let dw: Vec3 = std::array::from_fn(|_| {
+                    let z: f64 = StandardNormal.sample(rng);
+                    0.5 * 2.5f64.to_radians() * z
+                });
+                let cand = Pose {
+                    position: add(pose.position, dt),
+                    orientation: quaternion(matmul(cayley(dw), rotation(pose.orientation))),
+                };
+                if !self.tree.overlaps(&placed_id, &Placed::new(cand))
+                    && self.in_contact_poses(identity, cand)
+                {
+                    let e_cand = self.pair_surrogate_energy(identity, cand);
+                    if e_cand <= e_pair {
+                        pose = cand;
+                        e_pair = e_cand;
+                    }
+                }
+            }
             let w = if beta > 0. {
                 (-beta * e_pair).clamp(-25.0, 25.0).exp()
             } else {
                 1.0
             };
-            let r_inv = transpose(r_rel);
+            let r_inv = transpose(rotation(pose.orientation));
             let inv_pose = Pose {
-                position: matvec(r_inv, pos).map(|x| -x),
+                position: matvec(r_inv, pose.position).map(|x| -x),
                 orientation: quaternion(r_inv),
             };
             out.push((pose, 0.5 * w));
             out.push((inv_pose, 0.5 * w));
             accepted += 1;
+        }
+        let wsum: f64 = out.iter().map(|&(_, w)| w).sum();
+        if wsum > 0.0 {
+            for item in &mut out {
+                item.1 /= wsum;
+            }
         }
         out
     }
@@ -1401,24 +1434,35 @@ impl MorphMc {
         out
     }
 
+    fn weighted_memory_slots(&self, beta: f64) -> Vec<(Pose, f64)> {
+        let Some(mem) = &self.memory else {
+            return Vec::new();
+        };
+        if beta == 0.0 {
+            mem.slots.iter().map(|&p| (p, 1.0)).collect()
+        } else {
+            mem.slots
+                .iter()
+                .zip(&mem.slot_energies)
+                .map(|(&p, &e)| (p, (-beta * e).clamp(-25.0, 25.0).exp()))
+                .collect()
+        }
+    }
+
     /// Weighted relative poses `(Pose, weight)` of the current contacts between bodies other than `b`
     /// weighted by `exp(-beta * E_pair(i, j))` (or `1.0` when `beta == 0`), plus any Poisson memory
-    /// slots with weight `1.0`. Depends only on spectator bodies `i, j != b` and memory slots.
+    /// slots weighted by `exp(-beta * E_pair(identity, m))`. Depends only on spectator bodies `i, j != b`
+    /// and memory slots.
     pub fn weighted_dock_components(&self, b: usize, d: &DockSettings) -> Vec<(Pose, f64)> {
+        let beta = d.library_beta;
         if d.memory_only {
-            return self
-                .memory_slots()
-                .unwrap_or(&[])
-                .iter()
-                .map(|&p| (p, 1.0))
-                .collect();
+            return self.weighted_memory_slots(beta);
         }
         if !d.library {
             return d.components.iter().map(|&p| (p, 1.0)).collect();
         }
         let mut out = Vec::new();
         if !self.contact.is_empty() {
-            let beta = d.library_beta;
             for i in 0..self.poses.len() {
                 if i == b {
                     continue;
@@ -1441,11 +1485,7 @@ impl MorphMc {
                 }
             }
         }
-        if let Some(slots) = self.memory_slots() {
-            for &s in slots {
-                out.push((s, 1.0));
-            }
-        }
+        out.extend(self.weighted_memory_slots(beta));
         out
     }
 
@@ -1455,20 +1495,15 @@ impl MorphMc {
         in_cluster: &[bool],
         d: &DockSettings,
     ) -> Vec<(Pose, f64)> {
+        let beta = d.library_beta;
         if d.memory_only {
-            return self
-                .memory_slots()
-                .unwrap_or(&[])
-                .iter()
-                .map(|&p| (p, 1.0))
-                .collect();
+            return self.weighted_memory_slots(beta);
         }
         if !d.library {
             return d.components.iter().map(|&p| (p, 1.0)).collect();
         }
         let mut out = Vec::new();
         if !self.contact.is_empty() {
-            let beta = d.library_beta;
             for i in 0..self.poses.len() {
                 if in_cluster[i] {
                     continue;
@@ -1491,11 +1526,7 @@ impl MorphMc {
                 }
             }
         }
-        if let Some(slots) = self.memory_slots() {
-            for &s in slots {
-                out.push((s, 1.0));
-            }
-        }
+        out.extend(self.weighted_memory_slots(beta));
         out
     }
 
@@ -1528,14 +1559,23 @@ impl MorphMc {
                 && s.floor_sigma > 0.,
             "invalid memory settings"
         );
+        let identity = Pose {
+            position: [0.; 3],
+            orientation: [1., 0., 0., 0.],
+        };
         let entries = self.library(usize::MAX);
         let n0 = MemorySettings::poisson(rng, s.total(entries.len()));
         let slots: Vec<Pose> = (0..n0).map(|_| s.draw(rng, &entries, &prior)).collect();
         let prior_values = slots.iter().map(|&m| s.prior_value(&prior, m)).collect();
+        let slot_energies = slots
+            .iter()
+            .map(|&m| self.pair_surrogate_energy(identity, m))
+            .collect();
         self.memory = Some(Memory {
             s,
             prior,
             prior_values,
+            slot_energies,
             sums: vec![0.; slots.len()],
             slots,
             entries: entries.len(),
@@ -1574,25 +1614,44 @@ impl MorphMc {
     /// Lambda). Reversible for the Poisson process with intensity mu_x.
     pub fn refresh_memory(&mut self, rng: &mut StdRng) {
         let entries = self.library(usize::MAX);
+        let Some(mem) = &self.memory else {
+            return;
+        };
+        let s = mem.s;
+        let prior = mem.prior.clone();
+        let mut slots = Vec::with_capacity(mem.slots.len());
+        let mut slot_energies = Vec::with_capacity(mem.slots.len());
+        let mut sums = Vec::with_capacity(mem.slots.len());
+        let mut prior_values = Vec::with_capacity(mem.slots.len());
+        for (((m, sum), pv), se) in mem
+            .slots
+            .iter()
+            .zip(&mem.sums)
+            .zip(&mem.prior_values)
+            .zip(&mem.slot_energies)
+        {
+            if rng.random::<f64>() >= s.death {
+                slots.push(*m);
+                sums.push(*sum);
+                prior_values.push(*pv);
+                slot_energies.push(*se);
+            }
+        }
+        let identity = Pose {
+            position: [0.; 3],
+            orientation: [1., 0., 0., 0.],
+        };
+        let births = MemorySettings::poisson(rng, s.death * s.total(entries.len()));
+        for _ in 0..births {
+            let m = s.draw(rng, &entries, &prior);
+            sums.push(entries.iter().map(|&g| s.kernel(m, g)).sum());
+            prior_values.push(s.prior_value(&prior, m));
+            slot_energies.push(self.pair_surrogate_energy(identity, m));
+            slots.push(m);
+        }
         if let Some(mem) = &mut self.memory {
-            let mut slots = Vec::with_capacity(mem.slots.len());
-            let mut sums = Vec::with_capacity(mem.slots.len());
-            let mut prior_values = Vec::with_capacity(mem.slots.len());
-            for ((m, sum), pv) in mem.slots.iter().zip(&mem.sums).zip(&mem.prior_values) {
-                if rng.random::<f64>() >= mem.s.death {
-                    slots.push(*m);
-                    sums.push(*sum);
-                    prior_values.push(*pv);
-                }
-            }
-            let births = MemorySettings::poisson(rng, mem.s.death * mem.s.total(entries.len()));
-            for _ in 0..births {
-                let m = mem.s.draw(rng, &entries, &mem.prior);
-                sums.push(entries.iter().map(|&g| mem.s.kernel(m, g)).sum());
-                prior_values.push(mem.s.prior_value(&mem.prior, m));
-                slots.push(m);
-            }
             mem.slots = slots;
+            mem.slot_energies = slot_energies;
             mem.sums = sums;
             mem.prior_values = prior_values;
             mem.entries = entries.len();
@@ -4990,6 +5049,11 @@ mod tests {
         let prior_mc = make();
         let surf_prior = prior_mc.generate_surface_normal_prior(&mut rng_p, 4, 0.5);
         assert!(!surf_prior.is_empty());
+        let wsum_surf: f64 = surf_prior.iter().map(|&(_, w)| w).sum();
+        assert!(
+            (wsum_surf - 1.0).abs() < 1e-12,
+            "surface prior weights must be normalized to 1.0: {wsum_surf}"
+        );
         let dock = DockSettings {
             learned: None,
             library: true,

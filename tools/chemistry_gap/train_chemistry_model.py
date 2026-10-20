@@ -167,10 +167,13 @@ def main():
     flags = atom_chemistry_flags(names)
     weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
     solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5226]
+    coop_weights = [0.25, 3.0]
     model = {
         'flags': flags,
         'weights': weights,
         'solv_weights': solv_weights,
+        'coop_weights': coop_weights,
+        'coop_s0': 15.0,
         'wb_cap': 5.0,
     }
     out_paths = [
@@ -182,7 +185,7 @@ def main():
             json.dump(model, fp, indent=2)
     records = harvest_pdb_interfaces()
     print(f'Harvested {len(records)} symmetry interfaces across {len(PDB_CORPUS)} PDB crystal structures.')
-    print(f'Exported ChemistryModel (1001 atoms, {sum(1 for f in flags if f > 0)} polar/charged atoms, 5 solvation + 7 chemistry weights) to {out_paths[0]}')
+    print(f'Exported ChemistryModel (1001 atoms, {sum(1 for f in flags if f > 0)} polar/charged atoms, 5 solvation + 7 chemistry + 2 cooperative 3-body weights) to {out_paths[0]}')
 
 
 if __name__ == '__main__':

@@ -212,3 +212,44 @@ To eliminate the `~10 ms/move` 3D Gauss–Bonnet morphometric solvation bottlene
   - Matches or exceeds `B3_chem` on key contacts (`native m6`: $+13.96$, `native m1`: $+12.12$, `capture #9`: $+15.09$, `blind-agg #0`: $-0.36$, `blind-agg #3`: $-11.91$, `non-native #0`: $-3.04$) and along the greedy 14-step nucleation pathway (`step 1`: $\Delta G = -1.69\,kT$, `step 2`: $+0.71\,kT$, `step 3`: $+1.12\,kT$, `step 7`: $-22.18\,kT$, `step 10`: $-0.38\,kT$, `step 12`: $-0.41\,kT$).
   - Accelerates 64-body (`32+32`) runs to **112 sweeps/s** (`140 µs/move`) and 288-body (`32+256`) runs to **15 sweeps/s** (`260 µs/move`, `0 s` init) — a **~45x total speedup** over 3D morphometric solvation.
 
+### 8.5 Learned Stillinger–Weber / Tersoff Three-Body Cooperative Pocket Potential (`coop_weights`, `coop_s0`)
+
+#### Physical Motivation: Multi-Neighbor Pose Frustration & Closed Crystal Triangles
+
+Comparing seeded growth dynamics under the purely pairwise 12-feature learned solvation + chemistry model (`learned-solv`) against the 3D morphometric solvation reference (`3D-solv`) revealed an instructive many-body phenomenon:
+1. **Strong two-body dimer/tetramer assembly in bulk solution**: Under the 2-body learned model, free monomers rapidly assemble into native `m1` ($28.4\text{ \AA}$) and `m6` ($29.9\text{ \AA}$) dimers and open oligomers in bulk solution (higher native:non-native bond ratio than `3D-solv`).
+2. **Multi-neighbor pose frustration at crystal ledge/corner pockets**: When a monomer binds into a 2-, 3-, or 4-neighbor pocket on the crystal seed (`step 4/5: +3 (m0 m2 m4)`, `step 6: +4 (m0 m2 m3 m5)`, `step 10: +2 (m1 m2)`, `step 11: +3 (m1 m1 m2)`), its 6 rigid-body degrees of freedom are simultaneously constrained by multiple neighbors. Under a purely additive sum of rigid-body pair potentials, the monomer cannot simultaneously attain the isolated 2-body minimum-energy pose with every neighbor, incurring a **pose-compromise frustration penalty** of $+10\text{ to }+24\,kT$ relative to the sum of isolated pair minima (e.g. on `step 4/5: +3 (m0 m2 m4)`, the 2-body `B1_chem` minimum energy is $-11.81\,kT$ vs. $-15.86\,kT$ in `B3_chem`, leaving $\ln K = -12.05$ vs. $-7.63$).
+3. **Why real proteins and 3D morphometry stabilize multi-contact pockets**:
+   - **Shared cavity dewetting (3-body Hadwiger exclusion)**: In 3D morphometric solvation (`many_body_solvation.py`), the probe-excluded shells ($R_i + r_p$) of three mutually contacting monomers overlap in the shared corner crevice where water is geometrically excluded (`+2.2 to +2.7 kT` of non-additive 3-body pocket stabilization).
+   - ** Induced side-chain/water reorganization & dielectric screening**: In real protein crystallization, binding a first neighbor pre-organizes surface side chains, immobilizes shared vertex waters, and lowers the local dielectric constant, making the second and third crystal contacts round a closed pocket cooperatively favorable.
+   - **Closed contact triangles select crystal lattices over open oligomers**: In the $P4_32_12$ crystal lattice, secondary modes (`m0, m2, m3, m4, m5`) close **contact triangles** with the primary `m1`/`m6` modes (specifically `(m1, m6) -> m3`, `(m1, m2) -> m0`, `(m2, m4) -> m3`), whereas random open-chain oligomers in bulk solution form open wedges without closing triangles.
+
+#### Monomer-Level SE(3)-Invariant Formulation
+
+Directly analogous to **Stillinger–Weber** three-body angular potentials for tetrahedral crystals and **Tersoff** bond-order potentials, `ChemistryModel` includes a monomer-level SE(3)-invariant 3-body cooperative pocket potential (`coop_weights: [w_wedge, w_tri]`, `coop_s0`) computed from the 6.0 Å surface burial profile with **zero native-pose or crystal-lattice priors** and **zero extra spatial-grid queries**:
+
+1. **Directed 6.0 Å patch burial and body-frame unit vector**:
+   During the fused pairwise pass (`MorphMc::well_chem_and_patch_between`) between body $a$ (at pose $p$) and body $b$ (at pose $q$), for each atom pair $(i \in a, j \in b)$ with surface gap $g_{ij} = d_{ij} - (r_i + r_j) < 6.0\text{ \AA}$ (already visited by the $w = 6.0\text{ \AA}$ square-well loop), define:
+   $$u^{(6)}_{ij} = 1 - \frac{\max(0, g_{ij})}{6.0} \in (0, 1], \qquad u^{(6)}_{a,i} = \max_{j \in b} u^{(6)}_{ij}, \qquad u^{(6)}_{b,j} = \max_{i \in a} u^{(6)}_{ij}$$
+   From the per-atom burial profile $u^{(6)}_{a,i}$ on body $a$, define the total patch burial $s_{ab}$ and the unit patch centroid direction $\hat{u}_{ab} \in S^2$ in body $a$'s local template frame:
+   $$s_{ab} = \sum_{i \in a} u^{(6)}_{a,i}, \qquad \hat{u}_{ab} = \frac{\sum_{i \in a} u^{(6)}_{a,i}\,x_i}{\left\|\sum_{i \in a} u^{(6)}_{a,i}\,x_i\right\|}$$
+   Because $x_i$ are the fixed monomer-frame coordinates of body $a$, both $s_{ab}$ and $\hat{u}_{ab}$ are **strictly invariant under any global rigid SE(3) transformation** of the pair $(a, b)$ and depend only on which surface patch of $a$ is contacted by $b$.
+
+2. **Tersoff saturation factor & Stillinger–Weber angular orthogonality**:
+   Define the smooth saturation factor ($s_0 = 15.0$, with a $s > 0.5$ threshold):
+   $$\phi(s) = \begin{cases} \dfrac{s}{s + s_0} & \text{if } s > 0.5, \\ 0 & \text{otherwise} \end{cases}$$
+   and the Stillinger–Weber angular factor between two neighbors $b \neq c$ contacting vertex body $a$:
+   $$\Psi(\hat{u}_{ab}, \hat{u}_{ac}) = 1 - \max\!\left(0,\, \hat{u}_{ab} \cdot \hat{u}_{ac}\right)^2 \in [0, 1]$$
+   which equals $1$ when neighbors $b$ and $c$ bind to orthogonal or opposite surface patches of monomer $a$ ($\theta_{bac} \ge 90^\circ$) and vanishes if they crowd the same patch ($\theta_{bac} \to 0^\circ$).
+
+3. **Three-body cooperative energy (`w_wedge`, `w_tri`)**:
+   Summing over all vertex bodies $a$ and unordered neighbor pairs $\{b, c\}$ contacting $a$:
+   $$E_{\text{coop}} = -\sum_{a} \sum_{\substack{b < c \\ b \neq a,\, c \neq a}} \phi(s_{ab})\,\phi(s_{ac})\,\Psi(\hat{u}_{ab}, \hat{u}_{ac}) \left[ w_{\text{wedge}} + w_{\text{tri}}\,\bar{\phi}_{bc} \right], \qquad \bar{\phi}_{bc} = \frac{\phi(s_{bc}) + \phi(s_{cb})}{2}$$
+   - **`w_wedge` (`0.25 kT`)**: Open-wedge cooperativity across any two distinct patches on vertex $a$, compensating for two-neighbor pose-compromise frustration.
+   - **`w_tri` (`3.0 kT`)**: Closed-triangle pocket cooperativity when neighbors $b$ and $c$ also contact each other ($\bar{\phi}_{bc} > 0$), activating all three vertices of the closed triangle $\{a, b, c\}$ at crystal ledge and corner pockets (`(m1, m6, m3)`, `(m0, m2, m4)`, `(m0, m1, m2)`).
+
+4. **Exact Conservation Properties & Performance**:
+   - **Zero 2-body perturbation ($N = 2$)**: For any isolated pair of monomers, there is no third body $c$, so $E_{\text{coop}} \equiv 0$ identically. All two-body association constants (`contacts_key12.json`) and the second virial coefficient $B_{22} / B_{22}^{\text{HS}}$ are **100% unchanged**.
+   - **Exact incremental evaluation across all MC moves**: `MorphMc` maintains the $N \times N$ directed `PatchContact` matrix `self.patch` and updates `self.chem_sum` incrementally in $O(\deg)$ per single-body move (`step`, `step_dock`) and across multi-body FK cluster (`step_cluster`) and half-turn GCA (`step_gca`) moves, verified to machine precision ($< 10^{-10}\,kT$) against `recompute_chem()`.
+   - **Throughput & Seeded Growth**: Adds $< 10\%$ overhead (`~99 sweeps/s` on 64 bodies with library docking + FK cluster + GCA + center-shift moves) while doubling native lattice continuation (`2 -> 4` lattice sites, `6 -> 11` attached monomers, `5 -> 12` native free–seed bonds in 2,500 sweeps) and lifting multi-contact pocket $\ln K$ across `steps 2..14` of `site_path_jobs.json` by $+2.2\text{ to }+4.5$ ($\Delta E_{\min} = -2.0\text{ to }-5.3\,kT$).
+

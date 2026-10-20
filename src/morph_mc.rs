@@ -66,6 +66,27 @@ pub struct ChemistryModel {
     /// `[w_p2, w_p3, w_a1, w_a2, w_a05]` in kT for pairwise gap `g = d - (r_i + r_j) < 2.8 A`.
     #[serde(default)]
     pub solv_weights: [f64; 5],
+    /// Optional 2-feature SE(3)-invariant Stillinger-Weber / Tersoff 3-body cooperative
+    /// weights `[w_wedge, w_tri]` in kT (`>= 0` for attraction) across contacting surface
+    /// patches `s_{ij}` on a shared vertex body `i`.
+    #[serde(default)]
+    pub coop_weights: [f64; 2],
+    /// Half-saturation surface burial scale `s_0` (default `15.0`) for `phi(s) = s / (s + s_0)`.
+    #[serde(default = "default_coop_s0")]
+    pub coop_s0: f64,
+}
+
+fn default_coop_s0() -> f64 {
+    15.0
+}
+
+/// Directed interface patch summary on body `a` from its contact with body `b`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PatchContact {
+    /// Smooth 6.0 A surface burial sum `sum_{i in a} max_{j in b} max(0, 1 - g_{ij}/6.0)`.
+    pub s: f64,
+    /// Unit vector from body `a`'s origin toward the burial-weighted interface centroid in `a`'s frame.
+    pub u: Vec3,
 }
 
 const CHEM_CAT: u8 = 0x01;
@@ -82,9 +103,37 @@ impl ChemistryModel {
         self.solv_weights.iter().any(|&w| w != 0.)
     }
 
+    pub fn has_cooperativity(&self) -> bool {
+        self.coop_weights.iter().any(|&w| w != 0.)
+    }
+
     pub fn is_enabled(&self) -> bool {
         !self.flags.is_empty()
-            && (self.weights.iter().any(|&w| w != 0.) || self.has_solvation())
+            && (self.weights.iter().any(|&w| w != 0.)
+                || self.has_solvation()
+                || self.has_cooperativity())
+    }
+
+    /// Stillinger-Weber / Tersoff bond-order saturation `phi(s) = s / (s + s_0)` for `s > 0.5`.
+    #[inline]
+    pub fn coop_phi(&self, s: f64) -> f64 {
+        if s <= 0.5 {
+            0.0
+        } else {
+            let s0 = if self.coop_s0 > 0.0 { self.coop_s0 } else { 15.0 };
+            s / (s + s0)
+        }
+    }
+
+    /// Angular orthogonality factor `Psi(u_1, u_2) = 1 - max(0, u_1 . u_2)^2` on a vertex body.
+    #[inline]
+    pub fn coop_psi(u1: Vec3, u2: Vec3) -> f64 {
+        let dot = (u1[0] * u2[0] + u1[1] * u2[1] + u1[2] * u2[2]).clamp(-1.0, 1.0);
+        if dot > 0.0 {
+            1.0 - dot * dot
+        } else {
+            1.0
+        }
     }
 
     #[inline]
@@ -815,6 +864,9 @@ pub struct MorphMc {
     chem: ChemistryModel,
     chem_grid: Option<BallGrid>,
     chem_sum: f64,
+    /// Directed patch contact matrix `patch[a][b]` (`s > 0.5` when bodies `a, b` share 6 A interface)
+    /// used when `chem.has_cooperativity()` is enabled.
+    patch: Vec<Vec<PatchContact>>,
     /// Contact library: atom-gap threshold, its grid, and the symmetric contact matrix.
     contact_gap: Option<f64>,
     contact_grid: Option<BallGrid>,
@@ -865,6 +917,7 @@ impl MorphMc {
             chem: ChemistryModel::default(),
             chem_grid: None,
             chem_sum: 0.,
+            patch: Vec::new(),
             contact_gap: None,
             contact_grid: None,
             contact: Vec::new(),
@@ -930,6 +983,8 @@ impl MorphMc {
         ensure!(
             chem.weights.iter().all(|w| w.is_finite())
                 && chem.solv_weights.iter().all(|w| w.is_finite())
+                && chem.coop_weights.iter().all(|w| w.is_finite())
+                && chem.coop_s0.is_finite()
                 && chem.wb_cap.is_finite()
                 && chem.wb_cap >= 0.,
             "invalid chemistry model weights"
@@ -946,11 +1001,24 @@ impl MorphMc {
             None
         };
         self.chem = chem;
+        let n = self.poses.len();
+        if self.chem.has_cooperativity() {
+            self.patch = vec![vec![PatchContact::default(); n]; n];
+            for a in 0..n {
+                for b in a + 1..n {
+                    let (pa, pb) = self.patch_pair_between(self.poses[a], self.poses[b]);
+                    self.patch[a][b] = pa;
+                    self.patch[b][a] = pb;
+                }
+            }
+        } else {
+            self.patch.clear();
+        }
         let mut sum = 0.;
-        for a in 0..self.poses.len() {
+        for a in 0..n {
             sum += self.chem_pairs(a, self.poses[a]);
         }
-        self.chem_sum = sum / 2.;
+        self.chem_sum = sum / 2. + self.coop_total_from_matrix(&self.patch);
         Ok(self)
     }
 
@@ -1285,21 +1353,216 @@ impl MorphMc {
     }
 
     /// Combined `(well_pairs, chem_energy)` between body `b` placed at `p` and all other bodies,
-    /// evaluated in a single spatial-grid pass per interacting body pair.
+    /// evaluated in a single spatial-grid pass per interacting body pair (including any 3-body
+    /// cooperative pocket energy when `self.chem.has_cooperativity()`).
     pub fn well_and_chem_pairs(&self, b: usize, p: Pose) -> (usize, f64) {
         if !self.chem.is_enabled() {
             return (self.well_pairs(b, p), 0.);
         }
+        if !self.chem.has_cooperativity() {
+            let mut wp = 0usize;
+            let mut ch = 0.0f64;
+            for (c, &q) in self.poses.iter().enumerate() {
+                if c != b {
+                    let (w_pq, c_pq) = self.well_and_chem_pair_between(p, q);
+                    wp += w_pq;
+                    ch += c_pq;
+                }
+            }
+            return (wp, ch);
+        }
+        let n = self.poses.len();
         let mut wp = 0usize;
         let mut ch = 0.0f64;
+        let mut row_b = vec![PatchContact::default(); n];
+        let mut col_b = vec![PatchContact::default(); n];
         for (c, &q) in self.poses.iter().enumerate() {
             if c != b {
-                let (w_pq, c_pq) = self.well_and_chem_pair_between(p, q);
+                let (w_pq, c_pq, pb, pc) = self.well_chem_and_patch_between(p, q);
                 wp += w_pq;
                 ch += c_pq;
+                row_b[c] = pb;
+                col_b[c] = pc;
             }
         }
+        ch += self.coop_single_body_contribution(b, &row_b, &col_b);
         (wp, ch)
+    }
+
+    /// Evaluate `(well_pairs, chem_pair_energy)` plus updated `(row_b, col_b)` patch contacts for
+    /// body `b` at pose `p` against all other bodies `c != b`.
+    fn well_chem_and_patches_for_body(
+        &self,
+        b: usize,
+        p: Pose,
+    ) -> (usize, f64, Vec<PatchContact>, Vec<PatchContact>) {
+        let n = self.poses.len();
+        let mut wp = 0usize;
+        let mut ch = 0.0f64;
+        let mut row_b = vec![PatchContact::default(); n];
+        let mut col_b = vec![PatchContact::default(); n];
+        for (c, &q) in self.poses.iter().enumerate() {
+            if c != b {
+                let (w_pq, c_pq, pb, pc) = self.well_chem_and_patch_between(p, q);
+                wp += w_pq;
+                ch += c_pq;
+                row_b[c] = pb;
+                col_b[c] = pc;
+            }
+        }
+        (wp, ch, row_b, col_b)
+    }
+
+    /// Cooperative 3-body contribution of all wedges `(c1, b, c2)` and `(b, c1, d)` involving
+    /// body `b` when its patch row `patch[b][*]` is `row_b` and its patch column `patch[*][b]` is `col_b`.
+    fn coop_single_body_contribution(
+        &self,
+        b: usize,
+        row_b: &[PatchContact],
+        col_b: &[PatchContact],
+    ) -> f64 {
+        if !self.chem.has_cooperativity() || self.patch.is_empty() {
+            return 0.0;
+        }
+        let n = self.poses.len();
+        let w_wedge = self.chem.coop_weights[0];
+        let w_tri = self.chem.coop_weights[1];
+        let mut active: Vec<(usize, f64, Vec3, f64, Vec3)> = Vec::new();
+        for c in 0..n {
+            if c != b && (row_b[c].s > 0.5 || col_b[c].s > 0.5) {
+                active.push((
+                    c,
+                    self.chem.coop_phi(row_b[c].s),
+                    row_b[c].u,
+                    self.chem.coop_phi(col_b[c].s),
+                    col_b[c].u,
+                ));
+            }
+        }
+        if active.is_empty() {
+            return 0.0;
+        }
+        let mut e_coop = 0.0f64;
+        // 1. Vertex on body b: pairs (c1, c2) both contacting b.
+        for idx1 in 0..active.len() {
+            let (c1, phi_bc1, u_bc1, _, _) = active[idx1];
+            if phi_bc1 <= 0.0 {
+                continue;
+            }
+            for &(c2, phi_bc2, u_bc2, _, _) in &active[idx1 + 1..] {
+                if phi_bc2 <= 0.0 {
+                    continue;
+                }
+                let psi_b = ChemistryModel::coop_psi(u_bc1, u_bc2);
+                let wedge_b = phi_bc1 * phi_bc2 * psi_b;
+                let phi_c1c2 = 0.5
+                    * (self.chem.coop_phi(self.patch[c1][c2].s)
+                        + self.chem.coop_phi(self.patch[c2][c1].s));
+                e_coop -= (w_wedge + w_tri * phi_c1c2) * wedge_b;
+            }
+        }
+        // 2. Vertex on neighbor c: wedge (b, d) on vertex c for d != b, c.
+        for &(c, _, _, phi_cb, u_cb) in &active {
+            if phi_cb <= 0.0 {
+                continue;
+            }
+            for d in 0..n {
+                if d == b || d == c {
+                    continue;
+                }
+                let p_cd = self.patch[c][d];
+                if p_cd.s <= 0.5 {
+                    continue;
+                }
+                let phi_cd = self.chem.coop_phi(p_cd.s);
+                let psi_c = ChemistryModel::coop_psi(u_cb, p_cd.u);
+                let wedge_c = phi_cb * phi_cd * psi_c;
+                let phi_bd = 0.5 * (self.chem.coop_phi(row_b[d].s) + self.chem.coop_phi(col_b[d].s));
+                e_coop -= (w_wedge + w_tri * phi_bd) * wedge_c;
+            }
+        }
+        e_coop
+    }
+
+    /// Total 3-body cooperative energy across the full `n x n` patch matrix `mat`.
+    fn coop_total_from_matrix(&self, mat: &[Vec<PatchContact>]) -> f64 {
+        if !self.chem.has_cooperativity() || mat.is_empty() {
+            return 0.0;
+        }
+        let n = mat.len();
+        let w_wedge = self.chem.coop_weights[0];
+        let w_tri = self.chem.coop_weights[1];
+        let mut e_coop = 0.0f64;
+        for i in 0..n {
+            let mut active: Vec<(usize, f64, Vec3)> = Vec::new();
+            for j in 0..n {
+                if j != i && mat[i][j].s > 0.5 {
+                    active.push((j, self.chem.coop_phi(mat[i][j].s), mat[i][j].u));
+                }
+            }
+            for idx1 in 0..active.len() {
+                let (j, phi_ij, u_ij) = active[idx1];
+                for &(k, phi_ik, u_ik) in &active[idx1 + 1..] {
+                    let psi_i = ChemistryModel::coop_psi(u_ij, u_ik);
+                    let wedge_i = phi_ij * phi_ik * psi_i;
+                    let phi_jk =
+                        0.5 * (self.chem.coop_phi(mat[j][k].s) + self.chem.coop_phi(mat[k][j].s));
+                    e_coop -= (w_wedge + w_tri * phi_jk) * wedge_i;
+                }
+            }
+        }
+        e_coop
+    }
+
+    /// Evaluate `(dp_well, dc_chem, new_row_b, new_col_b)` for moving single body `b` from `old` to `new`.
+    fn single_body_well_and_chem_delta(
+        &self,
+        b: usize,
+        old: Pose,
+        new: Pose,
+    ) -> (i64, f64, Vec<PatchContact>, Vec<PatchContact>) {
+        if !self.chem.has_cooperativity() {
+            let (wp_new, ch_new) = self.well_and_chem_pairs(b, new);
+            let (wp_old, ch_old) = self.well_and_chem_pairs(b, old);
+            return (
+                wp_new as i64 - wp_old as i64,
+                ch_new - ch_old,
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        let (wp_new, ch_new_pair, row_new, col_new) = self.well_chem_and_patches_for_body(b, new);
+        let mut wp_old = 0usize;
+        let mut ch_old_pair = 0.0f64;
+        for (c, &q) in self.poses.iter().enumerate() {
+            if c != b {
+                let (w_pq, c_pq) = self.well_and_chem_pair_between(old, q);
+                wp_old += w_pq;
+                ch_old_pair += c_pq;
+            }
+        }
+        let col_old: Vec<PatchContact> = (0..self.poses.len())
+            .map(|c| self.patch[c][b])
+            .collect();
+        let coop_new = self.coop_single_body_contribution(b, &row_new, &col_new);
+        let coop_old = self.coop_single_body_contribution(b, &self.patch[b], &col_old);
+        (
+            wp_new as i64 - wp_old as i64,
+            (ch_new_pair - ch_old_pair) + (coop_new - coop_old),
+            row_new,
+            col_new,
+        )
+    }
+
+    fn commit_single_body_patches(&mut self, b: usize, row_b: Vec<PatchContact>, col_b: Vec<PatchContact>) {
+        if !row_b.is_empty() && !self.patch.is_empty() {
+            for (c, pc) in col_b.into_iter().enumerate() {
+                if c != b {
+                    self.patch[c][b] = pc;
+                }
+            }
+            self.patch[b] = row_b;
+        }
     }
 
     fn hard_valid(&self, b: usize, p: Pose) -> bool {
@@ -1359,12 +1622,9 @@ impl MorphMc {
             self.stats.hard_rejected += 1;
             return Ok(false);
         }
-        let (wp_new, ch_new) = self.well_and_chem_pairs(b, new);
-        let (wp_old, ch_old) = self.well_and_chem_pairs(b, old);
-        let dp = wp_new as i64 - wp_old as i64;
+        let (dp, dc, row_new, col_new) = self.single_body_well_and_chem_delta(b, old, new);
         let d_well = -self.well.epsilon * dp as f64;
         let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
-        let dc = ch_new - ch_old;
         let update = self.solv.propose(&[(b, new)])?;
         let (dm, sums, n_entries, partners) = self.memory_delta(b, new);
         // Minus the log joint-target ratio: energy change minus the memory-conditional ratio.
@@ -1375,6 +1635,7 @@ impl MorphMc {
             self.pair_count += dp;
             self.like_sum += dl;
             self.chem_sum += dc;
+            self.commit_single_body_patches(b, row_new, col_new);
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
             self.commit_memory(b, sums, n_entries, &partners);
@@ -1561,12 +1822,9 @@ impl MorphMc {
             self.stats.hard_rejected += 1;
             return Ok(false);
         }
-        let (wp_new, ch_new) = self.well_and_chem_pairs(b, new);
-        let (wp_old, ch_old) = self.well_and_chem_pairs(b, old);
-        let dp = wp_new as i64 - wp_old as i64;
+        let (dp, dc, row_new, col_new) = self.single_body_well_and_chem_delta(b, old, new);
         let d_well = -self.well.epsilon * dp as f64;
         let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
-        let dc = ch_new - ch_old;
         let update = self.solv.propose(&[(b, new)])?;
         let log_ratio =
             self.dock_log_density(b, old, d, comps, u) - self.dock_log_density(b, new, d, comps, u);
@@ -1578,6 +1836,7 @@ impl MorphMc {
             self.pair_count += dp;
             self.like_sum += dl;
             self.chem_sum += dc;
+            self.commit_single_body_patches(b, row_new, col_new);
             self.poses[b] = new;
             self.placed[b] = Placed::new(new);
             self.commit_memory(b, sums, n_entries, &partners);
@@ -1621,25 +1880,135 @@ impl MorphMc {
     }
 
     /// Fused single-pass evaluation of `(well_pairs, chem_energy)` between pose `p` and pose `q`.
-    /// When `self.well.width >= 2.8` (so `template_grid` cell size `2*vmax + width >= 6.56 >= 5.25`),
-    /// both the square-well atom pairs and the learned interface solvation + chemistry features are
-    /// accumulated in a single coordinate transform and spatial-grid traversal.
     pub fn well_and_chem_pair_between(&self, p: Pose, q: Pose) -> (usize, f64) {
-        if !self.chem.is_enabled() {
-            return (self.well_pair_between(p, q), 0.);
+        let (w, c, _, _) = self.well_chem_and_patch_between_inner(p, q, false);
+        (w, c)
+    }
+
+    /// Fused single-pass evaluation of `(well_pairs, chem_energy, patch_p_from_q, patch_q_from_p)`.
+    pub fn well_chem_and_patch_between(
+        &self,
+        p: Pose,
+        q: Pose,
+    ) -> (usize, f64, PatchContact, PatchContact) {
+        self.well_chem_and_patch_between_inner(p, q, self.chem.has_cooperativity())
+    }
+
+    /// Directed 6.0 A patch contacts `(patch_p_from_q, patch_q_from_p)` between pose `p` and pose `q`.
+    pub fn patch_pair_between(&self, p: Pose, q: Pose) -> (PatchContact, PatchContact) {
+        let reach = 2. * self.tree.bound + 6.0;
+        if norm(sub(q.position, p.position)) > reach {
+            return (PatchContact::default(), PatchContact::default());
         }
-        if self.well.width < 2.8 {
-            return (self.well_pair_between(p, q), self.chem_pair_between(p, q));
+        let n = self.centers.len();
+        let rp = rotation(p.orientation);
+        let rqt = transpose(rotation(q.orientation));
+        let r_rel = matmul(rqt, rp);
+        let t_rel = matvec(rqt, sub(p.position, q.position));
+        let rpt = transpose(rp);
+        let q_in_p = matvec(rpt, sub(q.position, p.position));
+        let mut u6_a = vec![0.0f64; n];
+        let mut u6_b = vec![0.0f64; n];
+        let mut any = false;
+        for (i, &x) in self.centers.iter().enumerate() {
+            let ri = self.vdw[i];
+            let r_pre = self.tree.bound + ri + 6.0;
+            let dx = sub(x, q_in_p);
+            if dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2] > r_pre * r_pre {
+                continue;
+            }
+            let ya = add(matvec(r_rel, x), t_rel);
+            for j in self.template_grid.near(&ya) {
+                let r_sum = ri + self.vdw[j];
+                let r_cut = r_sum + 6.0;
+                let diff = sub(ya, self.centers[j]);
+                let d2 = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
+                if d2 < r_cut * r_cut {
+                    let g = (d2.sqrt() - r_sum).max(0.0);
+                    let u6 = 1.0 - g * (1.0 / 6.0);
+                    if u6 > u6_a[i] {
+                        u6_a[i] = u6;
+                    }
+                    if u6 > u6_b[j] {
+                        u6_b[j] = u6;
+                    }
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return (PatchContact::default(), PatchContact::default());
+        }
+        (
+            self.build_patch_contact(&u6_a),
+            self.build_patch_contact(&u6_b),
+        )
+    }
+
+    fn build_patch_contact(&self, u6: &[f64]) -> PatchContact {
+        let mut s = 0.0f64;
+        let mut v = [0.0f64; 3];
+        for (i, &u) in u6.iter().enumerate() {
+            if u > 0.0 {
+                s += u;
+                let x = self.centers[i];
+                v[0] += u * x[0];
+                v[1] += u * x[1];
+                v[2] += u * x[2];
+            }
+        }
+        let vn = norm(v);
+        if s > 0.5 && vn > 1e-12 {
+            PatchContact {
+                s,
+                u: [v[0] / vn, v[1] / vn, v[2] / vn],
+            }
+        } else {
+            PatchContact::default()
+        }
+    }
+
+    fn well_chem_and_patch_between_inner(
+        &self,
+        p: Pose,
+        q: Pose,
+        need_patch: bool,
+    ) -> (usize, f64, PatchContact, PatchContact) {
+        if !self.chem.is_enabled() {
+            return (
+                self.well_pair_between(p, q),
+                0.,
+                PatchContact::default(),
+                PatchContact::default(),
+            );
+        }
+        if self.well.width < 2.8 || (need_patch && self.well.width < 6.0) {
+            let (pa, pb) = if need_patch {
+                self.patch_pair_between(p, q)
+            } else {
+                (PatchContact::default(), PatchContact::default())
+            };
+            return (
+                self.well_pair_between(p, q),
+                self.chem_pair_between(p, q),
+                pa,
+                pb,
+            );
         }
         let max_chem_cut = if self.chem.has_solvation() { 6.6 } else { 5.25 };
         let well_reach = 2. * self.tree.bound + self.well.width;
         let chem_reach = 2. * self.tree.bound + max_chem_cut;
         let d_pq = norm(sub(q.position, p.position));
         if d_pq > well_reach.max(chem_reach) {
-            return (0, 0.);
+            return (0, 0., PatchContact::default(), PatchContact::default());
         }
-        if d_pq > chem_reach {
-            return (self.well_pair_between(p, q), 0.);
+        if d_pq > chem_reach && !need_patch {
+            return (
+                self.well_pair_between(p, q),
+                0.,
+                PatchContact::default(),
+                PatchContact::default(),
+            );
         }
         let n = self.centers.len();
         let rp = rotation(p.orientation);
@@ -1652,10 +2021,13 @@ impl MorphMc {
 
         let mut well_count = 0usize;
         let mut any_chem = false;
+        let mut any_patch = false;
         let mut p2 = 0.0f64;
         let mut p3 = 0.0f64;
         let mut max_u_a = vec![0.0f64; if has_solv { n } else { 0 }];
         let mut max_u_b = vec![0.0f64; if has_solv { n } else { 0 }];
+        let mut u6_a = vec![0.0f64; if need_patch { n } else { 0 }];
+        let mut u6_b = vec![0.0f64; if need_patch { n } else { 0 }];
 
         let mut min_d_a = vec![99.0f64; n];
         let mut min_comp_a = vec![99.0f64; n];
@@ -1695,14 +2067,31 @@ impl MorphMc {
                 if d2 >= r_outer * r_outer {
                     continue;
                 }
+                let mut d_cached = -1.0f64;
                 if d2 < r_well * r_well {
                     well_count += 1;
+                    if need_patch {
+                        let r_6 = r_sum + 6.0;
+                        if d2 < r_6 * r_6 {
+                            let d = d2.sqrt();
+                            d_cached = d;
+                            let g = (d - r_sum).max(0.0);
+                            let u6 = 1.0 - g * (1.0 / 6.0);
+                            if u6 > u6_a[i] {
+                                u6_a[i] = u6;
+                            }
+                            if u6 > u6_b[j] {
+                                u6_b[j] = u6;
+                            }
+                            any_patch = true;
+                        }
+                    }
                 }
                 if !in_chem_a || d2 >= r_chem * r_chem {
                     continue;
                 }
                 any_chem = true;
-                let d = d2.sqrt();
+                let d = if d_cached >= 0.0 { d_cached } else { d2.sqrt() };
                 if has_solv {
                     let g = d - r_sum;
                     if g < 2.8 {
@@ -1776,8 +2165,17 @@ impl MorphMc {
             }
         }
 
+        let (pa, pb) = if any_patch {
+            (
+                self.build_patch_contact(&u6_a),
+                self.build_patch_contact(&u6_b),
+            )
+        } else {
+            (PatchContact::default(), PatchContact::default())
+        };
+
         if !any_chem {
-            return (well_count, 0.0);
+            return (well_count, 0.0, pa, pb);
         }
 
         let e_solv = if has_solv {
@@ -1876,7 +2274,7 @@ impl MorphMc {
             + w[4] * s_clash
             + w[5] * unp_pol
             + w[6] * unp_chg;
-        (well_count, e_chem)
+        (well_count, e_chem, pa, pb)
     }
 
     /// Pairwise like-charge contact sum `sum f_g f_h` between pose `p` and pose `q`.
@@ -2406,6 +2804,13 @@ impl MorphMc {
         let mut dc: f64 = 0.;
         let mut fk_log_survival_diff = 0.;
 
+        let has_coop = self.chem.has_cooperativity();
+        let mut new_patch = if has_coop {
+            self.patch.clone()
+        } else {
+            Vec::new()
+        };
+
         for &(b, p_new) in &moves {
             let p_old = self.poses[b];
             for &d in &spectators {
@@ -2413,10 +2818,18 @@ impl MorphMc {
                 if norm(sub(p_old.position, q.position)) > max_reach
                     && norm(sub(p_new.position, q.position)) > max_reach
                 {
+                    if has_coop {
+                        new_patch[b][d] = PatchContact::default();
+                        new_patch[d][b] = PatchContact::default();
+                    }
                     continue;
                 }
                 let (wp_old_u, ch_old) = self.well_and_chem_pair_between(p_old, q);
-                let (wp_new_u, ch_new) = self.well_and_chem_pair_between(p_new, q);
+                let (wp_new_u, ch_new, pb, pd) = self.well_chem_and_patch_between(p_new, q);
+                if has_coop {
+                    new_patch[b][d] = pb;
+                    new_patch[d][b] = pd;
+                }
                 let wp_old = wp_old_u as i64;
                 let wp_new = wp_new_u as i64;
                 let lk_old = self.like_pair_between(p_old, q);
@@ -2439,15 +2852,28 @@ impl MorphMc {
             for &(b2, p2_new) in &moves[idx1 + 1..] {
                 let p2_old = self.poses[b2];
                 if norm(sub(p1_old.position, p2_old.position)) > max_reach {
+                    if has_coop {
+                        new_patch[b1][b2] = PatchContact::default();
+                        new_patch[b2][b1] = PatchContact::default();
+                    }
                     continue;
                 }
-                let (wp12_new, ch12_new) = self.well_and_chem_pair_between(p1_new, p2_new);
+                let (wp12_new, ch12_new, p_b1, p_b2) =
+                    self.well_chem_and_patch_between(p1_new, p2_new);
                 let (wp12_old, ch12_old) = self.well_and_chem_pair_between(p1_old, p2_old);
+                if has_coop {
+                    new_patch[b1][b2] = p_b1;
+                    new_patch[b2][b1] = p_b2;
+                }
                 dp += wp12_new as i64 - wp12_old as i64;
                 dl += self.like_pair_between(p1_new, p2_new)
                     - self.like_pair_between(p1_old, p2_old);
                 dc += ch12_new - ch12_old;
             }
+        }
+        if has_coop {
+            dc += self.coop_total_from_matrix(&new_patch)
+                - self.coop_total_from_matrix(&self.patch);
         }
 
         let d_well = -self.well.epsilon * dp as f64;
@@ -2461,6 +2887,9 @@ impl MorphMc {
             self.pair_count += dp;
             self.like_sum += dl;
             self.chem_sum += dc;
+            if has_coop {
+                self.patch = new_patch;
+            }
             for (b, p_new) in moves {
                 self.poses[b] = p_new;
                 self.placed[b] = Placed::new(p_new);
@@ -2587,6 +3016,13 @@ impl MorphMc {
         let mut dc: f64 = 0.;
         let mut fk_log_survival_diff = 0.;
 
+        let has_coop = self.chem.has_cooperativity();
+        let mut new_patch = if has_coop {
+            self.patch.clone()
+        } else {
+            Vec::new()
+        };
+
         for &(b, p_new) in &moves {
             let p_old = self.poses[b];
             for &d in &spectators {
@@ -2594,10 +3030,18 @@ impl MorphMc {
                 if norm(sub(p_old.position, q_old.position)) > max_reach
                     && norm(sub(p_new.position, q_old.position)) > max_reach
                 {
+                    if has_coop {
+                        new_patch[b][d] = PatchContact::default();
+                        new_patch[d][b] = PatchContact::default();
+                    }
                     continue;
                 }
                 let (wp_old_u, ch_old) = self.well_and_chem_pair_between(p_old, q_old);
-                let (wp_new_u, ch_new) = self.well_and_chem_pair_between(p_new, q_old);
+                let (wp_new_u, ch_new, pb, pd) = self.well_chem_and_patch_between(p_new, q_old);
+                if has_coop {
+                    new_patch[b][d] = pb;
+                    new_patch[d][b] = pd;
+                }
                 let wp_old = wp_old_u as i64;
                 let wp_new = wp_new_u as i64;
                 let lk_old = self.like_pair_between(p_old, q_old);
@@ -2623,15 +3067,28 @@ impl MorphMc {
             for &(b2, p2_new) in &moves[idx1 + 1..] {
                 let p2_old = self.poses[b2];
                 if norm(sub(p1_old.position, p2_old.position)) > max_reach {
+                    if has_coop {
+                        new_patch[b1][b2] = PatchContact::default();
+                        new_patch[b2][b1] = PatchContact::default();
+                    }
                     continue;
                 }
-                let (wp12_new, ch12_new) = self.well_and_chem_pair_between(p1_new, p2_new);
+                let (wp12_new, ch12_new, p_b1, p_b2) =
+                    self.well_chem_and_patch_between(p1_new, p2_new);
                 let (wp12_old, ch12_old) = self.well_and_chem_pair_between(p1_old, p2_old);
+                if has_coop {
+                    new_patch[b1][b2] = p_b1;
+                    new_patch[b2][b1] = p_b2;
+                }
                 dp += wp12_new as i64 - wp12_old as i64;
                 dl += self.like_pair_between(p1_new, p2_new)
                     - self.like_pair_between(p1_old, p2_old);
                 dc += ch12_new - ch12_old;
             }
+        }
+        if has_coop {
+            dc += self.coop_total_from_matrix(&new_patch)
+                - self.coop_total_from_matrix(&self.patch);
         }
 
         let d_well = -self.well.epsilon * dp as f64;
@@ -2646,6 +3103,9 @@ impl MorphMc {
             self.pair_count += dp;
             self.like_sum += dl;
             self.chem_sum += dc;
+            if has_coop {
+                self.patch = new_patch;
+            }
             for (b, p_new) in moves {
                 self.poses[b] = p_new;
                 self.placed[b] = Placed::new(p_new);
@@ -2713,7 +3173,21 @@ impl MorphMc {
         let sum: f64 = (0..self.poses.len())
             .map(|a| self.chem_pairs(a, self.poses[a]))
             .sum();
-        sum / 2.
+        let coop = if self.chem.has_cooperativity() {
+            let n = self.poses.len();
+            let mut mat = vec![vec![PatchContact::default(); n]; n];
+            for a in 0..n {
+                for b in a + 1..n {
+                    let (pa, pb) = self.patch_pair_between(self.poses[a], self.poses[b]);
+                    mat[a][b] = pa;
+                    mat[b][a] = pb;
+                }
+            }
+            self.coop_total_from_matrix(&mat)
+        } else {
+            0.0
+        };
+        sum / 2. + coop
     }
 }
 
@@ -3429,6 +3903,8 @@ mod tests {
             ],
             weights: [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2],
             solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
+            coop_weights: [1.5, 10.0],
+            coop_s0: 15.0,
             wb_cap: 5.0,
         };
         let start = vec![
@@ -3551,6 +4027,8 @@ mod tests {
             flags: vec![CHEM_CAT | CHEM_PURE_DON, CHEM_ANI | CHEM_PURE_ACC],
             weights: [0.5, 0.8, 1.5, 0.45, 0.8, 0.85, 0.8],
             solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
+            coop_weights: [1.5, 10.0],
+            coop_s0: 15.0,
             wb_cap: 5.0,
         };
         let start = vec![

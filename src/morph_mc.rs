@@ -513,6 +513,8 @@ pub struct MoveStats {
     pub gca_attempts: u64,
     pub gca_accepted: u64,
     pub gca_moved_bodies: u64,
+    pub center_shift_attempts: u64,
+    pub center_shift_accepted: u64,
 }
 
 pub struct MorphMc {
@@ -526,6 +528,7 @@ pub struct MorphMc {
     poses: Vec<Pose>,
     placed: Vec<Placed>,
     fixed: Vec<bool>,
+    coordinate_wall_center: Vec3,
     /// Square-well atom pairs between different bodies, each pair once.
     pair_count: i64,
     like: LikeCharge,
@@ -578,6 +581,7 @@ impl MorphMc {
             poses,
             placed,
             fixed,
+            coordinate_wall_center: [0.; 3],
             pair_count: 0,
             like: LikeCharge::default(),
             charge_extent: 0.,
@@ -2079,6 +2083,38 @@ impl MorphMc {
         Ok(false)
     }
 
+    /// Cumulative wall-center shift (`p_coordinate = p_sphere + coordinate_wall_center`).
+    pub fn coordinate_wall_center(&self) -> Vec3 {
+        self.coordinate_wall_center
+    }
+
+    /// Common-translation chord move (`Container::center_shift`) of all bodies (including the
+    /// seed) inside the spherical vessel. Preserves all pairwise relative poses and energies
+    /// exactly (`dE = 0`, rejection-free), shifting the seed off the sphere origin so subsequent
+    /// centered `HalfTurn` GCA flips (`step_gca`) can transport oligomers radially.
+    pub fn step_center_shift(&mut self, rng: &mut StdRng) -> Result<bool> {
+        self.stats.center_shift_attempts += 1;
+        let direction: Vec3 = loop {
+            let v: Vec3 = std::array::from_fn(|_| StandardNormal.sample(rng));
+            let len = norm(v);
+            if len > 1e-12 {
+                break v.map(|x| x / len);
+            }
+        };
+        let open_u = ((rng.random::<u64>() >> 12) as f64 + 0.5) / 4503599627370496.;
+        let outcome = self.wall.center_shift(&mut self.poses, direction, open_u)?;
+        if outcome.degenerate {
+            return Ok(false);
+        }
+        for (b, &p) in self.poses.iter().enumerate() {
+            self.placed[b] = Placed::new(p);
+        }
+        self.solv.translate_all(&self.poses);
+        self.coordinate_wall_center = sub(self.coordinate_wall_center, outcome.displacement);
+        self.stats.center_shift_accepted += 1;
+        Ok(true)
+    }
+
     /// Recompute both energies from scratch (for checks).
     pub fn recompute(&self) -> (f64, f64) {
         let mut pairs = 0.;
@@ -2997,6 +3033,9 @@ mod tests {
             size_scaling: true,
         };
         for t in 0..3_000 {
+            if t % 10 == 0 {
+                mc.step_center_shift(&mut rng).unwrap();
+            }
             match t % 4 {
                 0 => {
                     mc.step_cluster(&mut rng, &cs, Some(&dock)).unwrap();
@@ -3025,5 +3064,6 @@ mod tests {
         assert!(mc.stats.cluster_multibody_accepted >= 5, "multi-body FK clusters should be accepted: {:?}", mc.stats);
         assert!(mc.stats.cluster_dock_accepted >= 1, "cluster dock moves should be accepted: {:?}", mc.stats);
         assert!(mc.stats.gca_accepted > 20, "half-turn GCA moves should be accepted: {:?}", mc.stats);
+        assert!(mc.stats.center_shift_accepted > 200, "center_shift moves should be accepted: {:?}", mc.stats);
     }
 }

@@ -101,6 +101,9 @@ enum Cmd {
         /// Inverse-temperature scale `beta_fk` for half-turn GCA bond recruitment.
         #[arg(long, default_value_t = 1.0)]
         gca_fk_beta: f64,
+        /// Probability per sweep of a rejection-free common-translation chord shift (`step_center_shift`).
+        #[arg(long, default_value_t = 0.)]
+        center_shift_probability: f64,
         /// Docking from the contact library (and memory) on this fraction of the steps; the
         /// docking and memory terms do not depend on eps, so swaps are unchanged.
         #[arg(long, default_value_t = 0.)]
@@ -251,6 +254,9 @@ enum Cmd {
         /// Inverse-temperature scale `beta_fk` for half-turn GCA bond recruitment.
         #[arg(long, default_value_t = 1.0)]
         gca_fk_beta: f64,
+        /// Probability per sweep of a rejection-free common-translation chord shift (`step_center_shift`).
+        #[arg(long, default_value_t = 0.)]
+        center_shift_probability: f64,
         #[arg(long)]
         sweeps: usize,
         #[arg(long, default_value_t = 50)]
@@ -445,6 +451,7 @@ fn main() -> Result<()> {
             cluster_no_size_scaling,
             gca_probability,
             gca_fk_beta,
+            center_shift_probability,
             dock_probability,
             dock_library_gap,
             dock_sigma_translation,
@@ -621,7 +628,9 @@ fn main() -> Result<()> {
                             trajs[l],
                             "{}",
                             json!({"sweep": sweep, "replica": r, "epsilon": ladder[l],
-                            "pairs": mcs[r].pair_count(), "solvation": mcs[r].solvation_energy(), "poses": mcs[r].poses()})
+                            "pairs": mcs[r].pair_count(), "solvation": mcs[r].solvation_energy(),
+                            "coordinate_wall_center": mcs[r].coordinate_wall_center(),
+                            "poses": mcs[r].poses()})
                         )?;
                         trajs[l].flush()?;
                     }
@@ -668,6 +677,11 @@ fn main() -> Result<()> {
                                         reinsert
                                     };
                                     mc.step(rng, mv)?;
+                                }
+                                for _ in 0..swap_every {
+                                    if center_shift_probability > 0. && rng.random::<f64>() < center_shift_probability {
+                                        mc.step_center_shift(rng)?;
+                                    }
                                 }
                                 for _ in 0..swap_every * memory_refresh_per_sweep {
                                     mc.refresh_memory(rng);
@@ -754,6 +768,7 @@ fn main() -> Result<()> {
             cluster_no_size_scaling,
             gca_probability,
             gca_fk_beta,
+            center_shift_probability,
             sweeps,
             sample_every,
             seed,
@@ -840,6 +855,7 @@ fn main() -> Result<()> {
                 "cluster_rotation_degrees": cluster_rotation_degrees,
                 "cluster_size_scaling": !cluster_no_size_scaling,
                 "gca_probability": gca_probability, "gca_fk_beta": gca_fk_beta,
+                "center_shift_probability": center_shift_probability,
                 "memory_lambda": memory_lambda,
                 "memory_lambda_floor": memory_lambda_floor, "memory_lambda_prior": memory_lambda_prior,
                 "memory_prior_model": memory_prior_model, "memory_death": memory_death,
@@ -931,7 +947,11 @@ fn main() -> Result<()> {
             };
             for sweep in 0..=sweeps {
                 if sweep % sample_every == 0 {
-                    writeln!(traj, "{}", json!({"sweep": sweep, "poses": mc.poses(), "memory": mc.memory_slots()}))?;
+                    writeln!(
+                        traj,
+                        "{}",
+                        json!({"sweep": sweep, "coordinate_wall_center": mc.coordinate_wall_center(), "poses": mc.poses(), "memory": mc.memory_slots()})
+                    )?;
                     let s = mc.stats;
                     writeln!(
                         log,
@@ -946,7 +966,8 @@ fn main() -> Result<()> {
                         "cluster_dock_attempts": s.cluster_dock_attempts, "cluster_dock_accepted": s.cluster_dock_accepted,
                         "cluster_reinsertion_attempts": s.cluster_reinsertion_attempts, "cluster_reinsertion_accepted": s.cluster_reinsertion_accepted,
                         "cluster_pinned_rejected": s.cluster_pinned_rejected, "cluster_cap_rejected": s.cluster_cap_rejected,
-                        "gca_attempts": s.gca_attempts, "gca_accepted": s.gca_accepted, "gca_moved_bodies": s.gca_moved_bodies})
+                        "gca_attempts": s.gca_attempts, "gca_accepted": s.gca_accepted, "gca_moved_bodies": s.gca_moved_bodies,
+                        "center_shift_attempts": s.center_shift_attempts, "center_shift_accepted": s.center_shift_accepted})
                     )?;
                     log.flush()?;
                     traj.flush()?;
@@ -978,6 +999,9 @@ fn main() -> Result<()> {
                         reinsert
                     };
                     mc.step(&mut rng, mv)?;
+                }
+                if center_shift_probability > 0. && rng.random::<f64>() < center_shift_probability {
+                    mc.step_center_shift(&mut rng)?;
                 }
                 for _ in 0..memory_refresh_per_sweep {
                     mc.refresh_memory(&mut rng);

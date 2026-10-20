@@ -409,6 +409,28 @@ impl SolvationState {
         self.energy += update.delta;
     }
 
+    /// Translate all bodies by a common displacement (`poses` have updated positions, identical orientations).
+    /// All pairwise relative positions/orientations, exposed areas, curvatures, and normal moments are invariant;
+    /// only world coordinates, the spatial grid, and divergence-theorem per-ball volume terms update in O(N).
+    pub fn translate_all(&mut self, poses: &[Pose]) {
+        let n = self.template.len();
+        let mut dv = 0.;
+        for (b, &p) in poses.iter().enumerate() {
+            let new = self.place(b, p);
+            for (i, (o, w)) in self.world[b].iter().zip(&new).enumerate() {
+                self.grid.relocate(b * n + i, o, w);
+                let old = self.balls[b][i];
+                let r = self.radii[i];
+                let v_new = (r * old.area + r * r * dot(*w, old.moment)) / 3.;
+                dv += v_new - old.volume;
+                self.balls[b][i].volume = v_new;
+            }
+            self.poses[b] = p;
+            self.world[b] = new;
+        }
+        self.energy += self.model.pressure * dv;
+    }
+
     /// Full recomputation from scratch (for checks).
     pub fn recompute(&self) -> f64 {
         let none = BTreeMap::new();

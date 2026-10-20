@@ -736,6 +736,37 @@ fn quat_abs_dot(a: [f64; 4], b: [f64; 4]) -> f64 {
         .min(1.0)
 }
 
+/// Rotation matrix mapping unit vector `u` to unit vector `v`.
+fn rotation_between_unit(u: Vec3, v: Vec3) -> [[f64; 3]; 3] {
+    let dot = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]).clamp(-1.0, 1.0);
+    if dot > 1.0 - 1e-10 {
+        return [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+    }
+    if dot < -1.0 + 1e-10 {
+        let ortho = if u[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let mut ax = [
+            u[1] * ortho[2] - u[2] * ortho[1],
+            u[2] * ortho[0] - u[0] * ortho[2],
+            u[0] * ortho[1] - u[1] * ortho[0],
+        ];
+        let n = norm(ax);
+        ax = [ax[0] / n, ax[1] / n, ax[2] / n];
+        return rotation([0.0, ax[0], ax[1], ax[2]]);
+    }
+    let cross = [
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    ];
+    let q = [1.0 + dot, cross[0], cross[1], cross[2]];
+    let n = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    rotation([q[0] / n, q[1] / n, q[2] / n, q[3] / n])
+}
+
 impl MemorySettings {
     fn kernel(&self, m: Pose, g: Pose) -> f64 {
         let (st, sr) = (self.sigma_translation, self.sigma_rotation);
@@ -898,11 +929,12 @@ impl Default for ClusterSettings {
 /// enter Q at both endpoints and the move is Metropolis-within-Gibbs for body b with an exact
 /// acceptance (formal/ReversibleSampling/FrozenContext.lean). An empty component list makes
 /// the proposal purely uniform.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DockSettings {
     pub learned: Option<std::sync::Arc<crate::docking::DockingProposal>>,
     pub library: bool,
     pub memory_only: bool,
+    pub library_beta: f64,
     pub components: Vec<Pose>,
     pub sigma_translation: f64,
     pub sigma_rotation: f64,
@@ -1237,6 +1269,118 @@ impl MorphMc {
         self.tree.within_gap(p, self.poses[c], gap)
     }
 
+    /// Precomputed body-frame indices of exposed surface atoms (atoms whose centroid along their
+    /// outward body normal by `r_i + 1.4 A` is not buried inside any other atom's `r_j + 1.4 A` ball).
+    pub fn surface_atoms(&self) -> Vec<usize> {
+        let probe = 1.4;
+        let mut out = Vec::new();
+        for (i, (&xi, &ri)) in self.centers.iter().zip(&self.vdw).enumerate() {
+            let ni = self.body_normals[i];
+            let test_pt = add(xi, scale(ni, ri + probe));
+            let mut exposed = true;
+            for (j, (&xj, &rj)) in self.centers.iter().zip(&self.vdw).enumerate() {
+                if i == j {
+                    continue;
+                }
+                let d = sub(test_pt, xj);
+                let cut = rj + probe - 0.2;
+                if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < cut * cut {
+                    exposed = false;
+                    break;
+                }
+            }
+            if exposed {
+                out.push(i);
+            }
+        }
+        if out.is_empty() {
+            (0..self.centers.len()).collect()
+        } else {
+            out
+        }
+    }
+
+    /// Generate `count` monomer-only surface-normal-opposed relative poses `(Pose, weight)`
+    /// (plus reciprocal inverse poses for symmetry) that are hard-core valid and within
+    /// `contact_gap`, optionally weighted by `exp(-beta * E_pair(identity, rel))` (clamped to `<= 25`).
+    pub fn generate_surface_normal_prior(
+        &self,
+        rng: &mut StdRng,
+        count: usize,
+        beta: f64,
+    ) -> Vec<(Pose, f64)> {
+        if count == 0 {
+            return Vec::new();
+        }
+        let surf = self.surface_atoms();
+        let identity = Pose {
+            position: [0.; 3],
+            orientation: [1., 0., 0., 0.],
+        };
+        let placed_id = Placed::new(identity);
+        let gap_max = self.contact_gap.unwrap_or(2.8).min(2.5);
+        let mut out = Vec::with_capacity(2 * count);
+        let max_trials = (count * 50).max(500);
+        let mut accepted = 0usize;
+        for _ in 0..max_trials {
+            if accepted >= count {
+                break;
+            }
+            let i = surf[rng.random_range(0..surf.len())];
+            let j = surf[rng.random_range(0..surf.len())];
+            let ni = self.body_normals[i];
+            let nj = self.body_normals[j];
+            // Construct rotation R_align mapping nj -> -ni, followed by uniform twist psi around ni.
+            let target = [-ni[0], -ni[1], -ni[2]];
+            let r_align = rotation_between_unit(nj, target);
+            let psi = rng.random::<f64>() * 2.0 * std::f64::consts::PI;
+            let half_psi = 0.5 * psi;
+            let q_twist = [
+                half_psi.cos(),
+                ni[0] * half_psi.sin(),
+                ni[1] * half_psi.sin(),
+                ni[2] * half_psi.sin(),
+            ];
+            // Small normal tilt jitter (~8 deg) around ni.
+            let tilt_sd = 8f64.to_radians();
+            let w_tilt: Vec3 = std::array::from_fn(|_| {
+                let z: f64 = StandardNormal.sample(rng);
+                tilt_sd * z
+            });
+            let r_rel = matmul(
+                cayley( scale(w_tilt, 0.5) ),
+                matmul(rotation(q_twist), r_align),
+            );
+            let gap = rng.random::<f64>() * gap_max;
+            let sep = self.vdw[i] + self.vdw[j] + gap;
+            let rj_rot = matvec(r_rel, self.centers[j]);
+            let pos = sub(add(self.centers[i], scale(ni, sep)), rj_rot);
+            let pose = Pose {
+                position: pos,
+                orientation: quaternion(r_rel),
+            };
+            let placed_p = Placed::new(pose);
+            if self.tree.overlaps(&placed_id, &placed_p) {
+                continue;
+            }
+            let e_pair = self.pair_surrogate_energy(identity, pose);
+            let w = if beta > 0. {
+                (-beta * e_pair).clamp(-25.0, 25.0).exp()
+            } else {
+                1.0
+            };
+            let r_inv = transpose(r_rel);
+            let inv_pose = Pose {
+                position: matvec(r_inv, pos).map(|x| -x),
+                orientation: quaternion(r_inv),
+            };
+            out.push((pose, 0.5 * w));
+            out.push((inv_pose, 0.5 * w));
+            accepted += 1;
+        }
+        out
+    }
+
     /// Relative poses (j in the frame of i, both orders) of the current contacts between
     /// bodies other than `b`: a function of the other bodies only. With `b` out of range,
     /// all contacts.
@@ -1252,6 +1396,104 @@ impl MorphMc {
                 }
                 out.push(rel_pose(self.poses[i], self.poses[j]));
                 out.push(rel_pose(self.poses[j], self.poses[i]));
+            }
+        }
+        out
+    }
+
+    /// Weighted relative poses `(Pose, weight)` of the current contacts between bodies other than `b`
+    /// weighted by `exp(-beta * E_pair(i, j))` (or `1.0` when `beta == 0`), plus any Poisson memory
+    /// slots with weight `1.0`. Depends only on spectator bodies `i, j != b` and memory slots.
+    pub fn weighted_dock_components(&self, b: usize, d: &DockSettings) -> Vec<(Pose, f64)> {
+        if d.memory_only {
+            return self
+                .memory_slots()
+                .unwrap_or(&[])
+                .iter()
+                .map(|&p| (p, 1.0))
+                .collect();
+        }
+        if !d.library {
+            return d.components.iter().map(|&p| (p, 1.0)).collect();
+        }
+        let mut out = Vec::new();
+        if !self.contact.is_empty() {
+            let beta = d.library_beta;
+            for i in 0..self.poses.len() {
+                if i == b {
+                    continue;
+                }
+                for j in (i + 1)..self.poses.len() {
+                    if j == b || !self.contact[i][j] {
+                        continue;
+                    }
+                    let w = if beta != 0.0 {
+                        let pc = self.pair_cache[i][j];
+                        let e_pair = -self.well.epsilon * (pc.well as f64)
+                            + self.like.weight * pc.like
+                            + pc.chem;
+                        (-beta * e_pair).clamp(-25.0, 25.0).exp()
+                    } else {
+                        1.0
+                    };
+                    out.push((rel_pose(self.poses[i], self.poses[j]), w));
+                    out.push((rel_pose(self.poses[j], self.poses[i]), w));
+                }
+            }
+        }
+        if let Some(slots) = self.memory_slots() {
+            for &s in slots {
+                out.push((s, 1.0));
+            }
+        }
+        out
+    }
+
+    /// Weighted relative poses `(Pose, weight)` of spectator contacts outside `in_cluster`.
+    pub fn weighted_dock_components_excluding(
+        &self,
+        in_cluster: &[bool],
+        d: &DockSettings,
+    ) -> Vec<(Pose, f64)> {
+        if d.memory_only {
+            return self
+                .memory_slots()
+                .unwrap_or(&[])
+                .iter()
+                .map(|&p| (p, 1.0))
+                .collect();
+        }
+        if !d.library {
+            return d.components.iter().map(|&p| (p, 1.0)).collect();
+        }
+        let mut out = Vec::new();
+        if !self.contact.is_empty() {
+            let beta = d.library_beta;
+            for i in 0..self.poses.len() {
+                if in_cluster[i] {
+                    continue;
+                }
+                for j in (i + 1)..self.poses.len() {
+                    if in_cluster[j] || !self.contact[i][j] {
+                        continue;
+                    }
+                    let w = if beta != 0.0 {
+                        let pc = self.pair_cache[i][j];
+                        let e_pair = -self.well.epsilon * (pc.well as f64)
+                            + self.like.weight * pc.like
+                            + pc.chem;
+                        (-beta * e_pair).clamp(-25.0, 25.0).exp()
+                    } else {
+                        1.0
+                    };
+                    out.push((rel_pose(self.poses[i], self.poses[j]), w));
+                    out.push((rel_pose(self.poses[j], self.poses[i]), w));
+                }
+            }
+        }
+        if let Some(slots) = self.memory_slots() {
+            for &s in slots {
+                out.push((s, 1.0));
             }
         }
         out
@@ -1994,8 +2236,16 @@ impl MorphMc {
     }
 
     /// Log of the docking mixture density of pose `x` of body `b` (anchors: all others), with
-    /// Gaussian components `comps` and uniform weight `u` (1 when there are no components).
-    fn dock_log_density(&self, b: usize, x: Pose, d: &DockSettings, comps: &[Pose], u: f64) -> f64 {
+    /// weighted Gaussian components `comps: &[(Pose, f64)]` and uniform weight `u` (1 when empty).
+    fn dock_log_density(
+        &self,
+        b: usize,
+        x: Pose,
+        d: &DockSettings,
+        comps: &[(Pose, f64)],
+        w_sum: f64,
+        u: f64,
+    ) -> f64 {
         let r = self.wall.radius;
         let uniform = if norm(x.position) <= r {
             u.ln() - (4. / 3. * std::f64::consts::PI * r * r * r).ln()
@@ -2034,10 +2284,10 @@ impl MorphMc {
             - 1.5 * (2. * std::f64::consts::PI * sr * sr).ln();
         let mut terms = Vec::new();
         let anchors = self.poses.len() - 1;
-        if comps.is_empty() {
+        if comps.is_empty() || w_sum <= 0. {
             return uniform;
         }
-        let lw = (1. - u).ln() - ((anchors * comps.len()) as f64).ln();
+        let lw_base = (1. - u).ln() - ((anchors as f64) * w_sum).ln();
         let max_anchor_dist = 2. * self.tree.bound + self.contact_gap.unwrap_or(6.) + 10. * st;
         let max_d2 = max_anchor_dist * max_anchor_dist;
         let max_t2 = 100. * st * st;
@@ -2055,7 +2305,7 @@ impl MorphMc {
             let rat = transpose(rotation(pa.orientation));
             let trel = matvec(rat, dx);
             let qrel = quat_mul(quat_conj(pa.orientation), x.orientation);
-            for c in comps {
+            for &(c, w_c) in comps {
                 let dt = sub(trel, c.position);
                 let t2 = dt[0] * dt[0] + dt[1] * dt[1] + dt[2] * dt[2];
                 if t2 > max_t2 {
@@ -2070,7 +2320,9 @@ impl MorphMc {
                     theta * theta / (2. * (1. - theta.cos()))
                 };
                 terms.push(
-                    lw + norm_t - t2 * inv_2st2 + norm_r - theta * theta * inv_2sr2 + jac.ln(),
+                    lw_base + w_c.ln() + norm_t - t2 * inv_2st2 + norm_r
+                        - theta * theta * inv_2sr2
+                        + jac.ln(),
                 );
             }
         }
@@ -2109,19 +2361,17 @@ impl MorphMc {
         // Components: the contact library of the other bodies (unchanged by this move), or
         // the Poisson memory slots only when `memory_only` is set, or the fixed list.
         // Without components the proposal is uniform with probability one.
-        let library = if d.memory_only {
-            Some(self.memory_slots().unwrap_or(&[]).to_vec())
-        } else if d.library {
-            let mut lib = self.library(b);
-            if let Some(slots) = self.memory_slots() {
-                lib.extend_from_slice(slots);
-            }
-            Some(lib)
+        let comps: Vec<(Pose, f64)> = if d.learned.is_some() {
+            Vec::new()
         } else {
-            None
+            self.weighted_dock_components(b, d)
         };
-        let comps: &[Pose] = library.as_deref().unwrap_or(&d.components);
-        let u = if d.learned.is_none() && comps.is_empty() { 1. } else { d.uniform_weight };
+        let w_sum: f64 = comps.iter().map(|&(_, w)| w).sum();
+        let u = if d.learned.is_none() && (comps.is_empty() || w_sum <= 0.) {
+            1.
+        } else {
+            d.uniform_weight
+        };
         let new = if rng.random::<f64>() < u {
             let r = self.wall.radius;
             let position = loop {
@@ -2148,7 +2398,20 @@ impl MorphMc {
         } else {
             let others: Vec<usize> = (0..self.poses.len()).filter(|&a| a != b).collect();
             let a = others[rng.random_range(0..others.len())];
-            let c = comps[rng.random_range(0..comps.len())];
+            let c = if d.library_beta == 0. {
+                comps[rng.random_range(0..comps.len())].0
+            } else {
+                let mut v = rng.random::<f64>() * w_sum;
+                let mut c = comps[comps.len() - 1].0;
+                for &(pose_c, w_c) in &comps {
+                    if v < w_c {
+                        c = pose_c;
+                        break;
+                    }
+                    v -= w_c;
+                }
+                c
+            };
             let t: Vec3 = std::array::from_fn(|k| {
                 let z: f64 = StandardNormal.sample(rng);
                 c.position[k] + z * d.sigma_translation
@@ -2188,8 +2451,8 @@ impl MorphMc {
         let d_well = -self.well.epsilon * delta.dp_well as f64;
         let (dl, old_likes, new_likes) = self.single_body_like_delta(b, old, new);
         let update = self.solv.propose(&[(b, new)])?;
-        let log_ratio =
-            self.dock_log_density(b, old, d, comps, u) - self.dock_log_density(b, new, d, comps, u);
+        let log_ratio = self.dock_log_density(b, old, d, &comps, w_sum, u)
+            - self.dock_log_density(b, new, d, &comps, w_sum, u);
         let (dm, sums, n_entries, partners) = self.memory_delta(b, new);
         let a = -(update.delta + d_well + self.like.weight * dl + delta.dc_chem) + dm + log_ratio;
         ensure!(!a.is_nan(), "NaN docking acceptance");
@@ -2771,7 +3034,8 @@ impl MorphMc {
         in_cluster: &[bool],
         x: Pose,
         d: &DockSettings,
-        comps: &[Pose],
+        comps: &[(Pose, f64)],
+        w_sum: f64,
         u: f64,
     ) -> f64 {
         let r = self.wall.radius;
@@ -2808,7 +3072,7 @@ impl MorphMc {
             }
             return hi + ((uniform - hi).exp() + (l - hi).exp()).ln();
         }
-        if comps.is_empty() {
+        if comps.is_empty() || w_sum <= 0. {
             return uniform;
         }
         let (st, sr) = (d.sigma_translation, d.sigma_rotation);
@@ -2816,7 +3080,7 @@ impl MorphMc {
         let norm_r = (8. * std::f64::consts::PI * std::f64::consts::PI).ln()
             - 1.5 * (2. * std::f64::consts::PI * sr * sr).ln();
         let mut terms = Vec::new();
-        let lw = (1. - u).ln() - ((spectators.len() * comps.len()) as f64).ln();
+        let lw_base = (1. - u).ln() - ((spectators.len() as f64) * w_sum).ln();
         let max_anchor_dist = 2. * self.tree.bound + self.contact_gap.unwrap_or(6.) + 10. * st;
         let max_d2 = max_anchor_dist * max_anchor_dist;
         let max_t2 = 100. * st * st;
@@ -2834,7 +3098,7 @@ impl MorphMc {
             let rat = transpose(rotation(pa.orientation));
             let trel = matvec(rat, dx);
             let qrel = quat_mul(quat_conj(pa.orientation), x.orientation);
-            for c in comps {
+            for &(c, w_c) in comps {
                 let dt = sub(trel, c.position);
                 let t2 = dt[0] * dt[0] + dt[1] * dt[1] + dt[2] * dt[2];
                 if t2 > max_t2 {
@@ -2848,7 +3112,9 @@ impl MorphMc {
                     theta * theta / (2. * (1. - theta.cos()))
                 };
                 terms.push(
-                    lw + norm_t - t2 * inv_2st2 + norm_r - theta * theta * inv_2sr2 + jac.ln(),
+                    lw_base + w_c.ln() + norm_t - t2 * inv_2st2 + norm_r
+                        - theta * theta * inv_2sr2
+                        + jac.ln(),
                 );
             }
         }
@@ -3038,19 +3304,13 @@ impl MorphMc {
         let moves: Vec<(usize, Pose)> = if use_dock {
             let d = dock.unwrap();
             self.stats.cluster_dock_attempts += 1;
-            let library = if d.memory_only {
-                Some(self.memory_slots().unwrap_or(&[]).to_vec())
-            } else if d.library {
-                let mut lib = self.library_excluding(&in_cluster);
-                if let Some(slots) = self.memory_slots() {
-                    lib.extend_from_slice(slots);
-                }
-                Some(lib)
+            let comps: Vec<(Pose, f64)> = if d.learned.is_some() {
+                Vec::new()
             } else {
-                None
+                self.weighted_dock_components_excluding(&in_cluster, d)
             };
-            let comps: &[Pose] = library.as_deref().unwrap_or(&d.components);
-            let u = if d.learned.is_none() && comps.is_empty() {
+            let w_sum: f64 = comps.iter().map(|&(_, w)| w).sum();
+            let u = if d.learned.is_none() && (comps.is_empty() || w_sum <= 0.) {
                 1.
             } else {
                 d.uniform_weight
@@ -3078,7 +3338,20 @@ impl MorphMc {
                 }
             } else {
                 let a = spectators[rng.random_range(0..spectators.len())];
-                let c = comps[rng.random_range(0..comps.len())];
+                let c = if d.library_beta == 0. {
+                    comps[rng.random_range(0..comps.len())].0
+                } else {
+                    let mut v = rng.random::<f64>() * w_sum;
+                    let mut c = comps[comps.len() - 1].0;
+                    for &(pose_c, w_c) in &comps {
+                        if v < w_c {
+                            c = pose_c;
+                            break;
+                        }
+                        v -= w_c;
+                    }
+                    c
+                };
                 let t: Vec3 = std::array::from_fn(|k| {
                     let z: f64 = StandardNormal.sample(rng);
                     c.position[k] + z * d.sigma_translation
@@ -3105,8 +3378,8 @@ impl MorphMc {
                     orientation: quaternion(matmul(ra, rrel)),
                 }
             };
-            log_q_ratio = self.dock_log_density_subset(&in_cluster, old_b0, d, comps, u)
-                - self.dock_log_density_subset(&in_cluster, new_b0, d, comps, u);
+            log_q_ratio = self.dock_log_density_subset(&in_cluster, old_b0, d, &comps, w_sum, u)
+                - self.dock_log_density_subset(&in_cluster, new_b0, d, &comps, w_sum, u);
             let carried = crate::rigid_subset::transport_members(&self.poses, &members, b0, new_b0)?;
             members.iter().copied().zip(carried).collect()
         } else if rng.random::<f64>() < cs.reinsertion_probability {
@@ -3797,6 +4070,7 @@ mod tests {
             learned: None,
             library: false,
             memory_only: false,
+            library_beta: 0.,
             components: vec![Pose {
                 position: [2.4, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -3921,6 +4195,7 @@ mod tests {
             learned: None,
             library: false,
             memory_only: false,
+            library_beta: 0.,
             components: vec![Pose {
                 position: [2.4, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -4011,6 +4286,7 @@ mod tests {
             learned: None,
             library: true,
             memory_only: false,
+            library_beta: 0.,
             components: Vec::new(),
             sigma_translation: 0.3,
             sigma_rotation: 0.3,
@@ -4139,6 +4415,7 @@ mod tests {
             learned: None,
             library: true,
             memory_only: false,
+            library_beta: 0.,
             components: Vec::new(),
             sigma_translation: 0.3,
             sigma_rotation: 0.3,
@@ -4309,6 +4586,7 @@ mod tests {
             learned: Some(std::sync::Arc::new(learned)),
             library: false,
             memory_only: false,
+            library_beta: 0.,
             components: Vec::new(),
             sigma_translation: 0.,
             sigma_rotation: 0.,
@@ -4442,6 +4720,7 @@ mod tests {
             learned: None,
             library: false,
             memory_only: false,
+            library_beta: 0.,
             components: vec![Pose {
                 position: [4.6, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -4594,11 +4873,19 @@ mod tests {
             rotation: 0.3,
             reinsertion_probability: 0.2,
         };
+        let mut rng_prior = StdRng::seed_from_u64(999);
+        let surf_prior = mc.generate_surface_normal_prior(&mut rng_prior, 8, 0.5);
+        assert!(
+            !surf_prior.is_empty(),
+            "surface-normal-opposed prior should discover valid non-overlapping contacts"
+        );
+        let dock_comps: Vec<Pose> = surf_prior.into_iter().map(|(p, _)| p).collect();
         let dock = DockSettings {
             learned: None,
             library: true,
             memory_only: false,
-            components: Vec::new(),
+            library_beta: 0.8,
+            components: dock_comps,
             sigma_translation: 0.3,
             sigma_rotation: 0.3,
             uniform_weight: 0.3,
@@ -4645,5 +4932,112 @@ mod tests {
         assert!(mc.stats.cluster_dock_accepted >= 1, "cluster dock moves should be accepted: {:?}", mc.stats);
         assert!(mc.stats.gca_accepted > 20, "half-turn GCA moves should be accepted: {:?}", mc.stats);
         assert!(mc.stats.center_shift_accepted > 200, "center_shift moves should be accepted: {:?}", mc.stats);
+    }
+
+    /// Three balls (one fixed, two mobile) with Boltzmann-weighted library docking
+    /// (`library_beta > 0`): weighting spectator contact pairs by `exp(-beta * E_pair(i, j))`
+    /// is invariant to the moved body and must preserve exact detailed balance.
+    #[test]
+    fn weighted_library_docking_preserves_detailed_balance() {
+        let r = 1.0;
+        let shape = Shape {
+            name: "ball".into(),
+            volume: 4. / 3. * std::f64::consts::PI,
+            atoms: vec![Atom {
+                center: [0.; 3],
+                radius: r,
+            }],
+        };
+        let model = SolvationModel {
+            probe: 1.4,
+            pressure: 0.209,
+            coefficients: vec![[-0.1564, 0.1362, -0.0369]],
+            atom_types: vec![0],
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 1.5,
+            width: 0.6,
+        };
+        let start = vec![
+            Pose {
+                position: [0.; 3],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [3., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+            Pose {
+                position: [-3., 0., 0.],
+                orientation: [1., 0., 0., 0.],
+            },
+        ];
+        let make = || {
+            let tree = SphereTree::new(shape.clone()).unwrap();
+            let wall = Container::new(5.0, &tree).unwrap();
+            MorphMc::new(tree, wall, model.clone(), well, start.clone(), vec![true, false, false])
+                .unwrap()
+                .with_contact_library(0.6)
+                .unwrap()
+        };
+        let mv = MoveSettings {
+            translation: 0.5,
+            rotation: 0.3,
+            reinsertion_probability: 0.2,
+        };
+        let mut rng_p = StdRng::seed_from_u64(42);
+        let prior_mc = make();
+        let surf_prior = prior_mc.generate_surface_normal_prior(&mut rng_p, 4, 0.5);
+        assert!(!surf_prior.is_empty());
+        let dock = DockSettings {
+            learned: None,
+            library: true,
+            memory_only: false,
+            library_beta: 0.8,
+            components: surf_prior.into_iter().map(|(p, _)| p).collect(),
+            sigma_translation: 0.3,
+            sigma_rotation: 0.3,
+            uniform_weight: 0.3,
+        };
+        let (bins, lo, hi) = (12usize, 2.0, 8.0);
+        let (burn, n) = (10_000, 800_000);
+        let mut out = Vec::new();
+        for (seed, with_dock) in [(31u64, false), (32, true)] {
+            let mut mc = make();
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut h = vec![0u64; 3 * bins];
+            let mut contacts = 0u64;
+            for t in 0..burn + n {
+                if with_dock && t % 2 == 0 {
+                    mc.step_dock(&mut rng, &dock).unwrap();
+                } else {
+                    mc.step(&mut rng, mv).unwrap();
+                }
+                if t >= burn {
+                    let p = mc.poses();
+                    for (k, (i, j)) in [(0, 1), (0, 2), (1, 2)].into_iter().enumerate() {
+                        let d = norm(sub(p[i].position, p[j].position));
+                        let bin = (((d - lo) / (hi - lo) * bins as f64) as usize).min(bins - 1);
+                        h[k * bins + bin] += 1;
+                    }
+                    contacts += mc.contact_count() as u64;
+                }
+            }
+            if with_dock {
+                assert!(mc.stats.dock_accepted > 15_000);
+            }
+            out.push((h, contacts as f64 / n as f64));
+        }
+        let (ha, ca) = &out[0];
+        let (hb, cb) = &out[1];
+        for k in 0..3 * bins {
+            let (pa, pb) = (ha[k] as f64 / n as f64, hb[k] as f64 / n as f64);
+            assert!(
+                (pa - pb).abs() < 8e-3,
+                "weighted dock bin {k}: local {pa:.4} vs weighted library {pb:.4}"
+            );
+        }
+        assert!((ca - cb).abs() < 0.025, "contact fraction {ca:.4} vs {cb:.4}");
     }
 }

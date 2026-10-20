@@ -1,6 +1,7 @@
 //! Seeded growth with exact morphometric solvation plus a pairwise atom square well
 //! (`tetramer_mc::morph_mc`). `calibrate` counts square-well pairs of environments
 //! (neighbour poses relative to body 0); `run` samples a fixed seed plus free bodies.
+#![recursion_limit = "256"]
 use anyhow::{Result, ensure};
 use clap::{Parser, Subcommand};
 use rand::{RngExt, SeedableRng, rngs::StdRng};
@@ -110,6 +111,18 @@ enum Cmd {
         dock_probability: f64,
         #[arg(long, default_value_t = 2.8)]
         dock_library_gap: f64,
+        /// Boltzmann inverse-temperature weight `beta` on spectator contact pair energies in the
+        /// contact library (`w_ij = exp(-beta * E_pair(i, j))`; `0.0` = uniform contact library).
+        #[arg(long, default_value_t = 0.)]
+        dock_library_beta: f64,
+        /// Number of monomer-only surface-normal-opposed contact poses to generate as a discovery
+        /// prior (`0` = off). Uses only the monomer template and its smooth density-gradient normals.
+        #[arg(long, default_value_t = 0)]
+        surface_prior_samples: usize,
+        /// Boltzmann inverse-temperature weight `beta` used to weight surface-normal-opposed prior
+        /// poses by their monomer-monomer pair energy (`exp(-beta * E_pair)`).
+        #[arg(long, default_value_t = 0.5)]
+        surface_prior_beta: f64,
         #[arg(long, default_value_t = 0.15)]
         dock_sigma_translation: f64,
         #[arg(long, default_value_t = 1.0)]
@@ -188,6 +201,18 @@ enum Cmd {
         /// Atom-gap threshold of a library contact, A.
         #[arg(long, default_value_t = 2.8)]
         dock_library_gap: f64,
+        /// Boltzmann inverse-temperature weight `beta` on spectator contact pair energies in the
+        /// contact library (`w_ij = exp(-beta * E_pair(i, j))`; `0.0` = uniform contact library).
+        #[arg(long, default_value_t = 0.)]
+        dock_library_beta: f64,
+        /// Number of monomer-only surface-normal-opposed contact poses to generate as a discovery
+        /// prior (`0` = off). Uses only the monomer template and its smooth density-gradient normals.
+        #[arg(long, default_value_t = 0)]
+        surface_prior_samples: usize,
+        /// Boltzmann inverse-temperature weight `beta` used to weight surface-normal-opposed prior
+        /// poses by their monomer-monomer pair energy (`exp(-beta * E_pair)`).
+        #[arg(long, default_value_t = 0.5)]
+        surface_prior_beta: f64,
         /// Poisson memory: intensity per contact entry (0 with --memory-lambda-floor 0: off;
         /// needs --dock-library). Memory slots join the docking components; each contact
         /// formed costs 2 lambda kT in the acceptance (exactly compensated in equilibrium).
@@ -462,6 +487,9 @@ fn main() -> Result<()> {
             center_shift_probability,
             dock_probability,
             dock_library_gap,
+            dock_library_beta,
+            surface_prior_samples,
+            surface_prior_beta,
             dock_sigma_translation,
             dock_sigma_rotation_degrees,
             dock_uniform_weight,
@@ -514,15 +542,7 @@ fn main() -> Result<()> {
                 !memory_only || memory_lambda_floor > 0.,
                 "--memory-only requires --memory-lambda-floor > 0"
             );
-            let dock = DockSettings {
-                learned: None,
-                library: !memory_only,
-                memory_only,
-                components: Vec::new(),
-                sigma_translation: dock_sigma_translation,
-                sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
-                uniform_weight: dock_uniform_weight,
-            };
+            let mut dock_prior_components = Vec::new();
             let cs = ClusterSettings {
                 max_size: cluster_max_size,
                 fk_beta: cluster_fk_beta,
@@ -563,15 +583,32 @@ fn main() -> Result<()> {
                 if dock_probability > 0. || (cluster_probability > 0. && cluster_dock_probability > 0.) {
                     let mc = mcs.pop().expect("replica");
                     let mut mc = mc.with_contact_library(dock_library_gap)?;
+                    let surf_prior = if surface_prior_samples > 0 {
+                        let mut prng = StdRng::seed_from_u64(seed ^ 0x50fa_ce00);
+                        mc.generate_surface_normal_prior(&mut prng, surface_prior_samples, surface_prior_beta)
+                    } else {
+                        Vec::new()
+                    };
+                    if k == 0 && memory_lambda_floor == 0. && !surf_prior.is_empty() {
+                        dock_prior_components = surf_prior.iter().map(|&(p, _)| p).collect();
+                    }
                     if memory_lambda_floor > 0. {
-                        let prior = match &memory_prior_model {
+                        let mut prior = match &memory_prior_model {
                             Some(f) => prior_from_model(f, &shape, r)?,
                             None => Vec::new(),
+                        };
+                        prior.extend(surf_prior);
+                        let eff_lambda_prior = if memory_lambda_prior > 0. {
+                            memory_lambda_prior
+                        } else if !prior.is_empty() {
+                            2.0
+                        } else {
+                            0.0
                         };
                         mc = mc.with_memory(
                             MemorySettings {
                                 lambda_floor: memory_lambda_floor,
-                                lambda_prior: memory_lambda_prior,
+                                lambda_prior: eff_lambda_prior,
                                 lambda: memory_lambda,
                                 death: memory_death,
                                 sigma_translation: memory_sigma_translation,
@@ -585,6 +622,16 @@ fn main() -> Result<()> {
                     mcs.push(mc);
                 }
             }
+            let dock = DockSettings {
+                learned: None,
+                library: !memory_only,
+                memory_only,
+                library_beta: dock_library_beta,
+                components: dock_prior_components,
+                sigma_translation: dock_sigma_translation,
+                sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
+                uniform_weight: dock_uniform_weight,
+            };
             let mut master = StdRng::seed_from_u64(seed ^ 0xabcdef);
             // level -> replica holding it
             let mut holder: Vec<usize> = (0..replicas).collect();
@@ -760,6 +807,9 @@ fn main() -> Result<()> {
             dock_uniform_weight,
             dock_library,
             dock_library_gap,
+            dock_library_beta,
+            surface_prior_samples,
+            surface_prior_beta,
             memory_lambda,
             memory_lambda_floor,
             memory_lambda_prior,
@@ -839,19 +889,33 @@ fn main() -> Result<()> {
                 mc = mc.with_contact_library(dock_library_gap)?;
             }
             let mut rng = StdRng::seed_from_u64(seed);
+            let surf_prior = if surface_prior_samples > 0 {
+                let mut prng = StdRng::seed_from_u64(seed ^ 0x50fa_ce00);
+                mc.generate_surface_normal_prior(&mut prng, surface_prior_samples, surface_prior_beta)
+            } else {
+                Vec::new()
+            };
             if memory_lambda_floor > 0. {
                 ensure!(
                     dock_library || memory_only,
                     "memory needs --dock-library or --memory-only"
                 );
-                let prior = match &memory_prior_model {
+                let mut prior = match &memory_prior_model {
                     Some(f) => prior_from_model(f, &shape, radius)?,
                     None => Vec::new(),
+                };
+                prior.extend(surf_prior.iter().copied());
+                let eff_lambda_prior = if memory_lambda_prior > 0. {
+                    memory_lambda_prior
+                } else if !prior.is_empty() {
+                    2.0
+                } else {
+                    0.0
                 };
                 mc = mc.with_memory(
                     MemorySettings {
                         lambda_floor: memory_lambda_floor,
-                        lambda_prior: memory_lambda_prior,
+                        lambda_prior: eff_lambda_prior,
                         lambda: memory_lambda,
                         death: memory_death,
                         sigma_translation: memory_sigma_translation,
@@ -872,6 +936,10 @@ fn main() -> Result<()> {
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
                 "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,
                 "like_charge_cutoff": like_charge_cutoff, "chemistry_model": chemistry_model,
+                "dock_library_beta": dock_library_beta,
+                "surface_prior_samples": surface_prior_samples,
+                "surface_prior_beta": surface_prior_beta,
+                "surface_prior_generated_poses": surf_prior.len(),
                 "cluster_probability": cluster_probability, "cluster_max_size": cluster_max_size,
                 "cluster_fk_beta": cluster_fk_beta, "cluster_dock_probability": cluster_dock_probability,
                 "cluster_reinsertion_probability": cluster_reinsertion_probability,
@@ -917,17 +985,22 @@ fn main() -> Result<()> {
                 }
                 None => None,
             };
+            let mut base_components: Vec<Pose> = match &dock_components {
+                Some(f) => serde_json::from_slice(&fs::read(f)?)?,
+                None => Vec::new(),
+            };
+            if memory_lambda_floor == 0. && !surf_prior.is_empty() {
+                base_components.extend(surf_prior.iter().map(|&(p, _)| p));
+            }
             let dock = if (dock_probability > 0. || (cluster_probability > 0. && cluster_dock_probability > 0.))
-                && (learned.is_some() || dock_components.is_some() || dock_library || memory_only)
+                && (learned.is_some() || !base_components.is_empty() || dock_library || memory_only)
             {
                 Some(DockSettings {
                     learned,
                     library: dock_library && !memory_only,
                     memory_only,
-                    components: match &dock_components {
-                        Some(f) => serde_json::from_slice(&fs::read(f)?)?,
-                        None => Vec::new(),
-                    },
+                    library_beta: dock_library_beta,
+                    components: base_components,
                     sigma_translation: dock_sigma_translation,
                     sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
                     uniform_weight: dock_uniform_weight,

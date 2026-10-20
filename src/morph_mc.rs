@@ -1511,7 +1511,7 @@ impl MorphMc {
         for &(b, p_new) in moves {
             let p_old = self.poses[b];
             for c in 0..n {
-                if c == b || (in_cluster[c] && c < b) {
+                if c == b || in_cluster[c] {
                     continue;
                 }
                 let k_old = self.contact[b][c];
@@ -1858,6 +1858,9 @@ impl MorphMc {
             let p1_old = self.poses[b1];
             for &(b2, p2_new) in &moves[idx1 + 1..] {
                 let p2_old = self.poses[b2];
+                if norm(sub(p1_old.position, p2_old.position)) > max_reach {
+                    continue;
+                }
                 dp += self.well_pair_between(p1_new, p2_new) as i64
                     - self.well_pair_between(p1_old, p2_old) as i64;
                 dl += self.like_pair_between(p1_new, p2_new)
@@ -1911,7 +1914,9 @@ impl MorphMc {
     ///    morphometric solvation `self.solv.propose(&moves)` and Poisson memory `dm`).
     pub fn step_gca(&mut self, rng: &mut StdRng, fk_beta: f64) -> Result<bool> {
         let n = self.poses.len();
-        ensure!(self.fixed.iter().any(|&f| !f), "no mobile body");
+        let free: Vec<usize> = (0..n).filter(|&b| !self.fixed[b]).collect();
+        ensure!(!free.is_empty(), "no mobile body");
+        let b0 = free[rng.random_range(0..free.len())];
         self.stats.gca_attempts += 1;
         let axis: Vec3 = loop {
             let v: Vec3 = std::array::from_fn(|_| StandardNormal.sample(rng));
@@ -1921,84 +1926,69 @@ impl MorphMc {
             }
         };
         let transform = crate::spherical::HalfTurn::new(axis)?;
-        let (hard, shadow) = crate::spherical::hard_components(&self.tree, &self.poses, transform)?;
+        let shadow: Vec<Pose> = self.poses.iter().map(|&p| transform.apply(p)).collect();
 
-        fn find_root(parent: &mut [usize], mut i: usize) -> usize {
-            while parent[i] != i {
-                parent[i] = parent[parent[i]];
-                i = parent[i];
-            }
-            i
-        }
-        fn union_roots(parent: &mut [usize], a: usize, b: usize) {
-            let ra = find_root(parent, a);
-            let rb = find_root(parent, b);
-            if ra != rb {
-                parent[rb] = ra;
-            }
-        }
-
-        let mut parent: Vec<usize> = (0..n).collect();
-        for group in &hard {
-            if let Some(&first) = group.first() {
-                for &i in &group[1..] {
-                    union_roots(&mut parent, first, i);
-                }
-            }
-        }
-
+        let hard_reach = 2. * self.tree.bound;
         let max_reach = (2. * self.tree.bound + self.well.width.max(self.like.cutoff).max(6.0))
             .max(2. * self.charge_extent + self.like.cutoff);
 
-        if fk_beta > 0. {
-            for i in 0..n {
-                for j in i + 1..n {
-                    if find_root(&mut parent, i) == find_root(&mut parent, j) {
-                        continue;
+        let mut in_cluster = vec![false; n];
+        in_cluster[b0] = true;
+        let mut moves = vec![(b0, shadow[b0])];
+        let mut queue = std::collections::VecDeque::from([b0]);
+        let mut pinned = false;
+
+        while let Some(u) = queue.pop_front() {
+            let pu_old = self.poses[u];
+            let pu_new = shadow[u];
+            let placed_u_new = Placed::new(pu_new);
+            for v in 0..n {
+                if in_cluster[v] {
+                    continue;
+                }
+                let pv_old = self.poses[v];
+                let pv_new = shadow[v];
+                let d_old = norm(sub(pu_old.position, pv_old.position));
+                let d_cross = norm(sub(pu_old.position, pv_new.position));
+                if d_old > max_reach && d_cross > max_reach {
+                    continue;
+                }
+                let mut bonded = false;
+                if d_cross <= hard_reach {
+                    let placed_v_new = Placed::new(pv_new);
+                    if self.tree.overlaps(&placed_u_new, &self.placed[v])
+                        || self.tree.overlaps(&self.placed[u], &placed_v_new)
+                    {
+                        bonded = true;
                     }
-                    let d_old = norm(sub(self.poses[i].position, self.poses[j].position));
-                    let d_cross = norm(sub(self.poses[i].position, shadow[j].position));
-                    if d_old > max_reach && d_cross > max_reach {
-                        continue;
-                    }
-                    let e_old = self.pair_surrogate_energy(self.poses[i], self.poses[j]);
-                    let e_cross = self.pair_surrogate_energy(self.poses[i], shadow[j]);
+                }
+                if !bonded && fk_beta > 0. {
+                    let e_old = self.pair_surrogate_energy(pu_old, pv_old);
+                    let e_cross = self.pair_surrogate_energy(pu_old, pv_new);
                     let de = e_cross - e_old;
                     if de > 0. {
                         let p_bond = 1. - (-fk_beta * de).exp();
                         if rng.random::<f64>() < p_bond {
-                            union_roots(&mut parent, i, j);
+                            bonded = true;
                         }
                     }
                 }
-            }
-        }
-
-        let mut comp_members = vec![Vec::new(); n];
-        let mut comp_pinned = vec![false; n];
-        for i in 0..n {
-            let r = find_root(&mut parent, i);
-            comp_members[r].push(i);
-            if self.fixed[i] {
-                comp_pinned[r] = true;
-            }
-        }
-
-        let mut in_cluster = vec![false; n];
-        let mut moves = Vec::new();
-        for r in 0..n {
-            if comp_members[r].is_empty() || comp_pinned[r] {
-                continue;
-            }
-            if rng.random::<bool>() {
-                for &i in &comp_members[r] {
-                    in_cluster[i] = true;
-                    moves.push((i, shadow[i]));
+                if bonded {
+                    if self.fixed[v] {
+                        pinned = true;
+                        break;
+                    }
+                    in_cluster[v] = true;
+                    moves.push((v, pv_new));
+                    queue.push_back(v);
                 }
             }
+            if pinned {
+                break;
+            }
         }
 
-        if moves.is_empty() {
+        if pinned {
             return Ok(false);
         }
         moves.sort_unstable_by_key(|&(i, _)| i);
@@ -2052,6 +2042,9 @@ impl MorphMc {
             let p1_old = self.poses[b1];
             for &(b2, p2_new) in &moves[idx1 + 1..] {
                 let p2_old = self.poses[b2];
+                if norm(sub(p1_old.position, p2_old.position)) > max_reach {
+                    continue;
+                }
                 dp += self.well_pair_between(p1_new, p2_new) as i64
                     - self.well_pair_between(p1_old, p2_old) as i64;
                 dl += self.like_pair_between(p1_new, p2_new)
@@ -2918,7 +2911,7 @@ mod tests {
             gauss_convention: GaussConvention::PatchGaussBonnet,
         };
         let well = SquareWell {
-            epsilon: 1.8,
+            epsilon: 0.8,
             width: 0.8,
         };
         let like = LikeCharge {
@@ -2932,7 +2925,7 @@ mod tests {
         };
         let chem = ChemistryModel {
             flags: vec![CHEM_CAT | CHEM_PURE_DON, CHEM_ANI | CHEM_PURE_ACC],
-            weights: [1.1, 1.6, 10.5, 0.45, 1.8, 0.85, 1.8],
+            weights: [0.5, 0.8, 1.5, 0.45, 0.8, 0.85, 0.8],
             wb_cap: 5.0,
         };
         let start = vec![

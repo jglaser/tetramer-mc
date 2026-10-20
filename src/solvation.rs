@@ -166,8 +166,10 @@ impl SolvationState {
         };
         s.world = (0..poses.len()).map(|b| s.place(b, poses[b])).collect();
         s.rebuild_grid();
+        let none = BTreeMap::new();
+        let none_centers = BTreeMap::new();
         s.balls = (0..poses.len())
-            .map(|b| (0..n).map(|i| s.measure(b, i, &BTreeMap::new())).collect())
+            .map(|b| (0..n).map(|i| s.measure(b, i, &none, &none_centers)).collect())
             .collect();
         s.energy = s.total();
         Ok(s)
@@ -218,6 +220,7 @@ impl SolvationState {
         i: usize,
         c: Vec3,
         moved: &BTreeMap<usize, Vec<Vec3>>,
+        moved_centers: &BTreeMap<usize, Vec3>,
     ) -> Vec<(usize, usize)> {
         let n = self.template.len();
         let r = self.radii[i];
@@ -232,7 +235,7 @@ impl SolvationState {
             })
             .collect();
         for (&bb, w) in moved {
-            if bb == b {
+            if bb == b || norm(sub(moved_centers[&bb], c)) >= self.reach + r {
                 continue;
             }
             for (j, &cj) in w.iter().enumerate() {
@@ -244,13 +247,19 @@ impl SolvationState {
         out
     }
 
-    fn measure(&self, b: usize, i: usize, moved: &BTreeMap<usize, Vec<Vec3>>) -> BallMeasures {
+    fn measure(
+        &self,
+        b: usize,
+        i: usize,
+        moved: &BTreeMap<usize, Vec<Vec3>>,
+        moved_centers: &BTreeMap<usize, Vec3>,
+    ) -> BallMeasures {
         let c = self.position(b, i, moved);
         let mut nb: Vec<(Vec3, f64)> = self.intra[i]
             .iter()
             .map(|&j| (self.position(b, j, moved), self.radii[j]))
             .collect();
-        for (bb, j) in self.inter_neighbours(b, i, c, moved) {
+        for (bb, j) in self.inter_neighbours(b, i, c, moved, moved_centers) {
             nb.push((self.position(bb, j, moved), self.radii[j]));
         }
         ball_measures(c, self.radii[i], &nb)
@@ -260,6 +269,7 @@ impl SolvationState {
     pub fn propose(&self, moves: &[(usize, Pose)]) -> Result<SolvationUpdate> {
         let nb = self.poses.len();
         let mut moved: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();
+        let mut moved_centers: BTreeMap<usize, Vec3> = BTreeMap::new();
         for &(b, p) in moves {
             ensure!(
                 b < nb && !moved.contains_key(&b),
@@ -267,40 +277,83 @@ impl SolvationState {
             );
             p.validate()?;
             moved.insert(b, self.place(b, p));
+            moved_centers.insert(b, p.position);
         }
+        let is_rigid = if let Some(&(b0, p0)) = moves.first() {
+            let rel0 = matmul(rotation(p0.orientation), transpose(self.rotations[b0]));
+            let shift0 = sub(p0.position, matvec(rel0, self.poses[b0].position));
+            moves.iter().skip(1).all(|&(b, p)| {
+                let rel = matmul(rotation(p.orientation), transpose(self.rotations[b]));
+                let shift = sub(p.position, matvec(rel0, self.poses[b].position));
+                norm(sub(shift, shift0)) < 1e-7
+                    && (0..3).all(|r| (0..3).all(|c| (rel[r][c] - rel0[r][c]).abs() < 1e-7))
+            })
+        } else {
+            true
+        };
         let none = BTreeMap::new();
-        // Atoms with an overlap across bodies before or after the move.
+        let none_centers = BTreeMap::new();
+        let n_atoms = self.template.len();
+        // Atoms with a changed overlap across bodies before or after the move.
+        // When `moves` is a single rigid SE(3) transformation of `moved`, intra-cluster
+        // overlaps between bodies inside `moved` are strictly invariant, so only atoms
+        // overlapping spectator bodies (`!moved.contains_key(&bb)`) before or after the
+        // move can change their intrinsic BallMeasures.
         let mut affected: BTreeSet<(usize, usize)> = BTreeSet::new();
         for (&b, w) in &moved {
-            // Body-level pre-check: only recompute balls if a body is near a spectator
-            // (outside `moved`) before or after the move, or if `moved` is non-rigid.
-            let (po, pn) = (
-                self.poses[b].position,
-                moves.iter().find(|m| m.0 == b).unwrap().1.position,
-            );
+            let (po, pn) = (self.poses[b].position, moved_centers[&b]);
             let near = (0..nb).any(|c| {
-                if c == b {
+                if c == b || (is_rigid && moved.contains_key(&c)) {
                     return false;
                 }
                 let qo = self.poses[c].position;
-                let qn = moves.iter().find(|m| m.0 == c).map_or(qo, |m| m.1.position);
-                if moved.contains_key(&c)
-                    && (norm(sub(qo, po)) - norm(sub(qn, pn))).abs() < 1e-9
-                {
-                    return false;
-                }
+                let qn = moved_centers.get(&c).copied().unwrap_or(qo);
                 norm(sub(qo, po)) < 2. * self.reach || norm(sub(qn, pn)) < 2. * self.reach
             });
             if !near {
                 continue;
             }
-            for i in 0..self.template.len() {
-                let old = self.inter_neighbours(b, i, self.world[b][i], &none);
-                let new = self.inter_neighbours(b, i, w[i], &moved);
-                if !old.is_empty() || !new.is_empty() {
-                    affected.insert((b, i));
-                    affected.extend(old);
-                    affected.extend(new);
+            if is_rigid {
+                for i in 0..n_atoms {
+                    let r = self.radii[i];
+                    let co = self.world[b][i];
+                    let cn = w[i];
+                    let mut hit = false;
+                    for (bb, j) in self
+                        .grid
+                        .near(&co)
+                        .map(|k| (k / n_atoms, k % n_atoms))
+                        .filter(|&(bb, j)| {
+                            !moved.contains_key(&bb) && norm(sub(self.world[bb][j], co)) < r + self.radii[j]
+                        })
+                    {
+                        hit = true;
+                        affected.insert((bb, j));
+                    }
+                    for (bb, j) in self
+                        .grid
+                        .near(&cn)
+                        .map(|k| (k / n_atoms, k % n_atoms))
+                        .filter(|&(bb, j)| {
+                            !moved.contains_key(&bb) && norm(sub(self.world[bb][j], cn)) < r + self.radii[j]
+                        })
+                    {
+                        hit = true;
+                        affected.insert((bb, j));
+                    }
+                    if hit {
+                        affected.insert((b, i));
+                    }
+                }
+            } else {
+                for i in 0..n_atoms {
+                    let old = self.inter_neighbours(b, i, self.world[b][i], &none, &none_centers);
+                    let new = self.inter_neighbours(b, i, w[i], &moved, &moved_centers);
+                    if !old.is_empty() || !new.is_empty() {
+                        affected.insert((b, i));
+                        affected.extend(old);
+                        affected.extend(new);
+                    }
                 }
             }
         }
@@ -309,7 +362,7 @@ impl SolvationState {
         let mut balls = Vec::new();
         for &(b, i) in &affected {
             let old = self.balls[b][i];
-            let new = self.measure(b, i, &moved);
+            let new = self.measure(b, i, &moved, &moved_centers);
             delta += self.model.ball_energy(i, &new) - self.model.ball_energy(i, &old);
             dv += new.volume - old.volume;
             balls.push(((b, i), new));
@@ -359,11 +412,12 @@ impl SolvationState {
     /// Full recomputation from scratch (for checks).
     pub fn recompute(&self) -> f64 {
         let none = BTreeMap::new();
+        let none_centers = BTreeMap::new();
         let mut f = 0.;
         let mut v = 0.;
         for b in 0..self.poses.len() {
             for i in 0..self.template.len() {
-                let m = self.measure(b, i, &none);
+                let m = self.measure(b, i, &none, &none_centers);
                 f += self.model.ball_energy(i, &m);
                 v += m.volume;
             }

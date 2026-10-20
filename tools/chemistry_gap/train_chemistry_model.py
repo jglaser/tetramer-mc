@@ -165,10 +165,12 @@ def harvest_pdb_interfaces():
 def main():
     names = json.load(open(f'{O_DIR}/atom_types_monomer.json'))['atoms']
     flags = atom_chemistry_flags(names)
-    weights = [1.1, 1.6, 10.5, 0.45, 1.8, 0.85, 1.8]
+    weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
+    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5226]
     model = {
         'flags': flags,
         'weights': weights,
+        'solv_weights': solv_weights,
         'wb_cap': 5.0,
     }
     out_paths = [
@@ -180,7 +182,7 @@ def main():
             json.dump(model, fp, indent=2)
     records = harvest_pdb_interfaces()
     print(f'Harvested {len(records)} symmetry interfaces across {len(PDB_CORPUS)} PDB crystal structures.')
-    print(f'Exported ChemistryModel (1001 atoms, {sum(1 for f in flags if f > 0)} polar/charged atoms) to {out_paths[0]}')
+    print(f'Exported ChemistryModel (1001 atoms, {sum(1 for f in flags if f > 0)} polar/charged atoms, 5 solvation + 7 chemistry weights) to {out_paths[0]}')
 
 
 if __name__ == '__main__':

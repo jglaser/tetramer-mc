@@ -114,8 +114,8 @@ impl Pair {
         let moved = self.env.len();
         let f = self.solv.propose(&[(moved, g)])?.delta;
         let like = if self.like_weight != 0. { self.like_weight * self.mc.like_pairs(moved, g) } else { 0. };
-        let chem = self.mc.chem_pairs(moved, g);
-        Ok(Some((f + like + chem, self.mc.well_pairs(moved, g) as f64)))
+        let (wp, chem) = self.mc.well_and_chem_pairs(moved, g);
+        Ok(Some((f + like + chem, wp as f64)))
     }
 }
 

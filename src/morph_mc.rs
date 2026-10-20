@@ -48,10 +48,12 @@ pub struct LikeCharge {
     pub groups: Vec<ChargeGroup>,
 }
 
-/// Learned SE(3)-invariant interface chemistry residual model (Formulation 6b):
+/// Learned SE(3)-invariant interface chemistry + hydration-shell solvation model (Formulation 6b):
 /// evaluates direct neutral and cationic H-bonds, bilateral-cationic anion-bridge triads,
-/// water-bridged polar networks (gated by like-polar clashes), and unsatisfied buried polar
-/// and charged desolvation penalties between interacting bodies.
+/// water-bridged polar networks (gated by like-polar clashes), unsatisfied buried polar
+/// and charged desolvation penalties, and optional 5-feature hydration-shell morphometric
+/// solvation (`solv_weights`: `[w_p2, w_p3, w_a1, w_a2, w_a05]` for gap `g < 2.8 A`)
+/// between interacting bodies.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct ChemistryModel {
     /// Per-atom 8-bit chemistry flags (length = number of body atoms, or empty if disabled).
@@ -60,6 +62,10 @@ pub struct ChemistryModel {
     pub weights: [f64; 7],
     /// Cap on raw water-bridge pair score before clash gating (default 5.0).
     pub wb_cap: f64,
+    /// Optional 5-feature hydration-shell morphometric solvation weights
+    /// `[w_p2, w_p3, w_a1, w_a2, w_a05]` in kT for pairwise gap `g = d - (r_i + r_j) < 2.8 A`.
+    #[serde(default)]
+    pub solv_weights: [f64; 5],
 }
 
 const CHEM_CAT: u8 = 0x01;
@@ -72,8 +78,13 @@ const CHEM_PURE_ACC: u8 = 0x40;
 const CHEM_PURE_DON: u8 = 0x80;
 
 impl ChemistryModel {
+    pub fn has_solvation(&self) -> bool {
+        self.solv_weights.iter().any(|&w| w != 0.)
+    }
+
     pub fn is_enabled(&self) -> bool {
-        !self.flags.is_empty() && self.weights.iter().any(|&w| w != 0.)
+        !self.flags.is_empty()
+            && (self.weights.iter().any(|&w| w != 0.) || self.has_solvation())
     }
 
     #[inline]
@@ -94,31 +105,282 @@ impl ChemistryModel {
         if !self.is_enabled() || norm(sub(q.position, p.position)) > 2. * bound + 5.25 {
             return 0.;
         }
+        let grid = BallGrid::new(centers, 5.25);
+        self.pair_energy_with_grid(centers, bound, &grid, p, q)
+    }
+
+    /// Pairwise interface solvation + chemistry energy (kT) using atom radii `vdw` and a
+    /// prebuilt template `BallGrid` (`cell >= 2*vmax + 2.8` when `has_solvation()`, else `>= 5.25`).
+    pub fn pair_energy_with_radii_and_grid(
+        &self,
+        centers: &[Vec3],
+        vdw: &[f64],
+        bound: f64,
+        grid: &BallGrid,
+        p: Pose,
+        q: Pose,
+    ) -> f64 {
+        if !self.has_solvation() {
+            return self.pair_energy_with_grid(centers, bound, grid, p, q);
+        }
+        let max_cut = 6.6;
+        if !self.is_enabled() || norm(sub(q.position, p.position)) > 2. * bound + max_cut {
+            return 0.;
+        }
         let n = centers.len();
         let rp = rotation(p.orientation);
         let rqt = transpose(rotation(q.orientation));
-        let cut = 5.25;
-        // Transform atoms of p into the frame of q, keeping those within bound + cut of origin.
+        let r_rel = matmul(rqt, rp);
+        let t_rel = matvec(rqt, sub(p.position, q.position));
+        let rpt = transpose(rp);
+        let q_in_p = matvec(rpt, sub(q.position, p.position));
+        let pre_cut2 = (bound + max_cut) * (bound + max_cut);
+
         let mut active_a: Vec<(usize, Vec3)> = Vec::new();
         for (i, &x) in centers.iter().enumerate() {
-            let y = matvec(rqt, sub(add(matvec(rp, x), p.position), q.position));
-            if norm(y) <= bound + cut {
-                active_a.push((i, y));
+            let dx = sub(x, q_in_p);
+            if dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2] <= pre_cut2 {
+                active_a.push((i, add(matvec(r_rel, x), t_rel)));
             }
         }
         if active_a.is_empty() {
             return 0.;
         }
-        let rpt = transpose(rp);
-        let rq = rotation(q.orientation);
-        let mut active_b: Vec<usize> = Vec::new();
-        for (j, &x) in centers.iter().enumerate() {
-            let y = matvec(rpt, sub(add(matvec(rq, x), q.position), p.position));
-            if norm(y) <= bound + cut {
-                active_b.push(j);
+
+        let mut p2 = 0.0f64;
+        let mut p3 = 0.0f64;
+        let mut max_u_a = vec![0.0f64; n];
+        let mut max_u_b = vec![0.0f64; n];
+
+        let mut min_d_a = vec![99.0f64; n];
+        let mut min_comp_a = vec![99.0f64; n];
+        let mut min_d_b = vec![99.0f64; n];
+        let mut min_comp_b = vec![99.0f64; n];
+
+        let mut s_hb = 0.0f64;
+        let mut s_chb = 0.0f64;
+        let mut s_wb_raw = 0.0f64;
+        let mut chb_mids: Vec<Vec3> = Vec::new();
+        let mut tn_pairs: Vec<(Vec3, f64)> = Vec::new();
+        let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
+
+        for &(i, ya) in &active_a {
+            let fi = self.flags[i];
+            let ri = vdw[i];
+            for j in grid.near(&ya) {
+                let xb = centers[j];
+                let r_sum = ri + vdw[j];
+                let r_solv = r_sum + 2.8;
+                let r_lim = r_solv.max(5.25);
+                let diff = sub(ya, xb);
+                let d2 = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
+                if d2 >= r_lim * r_lim {
+                    continue;
+                }
+                let d = d2.sqrt();
+                let g = d - r_sum;
+                if g < 2.8 {
+                    let u = ((2.8 - g) * (1.0 / 2.8)).max(0.0);
+                    let u2 = u * u;
+                    p2 += u2;
+                    p3 += u2 * u;
+                    if u > max_u_a[i] {
+                        max_u_a[i] = u;
+                    }
+                    if u > max_u_b[j] {
+                        max_u_b[j] = u;
+                    }
+                }
+                if d >= 5.25 {
+                    continue;
+                }
+                let fj = self.flags[j];
+                if fi != 0 && d < min_d_a[i] {
+                    min_d_a[i] = d;
+                }
+                if fj != 0 && d < min_d_b[j] {
+                    min_d_b[j] = d;
+                }
+                if fi == 0 || fj == 0 {
+                    continue;
+                }
+                let comp = Self::complementary(fi, fj);
+                if comp {
+                    if d < min_comp_a[i] {
+                        min_comp_a[i] = d;
+                    }
+                    if d < min_comp_b[j] {
+                        min_comp_b[j] = d;
+                    }
+                    if (3.95..=5.25).contains(&d) {
+                        let u = (d - 4.55) / 0.45;
+                        s_wb_raw += (-u * u).exp();
+                    }
+                }
+                if d < 3.9 {
+                    let u = (d.max(2.7) - 2.95) / 0.45;
+                    let gh = (-u * u).exp();
+                    if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
+                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
+                    {
+                        s_hb += gh;
+                    }
+                    if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
+                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
+                    {
+                        s_chb += gh;
+                        if d < 3.6 {
+                            chb_mids.push(scale(add(ya, xb), 0.5));
+                        }
+                    }
+                }
+                if (3.4..=4.5).contains(&d)
+                    && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
+                        || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
+                {
+                    tn_pairs.push((scale(add(ya, xb), 0.5), d));
+                }
+                if d < 4.0
+                    && (((fi & CHEM_PURE_ACC != 0) && (fj & CHEM_PURE_ACC != 0))
+                        || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0)))
+                {
+                    clash_candidates.push((i, j, d));
+                }
             }
         }
-        if active_b.is_empty() {
+
+        let mut a1 = 0.0f64;
+        let mut a2 = 0.0f64;
+        let mut a05 = 0.0f64;
+        for &u in max_u_a.iter().chain(max_u_b.iter()) {
+            if u > 0.0 {
+                a1 += u;
+                a2 += u * u;
+                a05 += u.sqrt();
+            }
+        }
+        let sw = &self.solv_weights;
+        let e_solv = sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05;
+
+        let mut s_cl = 0.0f64;
+        if !tn_pairs.is_empty() && !chb_mids.is_empty() {
+            let cats_a: Vec<Vec3> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.flags[i] & CHEM_CAT != 0)
+                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
+                .collect();
+            let cats_b: Vec<Vec3> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.flags[j] & CHEM_CAT != 0)
+                .map(|(_, &x)| x)
+                .collect();
+            for (mid, d) in tn_pairs {
+                let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                if da < 8.0 && db < 8.0 {
+                    let d_chb = chb_mids.iter().map(|&m| norm(sub(m, mid))).fold(99.0f64, f64::min);
+                    if d_chb < 8.5 {
+                        let u1 = (d - 4.05) / 0.40;
+                        let u2 = (d_chb.max(5.0) - 5.0) / 3.0;
+                        s_cl += (-u1 * u1 - u2 * u2).exp();
+                    }
+                }
+            }
+        }
+
+        let mut s_clash = 0.0f64;
+        for (i, j, d) in clash_candidates {
+            if min_comp_a[i] >= 3.65 && min_comp_b[j] >= 3.65 {
+                let u = (d.max(2.8) - 2.8) / 0.8;
+                s_clash += (-u * u).exp();
+            }
+        }
+        let s_wb = s_wb_raw.min(self.wb_cap) * (-1.5 * s_clash).exp();
+
+        let mut unp_pol = 0.0f64;
+        let mut unp_chg = 0.0f64;
+        for (i, (&dmin, &dcomp)) in min_d_a.iter().zip(&min_comp_a).enumerate() {
+            if dmin >= 4.25 {
+                continue;
+            }
+            let fi = self.flags[i];
+            let is_chg = (fi & (CHEM_CAT | CHEM_ANI)) != 0;
+            let is_npol = !is_chg && ((fi & (CHEM_NDON | CHEM_NACC)) != 0);
+            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
+                let u = (dmin.max(2.9) - 2.9) / 0.75;
+                unp_pol += (-u * u).exp();
+            }
+            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
+                let u = (dmin.max(3.0) - 3.0) / 0.95;
+                unp_chg += (-u * u).exp();
+            }
+        }
+        for (j, (&dmin, &dcomp)) in min_d_b.iter().zip(&min_comp_b).enumerate() {
+            if dmin >= 4.25 {
+                continue;
+            }
+            let fj = self.flags[j];
+            let is_chg = (fj & (CHEM_CAT | CHEM_ANI)) != 0;
+            let is_npol = !is_chg && ((fj & (CHEM_NDON | CHEM_NACC)) != 0);
+            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
+                let u = (dmin.max(2.9) - 2.9) / 0.75;
+                unp_pol += (-u * u).exp();
+            }
+            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
+                let u = (dmin.max(3.0) - 3.0) / 0.95;
+                unp_chg += (-u * u).exp();
+            }
+        }
+
+        let w = &self.weights;
+        e_solv - w[0] * s_hb - w[1] * s_chb - w[2] * s_cl - w[3] * s_wb
+            + w[4] * s_clash
+            + w[5] * unp_pol
+            + w[6] * unp_chg
+    }
+
+    /// Pairwise chemistry residual energy (kT) using a prebuilt template `BallGrid` (cell >= 5.25 A).
+    pub fn pair_energy_with_grid(
+        &self,
+        centers: &[Vec3],
+        bound: f64,
+        grid: &BallGrid,
+        p: Pose,
+        q: Pose,
+    ) -> f64 {
+        if !self.is_enabled() || norm(sub(q.position, p.position)) > 2. * bound + 5.25 {
+            return 0.;
+        }
+        let n = centers.len();
+        let rp = rotation(p.orientation);
+        let rqt = transpose(rotation(q.orientation));
+        let cut = 5.25;
+        // Transform flagged atoms of p into the frame of q, keeping those within bound + cut.
+        let mut active_a: Vec<(usize, Vec3)> = Vec::new();
+        for (i, &x) in centers.iter().enumerate() {
+            if self.flags[i] == 0 {
+                continue;
+            }
+            let y = matvec(rqt, sub(add(matvec(rp, x), p.position), q.position));
+            if norm(y) <= bound + cut {
+                active_a.push((i, y));
+            }
+        }
+        let rpt = transpose(rp);
+        let rq = rotation(q.orientation);
+        let mut active_b: Vec<(usize, Vec3)> = Vec::new();
+        for (j, &x) in centers.iter().enumerate() {
+            if self.flags[j] == 0 {
+                continue;
+            }
+            let y = matvec(rpt, sub(add(matvec(rq, x), q.position), p.position));
+            if norm(y) <= bound + cut {
+                active_b.push((j, y));
+            }
+        }
+        if active_a.is_empty() && active_b.is_empty() {
             return 0.;
         }
         let mut min_d_a = vec![99.0f64; n];
@@ -135,7 +397,7 @@ impl ChemistryModel {
 
         for &(i, ya) in &active_a {
             let fi = self.flags[i];
-            for &j in &active_b {
+            for j in grid.near(&ya) {
                 let xb = centers[j];
                 let d = norm(sub(ya, xb));
                 if d >= cut {
@@ -148,6 +410,9 @@ impl ChemistryModel {
                     min_d_b[j] = d;
                 }
                 let fj = self.flags[j];
+                if fj == 0 {
+                    continue;
+                }
                 let comp = Self::complementary(fi, fj);
                 if comp {
                     if d < min_comp_a[i] {
@@ -247,19 +512,29 @@ impl ChemistryModel {
                 unp_chg += (-u * u).exp();
             }
         }
-        for &j in &active_b {
+        for &(j, yb) in &active_b {
             let fj = self.flags[j];
-            let dmin = min_d_b[j];
             let dcomp = min_comp_b[j];
             let is_chg = (fj & (CHEM_CAT | CHEM_ANI)) != 0;
             let is_npol = !is_chg && ((fj & (CHEM_NDON | CHEM_NACC)) != 0);
-            if is_npol && dmin < 3.9 && dcomp >= 3.65 {
-                let u = (dmin.max(2.9) - 2.9) / 0.7;
-                unp_pol += (-u * u).exp();
-            }
-            if is_chg && dmin < 4.0 && dcomp >= 4.30 {
-                let u = (dmin.max(3.0) - 3.0) / 0.9;
-                unp_chg += (-u * u).exp();
+            if (is_npol && dcomp >= 3.65) || (is_chg && dcomp >= 4.30) {
+                let mut dmin = min_d_b[j];
+                for i in grid.near(&yb) {
+                    if self.flags[i] == 0 {
+                        let d = norm(sub(yb, centers[i]));
+                        if d < dmin {
+                            dmin = d;
+                        }
+                    }
+                }
+                if is_npol && dmin < 3.9 {
+                    let u = (dmin.max(2.9) - 2.9) / 0.7;
+                    unp_pol += (-u * u).exp();
+                }
+                if is_chg && dmin < 4.0 {
+                    let u = (dmin.max(3.0) - 3.0) / 0.9;
+                    unp_chg += (-u * u).exp();
+                }
             }
         }
 
@@ -538,6 +813,7 @@ pub struct MorphMc {
     like_sum: f64,
     /// Learned SE(3)-invariant interface chemistry residual model and cached total energy.
     chem: ChemistryModel,
+    chem_grid: Option<BallGrid>,
     chem_sum: f64,
     /// Contact library: atom-gap threshold, its grid, and the symmetric contact matrix.
     contact_gap: Option<f64>,
@@ -587,6 +863,7 @@ impl MorphMc {
             charge_extent: 0.,
             like_sum: 0.,
             chem: ChemistryModel::default(),
+            chem_grid: None,
             chem_sum: 0.,
             contact_gap: None,
             contact_grid: None,
@@ -651,9 +928,23 @@ impl MorphMc {
             self.centers.len()
         );
         ensure!(
-            chem.weights.iter().all(|w| w.is_finite()) && chem.wb_cap.is_finite() && chem.wb_cap >= 0.,
+            chem.weights.iter().all(|w| w.is_finite())
+                && chem.solv_weights.iter().all(|w| w.is_finite())
+                && chem.wb_cap.is_finite()
+                && chem.wb_cap >= 0.,
             "invalid chemistry model weights"
         );
+        let vmax = self.vdw.iter().copied().fold(0., f64::max);
+        let cell = if chem.has_solvation() {
+            (2. * vmax + 2.8).max(5.25)
+        } else {
+            5.25
+        };
+        self.chem_grid = if chem.is_enabled() {
+            Some(BallGrid::new(&self.centers, cell))
+        } else {
+            None
+        };
         self.chem = chem;
         let mut sum = 0.;
         for a in 0..self.poses.len() {
@@ -923,7 +1214,7 @@ impl MorphMc {
         let mut sum = 0.;
         for (c, &q) in self.poses.iter().enumerate() {
             if c != b {
-                sum += self.chem.pair_energy(&self.centers, self.tree.bound, p, q);
+                sum += self.chem_pair_between(p, q);
             }
         }
         sum
@@ -984,28 +1275,31 @@ impl MorphMc {
 
     /// Square-well atom pairs between body `b` placed at `p` and all other bodies.
     pub fn well_pairs(&self, b: usize, p: Pose) -> usize {
-        let reach = 2. * self.tree.bound + self.well.width;
-        let rb = rotation(p.orientation);
         let mut count = 0;
-        for (c, q) in self.poses.iter().enumerate() {
-            if c == b || norm(sub(q.position, p.position)) > reach {
-                continue;
-            }
-            let rct = transpose(rotation(q.orientation));
-            for (i, &x) in self.centers.iter().enumerate() {
-                // Atom i of b in the frame of body c.
-                let y = matvec(rct, sub(add(matvec(rb, x), p.position), q.position));
-                if norm(y) > self.tree.bound + self.vdw[i] + self.well.width {
-                    continue;
-                }
-                for j in self.template_grid.near(&y) {
-                    if norm(sub(self.centers[j], y)) < self.vdw[i] + self.vdw[j] + self.well.width {
-                        count += 1;
-                    }
-                }
+        for (c, &q) in self.poses.iter().enumerate() {
+            if c != b {
+                count += self.well_pair_between(p, q);
             }
         }
         count
+    }
+
+    /// Combined `(well_pairs, chem_energy)` between body `b` placed at `p` and all other bodies,
+    /// evaluated in a single spatial-grid pass per interacting body pair.
+    pub fn well_and_chem_pairs(&self, b: usize, p: Pose) -> (usize, f64) {
+        if !self.chem.is_enabled() {
+            return (self.well_pairs(b, p), 0.);
+        }
+        let mut wp = 0usize;
+        let mut ch = 0.0f64;
+        for (c, &q) in self.poses.iter().enumerate() {
+            if c != b {
+                let (w_pq, c_pq) = self.well_and_chem_pair_between(p, q);
+                wp += w_pq;
+                ch += c_pq;
+            }
+        }
+        (wp, ch)
     }
 
     fn hard_valid(&self, b: usize, p: Pose) -> bool {
@@ -1065,10 +1359,12 @@ impl MorphMc {
             self.stats.hard_rejected += 1;
             return Ok(false);
         }
-        let dp = self.well_pairs(b, new) as i64 - self.well_pairs(b, old) as i64;
+        let (wp_new, ch_new) = self.well_and_chem_pairs(b, new);
+        let (wp_old, ch_old) = self.well_and_chem_pairs(b, old);
+        let dp = wp_new as i64 - wp_old as i64;
         let d_well = -self.well.epsilon * dp as f64;
         let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
-        let dc = self.chem_pairs(b, new) - self.chem_pairs(b, old);
+        let dc = ch_new - ch_old;
         let update = self.solv.propose(&[(b, new)])?;
         let (dm, sums, n_entries, partners) = self.memory_delta(b, new);
         // Minus the log joint-target ratio: energy change minus the memory-conditional ratio.
@@ -1265,10 +1561,12 @@ impl MorphMc {
             self.stats.hard_rejected += 1;
             return Ok(false);
         }
-        let dp = self.well_pairs(b, new) as i64 - self.well_pairs(b, old) as i64;
+        let (wp_new, ch_new) = self.well_and_chem_pairs(b, new);
+        let (wp_old, ch_old) = self.well_and_chem_pairs(b, old);
+        let dp = wp_new as i64 - wp_old as i64;
         let d_well = -self.well.epsilon * dp as f64;
         let dl = self.like_pairs(b, new) - self.like_pairs(b, old);
-        let dc = self.chem_pairs(b, new) - self.chem_pairs(b, old);
+        let dc = ch_new - ch_old;
         let update = self.solv.propose(&[(b, new)])?;
         let log_ratio =
             self.dock_log_density(b, old, d, comps, u) - self.dock_log_density(b, new, d, comps, u);
@@ -1298,19 +1596,287 @@ impl MorphMc {
         }
         let rb = rotation(p.orientation);
         let rct = transpose(rotation(q.orientation));
+        let r_rel = matmul(rct, rb);
+        let t_rel = matvec(rct, sub(p.position, q.position));
+        let rbt = transpose(rb);
+        let q_in_p = matvec(rbt, sub(q.position, p.position));
         let mut count = 0;
         for (i, &x) in self.centers.iter().enumerate() {
-            let y = matvec(rct, sub(add(matvec(rb, x), p.position), q.position));
-            if norm(y) > self.tree.bound + self.vdw[i] + self.well.width {
+            let ri = self.vdw[i];
+            let r_pre = self.tree.bound + ri + self.well.width;
+            let dx = sub(x, q_in_p);
+            if dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2] > r_pre * r_pre {
                 continue;
             }
+            let y = add(matvec(r_rel, x), t_rel);
             for j in self.template_grid.near(&y) {
-                if norm(sub(self.centers[j], y)) < self.vdw[i] + self.vdw[j] + self.well.width {
+                let r_cut = ri + self.vdw[j] + self.well.width;
+                let diff = sub(self.centers[j], y);
+                if diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2] < r_cut * r_cut {
                     count += 1;
                 }
             }
         }
         count
+    }
+
+    /// Fused single-pass evaluation of `(well_pairs, chem_energy)` between pose `p` and pose `q`.
+    /// When `self.well.width >= 2.8` (so `template_grid` cell size `2*vmax + width >= 6.56 >= 5.25`),
+    /// both the square-well atom pairs and the learned interface solvation + chemistry features are
+    /// accumulated in a single coordinate transform and spatial-grid traversal.
+    pub fn well_and_chem_pair_between(&self, p: Pose, q: Pose) -> (usize, f64) {
+        if !self.chem.is_enabled() {
+            return (self.well_pair_between(p, q), 0.);
+        }
+        if self.well.width < 2.8 {
+            return (self.well_pair_between(p, q), self.chem_pair_between(p, q));
+        }
+        let max_chem_cut = if self.chem.has_solvation() { 6.6 } else { 5.25 };
+        let well_reach = 2. * self.tree.bound + self.well.width;
+        let chem_reach = 2. * self.tree.bound + max_chem_cut;
+        let d_pq = norm(sub(q.position, p.position));
+        if d_pq > well_reach.max(chem_reach) {
+            return (0, 0.);
+        }
+        if d_pq > chem_reach {
+            return (self.well_pair_between(p, q), 0.);
+        }
+        let n = self.centers.len();
+        let rp = rotation(p.orientation);
+        let rqt = transpose(rotation(q.orientation));
+        let r_rel = matmul(rqt, rp);
+        let t_rel = matvec(rqt, sub(p.position, q.position));
+        let rpt = transpose(rp);
+        let q_in_p = matvec(rpt, sub(q.position, p.position));
+        let has_solv = self.chem.has_solvation();
+
+        let mut well_count = 0usize;
+        let mut any_chem = false;
+        let mut p2 = 0.0f64;
+        let mut p3 = 0.0f64;
+        let mut max_u_a = vec![0.0f64; if has_solv { n } else { 0 }];
+        let mut max_u_b = vec![0.0f64; if has_solv { n } else { 0 }];
+
+        let mut min_d_a = vec![99.0f64; n];
+        let mut min_comp_a = vec![99.0f64; n];
+        let mut min_d_b = vec![99.0f64; n];
+        let mut min_comp_b = vec![99.0f64; n];
+
+        let mut s_hb = 0.0f64;
+        let mut s_chb = 0.0f64;
+        let mut s_wb_raw = 0.0f64;
+        let mut chb_mids: Vec<Vec3> = Vec::new();
+        let mut tn_pairs: Vec<(Vec3, f64)> = Vec::new();
+        let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
+
+        for (i, &x) in self.centers.iter().enumerate() {
+            let ri = self.vdw[i];
+            let r_pre = self.tree.bound + (ri + self.well.width).max(max_chem_cut);
+            let dx = sub(x, q_in_p);
+            if dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2] > r_pre * r_pre {
+                continue;
+            }
+            let ya = add(matvec(r_rel, x), t_rel);
+            let fi = self.chem.flags[i];
+            let in_chem_a = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2]
+                <= (self.tree.bound + max_chem_cut) * (self.tree.bound + max_chem_cut);
+            for j in self.template_grid.near(&ya) {
+                let xb = self.centers[j];
+                let r_sum = ri + self.vdw[j];
+                let r_well = r_sum + self.well.width;
+                let r_chem = if has_solv {
+                    (r_sum + 2.8).max(5.25)
+                } else {
+                    5.25
+                };
+                let r_outer = r_well.max(r_chem);
+                let diff = sub(ya, xb);
+                let d2 = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
+                if d2 >= r_outer * r_outer {
+                    continue;
+                }
+                if d2 < r_well * r_well {
+                    well_count += 1;
+                }
+                if !in_chem_a || d2 >= r_chem * r_chem {
+                    continue;
+                }
+                any_chem = true;
+                let d = d2.sqrt();
+                if has_solv {
+                    let g = d - r_sum;
+                    if g < 2.8 {
+                        let u = ((2.8 - g) * (1.0 / 2.8)).max(0.0);
+                        let u2 = u * u;
+                        p2 += u2;
+                        p3 += u2 * u;
+                        if u > max_u_a[i] {
+                            max_u_a[i] = u;
+                        }
+                        if u > max_u_b[j] {
+                            max_u_b[j] = u;
+                        }
+                    }
+                }
+                if d >= 5.25 {
+                    continue;
+                }
+                let fj = self.chem.flags[j];
+                if fi != 0 && d < min_d_a[i] {
+                    min_d_a[i] = d;
+                }
+                if fj != 0 && d < min_d_b[j] {
+                    min_d_b[j] = d;
+                }
+                if fi == 0 || fj == 0 {
+                    continue;
+                }
+                let comp = ChemistryModel::complementary(fi, fj);
+                if comp {
+                    if d < min_comp_a[i] {
+                        min_comp_a[i] = d;
+                    }
+                    if d < min_comp_b[j] {
+                        min_comp_b[j] = d;
+                    }
+                    if (3.95..=5.25).contains(&d) {
+                        let u = (d - 4.55) / 0.45;
+                        s_wb_raw += (-u * u).exp();
+                    }
+                }
+                if d < 3.9 {
+                    let u = (d.max(2.7) - 2.95) / 0.45;
+                    let gh = (-u * u).exp();
+                    if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
+                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
+                    {
+                        s_hb += gh;
+                    }
+                    if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
+                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
+                    {
+                        s_chb += gh;
+                        if d < 3.6 {
+                            chb_mids.push(scale(add(ya, xb), 0.5));
+                        }
+                    }
+                }
+                if (3.4..=4.5).contains(&d)
+                    && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
+                        || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
+                {
+                    tn_pairs.push((scale(add(ya, xb), 0.5), d));
+                }
+                if d < 4.0
+                    && (((fi & CHEM_PURE_ACC != 0) && (fj & CHEM_PURE_ACC != 0))
+                        || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0)))
+                {
+                    clash_candidates.push((i, j, d));
+                }
+            }
+        }
+
+        if !any_chem {
+            return (well_count, 0.0);
+        }
+
+        let e_solv = if has_solv {
+            let mut a1 = 0.0f64;
+            let mut a2 = 0.0f64;
+            let mut a05 = 0.0f64;
+            for &u in max_u_a.iter().chain(max_u_b.iter()) {
+                if u > 0.0 {
+                    a1 += u;
+                    a2 += u * u;
+                    a05 += u.sqrt();
+                }
+            }
+            let sw = &self.chem.solv_weights;
+            sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05
+        } else {
+            0.0
+        };
+
+        let mut s_cl = 0.0f64;
+        if !tn_pairs.is_empty() && !chb_mids.is_empty() {
+            let cats_a: Vec<Vec3> = self
+                .centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.chem.flags[i] & CHEM_CAT != 0)
+                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
+                .collect();
+            let cats_b: Vec<Vec3> = self
+                .centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.chem.flags[j] & CHEM_CAT != 0)
+                .map(|(_, &x)| x)
+                .collect();
+            for (mid, d) in tn_pairs {
+                let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                if da < 8.0 && db < 8.0 {
+                    let d_chb = chb_mids.iter().map(|&m| norm(sub(m, mid))).fold(99.0f64, f64::min);
+                    if d_chb < 8.5 {
+                        let u1 = (d - 4.05) / 0.40;
+                        let u2 = (d_chb.max(5.0) - 5.0) / 3.0;
+                        s_cl += (-u1 * u1 - u2 * u2).exp();
+                    }
+                }
+            }
+        }
+
+        let mut s_clash = 0.0f64;
+        for (i, j, d) in clash_candidates {
+            if min_comp_a[i] >= 3.65 && min_comp_b[j] >= 3.65 {
+                let u = (d.max(2.8) - 2.8) / 0.8;
+                s_clash += (-u * u).exp();
+            }
+        }
+        let s_wb = s_wb_raw.min(self.chem.wb_cap) * (-1.5 * s_clash).exp();
+
+        let mut unp_pol = 0.0f64;
+        let mut unp_chg = 0.0f64;
+        for (i, (&dmin, &dcomp)) in min_d_a.iter().zip(&min_comp_a).enumerate() {
+            if dmin >= 4.25 {
+                continue;
+            }
+            let fi = self.chem.flags[i];
+            let is_chg = (fi & (CHEM_CAT | CHEM_ANI)) != 0;
+            let is_npol = !is_chg && ((fi & (CHEM_NDON | CHEM_NACC)) != 0);
+            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
+                let u = (dmin.max(2.9) - 2.9) / 0.75;
+                unp_pol += (-u * u).exp();
+            }
+            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
+                let u = (dmin.max(3.0) - 3.0) / 0.95;
+                unp_chg += (-u * u).exp();
+            }
+        }
+        for (j, (&dmin, &dcomp)) in min_d_b.iter().zip(&min_comp_b).enumerate() {
+            if dmin >= 4.25 {
+                continue;
+            }
+            let fj = self.chem.flags[j];
+            let is_chg = (fj & (CHEM_CAT | CHEM_ANI)) != 0;
+            let is_npol = !is_chg && ((fj & (CHEM_NDON | CHEM_NACC)) != 0);
+            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
+                let u = (dmin.max(2.9) - 2.9) / 0.75;
+                unp_pol += (-u * u).exp();
+            }
+            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
+                let u = (dmin.max(3.0) - 3.0) / 0.95;
+                unp_chg += (-u * u).exp();
+            }
+        }
+
+        let w = &self.chem.weights;
+        let e_chem = e_solv - w[0] * s_hb - w[1] * s_chb - w[2] * s_cl - w[3] * s_wb
+            + w[4] * s_clash
+            + w[5] * unp_pol
+            + w[6] * unp_chg;
+        (well_count, e_chem)
     }
 
     /// Pairwise like-charge contact sum `sum f_g f_h` between pose `p` and pose `q`.
@@ -1352,15 +1918,25 @@ impl MorphMc {
 
     /// Pairwise chemistry residual energy between pose `p` and pose `q`.
     pub fn chem_pair_between(&self, p: Pose, q: Pose) -> f64 {
-        self.chem.pair_energy(&self.centers, self.tree.bound, p, q)
+        if let Some(grid) = &self.chem_grid {
+            self.chem.pair_energy_with_radii_and_grid(
+                &self.centers,
+                &self.vdw,
+                self.tree.bound,
+                grid,
+                p,
+                q,
+            )
+        } else {
+            self.chem.pair_energy(&self.centers, self.tree.bound, p, q)
+        }
     }
 
     /// Total pairwise surrogate energy `E_well + E_like + dG_chem` between pose `p` and pose `q`.
     pub fn pair_surrogate_energy(&self, p: Pose, q: Pose) -> f64 {
-        let wp = self.well_pair_between(p, q) as f64;
+        let (wp, ch) = self.well_and_chem_pair_between(p, q);
         let lk = self.like_pair_between(p, q);
-        let ch = self.chem_pair_between(p, q);
-        -self.well.epsilon * wp + self.like.weight * lk + ch
+        -self.well.epsilon * (wp as f64) + self.like.weight * lk + ch
     }
 
     /// Whether pose `p` and pose `q` are in contact according to `self.contact_gap`.
@@ -1839,12 +2415,12 @@ impl MorphMc {
                 {
                     continue;
                 }
-                let wp_old = self.well_pair_between(p_old, q) as i64;
-                let wp_new = self.well_pair_between(p_new, q) as i64;
+                let (wp_old_u, ch_old) = self.well_and_chem_pair_between(p_old, q);
+                let (wp_new_u, ch_new) = self.well_and_chem_pair_between(p_new, q);
+                let wp_old = wp_old_u as i64;
+                let wp_new = wp_new_u as i64;
                 let lk_old = self.like_pair_between(p_old, q);
                 let lk_new = self.like_pair_between(p_new, q);
-                let ch_old = self.chem_pair_between(p_old, q);
-                let ch_new = self.chem_pair_between(p_new, q);
                 dp += wp_new - wp_old;
                 dl += lk_new - lk_old;
                 dc += ch_new - ch_old;
@@ -1865,12 +2441,12 @@ impl MorphMc {
                 if norm(sub(p1_old.position, p2_old.position)) > max_reach {
                     continue;
                 }
-                dp += self.well_pair_between(p1_new, p2_new) as i64
-                    - self.well_pair_between(p1_old, p2_old) as i64;
+                let (wp12_new, ch12_new) = self.well_and_chem_pair_between(p1_new, p2_new);
+                let (wp12_old, ch12_old) = self.well_and_chem_pair_between(p1_old, p2_old);
+                dp += wp12_new as i64 - wp12_old as i64;
                 dl += self.like_pair_between(p1_new, p2_new)
                     - self.like_pair_between(p1_old, p2_old);
-                dc += self.chem_pair_between(p1_new, p2_new)
-                    - self.chem_pair_between(p1_old, p2_old);
+                dc += ch12_new - ch12_old;
             }
         }
 
@@ -2020,12 +2596,12 @@ impl MorphMc {
                 {
                     continue;
                 }
-                let wp_old = self.well_pair_between(p_old, q_old) as i64;
-                let wp_new = self.well_pair_between(p_new, q_old) as i64;
+                let (wp_old_u, ch_old) = self.well_and_chem_pair_between(p_old, q_old);
+                let (wp_new_u, ch_new) = self.well_and_chem_pair_between(p_new, q_old);
+                let wp_old = wp_old_u as i64;
+                let wp_new = wp_new_u as i64;
                 let lk_old = self.like_pair_between(p_old, q_old);
                 let lk_new = self.like_pair_between(p_new, q_old);
-                let ch_old = self.chem_pair_between(p_old, q_old);
-                let ch_new = self.chem_pair_between(p_new, q_old);
                 dp += wp_new - wp_old;
                 dl += lk_new - lk_old;
                 dc += ch_new - ch_old;
@@ -2049,12 +2625,12 @@ impl MorphMc {
                 if norm(sub(p1_old.position, p2_old.position)) > max_reach {
                     continue;
                 }
-                dp += self.well_pair_between(p1_new, p2_new) as i64
-                    - self.well_pair_between(p1_old, p2_old) as i64;
+                let (wp12_new, ch12_new) = self.well_and_chem_pair_between(p1_new, p2_new);
+                let (wp12_old, ch12_old) = self.well_and_chem_pair_between(p1_old, p2_old);
+                dp += wp12_new as i64 - wp12_old as i64;
                 dl += self.like_pair_between(p1_new, p2_new)
                     - self.like_pair_between(p1_old, p2_old);
-                dc += self.chem_pair_between(p1_new, p2_new)
-                    - self.chem_pair_between(p1_old, p2_old);
+                dc += ch12_new - ch12_old;
             }
         }
 
@@ -2843,7 +3419,7 @@ mod tests {
             atom_types: vec![0; 4],
             gauss_convention: GaussConvention::PatchGaussBonnet,
         };
-        let well = SquareWell { epsilon: 0.3, width: 1.0 };
+        let well = SquareWell { epsilon: 0.3, width: 6.0 };
         let chem = ChemistryModel {
             flags: vec![
                 CHEM_CAT | CHEM_PURE_DON,
@@ -2851,7 +3427,8 @@ mod tests {
                 CHEM_NDON | CHEM_AMIDE_ND | CHEM_PURE_DON,
                 CHEM_ANI | CHEM_PURE_ACC,
             ],
-            weights: [1.1, 1.6, 10.5, 0.45, 1.8, 0.85, 1.8],
+            weights: [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2],
+            solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
             wb_cap: 5.0,
         };
         let start = vec![
@@ -2866,21 +3443,32 @@ mod tests {
             },
         ];
         let centers: Vec<Vec3> = tree.shape.atoms.iter().map(|a| a.center).collect();
+        let vdw: Vec<f64> = tree.shape.atoms.iter().map(|a| a.radius).collect();
+        let cgrid = BallGrid::new(&centers, 5.25);
         // Verify exact symmetry and SE(3) invariance on initial pairs.
         for i in 0..start.len() {
             for j in i + 1..start.len() {
-                let e_ij = chem.pair_energy(&centers, tree.bound, start[i], start[j]);
-                let e_ji = chem.pair_energy(&centers, tree.bound, start[j], start[i]);
+                let e_ij = chem.pair_energy_with_radii_and_grid(&centers, &vdw, tree.bound, &cgrid, start[i], start[j]);
+                let e_ji = chem.pair_energy_with_radii_and_grid(&centers, &vdw, tree.bound, &cgrid, start[j], start[i]);
                 assert!(
                     (e_ij - e_ji).abs() < 1e-12,
-                    "asymmetric pair chemistry energy: {e_ij} vs {e_ji}"
+                    "asymmetric pair chemistry+solvation energy: {e_ij} vs {e_ji}"
                 );
             }
         }
-        let mut mc = MorphMc::new(tree, wall, model, well, start, vec![true, false, false])
+        let mut mc = MorphMc::new(tree, wall, model, well, start.clone(), vec![true, false, false])
             .unwrap()
             .with_chemistry_model(chem)
             .unwrap();
+        for i in 0..start.len() {
+            for j in i + 1..start.len() {
+                let (w_f, c_f) = mc.well_and_chem_pair_between(start[i], start[j]);
+                let w_s = mc.well_pair_between(start[i], start[j]);
+                let c_s = mc.chem_pair_between(start[i], start[j]);
+                assert_eq!(w_f, w_s, "fused well count mismatch");
+                assert!((c_f - c_s).abs() < 1e-12, "fused chem+solv mismatch: {c_f} vs {c_s}");
+            }
+        }
         let mv = MoveSettings {
             translation: 0.4,
             rotation: 0.25,
@@ -2962,6 +3550,7 @@ mod tests {
         let chem = ChemistryModel {
             flags: vec![CHEM_CAT | CHEM_PURE_DON, CHEM_ANI | CHEM_PURE_ACC],
             weights: [0.5, 0.8, 1.5, 0.45, 0.8, 0.85, 0.8],
+            solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
             wb_cap: 5.0,
         };
         let start = vec![

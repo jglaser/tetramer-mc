@@ -181,23 +181,34 @@ Basin association constants $\ln(K / \text{\AA}^3)$ evaluated via `pair-binding`
 - **Baseline 2 (`B2`)**: Ideal Asakura–Oosawa depletion ($-z\Delta V_{\text{excl}}(r_d)$ with `--depletion-z 0.056`, $r_d = 1.4\text{ \AA}$) + 6 Å square well
 - **Baseline 3 (`B3`)**: Exact White Bear II morphometric solvation + 6 Å square well + like-charge penalty (`w = 4.0`, `cutoff = 5.0 Å`)
 
-| Contact | `B1_raw` | `B1_chem` | `B2_raw` | `B2_chem` | `B3_raw` | `B3_chem` | $\Delta G_{\text{chem}}(g_0)$ |
+| Contact | `B1_raw` | `B1_chem` (learned solv+chem) | `B2_raw` | `B2_chem` | `B3_raw` | `B3_chem` | $\Delta G_{\text{chem}}(g_0)$ |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `native m6` (dimer spine) | +1.83 | +3.55 | +38.04 | +39.69 | +10.49 | **+14.55** | $-2.05\,kT$ |
-| `native m1` (trimer $4_3$ screw) | -0.14 | +5.83 | +20.23 | +18.90 | +1.90 | **+10.17** | $-10.43\,kT$ |
-| `native m4` (inversion) | -0.01 | -0.78 | +15.99 | +8.88 | -4.00 | **-5.36** | $+2.88\,kT$ |
-| `native m2` (stack) | -0.82 | +0.64 | +5.60 | +7.50 | -1.68 | **-3.06** | $-0.16\,kT$ |
-| `native m3` (water-sep) | -0.15 | -0.07 | +4.24 | +5.59 | -0.62 | **-0.86** | $0.00\,kT$ |
-| `native m0` (water-sep) | -0.24 | -0.87 | +6.92 | +5.47 | -0.92 | **-1.45** | $0.00\,kT$ |
-| `native m5` (water-sep) | -0.75 | -0.92 | +3.62 | +4.08 | -0.83 | **-1.09** | $0.00\,kT$ |
-| `capture #9` (`m6` near-dup) | +0.74 | +2.34 | +34.35 | +41.12 | +6.79 | **+13.41** | $-3.15\,kT$ |
-| `capture #3` | +1.02 | -0.32 | +25.60 | +22.95 | +1.24 | **+1.75** | $+4.86\,kT$ |
-| `blind-agg #0` (offender) | +0.74 | -0.84 | +26.19 | +19.04 | +11.16 | **-0.81** | $+19.06\,kT$ |
-| `blind-agg #3` (offender) | -1.31 | -6.67 | +25.22 | +1.87 | +0.86 | **-13.03** | $+10.40\,kT$ |
-| `non-native #0` (competing) | +2.53 | +1.23 | +36.54 | +12.47 | -13.33 | **-0.85** | $+30.06\,kT$ |
+| `native m6` (dimer spine) | +1.83 | **+13.96** | +38.04 | +39.69 | +10.49 | **+14.55** | $-2.05\,kT$ |
+| `native m1` (trimer $4_3$ screw) | -0.14 | **+12.12** | +20.23 | +18.90 | +1.90 | **+10.17** | $-10.43\,kT$ |
+| `native m4` (inversion) | -0.01 | **-7.91** | +15.99 | +8.88 | -4.00 | **-5.36** | $+2.88\,kT$ |
+| `native m2` (stack) | -0.82 | **-2.17** | +5.60 | +7.50 | -1.68 | **-3.06** | $-0.16\,kT$ |
+| `native m3` (water-sep) | -0.15 | **-1.31** | +4.24 | +5.59 | -0.62 | **-0.86** | $0.00\,kT$ |
+| `native m0` (water-sep) | -0.24 | **-1.76** | +6.92 | +5.47 | -0.92 | **-1.45** | $0.00\,kT$ |
+| `native m5` (water-sep) | -0.75 | **-1.63** | +3.62 | +4.08 | -0.83 | **-1.09** | $0.00\,kT$ |
+| `capture #9` (`m6` near-dup) | +0.74 | **+15.09** | +34.35 | +41.12 | +6.79 | **+13.41** | $-3.15\,kT$ |
+| `capture #3` | +1.02 | **+4.29** | +25.60 | +22.95 | +1.24 | **+1.75** | $+4.86\,kT$ |
+| `blind-agg #0` (offender) | +0.74 | **-0.36** | +26.19 | +19.04 | +11.16 | **-0.81** | $+19.06\,kT$ |
+| `blind-agg #3` (offender) | -1.31 | **-11.91** | +25.22 | +1.87 | +0.86 | **-13.03** | $+10.40\,kT$ |
+| `non-native #0` (competing) | +2.53 | **-3.04** | +36.54 | +12.47 | -13.33 | **-0.85** | $+30.06\,kT$ |
 
 ### 8.3 Greedy nucleation path & $B_{22}$ verification (`B3_chem`)
 
 1. **Trimer & growth steps resolved**: At $\varepsilon = 0.00325\,kT$ ($2.8\text{ mM}$, $\ln\rho = -13.29$), `step 1 (m6 pair)` shifts from $\Delta G = +1.22\,kT$ to **$-1.27\,kT$**, `step 2 (+2: m1 m3)` drops from $+8.74\,kT$ to **$+2.54\,kT$** ($\Delta\ln K = +6.20$), `step 3 (+2: m1 m3)` drops from $+10.35\,kT$ to **$+1.76\,kT$** ($\Delta\ln K = +8.59$), and the repeatable growth steps `step 10 (+2: m1 m2)` and `step 12 (+3: m0 m1 m2)` turn exergonic (**$-0.61\,kT$** and **$-0.10\,kT$** vs. $+8.91\,kT$ and $+6.89\,kT$ without chemistry).
 2. **Second virial coefficient $B_{22} / B_{22}^{\text{HS}}$**: Across $\varepsilon \in [0.00228, 0.00423]\,kT$, $B_{22} / B_{22}^{\text{HS}}$ spans **$+0.42 \pm 0.10$** ($\varepsilon = 0.00228$), **$+0.08 \pm 0.15$** ($\varepsilon = 0.00277$), **$-0.42 \pm 0.24$** ($\varepsilon = 0.00325$), **$-1.21 \pm 0.40$** ($\varepsilon = 0.00374$), and **$-2.50 \pm 0.65$** ($\varepsilon = 0.00423$), sits squarely inside the experimental crystallization slot ($-0.5$ to $-3.5$) at $\varepsilon = 0.00325\text{–}0.00423\,kT$.
+
+### 8.4 Learned Hydration-Shell Solvation (`solv_weights`) & Fused Single-Pass Evaluator (`--no-solvation`)
+
+To eliminate the `~10 ms/move` 3D Gauss–Bonnet morphometric solvation bottleneck (`70–80%` of CPU time plus `47 s` initialization on 288 bodies), `ChemistryModel` also includes a 5-feature hydration-shell solvation surrogate (`solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226]`, calibrated with `weights: [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]`):
+- For heavy-atom pairs $(i, j)$ with gap $g_{ij} = d_{ij} - (r_i + r_j) < 2.8\text{ \AA}$, let $u_{ij} = (2.8 - g_{ij})/2.8 \in (0, 1]$ and $u_{\min,i} = \max_j u_{ij}$:
+  $$E_{\text{solv}}(A, B) = w_{p_2} \sum_{ij} u_{ij}^2 + w_{p_3} \sum_{ij} u_{ij}^3 + w_{a_1} \sum_k u_{\min,k} + w_{a_2} \sum_k u_{\min,k}^2 + w_{a_{0.5}} \sum_k \sqrt{u_{\min,k}}$$
+- Across all 64 contacts (`contacts_monomer.json` + `contacts_blind_top32.json`), this 5-feature surrogate fits exact 3D White Bear II solvation with $R^2 = 0.850$ (`LOO CV R^2 = 0.805`, `RMSE = 2.35 kT`) and automatically reproduces the $+10\text{ to }+13\,kT$ radial desolvation barrier at $dr = 1.0\text{–}2.0\text{ \AA}$.
+- In `MorphMc::well_and_chem_pair_between`, the 6 Å square-well contact count and the 12-feature learned solvation + chemistry energy are evaluated in a **single fused spatial-grid pass** using body-frame spherical prefiltering (`SolvationState::is_zero` makes `--no-solvation` $O(1)$).
+- **Validation (`B1_chem` with `--no-solvation`) & Speedup**:
+  - Matches or exceeds `B3_chem` on key contacts (`native m6`: $+13.96$, `native m1`: $+12.12$, `capture #9`: $+15.09$, `blind-agg #0`: $-0.36$, `blind-agg #3`: $-11.91$, `non-native #0`: $-3.04$) and along the greedy 14-step nucleation pathway (`step 1`: $\Delta G = -1.69\,kT$, `step 2`: $+0.71\,kT$, `step 3`: $+1.12\,kT$, `step 7`: $-22.18\,kT$, `step 10`: $-0.38\,kT$, `step 12`: $-0.41\,kT$).
+  - Accelerates 64-body (`32+32`) runs to **112 sweeps/s** (`140 µs/move`) and 288-body (`32+256`) runs to **15 sweeps/s** (`260 µs/move`, `0 s` init) — a **~45x total speedup** over 3D morphometric solvation.
 

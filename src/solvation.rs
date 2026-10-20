@@ -79,6 +79,14 @@ impl SolvationModel {
             gauss_convention: GaussConvention::PatchGaussBonnet,
         })
     }
+    pub fn is_zero(&self) -> bool {
+        self.pressure == 0.
+            && self
+                .coefficients
+                .iter()
+                .all(|c| c[0] == 0. && c[1] == 0. && c[2] == 0.)
+    }
+
     fn ball_energy(&self, atom: usize, b: &BallMeasures) -> f64 {
         let c = self.coefficients[self.atom_types[atom]];
         let x = match self.gauss_convention {
@@ -164,6 +172,9 @@ impl SolvationState {
             energy: 0.,
             reach,
         };
+        if s.model.is_zero() {
+            return Ok(s);
+        }
         s.world = (0..poses.len()).map(|b| s.place(b, poses[b])).collect();
         s.rebuild_grid();
         let none = BTreeMap::new();
@@ -268,6 +279,18 @@ impl SolvationState {
     /// Exact change of beta F for rigid moves of the listed bodies.
     pub fn propose(&self, moves: &[(usize, Pose)]) -> Result<SolvationUpdate> {
         let nb = self.poses.len();
+        if self.model.is_zero() {
+            let mut seen = BTreeSet::new();
+            for &(b, p) in moves {
+                ensure!(b < nb && seen.insert(b), "invalid or repeated moved body");
+                p.validate()?;
+            }
+            return Ok(SolvationUpdate {
+                delta: 0.,
+                poses: moves.to_vec(),
+                balls: Vec::new(),
+            });
+        }
         let mut moved: BTreeMap<usize, Vec<Vec3>> = BTreeMap::new();
         let mut moved_centers: BTreeMap<usize, Vec3> = BTreeMap::new();
         for &(b, p) in moves {
@@ -302,15 +325,22 @@ impl SolvationState {
         let mut affected: BTreeSet<(usize, usize)> = BTreeSet::new();
         for (&b, w) in &moved {
             let (po, pn) = (self.poses[b].position, moved_centers[&b]);
-            let near = (0..nb).any(|c| {
+            let mut near_old: Vec<Vec3> = Vec::new();
+            let mut near_new: Vec<Vec3> = Vec::new();
+            for c in 0..nb {
                 if c == b || (is_rigid && moved.contains_key(&c)) {
-                    return false;
+                    continue;
                 }
                 let qo = self.poses[c].position;
                 let qn = moved_centers.get(&c).copied().unwrap_or(qo);
-                norm(sub(qo, po)) < 2. * self.reach || norm(sub(qn, pn)) < 2. * self.reach
-            });
-            if !near {
+                if norm(sub(qo, po)) < 2. * self.reach {
+                    near_old.push(qo);
+                }
+                if norm(sub(qn, pn)) < 2. * self.reach {
+                    near_new.push(qn);
+                }
+            }
+            if near_old.is_empty() && near_new.is_empty() {
                 continue;
             }
             if is_rigid {
@@ -319,27 +349,33 @@ impl SolvationState {
                     let co = self.world[b][i];
                     let cn = w[i];
                     let mut hit = false;
-                    for (bb, j) in self
-                        .grid
-                        .near(&co)
-                        .map(|k| (k / n_atoms, k % n_atoms))
-                        .filter(|&(bb, j)| {
-                            !moved.contains_key(&bb) && norm(sub(self.world[bb][j], co)) < r + self.radii[j]
-                        })
-                    {
-                        hit = true;
-                        affected.insert((bb, j));
+                    if near_old.iter().any(|&qo| norm(sub(co, qo)) < self.reach + r) {
+                        for (bb, j) in self
+                            .grid
+                            .near(&co)
+                            .map(|k| (k / n_atoms, k % n_atoms))
+                            .filter(|&(bb, j)| {
+                                !moved.contains_key(&bb)
+                                    && norm(sub(self.world[bb][j], co)) < r + self.radii[j]
+                            })
+                        {
+                            hit = true;
+                            affected.insert((bb, j));
+                        }
                     }
-                    for (bb, j) in self
-                        .grid
-                        .near(&cn)
-                        .map(|k| (k / n_atoms, k % n_atoms))
-                        .filter(|&(bb, j)| {
-                            !moved.contains_key(&bb) && norm(sub(self.world[bb][j], cn)) < r + self.radii[j]
-                        })
-                    {
-                        hit = true;
-                        affected.insert((bb, j));
+                    if near_new.iter().any(|&qn| norm(sub(cn, qn)) < self.reach + r) {
+                        for (bb, j) in self
+                            .grid
+                            .near(&cn)
+                            .map(|k| (k / n_atoms, k % n_atoms))
+                            .filter(|&(bb, j)| {
+                                !moved.contains_key(&bb)
+                                    && norm(sub(self.world[bb][j], cn)) < r + self.radii[j]
+                            })
+                        {
+                            hit = true;
+                            affected.insert((bb, j));
+                        }
                     }
                     if hit {
                         affected.insert((b, i));
@@ -393,6 +429,13 @@ impl SolvationState {
     }
 
     pub fn commit(&mut self, update: SolvationUpdate) {
+        if self.model.is_zero() {
+            for &(b, p) in &update.poses {
+                self.poses[b] = p;
+                self.rotations[b] = rotation(p.orientation);
+            }
+            return;
+        }
         let n = self.template.len();
         for &(b, p) in &update.poses {
             let new = self.place(b, p);
@@ -413,6 +456,10 @@ impl SolvationState {
     /// All pairwise relative positions/orientations, exposed areas, curvatures, and normal moments are invariant;
     /// only world coordinates, the spatial grid, and divergence-theorem per-ball volume terms update in O(N).
     pub fn translate_all(&mut self, poses: &[Pose]) {
+        if self.model.is_zero() {
+            self.poses = poses.to_vec();
+            return;
+        }
         let n = self.template.len();
         let mut dv = 0.;
         for (b, &p) in poses.iter().enumerate() {
@@ -433,6 +480,9 @@ impl SolvationState {
 
     /// Full recomputation from scratch (for checks).
     pub fn recompute(&self) -> f64 {
+        if self.model.is_zero() {
+            return 0.;
+        }
         let none = BTreeMap::new();
         let none_centers = BTreeMap::new();
         let mut f = 0.;

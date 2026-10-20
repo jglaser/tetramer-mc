@@ -19,6 +19,7 @@ use crate::{
 use anyhow::{Result, ensure};
 use rand::{RngExt, rngs::StdRng};
 use rand_distr::{Distribution, StandardNormal};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug)]
 pub struct SquareWell {
@@ -74,19 +75,79 @@ pub struct ChemistryModel {
     /// Half-saturation surface burial scale `s_0` (default `15.0`) for `phi(s) = s / (s + s_0)`.
     #[serde(default = "default_coop_s0")]
     pub coop_s0: f64,
+    /// Learned 3-body Lawrence-Colman junction weights `[w_seal, w_sat]` in kT:
+    /// `-w_seal * (W_ABC / (W_ABC + junc_w0)) * (1 - R_ABC^2)^2 + w_sat * W_ABC * R_ABC^2`,
+    /// where `N_A = R_A sum_{i in A} u_i^(A,B) u_i^(A,C) n_i^body`,
+    /// `W_ABC = ||N_A|| + ||N_B|| + ||N_C||`, and `R_ABC = ||N_A + N_B + N_C|| / W_ABC`.
+    #[serde(default)]
+    pub junc_weights: [f64; 2],
+    /// Half-saturation scale `W_0` (default `4.0`) for `W_ABC / (W_ABC + W_0)`.
+    #[serde(default = "default_junc_w0")]
+    pub junc_w0: f64,
 }
 
 fn default_coop_s0() -> f64 {
     15.0
 }
 
+fn default_junc_w0() -> f64 {
+    4.0
+}
+
+/// Precompute outward unit surface normals in the body frame for each template sphere `i`
+/// from the negative gradient of the smooth molecular volume density field
+/// `rho(x) = sum_j r_j^3 exp(-||x - x_j||^2 / sigma^2)` with `sigma = 3.5 A`.
+pub fn compute_body_normals(centers: &[Vec3], vdw: &[f64]) -> Vec<Vec3> {
+    let n = centers.len();
+    let inv_sig2 = 1.0 / (3.5 * 3.5);
+    let r3: Vec<f64> = vdw
+        .iter()
+        .map(|&r| {
+            let r_pos = if r > 0.0 { r } else { 1.0 };
+            r_pos * r_pos * r_pos
+        })
+        .collect();
+    let mut normals = Vec::with_capacity(n);
+    for i in 0..n {
+        let xi = centers[i];
+        let mut g = [0.0f64; 3];
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let dx = sub(xi, centers[j]);
+            let d2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+            if d2 > 1e-12 {
+                let w = r3[j] * (-d2 * inv_sig2).exp();
+                g[0] += w * dx[0];
+                g[1] += w * dx[1];
+                g[2] += w * dx[2];
+            }
+        }
+        let gn = norm(g);
+        if gn > 1e-12 {
+            normals.push([g[0] / gn, g[1] / gn, g[2] / gn]);
+        } else {
+            let xn = norm(xi);
+            if xn > 1e-12 {
+                normals.push([xi[0] / xn, xi[1] / xn, xi[2] / xn]);
+            } else {
+                normals.push([1.0, 0.0, 0.0]);
+            }
+        }
+    }
+    normals
+}
+
 /// Directed interface patch summary on body `a` from its contact with body `b`.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PatchContact {
     /// Smooth 6.0 A surface burial sum `sum_{i in a} max_{j in b} max(0, 1 - g_{ij}/6.0)`.
     pub s: f64,
     /// Unit vector from body `a`'s origin toward the burial-weighted interface centroid in `a`'s frame.
     pub u: Vec3,
+    /// Per-atom 6.0 A burial weights `u_i^(a,b)` on body `a` (present when `s > 0.5` and `has_junction()`).
+    pub u6: Option<Arc<[f64]>>,
 }
 
 const CHEM_CAT: u8 = 0x01;
@@ -103,8 +164,12 @@ impl ChemistryModel {
         self.solv_weights.iter().any(|&w| w != 0.)
     }
 
+    pub fn has_junction(&self) -> bool {
+        self.junc_weights.iter().any(|&w| w != 0.)
+    }
+
     pub fn has_cooperativity(&self) -> bool {
-        self.coop_weights.iter().any(|&w| w != 0.)
+        self.coop_weights.iter().any(|&w| w != 0.) || self.has_junction()
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -800,14 +865,18 @@ impl Default for ClusterSettings {
 ///
 /// With `library` (requires `MorphMc::with_contact_library`), the components are instead the
 /// relative poses of the current contacts between bodies other than the moved body b, in both
-/// directions. They are a function of the other bodies only, which the move leaves unchanged,
-/// so the same library enters Q at both endpoints and the move is Metropolis-within-Gibbs for
-/// body b with an exact acceptance (formal/ReversibleSampling/FrozenContext.lean). An empty
-/// library makes the proposal purely uniform.
+/// directions (plus any Poisson `memory_slots()`). When `memory_only` is true (or `library` is
+/// false while `memory_only` is true), only the Poisson `memory_slots()` are used as docking
+/// components, omitting the raw instantaneous contact pairs. They are a function of the other
+/// bodies / auxiliary memory only, which the move leaves unchanged, so the same components
+/// enter Q at both endpoints and the move is Metropolis-within-Gibbs for body b with an exact
+/// acceptance (formal/ReversibleSampling/FrozenContext.lean). An empty component list makes
+/// the proposal purely uniform.
 #[derive(Clone)]
 pub struct DockSettings {
     pub learned: Option<std::sync::Arc<crate::docking::DockingProposal>>,
     pub library: bool,
+    pub memory_only: bool,
     pub components: Vec<Pose>,
     pub sigma_translation: f64,
     pub sigma_rotation: f64,
@@ -848,6 +917,7 @@ pub struct MorphMc {
     pub well: SquareWell,
     centers: Vec<Vec3>,
     vdw: Vec<f64>,
+    body_normals: Vec<Vec3>,
     template_grid: BallGrid,
     poses: Vec<Pose>,
     placed: Vec<Placed>,
@@ -894,6 +964,7 @@ impl MorphMc {
         );
         let centers: Vec<Vec3> = tree.shape.atoms.iter().map(|a| a.center).collect();
         let vdw: Vec<f64> = tree.shape.atoms.iter().map(|a| a.radius).collect();
+        let body_normals = compute_body_normals(&centers, &vdw);
         let vmax = vdw.iter().copied().fold(0., f64::max);
         let template_grid = BallGrid::new(&centers, 2. * vmax + well.width);
         let solv = SolvationState::new(model, &centers, &vdw, &poses)?;
@@ -905,6 +976,7 @@ impl MorphMc {
             well,
             centers,
             vdw,
+            body_normals,
             template_grid,
             poses,
             placed,
@@ -985,6 +1057,8 @@ impl MorphMc {
                 && chem.solv_weights.iter().all(|w| w.is_finite())
                 && chem.coop_weights.iter().all(|w| w.is_finite())
                 && chem.coop_s0.is_finite()
+                && chem.junc_weights.iter().all(|w| w.is_finite())
+                && chem.junc_w0.is_finite()
                 && chem.wb_cap.is_finite()
                 && chem.wb_cap >= 0.,
             "invalid chemistry model weights"
@@ -1018,7 +1092,7 @@ impl MorphMc {
         for a in 0..n {
             sum += self.chem_pairs(a, self.poses[a]);
         }
-        self.chem_sum = sum / 2. + self.coop_total_from_matrix(&self.patch);
+        self.chem_sum = sum / 2. + self.coop_total_from_matrix(&self.patch, &self.poses);
         Ok(self)
     }
 
@@ -1385,7 +1459,7 @@ impl MorphMc {
                 col_b[c] = pc;
             }
         }
-        ch += self.coop_single_body_contribution(b, &row_b, &col_b);
+        ch += self.coop_single_body_contribution(b, p, &row_b, &col_b);
         (wp, ch)
     }
 
@@ -1413,11 +1487,55 @@ impl MorphMc {
         (wp, ch, row_b, col_b)
     }
 
+    /// Body-frame 3-body junction normal vector `sum_{i in v} u_i^(v,c1) u_i^(v,c2) n_i^body`
+    /// on vertex body `v` from its contacts with `c1` and `c2`.
+    #[inline]
+    fn vertex_junction_normal(&self, p1: &PatchContact, p2: &PatchContact) -> Vec3 {
+        let (Some(u1), Some(u2)) = (&p1.u6, &p2.u6) else {
+            return [0.0; 3];
+        };
+        let mut g = [0.0f64; 3];
+        for ((&a, &b), &nb) in u1.iter().zip(u2.iter()).zip(self.body_normals.iter()) {
+            let w = a * b;
+            if w > 0.0 {
+                g[0] += w * nb[0];
+                g[1] += w * nb[1];
+                g[2] += w * nb[2];
+            }
+        }
+        g
+    }
+
+    /// Triangle normal-cancellation stabilization `W_ABC (1 - R_ABC^2) [w_sat + w_seal (1 - R_ABC^2) / (W_ABC + W_0)]`
+    /// subtracted when a closed 3-body triangle `(A, B, C)` seals its triple-junction normals (`N_A + N_B + N_C -> 0`).
+    #[inline]
+    fn triangle_junction_cancel_term(&self, n_a: Vec3, n_b: Vec3, n_c: Vec3) -> f64 {
+        let w_abc = norm(n_a) + norm(n_b) + norm(n_c);
+        if w_abc <= 1e-12 {
+            return 0.0;
+        }
+        let sum_n = add(add(n_a, n_b), n_c);
+        let r_abc = (norm(sum_n) / w_abc).clamp(0.0, 1.0);
+        let one_m_r2 = 1.0 - r_abc * r_abc;
+        if one_m_r2 <= 0.0 {
+            return 0.0;
+        }
+        let w_seal = self.chem.junc_weights[0];
+        let w_sat = self.chem.junc_weights[1];
+        let w0 = if self.chem.junc_w0 > 0.0 {
+            self.chem.junc_w0
+        } else {
+            4.0
+        };
+        w_abc * one_m_r2 * (w_sat + w_seal * one_m_r2 / (w_abc + w0))
+    }
+
     /// Cooperative 3-body contribution of all wedges `(c1, b, c2)` and `(b, c1, d)` involving
-    /// body `b` when its patch row `patch[b][*]` is `row_b` and its patch column `patch[*][b]` is `col_b`.
+    /// body `b` at `pose_b` when its patch row `patch[b][*]` is `row_b` and its patch column `patch[*][b]` is `col_b`.
     fn coop_single_body_contribution(
         &self,
         b: usize,
+        pose_b: Pose,
         row_b: &[PatchContact],
         col_b: &[PatchContact],
     ) -> f64 {
@@ -1427,6 +1545,13 @@ impl MorphMc {
         let n = self.poses.len();
         let w_wedge = self.chem.coop_weights[0];
         let w_tri = self.chem.coop_weights[1];
+        let has_junc = self.chem.has_junction();
+        let w_sat = self.chem.junc_weights[1];
+        let r_b = if has_junc {
+            rotation(pose_b.orientation)
+        } else {
+            [[0.0; 3]; 3]
+        };
         let mut active: Vec<(usize, f64, Vec3, f64, Vec3)> = Vec::new();
         for c in 0..n {
             if c != b && (row_b[c].s > 0.5 || col_b[c].s > 0.5) {
@@ -1443,22 +1568,31 @@ impl MorphMc {
             return 0.0;
         }
         let mut e_coop = 0.0f64;
-        // 1. Vertex on body b: pairs (c1, c2) both contacting b.
+        // 1. Vertex on body b and triangles {b, c1, c2}: pairs (c1, c2) both contacting b.
         for idx1 in 0..active.len() {
             let (c1, phi_bc1, u_bc1, _, _) = active[idx1];
-            if phi_bc1 <= 0.0 {
-                continue;
-            }
             for &(c2, phi_bc2, u_bc2, _, _) in &active[idx1 + 1..] {
-                if phi_bc2 <= 0.0 {
-                    continue;
+                let mut nb_body = [0.0; 3];
+                if phi_bc1 > 0.0 && phi_bc2 > 0.0 {
+                    let psi_b = ChemistryModel::coop_psi(u_bc1, u_bc2);
+                    let wedge_b = phi_bc1 * phi_bc2 * psi_b;
+                    let phi_c1c2 = 0.5
+                        * (self.chem.coop_phi(self.patch[c1][c2].s)
+                            + self.chem.coop_phi(self.patch[c2][c1].s));
+                    e_coop -= (w_wedge + w_tri * phi_c1c2) * wedge_b;
+                    if has_junc {
+                        nb_body = self.vertex_junction_normal(&row_b[c1], &row_b[c2]);
+                        e_coop += w_sat * norm(nb_body);
+                    }
                 }
-                let psi_b = ChemistryModel::coop_psi(u_bc1, u_bc2);
-                let wedge_b = phi_bc1 * phi_bc2 * psi_b;
-                let phi_c1c2 = 0.5
-                    * (self.chem.coop_phi(self.patch[c1][c2].s)
-                        + self.chem.coop_phi(self.patch[c2][c1].s));
-                e_coop -= (w_wedge + w_tri * phi_c1c2) * wedge_b;
+                if has_junc && (self.patch[c1][c2].s > 0.5 || self.patch[c2][c1].s > 0.5) {
+                    let nc1_body = self.vertex_junction_normal(&col_b[c1], &self.patch[c1][c2]);
+                    let nc2_body = self.vertex_junction_normal(&col_b[c2], &self.patch[c2][c1]);
+                    let n_b = matvec(r_b, nb_body);
+                    let n_c1 = matvec(rotation(self.poses[c1].orientation), nc1_body);
+                    let n_c2 = matvec(rotation(self.poses[c2].orientation), nc2_body);
+                    e_coop -= self.triangle_junction_cancel_term(n_b, n_c1, n_c2);
+                }
             }
         }
         // 2. Vertex on neighbor c: wedge (b, d) on vertex c for d != b, c.
@@ -1470,7 +1604,7 @@ impl MorphMc {
                 if d == b || d == c {
                     continue;
                 }
-                let p_cd = self.patch[c][d];
+                let p_cd = &self.patch[c][d];
                 if p_cd.s <= 0.5 {
                     continue;
                 }
@@ -1479,19 +1613,30 @@ impl MorphMc {
                 let wedge_c = phi_cb * phi_cd * psi_c;
                 let phi_bd = 0.5 * (self.chem.coop_phi(row_b[d].s) + self.chem.coop_phi(col_b[d].s));
                 e_coop -= (w_wedge + w_tri * phi_bd) * wedge_c;
+                if has_junc {
+                    let nc_body = self.vertex_junction_normal(&col_b[c], p_cd);
+                    e_coop += w_sat * norm(nc_body);
+                }
             }
         }
         e_coop
     }
 
-    /// Total 3-body cooperative energy across the full `n x n` patch matrix `mat`.
-    fn coop_total_from_matrix(&self, mat: &[Vec<PatchContact>]) -> f64 {
+    /// Total 3-body cooperative energy across the full `n x n` patch matrix `mat` at body `poses`.
+    fn coop_total_from_matrix(&self, mat: &[Vec<PatchContact>], poses: &[Pose]) -> f64 {
         if !self.chem.has_cooperativity() || mat.is_empty() {
             return 0.0;
         }
         let n = mat.len();
         let w_wedge = self.chem.coop_weights[0];
         let w_tri = self.chem.coop_weights[1];
+        let has_junc = self.chem.has_junction();
+        let w_sat = self.chem.junc_weights[1];
+        let rots: Vec<[[f64; 3]; 3]> = if has_junc {
+            poses.iter().map(|p| rotation(p.orientation)).collect()
+        } else {
+            Vec::new()
+        };
         let mut e_coop = 0.0f64;
         for i in 0..n {
             let mut active: Vec<(usize, f64, Vec3)> = Vec::new();
@@ -1508,6 +1653,30 @@ impl MorphMc {
                     let phi_jk =
                         0.5 * (self.chem.coop_phi(mat[j][k].s) + self.chem.coop_phi(mat[k][j].s));
                     e_coop -= (w_wedge + w_tri * phi_jk) * wedge_i;
+                    if has_junc {
+                        let ni_body = self.vertex_junction_normal(&mat[i][j], &mat[i][k]);
+                        e_coop += w_sat * norm(ni_body);
+                    }
+                }
+            }
+        }
+        if has_junc {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    if mat[i][j].s <= 0.5 && mat[j][i].s <= 0.5 {
+                        continue;
+                    }
+                    for k in (j + 1)..n {
+                        if (mat[i][k].s <= 0.5 && mat[k][i].s <= 0.5)
+                            || (mat[j][k].s <= 0.5 && mat[k][j].s <= 0.5)
+                        {
+                            continue;
+                        }
+                        let ni = matvec(rots[i], self.vertex_junction_normal(&mat[i][j], &mat[i][k]));
+                        let nj = matvec(rots[j], self.vertex_junction_normal(&mat[j][i], &mat[j][k]));
+                        let nk = matvec(rots[k], self.vertex_junction_normal(&mat[k][i], &mat[k][j]));
+                        e_coop -= self.triangle_junction_cancel_term(ni, nj, nk);
+                    }
                 }
             }
         }
@@ -1542,10 +1711,10 @@ impl MorphMc {
             }
         }
         let col_old: Vec<PatchContact> = (0..self.poses.len())
-            .map(|c| self.patch[c][b])
+            .map(|c| self.patch[c][b].clone())
             .collect();
-        let coop_new = self.coop_single_body_contribution(b, &row_new, &col_new);
-        let coop_old = self.coop_single_body_contribution(b, &self.patch[b], &col_old);
+        let coop_new = self.coop_single_body_contribution(b, new, &row_new, &col_new);
+        let coop_old = self.coop_single_body_contribution(b, old, &self.patch[b], &col_old);
         (
             wp_new as i64 - wp_old as i64,
             (ch_new_pair - ch_old_pair) + (coop_new - coop_old),
@@ -1733,12 +1902,16 @@ impl MorphMc {
         ensure!(
             !free.is_empty()
                 && self.poses.len() > 1
-                && (d.learned.is_some() || d.library || !d.components.is_empty()),
+                && (d.learned.is_some() || d.library || d.memory_only || !d.components.is_empty()),
             "invalid docking setup"
         );
         ensure!(
-            !d.library || (self.contact_gap.is_some() && d.learned.is_none()),
-            "library docking needs with_contact_library and no learned model"
+            !(d.library || d.memory_only) || (self.contact_gap.is_some() && d.learned.is_none()),
+            "library/memory docking needs with_contact_library and no learned model"
+        );
+        ensure!(
+            !d.memory_only || self.memory.is_some(),
+            "memory_only docking needs with_memory"
         );
         ensure!(
             d.uniform_weight > 0. && d.uniform_weight < 1.,
@@ -1748,8 +1921,11 @@ impl MorphMc {
         let old = self.poses[b];
         self.stats.dock_attempts += 1;
         // Components: the contact library of the other bodies (unchanged by this move), or
-        // the fixed list. Without components the proposal is uniform with probability one.
-        let library = if d.library {
+        // the Poisson memory slots only when `memory_only` is set, or the fixed list.
+        // Without components the proposal is uniform with probability one.
+        let library = if d.memory_only {
+            Some(self.memory_slots().unwrap_or(&[]).to_vec())
+        } else if d.library {
             let mut lib = self.library(b);
             if let Some(slots) = self.memory_slots() {
                 lib.extend_from_slice(slots);
@@ -1959,9 +2135,15 @@ impl MorphMc {
         }
         let vn = norm(v);
         if s > 0.5 && vn > 1e-12 {
+            let u6_arc = if self.chem.has_junction() {
+                Some(Arc::from(u6))
+            } else {
+                None
+            };
             PatchContact {
                 s,
                 u: [v[0] / vn, v[1] / vn, v[2] / vn],
+                u6: u6_arc,
             }
         } else {
             PatchContact::default()
@@ -2640,7 +2822,9 @@ impl MorphMc {
         let moves: Vec<(usize, Pose)> = if use_dock {
             let d = dock.unwrap();
             self.stats.cluster_dock_attempts += 1;
-            let library = if d.library {
+            let library = if d.memory_only {
+                Some(self.memory_slots().unwrap_or(&[]).to_vec())
+            } else if d.library {
                 let mut lib = self.library_excluding(&in_cluster);
                 if let Some(slots) = self.memory_slots() {
                     lib.extend_from_slice(slots);
@@ -2872,8 +3056,12 @@ impl MorphMc {
             }
         }
         if has_coop {
-            dc += self.coop_total_from_matrix(&new_patch)
-                - self.coop_total_from_matrix(&self.patch);
+            let mut trial_poses = self.poses.clone();
+            for &(b, p_new) in &moves {
+                trial_poses[b] = p_new;
+            }
+            dc += self.coop_total_from_matrix(&new_patch, &trial_poses)
+                - self.coop_total_from_matrix(&self.patch, &self.poses);
         }
 
         let d_well = -self.well.epsilon * dp as f64;
@@ -3087,8 +3275,12 @@ impl MorphMc {
             }
         }
         if has_coop {
-            dc += self.coop_total_from_matrix(&new_patch)
-                - self.coop_total_from_matrix(&self.patch);
+            let mut trial_poses = self.poses.clone();
+            for &(b, p_new) in &moves {
+                trial_poses[b] = p_new;
+            }
+            dc += self.coop_total_from_matrix(&new_patch, &trial_poses)
+                - self.coop_total_from_matrix(&self.patch, &self.poses);
         }
 
         let d_well = -self.well.epsilon * dp as f64;
@@ -3183,7 +3375,7 @@ impl MorphMc {
                     mat[b][a] = pb;
                 }
             }
-            self.coop_total_from_matrix(&mat)
+            self.coop_total_from_matrix(&mat, &self.poses)
         } else {
             0.0
         };
@@ -3315,6 +3507,7 @@ mod tests {
         let dock = DockSettings {
             learned: None,
             library: false,
+            memory_only: false,
             components: vec![Pose {
                 position: [2.4, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -3438,6 +3631,7 @@ mod tests {
         let dock = DockSettings {
             learned: None,
             library: false,
+            memory_only: false,
             components: vec![Pose {
                 position: [2.4, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -3527,6 +3721,7 @@ mod tests {
         let dock = DockSettings {
             learned: None,
             library: true,
+            memory_only: false,
             components: Vec::new(),
             sigma_translation: 0.3,
             sigma_rotation: 0.3,
@@ -3654,6 +3849,7 @@ mod tests {
         let dock = DockSettings {
             learned: None,
             library: true,
+            memory_only: false,
             components: Vec::new(),
             sigma_translation: 0.3,
             sigma_rotation: 0.3,
@@ -3823,6 +4019,7 @@ mod tests {
         let dock = DockSettings {
             learned: Some(std::sync::Arc::new(learned)),
             library: false,
+            memory_only: false,
             components: Vec::new(),
             sigma_translation: 0.,
             sigma_rotation: 0.,
@@ -3905,16 +4102,18 @@ mod tests {
             solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
             coop_weights: [1.5, 10.0],
             coop_s0: 15.0,
+            junc_weights: [4.2, 0.7],
+            junc_w0: 4.0,
             wb_cap: 5.0,
         };
         let start = vec![
             Pose { position: [0., 0., 0.], orientation: [1., 0., 0., 0.] },
             Pose {
-                position: [4.6, 0.2, -0.1],
+                position: [3.2, 1.8, -0.1],
                 orientation: quaternion(cayley([0.1, -0.2, 0.15])),
             },
             Pose {
-                position: [-4.8, 0.4, 0.3],
+                position: [-3.2, 1.8, 0.1],
                 orientation: quaternion(cayley([-0.25, 0.3, -0.1])),
             },
         ];
@@ -3953,6 +4152,7 @@ mod tests {
         let dock = DockSettings {
             learned: None,
             library: false,
+            memory_only: false,
             components: vec![Pose {
                 position: [4.6, 0., 0.],
                 orientation: [1., 0., 0., 0.],
@@ -3962,11 +4162,32 @@ mod tests {
             uniform_weight: 0.3,
         };
         let mut rng = StdRng::seed_from_u64(42);
+        let cs = ClusterSettings {
+            max_size: 3,
+            fk_beta: 0.5,
+            dock_probability: 0.1,
+            reinsertion_probability: 0.1,
+            translation: 0.4,
+            rotation: 0.25,
+            size_scaling: true,
+        };
         for t in 0..2_000 {
-            if t % 3 == 0 {
+            if t % 5 == 0 {
+                mc.step_cluster(&mut rng, &cs, Some(&dock)).unwrap();
+            } else if t % 3 == 0 {
                 mc.step_dock(&mut rng, &dock).unwrap();
             } else {
                 mc.step(&mut rng, mv).unwrap();
+            }
+            if t % 200 == 0 {
+                let d = (mc.recompute_chem() - mc.chem_energy()).abs();
+                assert!(
+                    d < 1e-10,
+                    "step {t}: cached chemistry energy {} differs from recomputed {} by {}",
+                    mc.chem_energy(),
+                    mc.recompute_chem(),
+                    d
+                );
             }
         }
         let diff = (mc.recompute_chem() - mc.chem_energy()).abs();
@@ -4029,6 +4250,8 @@ mod tests {
             solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
             coop_weights: [1.5, 10.0],
             coop_s0: 15.0,
+            junc_weights: [4.2, 0.7],
+            junc_w0: 4.0,
             wb_cap: 5.0,
         };
         let start = vec![
@@ -4085,6 +4308,7 @@ mod tests {
         let dock = DockSettings {
             learned: None,
             library: true,
+            memory_only: false,
             components: Vec::new(),
             sigma_translation: 0.3,
             sigma_rotation: 0.3,

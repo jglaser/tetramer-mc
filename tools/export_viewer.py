@@ -7,10 +7,12 @@ No external scripts, libraries, fonts or network resources are referenced.
 """
 from __future__ import annotations
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 import gzip
 import hashlib
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -161,6 +163,29 @@ def coordinate_history(run, frames, rows, initial_center):
         return dict(available=False, reason=str(error), convention=convention)
 
 
+_CLASSIFIER = None
+
+
+def _init_classifier(analysis, run, monomer, motifs_path, classes_path, ref_scripts):
+    global _CLASSIFIER
+    if ref_scripts not in sys.path:
+        sys.path.insert(0, ref_scripts)
+    from tetramer_order import TetramerOrder
+    from analyze_precursor_exchange import prepare_templates
+    templates = prepare_templates(monomer, motifs_path, classes_path)
+    _CLASSIFIER = TetramerOrder(analysis, run, templates=templates)
+
+
+def _classify_frame_worker(frame):
+    result = _CLASSIFIER.classify(frame)
+    unique = {}
+    for edge in result['native_entry_monomer_edges']:
+        key = (*edge['bodies'], *edge['members'])
+        bond = unique.setdefault(key, dict(bodies=edge['bodies'], members=edge['members'], classes=[]))
+        bond['classes'].append(edge['class_label'])
+    return [dict(unique[key], classes=sorted(set(unique[key]['classes']))) for key in sorted(unique)]
+
+
 def native_bonds(config, shape, frames, run, boundary, wall_radius, reference, mode):
     """Optional posthoc classifier; never substitute a center-distance graph."""
     unavailable = lambda reason: dict(available=False, reason=reason)
@@ -217,14 +242,47 @@ def native_bonds(config, shape, frames, run, boundary, wall_radius, reference, m
         inputs.append(motif_path)
     templates = prepare_templates(monomer, inputs[1], inputs[2])
     classifier = TetramerOrder(analysis, run, templates=templates)
-    for frame in frames:
-        result = classifier.classify(frame)
-        unique = {}
-        for edge in result['native_entry_monomer_edges']:
-            key = (*edge['bodies'], *edge['members'])
-            bond = unique.setdefault(key, dict(bodies=edge['bodies'], members=edge['members'], classes=[]))
-            bond['classes'].append(edge['class_label'])
-        frame['native_bonds'] = [dict(unique[key], classes=sorted(set(unique[key]['classes']))) for key in sorted(unique)]
+    workers = min(len(frames), max(1, (os.cpu_count() or 4) // 2), 16)
+    if len(frames) >= 4 and workers > 1:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            initializer=_init_classifier,
+            initargs=(analysis, run, monomer, inputs[1], inputs[2], str(reference/'scripts')),
+        ) as ex:
+            bonds_per_frame = list(ex.map(_classify_frame_worker, frames, chunksize=max(1, len(frames) // (workers * 2))))
+        for frame, nb in zip(frames, bonds_per_frame):
+            frame['native_bonds'] = nb
+    else:
+        for frame in frames:
+            result = classifier.classify(frame)
+            unique = {}
+            for edge in result['native_entry_monomer_edges']:
+                key = (*edge['bodies'], *edge['members'])
+                bond = unique.setdefault(key, dict(bodies=edge['bodies'], members=edge['members'], classes=[]))
+                bond['classes'].append(edge['class_label'])
+            frame['native_bonds'] = [dict(unique[key], classes=sorted(set(unique[key]['classes']))) for key in sorted(unique)]
+    # When seed_labels has <= 1 fixed body (unseeded / 1-pinned-body runs), automatically
+    # highlight the largest connected component of native bonds in each frame as the growing seed.
+    cfg_seeds = config.get('seed_labels', [])
+    if len(cfg_seeds) <= 1 and frames:
+        n_bodies = len(frames[0]['poses'])
+        for frame in frames:
+            if len(frame.get('seed_labels', [])) <= 1 and frame.get('native_bonds'):
+                parent = list(range(n_bodies))
+                def root(x):
+                    while parent[x] != x:
+                        parent[x] = parent[parent[x]]
+                        x = parent[x]
+                    return x
+                for b in frame['native_bonds']:
+                    i, j = b['bodies']
+                    parent[root(i)] = root(j)
+                members_by_root = {}
+                for idx in range(n_bodies):
+                    members_by_root.setdefault(root(idx), []).append(idx)
+                best_r = max(members_by_root.keys(), key=lambda r: (len(members_by_root[r]), -min(members_by_root[r])))
+                if len(members_by_root[best_r]) > 1:
+                    frame['seed_labels'] = sorted(members_by_root[best_r])
     return dict(available=True, classifier='TetramerOrder.native_entry_monomer_edges',
         criterion='Strict per-frame native entry: proper relative monomer pose, atomic gap, and shared native residue patch; intrinsic contacts within a tetramer excluded.',
         history='Each saved frame classified independently; no retention hysteresis or inferred events between frames.',

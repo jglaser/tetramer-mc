@@ -253,3 +253,45 @@ Directly analogous to **Stillinger–Weber** three-body angular potentials for t
    - **Exact incremental evaluation across all MC moves**: `MorphMc` maintains the $N \times N$ directed `PatchContact` matrix `self.patch` and updates `self.chem_sum` incrementally in $O(\deg)$ per single-body move (`step`, `step_dock`) and across multi-body FK cluster (`step_cluster`) and half-turn GCA (`step_gca`) moves, verified to machine precision ($< 10^{-10}\,kT$) against `recompute_chem()`.
    - **Throughput & Seeded Growth**: Adds $< 10\%$ overhead (`~99 sweeps/s` on 64 bodies with library docking + FK cluster + GCA + center-shift moves) while doubling native lattice continuation (`2 -> 4` lattice sites, `6 -> 11` attached monomers, `5 -> 12` native free–seed bonds in 2,500 sweeps) and lifting multi-contact pocket $\ln K$ across `steps 2..14` of `site_path_jobs.json` by $+2.2\text{ to }+4.5$ ($\Delta E_{\min} = -2.0\text{ to }-5.3\,kT$).
 
+### 8.6 Three-Body Lawrence–Colman Normal-Cancellation Junction Potential (`junc_weights`, `junc_w0`)
+
+![Three-body Lawrence–Colman normal-cancellation junction complementarity](figures/three_body_junction_complementarity.png)
+
+#### Why Coarse Centroid 3-Body Potentials Bias $N=256$ Free–Free Contacts Toward Non-Native Coat Defects
+
+In $N=256$ seeded growth simulations (`observe_growth.py`), exact 3D morphometric solvation maintains a **50:50** ratio of native to non-native free–free contacts (`11:11`), whereas the coarse centroid 3-body potential (`coop_weights: [0.25, 3.0]`, Section 8.5) biases free–free contacts heavily toward non-native contacts (**1:8**, `12:94`). Empirical inspection of all 4,946 triplets in the $N=256$ trajectories reveals two physical causes:
+1. **Uncompensated pairwise burial double-counting on open wedges**: When two neighbors $B$ and $C$ crowd overlapping or adjacent regions of monomer $A$, pairwise hydration-shell solvation (`solv_weights`) sums $E_{\text{solv}}(A,B) + E_{\text{solv}}(A,C)$ additively and double-counts shared buried surface atoms (which in 3D Hadwiger morphometry are corrected by repulsive 3-body exclusion overlap).
+2. **Coarse patch-centroid angles cannot detect local surface normal mismatch**: The coarse centroid angle $\Psi(\hat{\mathbf{u}}_{AB}, \hat{\mathbf{u}}_{AC})$ measures only whether the global patch centroids on body $A$ are $\gtrsim 90^\circ$ apart around the monomer center of mass. Consequently, a random monomer $C$ docking non-natively onto the waist of a native dimer $(A,B)$ ("1-native coat defect") achieves $\Psi \approx 1$ and receives **stronger** 3-body attraction ($\langle E_{\text{coop}}\rangle = -2.40\,k_B T$) than a true 3-native crystal triangle ($\langle E_{\text{coop}}\rangle = -1.39\,k_B T$), even though its local contact surfaces leave an unsealed interstitial void.
+
+#### Generalizing Lawrence–Colman (1993) from 2-Body Normal Opposition to 3-Body Y-Junction Normal Cancellation
+
+For a 2-body interface $(A, B)$, Lawrence & Colman (*J. Mol. Biol.* **234**, 946–950, 1993) showed that complementary lock-and-key packing requires opposing outward unit surface normals:
+$$\hat{\mathbf{n}}_i^{(A)} \cdot \bigl(-\hat{\mathbf{n}}_j^{(B)}\bigr) \to 1 \quad\Longleftrightarrow\quad \hat{\mathbf{n}}_i^{(A)} + \hat{\mathbf{n}}_j^{(B)} \to \mathbf{0}$$
+At a 3-body triple junction (Y-seam $\Gamma_{ABC}$) where three monomers $A, B, C$ meet around a shared crevice:
+1. **Intrinsic monomer outward surface normals**: Each heavy atom $i \in A$ has a fixed body-frame outward unit normal $\hat{\mathbf{n}}_i^{\text{body}} \in S^2$ computed once from the $10\text{ \AA}$ local interior neighborhood centroid (`compute_body_normals`), rotated to the world frame via $\hat{\mathbf{n}}_i^{(A)} = R_A \hat{\mathbf{n}}_i^{\text{body}}$.
+2. **Triple-junction wedge normal vectors**: Using the $6.0\text{ \AA}$ burial profiles $u_i^{(A,B)} = \max_{j \in B}\max(0, 1 - g_{ij}/6)$, an atom $i \in A$ lies in the shared $(A; B,C)$ triple-junction seam iff $w_i^{(A;BC)} = u_i^{(A,B)} u_i^{(A,C)} > 0$. Summing its outward normals yields the vertex junction normal vector:
+   $$\mathbf{N}_A = \sum_{i \in A} u_i^{(A,B)}\,u_i^{(A,C)}\,\hat{\mathbf{n}}_i^{(A)} = R_A \mathbf{N}_A^{\text{body}}, \qquad W_{ABC} = \|\mathbf{N}_A\| + \|\mathbf{N}_B\| + \|\mathbf{N}_C\|$$
+3. **3-body normal-cancellation residual**:
+   $$R_{ABC} = \frac{\|\mathbf{N}_A + \mathbf{N}_B + \mathbf{N}_C\|}{\|\mathbf{N}_A\| + \|\mathbf{N}_B\| + \|\mathbf{N}_C\|} \in [0, 1]$$
+   - In a **well-sealed 3-body crystal pocket**, the three wedge interfaces meet around the Y-junction axis at $\sim 120^\circ$ so their outward normals form a closed triangle ($\mathbf{N}_A + \mathbf{N}_B + \mathbf{N}_C \to \mathbf{0}$, $R_{ABC} \to 0$).
+   - In an **open 2-edge crowding wedge** ($B$ and $C$ do not contact each other, so $\mathbf{N}_B = \mathbf{N}_C = \mathbf{0}$), $R_{ABC} \equiv 1$ identically.
+   - In a **frustrated non-native coat defect**, the three normals fail to cancel ($R_{ABC} \gtrsim 0.50$).
+
+#### Learned 3-Body Junction Potential & Exact Algebraic Decomposition
+
+The 3-body Lawrence–Colman junction potential (`junc_weights: [w_seal, w_sat] = [4.2, 0.7]`, `junc_w0 = 4.0`) combines attractive Y-seam normal cancellation with repulsive burial-saturation (double-counting) correction:
+$$E_{\text{junc}}(A, B, C) = -w_{\text{seal}}\,\frac{W_{ABC}}{W_{ABC} + W_0}\,\bigl(1 - R_{ABC}^2\bigr)^2 \;+\; w_{\text{sat}}\,W_{ABC}\,R_{ABC}^2$$
+Using the exact identity $W_{ABC} R_{ABC}^2 = W_{ABC} - W_{ABC}(1 - R_{ABC}^2)$, `src/morph_mc.rs` decomposes $E_{\text{junc}}(A, B, C)$ into:
+$$E_{\text{junc}}(A, B, C) = \sum_{v \in \{A,B,C\}} w_{\text{sat}}\,\|\mathbf{N}_v^{\text{body}}\| \;-\; W_{ABC}\bigl(1 - R_{ABC}^2\bigr)\left[w_{\text{sat}} + w_{\text{seal}}\,\frac{1 - R_{ABC}^2}{W_{ABC} + W_0}\right]$$
+- The first term (`w_sat * ||N_v^body||`) depends only on vertex $v$'s body-frame burial profiles (`PatchContact::u6`) and is rotation-invariant.
+- The second term (`triangle_junction_cancel_term`) is non-zero **exclusively on closed contact triangles** where all three edges have $s > 0.5$ (since if any edge is absent, at most one vertex has $\mathbf{N}_v \neq \mathbf{0}$, implying $R_{ABC} \equiv 1$ and $1 - R_{ABC}^2 \equiv 0$).
+
+| Triplet Topology ($N=256$ Trajectories) | $\langle W_{ABC} \rangle$ | $\langle R_{ABC} \rangle$ | Old Coarse Centroid $\langle E_{\text{coop}} \rangle$ | New L–C Junction $\langle E_{\text{junc}} \rangle$ | Physical Role |
+|---|---:|---:|---:|---:|---|
+| **3-native crystal triangle (closed)** | $5.54$ | **$0.337$** | $-1.39\,k_B T$ | **$-1.31\,k_B T$** | Strong cooperative stabilization of closed crystal trimers |
+| **2-native crystal pocket (closed)** | $5.69$ | **$0.251$** | $-1.94\,k_B T$ | **$-1.70\,k_B T$** | Strong stabilization of ledge/corner attachment pockets |
+| **1-native coat defect (closed)** | $8.07$ | $0.502$ | $-2.40\,k_B T$ | **$-0.29\,k_B T$** | Eliminates spurious $-2.40\,k_B T$ non-native coat-defect trap |
+| **0-native non-native triangle (closed)** | $5.04$ | $0.464$ | $-1.55\,k_B T$ | **$-0.25\,k_B T$** | Suppresses amorphous non-native trimer aggregation |
+| **Open crowding wedge (0–1 nat, 2 edges)** | $0.23$ | $1.000$ | $-0.09\,k_B T$ | **$+0.16\,k_B T$** | Repulsive burial-saturation correction ($R_{ABC}=1$) |
+
+

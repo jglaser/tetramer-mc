@@ -135,6 +135,10 @@ enum Cmd {
         memory_floor_sigma: f64,
         #[arg(long, default_value_t = 1)]
         memory_refresh_per_sweep: usize,
+        /// Propose docking moves from the Poisson memory slots only, omitting raw instantaneous
+        /// contact library pairs (prevents Polya-urn self-copying of transient 1-bond contacts).
+        #[arg(long)]
+        memory_only: bool,
         #[arg(long, default_value_t = 500)]
         sample_every: usize,
         #[arg(long, default_value_t = 1)]
@@ -212,6 +216,10 @@ enum Cmd {
         /// Memory refreshes per sweep.
         #[arg(long, default_value_t = 1)]
         memory_refresh_per_sweep: usize,
+        /// Propose docking moves from the Poisson memory slots only, omitting raw instantaneous
+        /// contact library pairs (prevents Polya-urn self-copying of transient 1-bond contacts).
+        #[arg(long)]
+        memory_only: bool,
         /// JSON list of charged groups {atoms, sign, fraction} for the like-charge penalty.
         #[arg(long)]
         charge_groups: Option<PathBuf>,
@@ -466,6 +474,7 @@ fn main() -> Result<()> {
             memory_sigma_rotation_degrees,
             memory_floor_sigma,
             memory_refresh_per_sweep,
+            memory_only,
             sample_every,
             seed,
             out,
@@ -501,9 +510,14 @@ fn main() -> Result<()> {
                 memory_lambda_floor == 0. || dock_probability > 0.,
                 "rex memory needs docking (--dock-probability > 0)"
             );
+            ensure!(
+                !memory_only || memory_lambda_floor > 0.,
+                "--memory-only requires --memory-lambda-floor > 0"
+            );
             let dock = DockSettings {
                 learned: None,
-                library: true,
+                library: !memory_only,
+                memory_only,
                 components: Vec::new(),
                 sigma_translation: dock_sigma_translation,
                 sigma_rotation: dock_sigma_rotation_degrees.to_radians(),
@@ -588,6 +602,7 @@ fn main() -> Result<()> {
                 "memory_sigma_translation": memory_sigma_translation,
                 "memory_sigma_rotation_degrees": memory_sigma_rotation_degrees,
                 "memory_floor_sigma": memory_floor_sigma, "memory_refresh_per_sweep": memory_refresh_per_sweep,
+                "memory_only": memory_only,
                 "like_charge_weight": like_charge_weight, "like_charge_cutoff": like_charge_cutoff,
                 "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion",
                 "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well; exact hard cores and wall"});
@@ -754,6 +769,7 @@ fn main() -> Result<()> {
             memory_sigma_rotation_degrees,
             memory_floor_sigma,
             memory_refresh_per_sweep,
+            memory_only,
             charge_groups,
             like_charge_weight,
             like_charge_cutoff,
@@ -815,16 +831,19 @@ fn main() -> Result<()> {
                     groups,
                 })?
                 .with_chemistry_model(chem)?;
-            if dock_library {
+            if dock_library || memory_only || memory_lambda_floor > 0. {
                 ensure!(
                     dock_model.is_none() && dock_components.is_none(),
-                    "--dock-library excludes --dock-model and --dock-components"
+                    "--dock-library / --memory-only excludes --dock-model and --dock-components"
                 );
                 mc = mc.with_contact_library(dock_library_gap)?;
             }
             let mut rng = StdRng::seed_from_u64(seed);
             if memory_lambda_floor > 0. {
-                ensure!(dock_library, "memory needs --dock-library");
+                ensure!(
+                    dock_library || memory_only,
+                    "memory needs --dock-library or --memory-only"
+                );
                 let prior = match &memory_prior_model {
                     Some(f) => prior_from_model(f, &shape, radius)?,
                     None => Vec::new(),
@@ -842,6 +861,11 @@ fn main() -> Result<()> {
                     prior,
                     &mut rng,
                 )?;
+            } else {
+                ensure!(
+                    !memory_only,
+                    "--memory-only requires --memory-lambda-floor > 0"
+                );
             }
             let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
@@ -863,6 +887,7 @@ fn main() -> Result<()> {
                 "memory_sigma_rotation_degrees": memory_sigma_rotation_degrees,
                 "memory_floor_sigma": memory_floor_sigma,
                 "memory_refresh_per_sweep": memory_refresh_per_sweep,
+                "memory_only": memory_only,
                 "sample_every": sample_every, "seed": seed,
                 "moves": "uniform free body; 0.5 tiny (0.1 A, 1 deg) / 0.45 medium (0.5 A, 4 deg) / 0.05 uniform reinsertion; optional FK rigid cluster + half-turn GCA",
                 "energy": "exact hard-sphere White Bear II morphometry (eta 0.383, R 1.4) + atom square well + like-charge + chemistry residual; exact hard cores and wall"});
@@ -893,11 +918,12 @@ fn main() -> Result<()> {
                 None => None,
             };
             let dock = if (dock_probability > 0. || (cluster_probability > 0. && cluster_dock_probability > 0.))
-                && (learned.is_some() || dock_components.is_some() || dock_library)
+                && (learned.is_some() || dock_components.is_some() || dock_library || memory_only)
             {
                 Some(DockSettings {
                     learned,
-                    library: dock_library,
+                    library: dock_library && !memory_only,
+                    memory_only,
                     components: match &dock_components {
                         Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                         None => Vec::new(),
@@ -921,7 +947,8 @@ fn main() -> Result<()> {
             fs::write(
                 out.join("dock.json"),
                 serde_json::to_string_pretty(
-                    &json!({"components": dock_components, "model": dock_model, "library": dock_library,
+                    &json!({"components": dock_components, "model": dock_model, "library": dock_library && !memory_only,
+                    "memory_only": memory_only,
                     "library_gap": dock_library_gap, "probability": dock_probability,
                     "sigma_translation": dock_sigma_translation, "sigma_rotation_degrees": dock_sigma_rotation_degrees,
                     "uniform_weight": dock_uniform_weight}),

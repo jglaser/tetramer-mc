@@ -294,4 +294,27 @@ $$E_{\text{junc}}(A, B, C) = \sum_{v \in \{A,B,C\}} w_{\text{sat}}\,\|\mathbf{N}
 | **0-native non-native triangle (closed)** | $5.04$ | $0.464$ | $-1.55\,k_B T$ | **$-0.25\,k_B T$** | Suppresses amorphous non-native trimer aggregation |
 | **Open crowding wedge (0–1 nat, 2 edges)** | $0.23$ | $1.000$ | $-0.09\,k_B T$ | **$+0.16\,k_B T$** | Repulsive burial-saturation correction ($R_{ABC}=1$) |
 
+### 8.7 Many-Body Stoichiometric Valency Saturation for Interfacial Chloride Bridges (`s_cl`)
+
+#### Diagnosis of the Non-Native Runaway Aggregate in `seeded-6`
+
+In 100,000-sweep seeded growth trajectories with Boltzmann-weighted contact-library docking (`seeded-6`, `--dock-library --dock-library-beta 0.3`), native crystal growth proceeded cleanly through sweep 40,000 (`lattice = 15`, `attached = 16`, `fs = 31/1` native/non-native, `ff = 166/75`), outperforming unweighted library docking (`seeded-5`). Between sweeps 50,000 and 100,000, however, a single non-native dimer motif (`|t| = 28.95 Å`, $\theta = 27.3^\circ$, `closest = m1` at `sc = 8.5`) nucleated a 35-monomer bulk aggregate that overtook the simulation (`chemistry = -6,311 kT`).
+
+Decomposing the exact Hamiltonian (`epsilon = 0.00325`, `like_charge_weight = 4.0`) on the native crystal contacts (`m0..m6`) versus the runaway non-native dimer `(74, 91)` / `(143, 145)` pinpoints the exact physical cause:
+- In **native `m1`** ($E_{\text{pair}} = -30.58\,k_BT$: $E_{\text{well}} = -8.46$, $E_{\text{like}} = 0.00$, $E_{\text{chem}} = -22.12$), the bilateral cationic chloride-bridge feature (`w_cl = 12.5 kT`) fires on a single 1-to-1 pair (`TYR_OH(184)` on monomer $A$ $\leftrightarrow$ `AMIDE_ND(871)` on monomer $B$, $d = 4.07\text{ \AA}$, contributing $-10.20\,k_BT$).
+- In the **non-native runaway dimer** ($E_{\text{pair}} = -38.13\,k_BT$ before valency saturation), a single `TYR_OH(157)` on monomer $B$ approaches a surface patch on monomer $A$ containing **two** adjacent `AMIDE_ND` atoms (`309` and `325`, separated by $6.52\text{ \AA}$ on the same monomer). Because `s_cl` summed additively over all `(TYR_OH, AMIDE_ND)` pairs within $3.4\text{–}4.5\text{ \AA}$, that single `TYR_OH(157)` hydroxyl was simultaneously awarded **two** full chloride bridges ($-21.71\,k_BT$ from `s_cl` alone), beating native `m1` by $7.5\,k_BT$ and receiving a $\sim 10\times$ Boltzmann weight boost under $\beta_{\text{lib}} = 0.3$.
+
+#### Stoichiometric 1-to-1 Valency Saturation (`s_cl`)
+
+Physically, a single `TYR_OH` hydroxyl or `AMIDE_ND` group at an interface pocket coordinates at most one bridging $\text{Cl}^-$ anion (valence 1 per donor group); two amides $6.5\text{ \AA}$ apart on one monomer cannot independently claim two full $\text{Cl}^-$ ion bridges from the same partner `TYR_OH`. In `MorphMc::well_chem_and_patch_between` and `ChemistryModel::pair_energy_with_radii_and_grid` / `pair_energy_with_grid`, candidate chloride-bridge triads `(i, j, val)` are sorted by score `val` in descending order and matched greedily one-to-one so each atom $i \in A$ and $j \in B$ participates in at most one chloride bridge:
+
+| Dimer Interface | Uncapped Additive `s_cl` ($k_B T$) | Valence-1 Saturated `s_cl` ($k_B T$) | Total $E_{\text{pair}}$ (Valence-1 Saturated) |
+|---|---:|---:|---:|
+| **Native `m1`** (2-fold dimer, `184` $\leftrightarrow$ `871`) | $-10.20\,k_B T$ | **$-10.20\,k_B T$** (unchanged) | **$-30.58\,k_B T$** |
+| **Native `m6`** (screw dimer) | $0.00\,k_B T$ | **$0.00\,k_B T$** (unchanged) | **$-25.48\,k_B T$** |
+| **Non-native `(74, 91)`** (`157` $\leftrightarrow$ `309, 325`) | $-21.71\,k_B T$ | **$-12.43\,k_B T$** | **$-26.78\,k_B T$** (weaker than `m1`) |
+| **Non-native `(120, 121)`** (`157` $\leftrightarrow$ `309, 325`) | $-21.54\,k_B T$ | **$-11.09\,k_B T$** | **$-24.78\,k_B T$** (weaker than `m1`, `m6`) |
+| **Non-native `(143, 145)`** (`157` $\leftrightarrow$ `309, 325`) | $-20.69\,k_B T$ | **$-12.36\,k_B T$** | **$-29.80\,k_B T$** (weaker than `m1`) |
+
+
 

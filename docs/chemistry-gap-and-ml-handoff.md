@@ -361,3 +361,46 @@ When a `ChemistryModel` is loaded, `MorphMc::generate_surface_normal_prior` now 
    - At isotropic `--memory-sigma 0.5 A, 5 deg`, a $5^\circ$ center-of-mass rotation sweeps the $20\text{ \AA}$ monomer rim by $1.75\text{ \AA}$, causing $97.0\%$ (`m1`) and $99.4\%$ (`m6`) hard-core steric clashes; running 32 rejection trials at full $\sigma$ selectively accepted $+1.5\text{ \AA}$ outward-jumped tail draws that broke all short-range H-bonds (degrading birthed slot energies to $-5.30\,k_BT$ for `m1` and $+2.30\,k_BT$ for `m6`).
    - `MemorySettings::draw` now anneals the perturbation scale $s_{\text{scale}} = \max(0.75^{\text{attempt}-1}, 0.08)$ after the first 2 full-$\sigma$ attempts, keeping clash-free births around tight lock-and-key contacts deep inside their attractive H-bond basins ($\langle E_{\text{pair}}\rangle = -18.98\,k_BT$ for `m1` and $-8.83\,k_BT$ for `m6`).
 
+### 8.9 Restoring $B_{22} / B_{22}^{\text{HS}}$ to the Crystallization Window via Learnable Burial Gating (`burial_gate`, `solv_cap`) and Closed-Triangle 3-Body Cooperativity (`nuc-23`–`nuc-27`)
+
+#### Diagnosis of `nuc-23`–`nuc-27` and $B_{22}$ Spinodal Collapse on the Hard-Shape Baseline
+
+In `nuc-23` and `nuc-26`, unseeded $N=256$ monomer simulations self-assembled a 4-monomer $4_3$ helical crystal seed (`3 native m1 + 1 native m2`), which then shrank `4 -> 3 -> 2` while all 256 monomers condensed into a single percolating non-native cluster (`clusters: 256:1`, `112` non-native vs. `32` native contacts).Evaluating the $10^6$-sample 6D virial integral (`pair-binding --virial 1000000`) and the 15-step crystal pathway (`site_path_jobs.json`) identified three coupled causes:
+
+1. **Glancing unburied salt-bridge/H-bond spikes collapsed $B_{22} / B_{22}^{\text{HS}}$ to $-341$**:
+   - Under `B3_chem` (exact 3D White Bear II morphometry), approaching monomers face a $+10\text{ to }+15\,k_BT$ desolvation barrier unless they achieve true 3D lock-and-key complementarity, keeping $B_{22} / B_{22}^{\text{HS}} = -0.42 \pm 0.24$ at $\varepsilon = 0.00325$.
+   - Under `B1_chem` (`--no-solvation`), any random glancing orientation where two protruding surface side chains touch (`1–3` atom pairs, $-E_{\text{solv,raw}} \in [0, 3.3]\,k_BT$) triggered $-20\text{ to }-25\,k_BT$ of raw `s_hb`/`s_chb`/`s_wb` attraction with zero desolvation penalty, driving the $10^6$-sample uniform virial to $B_{22} / B_{22}^{\text{HS}} = -30.50$ at $\varepsilon = 0.00228$ and $-341.04$ at $\varepsilon = 0.00325$.
+   - Across `nuc-23` (sweep 20,000), $90\%$ of the $112$ non-native contacts had shallow hydration-shell burial ($-E_{\text{solv,raw}} < 5.64\,k_BT$, median $1.59\,k_BT$), whereas native `m1` ($-E_{\text{solv,raw}} = 10.34\,k_BT$) and `native m6` ($9.42\,k_BT$) sit in a well-buried lock-and-key window ($-E_{\text{solv,raw}} \in [6.8, 11.6]\,k_BT$).
+2. **Unbounded linear `e_solv_raw` on broad non-native patches (`blind-agg #0`, `blind-agg #3`)**:
+   - Oversized non-native interfaces (`blind-agg #0` at $E_{\text{solv,raw}} = -20.31\,k_BT$, `blind-agg #3` at $-27.38\,k_BT$) accumulated enough linear hydration-shell burial to overwhelm their $+16.5\,k_BT$ unsatisfied polar/charge desolvation penalty.
+3. **Repulsive 3-body `w_sat` on the 4-monomer $4_3$ screw turn (`4 -> 3 -> 2` dissolution)**:
+   - In $P4_32_12$ lysozyme, the 4-monomer $4_3$ screw turn `0-1-2-3-0` (`3 m1 + 1 m2`, `step 10: +2 (m1 m2)`) is a **chordless 4-cycle** (`(0,2)` and `(1,3)` have $s_{ij} = 0.00$).
+   - Because `w_sat = 0.7` added a repulsive penalty $+w_{\text{sat}}\|\mathbf{N}_v^{\text{body}}\|$ to every open vertex while only cancelling on closed 3-cycles, `w_sat = 0.7` penalized the interior $4_3$ helix vertices (`205`, `239` with $\|\mathbf{N}_v\| = 2.12, 1.73$) by $+1.48$ and $+1.21\,k_BT$, making `step 10: +2 (m1 m2)` endergonic ($\Delta G = +2.92\,k_BT$) and driving chain scission (`[4] + [1] -> [3] + [2]`). Meanwhile, `w_wedge > 0` rewarded 1-bond dendritic branching onto multi-coordinated hubs (`nuc-27`).
+
+#### Learnable Burial-Gated 2-Body + Closed-Triangle 3-Body Hamiltonian (`ChemistryModel::combine_pair_energy`)
+
+To make the many-body Hamiltonian learnable directly on top of the hard-shape baseline (`--no-solvation`), `ChemistryModel` (`src/morph_mc.rs`, `examples/chemistry-model-monomer.json`) incorporates:
+1. **Hydration-shell burial saturation (`solv_cap = 13.0`)**:
+   $$E_{\text{solv}} = \max\!\bigl(E_{\text{solv,raw}},\, -\text{solv\_cap}\bigr)$$
+   Caps attractive pairwise solvation at $-13.0\,k_BT$, leaving `native m1` ($-10.34\,k_BT$) and `native m6` ($-9.42\,k_BT$) untouched while eliminating the runaway solvation bonus on `blind-agg #0` ($\ln K: +6.57 \to -0.77$) and `blind-agg #3` ($\ln K: +1.76 \to -16.94$).
+2. **Smooth Hermite burial gate (`burial_gate = [b_on, b_full] = [3.0, 6.0]`)**:
+   Let $b = \max(0, -E_{\text{solv,raw}})$ measure the hydration-shell burial of the interface. Attractive polar/ion-bridge chemistry ($s_{\text{hb}}, s_{\text{chb}}, s_{\text{cl}}, s_{\text{wb}}$) is gated by the $C^1$ Hermite switch:
+   $$g_{\text{burial}}(b) = \begin{cases} 0 & b \le b_{\text{on}}, \\ t^2(3 - 2t), \quad t = \dfrac{b - b_{\text{on}}}{b_{\text{full}} - b_{\text{on}}} & b_{\text{on}} < b < b_{\text{full}}, \\ 1 & b \ge b_{\text{full}}, \end{cases}$$
+   while repulsive clash and unsatisfied burial penalties ($s_{\text{clash}}, \text{unp}_{\text{pol}}, \text{unp}_{\text{chg}}$) remain ungated. Across `nuc-23` (sweep 20,000), this reduces mean non-native contact strength ($n=112$) from **$-20.35\,k_BT$ to $-6.87\,k_BT$** while keeping native `m1` contacts ($n=32$) at **$-26.41\,k_BT$**.
+3. **Pure closed-triangle 3-body cooperativity (`coop_weights = [0.0, 14.0]`, `junc_weights = [6.0, 0.0]`)**:
+   Setting `w_wedge = 0.0` and `w_sat = 0.0` assigns zero 3-body bonus to 1-bond dendritic tree branches and removes the artificial open-wedge penalty on 4-cycles, while strongly stabilizing closed 3-body crystal pockets (`w_tri = 14.0`, `w_seal = 6.0`).
+
+| Observable / Pathway Step ($w = 6.0\text{ \AA}$, $c = 2.8\text{ mM}$) | Uncalibrated `B1_chem` ($\varepsilon = 0.00325$) | Calibrated `B1_chem` ($\varepsilon = 0.0028$) | Calibrated `B1_chem` ($\varepsilon = 0.0029$) | Calibrated `B1_chem` ($\varepsilon = 0.0030$) | Physical Regime |
+|---|---:|---:|---:|---:|---|
+| **Basin-summed $B_{22} / B_{22}^{\text{HS}}$** | $-8.4$ | **$-0.95$** | **$-1.72$** | **$-2.95$** | Inside George & Wilson slot `[-0.5, -3.5]` |
+| **$10^6$-sample uniform $B_{22} / B_{22}^{\text{HS}}$** | $-341.0 \pm 191.6$ | **$+0.70 \pm 0.39$** | **$+0.63 \pm 0.44$** | **$+0.57 \pm 0.49$** | Glancing unburied spikes eliminated |
+| **`native m6`** ($\ln K$, $m=1$) | $+13.96$ | **$+11.96$** | **$+12.64$** | **$+13.09$** | Reversible 1-bond dimer ($\Delta G \approx +0.6\,k_BT$) |
+| **`native m1`** ($\ln K$, $m=2$) | $+12.12$ | **$+11.28$** | **$+11.66$** | **$+11.91$** | Reversible $4_3$ screw dimer ($\Delta G \approx +0.9\,k_BT$) |
+| **`capture #3` / `blind-agg #0` / `#3`** ($\ln K$) | $+4.29 / -0.36 / -11.91$ | $+2.38 / -1.15 / -17.3$ | **$+2.82 / -0.77 / -16.9$** | $+3.12 / -0.52 / -16.7$ | All non-native decoys suppressed ($\Delta G \ge +9.8\,k_BT$) |
+| **`step 2: +2 (m1 m3)`** ($\Delta G_{\text{step}}$) | $+0.71\,k_BT$ | **$-11.62\,k_BT$** | **$-11.95\,k_BT$** | **$-12.28\,k_BT$** | Exergonic closed-trimer nucleation |
+| **`step 3: +2 (m1 m3)`** ($\Delta G_{\text{step}}$) | $+1.12\,k_BT$ | **$-26.87\,k_BT$** | **$-27.28\,k_BT$** | **$-27.69\,k_BT$** | Exergonic tetramer pocket |
+| **`step 6: +4 (m0 m2 m3 m5)`** ($\Delta G_{\text{step}}$) | $+15.73\,k_BT$ | **$-17.06\,k_BT$** | **$-17.32\,k_BT$** | **$-17.58\,k_BT$** | Multi-neighbor frustration resolved |
+| **`step 10: +2 (m1 m2)`** ($4_3$ turn $\Delta G_{\text{step}}$) | $+2.92\,k_BT$ (`w_sat=0.7`) | **$-5.92\,k_BT$** | **$-6.31\,k_BT$** | **$-6.70\,k_BT$** | Stable 4-monomer $4_3$ screw turn |
+| **`step 12: +3 (m0 m1 m2)`** ($\Delta G_{\text{step}}$) | $+4.17\,k_BT$ (`w_sat=0.7`) | **$-14.36\,k_BT$** | **$-14.77\,k_BT$** | **$-15.18\,k_BT$** | Exergonic repeatable ledge growth |
+
+

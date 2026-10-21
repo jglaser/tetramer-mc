@@ -67,6 +67,14 @@ pub struct ChemistryModel {
     /// `[w_p2, w_p3, w_a1, w_a2, w_a05]` in kT for pairwise gap `g = d - (r_i + r_j) < 2.8 A`.
     #[serde(default)]
     pub solv_weights: [f64; 5],
+    /// Optional cap (`> 0` in kT) on attractive pairwise hydration-shell solvation (`e_solv >= -solv_cap`),
+    /// preventing unbounded linear solvation runaway on oversized non-native patches (`0.0` = uncapped).
+    #[serde(default)]
+    pub solv_cap: f64,
+    /// Optional smooth Hermite burial gate `[b_on, b_full]` (in kT of `-e_solv_raw`) multiplying
+    /// attractive polar/ion-bridge chemistry (`s_hb, s_chb, s_cl, s_wb`); disabled when `b_full <= b_on`.
+    #[serde(default)]
+    pub burial_gate: [f64; 2],
     /// Optional 2-feature SE(3)-invariant Stillinger-Weber / Tersoff 3-body cooperative
     /// weights `[w_wedge, w_tri]` in kT (`>= 0` for attraction) across contacting surface
     /// patches `s_{ij}` on a shared vertex body `i`.
@@ -199,6 +207,40 @@ impl ChemistryModel {
         } else {
             1.0
         }
+    }
+
+    /// Combine raw hydration-shell solvation `e_solv_raw` and pairwise chemistry features into
+    /// the total 2-body residual energy (kT), applying optional `solv_cap` and `burial_gate`.
+    #[inline]
+    pub fn combine_pair_energy(
+        &self,
+        e_solv_raw: f64,
+        s_hb: f64,
+        s_chb: f64,
+        s_cl: f64,
+        s_wb: f64,
+        s_clash: f64,
+        unp_pol: f64,
+        unp_chg: f64,
+    ) -> f64 {
+        let e_solv = if self.solv_cap > 0.0 {
+            e_solv_raw.max(-self.solv_cap)
+        } else {
+            e_solv_raw
+        };
+        let g_burial = if self.burial_gate[1] > self.burial_gate[0] {
+            let t = ((-e_solv_raw - self.burial_gate[0])
+                / (self.burial_gate[1] - self.burial_gate[0]))
+                .clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        } else {
+            1.0
+        };
+        let w = &self.weights;
+        e_solv - g_burial * (w[0] * s_hb + w[1] * s_chb + w[2] * s_cl + w[3] * s_wb)
+            + w[4] * s_clash
+            + w[5] * unp_pol
+            + w[6] * unp_chg
     }
 
     #[inline]
@@ -480,11 +522,9 @@ impl ChemistryModel {
             }
         }
 
-        let w = &self.weights;
-        e_solv - w[0] * s_hb - w[1] * s_chb - w[2] * s_cl - w[3] * s_wb
-            + w[4] * s_clash
-            + w[5] * unp_pol
-            + w[6] * unp_chg
+        self.combine_pair_energy(
+            e_solv, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg,
+        )
     }
 
     /// Pairwise chemistry residual energy (kT) using a prebuilt template `BallGrid` (cell >= 5.25 A).
@@ -1306,6 +1346,9 @@ impl MorphMc {
         ensure!(
             chem.weights.iter().all(|w| w.is_finite())
                 && chem.solv_weights.iter().all(|w| w.is_finite())
+                && chem.solv_cap.is_finite()
+                && chem.solv_cap >= 0.
+                && chem.burial_gate.iter().all(|w| w.is_finite())
                 && chem.coop_weights.iter().all(|w| w.is_finite())
                 && chem.coop_s0.is_finite()
                 && chem.junc_weights.iter().all(|w| w.is_finite())
@@ -3651,11 +3694,9 @@ impl MorphMc {
             }
         }
 
-        let w = &self.chem.weights;
-        let e_chem = e_solv - w[0] * s_hb - w[1] * s_chb - w[2] * s_cl - w[3] * s_wb
-            + w[4] * s_clash
-            + w[5] * unp_pol
-            + w[6] * unp_chg;
+        let e_chem = self.chem.combine_pair_energy(
+            e_solv, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg,
+        );
         (well_count, e_chem, pa, pb)
     }
 
@@ -5389,6 +5430,8 @@ mod tests {
             ],
             weights: [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2],
             solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
+            solv_cap: 11.5,
+            burial_gate: [4.0, 8.0],
             coop_weights: [1.5, 10.0],
             coop_s0: 15.0,
             junc_weights: [4.2, 0.7],
@@ -5538,6 +5581,8 @@ mod tests {
             flags: vec![CHEM_CAT | CHEM_PURE_DON, CHEM_ANI | CHEM_PURE_ACC],
             weights: [0.5, 0.8, 1.5, 0.45, 0.8, 0.85, 0.8],
             solv_weights: [0.4645, -0.7707, -0.2771, -0.7201, 0.5226],
+            solv_cap: 11.5,
+            burial_gate: [4.0, 8.0],
             coop_weights: [1.5, 10.0],
             coop_s0: 15.0,
             junc_weights: [4.2, 0.7],

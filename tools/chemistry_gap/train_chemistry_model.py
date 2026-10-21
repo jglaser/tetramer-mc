@@ -167,17 +167,25 @@ def main():
     flags = atom_chemistry_flags(names)
     weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
     solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5226]
-    coop_weights = [0.25, 3.0]
+    solv_cap = 13.0
+    burial_gate = [3.0, 6.0]
+    coop_weights = [0.0, 14.0]
+    junc_weights = [6.0, 0.0]
     model = {
         'flags': flags,
         'weights': weights,
         'solv_weights': solv_weights,
+        'solv_cap': solv_cap,
+        'burial_gate': burial_gate,
         'coop_weights': coop_weights,
         'coop_s0': 15.0,
+        'junc_weights': junc_weights,
+        'junc_w0': 4.0,
         'wb_cap': 5.0,
     }
     out_paths = [
         '/home/xvg/tetramer-mc/.claude/worktrees/oligomer-capture/examples/chemistry-model-monomer.json',
+        '/home/xvg/tetramer-mc/examples/chemistry-model-monomer.json',
         f'{D_DIR}/chemistry_model_monomer.json',
     ]
     for p in out_paths:
@@ -185,7 +193,7 @@ def main():
             json.dump(model, fp, indent=2)
     records = harvest_pdb_interfaces()
     print(f'Harvested {len(records)} symmetry interfaces across {len(PDB_CORPUS)} PDB crystal structures.')
-    print(f'Exported ChemistryModel (1001 atoms, {sum(1 for f in flags if f > 0)} polar/charged atoms, 5 solvation + 7 chemistry + 2 cooperative 3-body weights) to {out_paths[0]}')
+    print(f'Exported ChemistryModel (1001 atoms, {sum(1 for f in flags if f > 0)} polar/charged atoms, burial-gated 2-body + closed-triangle 3-body) to {out_paths[0]}')
 
 
 if __name__ == '__main__':

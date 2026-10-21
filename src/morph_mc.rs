@@ -841,21 +841,42 @@ impl MemorySettings {
         let n: f64 = rand_distr::Poisson::new(mean).expect("finite mean").sample(rng);
         n as usize
     }
-    /// Exact draw from mu_x / Lambda(x) given the contact entries of x and the prior.
-    fn draw(&self, rng: &mut StdRng, entries: &[Pose], prior: &[(Pose, f64)]) -> Pose {
+    /// Exact draw from mu_x / Lambda(x) given the contact entries of x and the prior,
+    /// rejection-sampling any draw that causes a monomer-monomer hard-core overlap with
+    /// the anchor body at the origin (`tree.overlaps(&placed_id, &Placed::new(m))`).
+    fn draw(
+        &self,
+        rng: &mut StdRng,
+        entries: &[Pose],
+        prior: &[(Pose, f64)],
+        tree: &SphereTree,
+    ) -> Pose {
         let normal = |rng: &mut StdRng| -> f64 { StandardNormal.sample(rng) };
+        let identity = Pose {
+            position: [0.; 3],
+            orientation: [1., 0., 0., 0.],
+        };
+        let placed_id = Placed::new(identity);
         let total = self.total(entries.len());
         let u = rng.random::<f64>() * total;
         let use_floor = u < self.lambda_floor || (entries.is_empty() && prior.is_empty());
         let use_prior = !use_floor && u < self.lambda_floor + self.lambda_prior && !prior.is_empty();
         if use_floor || (!use_prior && entries.is_empty()) {
-            let position: Vec3 = std::array::from_fn(|_| self.floor_sigma * normal(rng));
-            let q: [f64; 4] = std::array::from_fn(|_| normal(rng));
-            let n = q.iter().map(|x| x * x).sum::<f64>().sqrt();
-            return Pose {
-                position,
-                orientation: q.map(|x| x / n),
-            };
+            let mut last = identity;
+            for _ in 0..64 {
+                let position: Vec3 = std::array::from_fn(|_| self.floor_sigma * normal(rng));
+                let q: [f64; 4] = std::array::from_fn(|_| normal(rng));
+                let n = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+                let cand = Pose {
+                    position,
+                    orientation: q.map(|x| x / n),
+                };
+                last = cand;
+                if !tree.overlaps(&placed_id, &Placed::new(cand)) {
+                    return cand;
+                }
+            }
+            return last;
         }
         let g = if use_prior {
             let mut v = rng.random::<f64>();
@@ -871,8 +892,38 @@ impl MemorySettings {
         } else {
             entries[rng.random_range(0..entries.len())]
         };
+        let rg = rotation(g.orientation);
+        let mut last = g;
+        for _ in 0..32 {
+            let w: Vec3 = loop {
+                let w: Vec3 = std::array::from_fn(|_| self.sigma_rotation * normal(rng));
+                if norm(w) < std::f64::consts::PI {
+                    break w;
+                }
+            };
+            let theta = norm(w);
+            let e = if theta < 1e-12 {
+                [1., 0., 0., 0.]
+            } else {
+                let s = (theta / 2.).sin() / theta;
+                [(theta / 2.).cos(), w[0] * s, w[1] * s, w[2] * s]
+            };
+            let position: Vec3 =
+                std::array::from_fn(|k| g.position[k] + self.sigma_translation * normal(rng));
+            let cand = Pose {
+                position,
+                orientation: quaternion(matmul(rg, rotation(e))),
+            };
+            last = cand;
+            if !tree.overlaps(&placed_id, &Placed::new(cand)) {
+                return cand;
+            }
+        }
+        // Tight native contacts (e.g. m1, m6 with min_gap ~ 0.037 A) almost always clash under
+        // isotropic 0.5 A / 5 deg perturbations: draw a finer perturbation and retract along the
+        // outward separation vector until the monomer hard cores are clash-free.
         let w: Vec3 = loop {
-            let w: Vec3 = std::array::from_fn(|_| self.sigma_rotation * normal(rng));
+            let w: Vec3 = std::array::from_fn(|_| 0.35 * self.sigma_rotation * normal(rng));
             if norm(w) < std::f64::consts::PI {
                 break w;
             }
@@ -884,12 +935,30 @@ impl MemorySettings {
             let s = (theta / 2.).sin() / theta;
             [(theta / 2.).cos(), w[0] * s, w[1] * s, w[2] * s]
         };
-        let position: Vec3 =
-            std::array::from_fn(|k| g.position[k] + self.sigma_translation * normal(rng));
-        Pose {
-            position,
-            orientation: quaternion(matmul(rotation(g.orientation), rotation(e))),
+        let r_cand = matmul(rg, rotation(e));
+        let q_cand = quaternion(r_cand);
+        let pos0: Vec3 =
+            std::array::from_fn(|k| g.position[k] + 0.35 * self.sigma_translation * normal(rng));
+        let gn = norm(g.position);
+        let n_out = if gn > 1e-8 {
+            scale(g.position, 1.0 / gn)
+        } else {
+            [1.0, 0.0, 0.0]
+        };
+        for step in 0..=16 {
+            let shift = 0.15 * (step as f64);
+            let cand = Pose {
+                position: add(pos0, scale(n_out, shift)),
+                orientation: q_cand,
+            };
+            if !tree.overlaps(&placed_id, &Placed::new(cand)) {
+                return cand;
+            }
         }
+        if !tree.overlaps(&placed_id, &Placed::new(g)) {
+            return g;
+        }
+        last
     }
 }
 
@@ -1588,7 +1657,9 @@ impl MorphMc {
         let placed_id = Placed::new(identity);
         let entries = self.library(usize::MAX);
         let n0 = MemorySettings::poisson(rng, s.total(entries.len()));
-        let slots: Vec<Pose> = (0..n0).map(|_| s.draw(rng, &entries, &prior)).collect();
+        let slots: Vec<Pose> = (0..n0)
+            .map(|_| s.draw(rng, &entries, &prior, &self.tree))
+            .collect();
         let prior_values = slots.iter().map(|&m| s.prior_value(&prior, m)).collect();
         let slot_energies = slots
             .iter()
@@ -1673,7 +1744,7 @@ impl MorphMc {
         let placed_id = Placed::new(identity);
         let births = MemorySettings::poisson(rng, s.death * s.total(entries.len()));
         for _ in 0..births {
-            let m = s.draw(rng, &entries, &prior);
+            let m = s.draw(rng, &entries, &prior, &self.tree);
             sums.push(entries.iter().map(|&g| s.kernel(m, g)).sum());
             prior_values.push(s.prior_value(&prior, m));
             let e_slot = if self.tree.overlaps(&placed_id, &Placed::new(m)) {

@@ -294,7 +294,7 @@ impl ChemistryModel {
                 let d = d2.sqrt();
                 let g = d - r_sum;
                 if g < 2.8 {
-                    let u = ((2.8 - g) * (1.0 / 2.8)).max(0.0);
+                    let u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
                     let u2 = u * u;
                     p2 += u2;
                     p3 += u2 * u;
@@ -1585,13 +1585,20 @@ impl MorphMc {
             position: [0.; 3],
             orientation: [1., 0., 0., 0.],
         };
+        let placed_id = Placed::new(identity);
         let entries = self.library(usize::MAX);
         let n0 = MemorySettings::poisson(rng, s.total(entries.len()));
         let slots: Vec<Pose> = (0..n0).map(|_| s.draw(rng, &entries, &prior)).collect();
         let prior_values = slots.iter().map(|&m| s.prior_value(&prior, m)).collect();
         let slot_energies = slots
             .iter()
-            .map(|&m| self.pair_surrogate_energy(identity, m))
+            .map(|&m| {
+                if self.tree.overlaps(&placed_id, &Placed::new(m)) {
+                    0.0
+                } else {
+                    self.pair_surrogate_energy(identity, m)
+                }
+            })
             .collect();
         self.memory = Some(Memory {
             s,
@@ -1663,12 +1670,18 @@ impl MorphMc {
             position: [0.; 3],
             orientation: [1., 0., 0., 0.],
         };
+        let placed_id = Placed::new(identity);
         let births = MemorySettings::poisson(rng, s.death * s.total(entries.len()));
         for _ in 0..births {
             let m = s.draw(rng, &entries, &prior);
             sums.push(entries.iter().map(|&g| s.kernel(m, g)).sum());
             prior_values.push(s.prior_value(&prior, m));
-            slot_energies.push(self.pair_surrogate_energy(identity, m));
+            let e_slot = if self.tree.overlaps(&placed_id, &Placed::new(m)) {
+                0.0
+            } else {
+                self.pair_surrogate_energy(identity, m)
+            };
+            slot_energies.push(e_slot);
             slots.push(m);
         }
         if let Some(mem) = &mut self.memory {
@@ -2836,7 +2849,7 @@ impl MorphMc {
                 if has_solv {
                     let g = d - r_sum;
                     if g < 2.8 {
-                        let u = ((2.8 - g) * (1.0 / 2.8)).max(0.0);
+                        let u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
                         let u2 = u * u;
                         p2 += u2;
                         p3 += u2 * u;

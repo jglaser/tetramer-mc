@@ -316,5 +316,15 @@ Physically, a single `TYR_OH` hydroxyl or `AMIDE_ND` group at an interface pocke
 | **Non-native `(120, 121)`** (`157` $\leftrightarrow$ `309, 325`) | $-21.54\,k_B T$ | **$-11.09\,k_B T$** | **$-24.78\,k_B T$** (weaker than `m1`, `m6`) |
 | **Non-native `(143, 145)`** (`157` $\leftrightarrow$ `309, 325`) | $-20.69\,k_B T$ | **$-12.36\,k_B T$** | **$-29.80\,k_B T$** (weaker than `m1`) |
 
+#### Hard-Core Overlap Guard on Poisson Memory Slots (`slot_energies`)
 
+In `nuc-12` (unseeded nucleation with `--dock-library-beta 0.3` and Poisson memory `--memory-sigma 0.5 A, 5 deg`, `--memory-floor-sigma 30 A`), the 1-to-1 `s_cl` valency saturation eliminated the $-38.1\,k_BT$ runaway dimers (capping all physical dimers in `nuc-12` at $E_{\text{pair}} \ge -30.20\,k_BT$), yet `nuc-12` still formed only non-native contacts through sweep 40,000.
 
+Inspecting the 74 Poisson memory slots in `nuc-12` revealed why:
+- Because Poisson memory slots `m` are drawn by `MemorySettings::draw` from the $30\text{ \AA}$ Gaussian floor or by adding Gaussian noise (`0.5 A, 5 deg`) around contacts/prior centres without a steric overlap rejection step, **49 of the 74 memory slots had hard-core steric overlaps (`min_gap < 0`, down to `-2.63 A`)**.
+- Evaluating `pair_surrogate_energy(identity, m)` on an overlapping slot `m` without checking `tree.overlaps` caused `u = (2.8 - g) / 2.8` to exceed `1.0` for `g < 0` (`u = 1.94`, `u^3 = 7.3`), yielding phantom energies of **$E_{\text{pair}} = -76.5\text{ to }-99.0\,k_BT$** on deeply overlapping memory slots.
+- Under `--dock-library-beta 0.3`, those clashing memory slots received Boltzmann weights $\exp(-0.3 E_{\text{pair}}) \sim 10^9\text{–}7.2 \times 10^{10}$ (versus $9.6 \times 10^3$ for native `m1` at $-30.58\,k_BT$), capturing **$100.0000\%$** of the docking proposal weight and continuously proposing in the peripheral Gaussian tail of non-native clashing slots.
+
+To prevent clashing virtual memory slots from hijacking Boltzmann-weighted docking:
+1. In `MorphMc::with_memory` and `MorphMc::refresh_memory`, each memory slot `m` is checked with `self.tree.overlaps(&Placed::new(identity), &Placed::new(m))`: any slot with a hard-core steric overlap (`min_gap < 0`) is assigned `slot_energy = 0.0` (unit weight $e^0 = 1$), so only physically valid, clash-free contact poses receive attractive Boltzmann amplification ($\exp(-\beta_{\text{lib}} E_{\text{pair}}) > 1$).
+2. In `ChemistryModel::pair_energy_with_radii_and_grid` and `MorphMc::well_chem_and_patch_between`, the hydration-shell burial fraction is clamped on both sides via `u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0)`.

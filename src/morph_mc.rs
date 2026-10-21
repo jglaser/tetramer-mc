@@ -497,11 +497,43 @@ impl ChemistryModel {
                 .filter(|&(j, _)| self.flags[j] & CHEM_ANI != 0)
                 .map(|(_, &x)| x)
                 .collect();
+            let accs_a: Vec<(usize, Vec3)> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.flags[i] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+                .map(|(i, &x)| (i, add(matvec(r_rel, x), t_rel)))
+                .collect();
+            let accs_b: Vec<(usize, Vec3)> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+                .map(|(j, &x)| (j, x))
+                .collect();
             let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
             for (i, j, mid, d) in tn_pairs {
+                if ((self.flags[i] & CHEM_TYR_OH != 0)
+                    && (used_hb_a.contains(&i) || used_chb_a.contains(&i)))
+                    || ((self.flags[j] & CHEM_TYR_OH != 0)
+                        && (used_hb_b.contains(&j) || used_chb_b.contains(&j)))
+                {
+                    continue;
+                }
                 let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 if da_ani < 5.5 || db_ani < 5.5 {
+                    continue;
+                }
+                let da_acc = accs_a
+                    .iter()
+                    .filter(|&&(idx, _)| idx != i)
+                    .map(|&(_, c)| norm(sub(c, mid)))
+                    .fold(99.0f64, f64::min);
+                let db_acc = accs_b
+                    .iter()
+                    .filter(|&&(idx, _)| idx != j)
+                    .map(|&(_, c)| norm(sub(c, mid)))
+                    .fold(99.0f64, f64::min);
+                if da_acc < 3.45 || db_acc < 3.45 {
                     continue;
                 }
                 let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
@@ -749,11 +781,43 @@ impl ChemistryModel {
                 .filter(|&(j, _)| self.flags[j] & CHEM_ANI != 0)
                 .map(|(_, &x)| x)
                 .collect();
+            let accs_a: Vec<(usize, Vec3)> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.flags[i] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+                .map(|(i, &x)| (i, matvec(rqt, sub(add(matvec(rp, x), p.position), q.position))))
+                .collect();
+            let accs_b: Vec<(usize, Vec3)> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+                .map(|(j, &x)| (j, x))
+                .collect();
             let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
             for (i, j, mid, d) in tn_pairs {
+                if ((self.flags[i] & CHEM_TYR_OH != 0)
+                    && (used_hb_a.contains(&i) || used_chb_a.contains(&i)))
+                    || ((self.flags[j] & CHEM_TYR_OH != 0)
+                        && (used_hb_b.contains(&j) || used_chb_b.contains(&j)))
+                {
+                    continue;
+                }
                 let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 if da_ani < 5.5 || db_ani < 5.5 {
+                    continue;
+                }
+                let da_acc = accs_a
+                    .iter()
+                    .filter(|&&(idx, _)| idx != i)
+                    .map(|&(_, c)| norm(sub(c, mid)))
+                    .fold(99.0f64, f64::min);
+                let db_acc = accs_b
+                    .iter()
+                    .filter(|&&(idx, _)| idx != j)
+                    .map(|&(_, c)| norm(sub(c, mid)))
+                    .fold(99.0f64, f64::min);
+                if da_acc < 3.45 || db_acc < 3.45 {
                     continue;
                 }
                 let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
@@ -3767,11 +3831,45 @@ impl MorphMc {
                 .filter(|&(j, _)| self.chem.flags[j] & CHEM_ANI != 0)
                 .map(|(_, &x)| x)
                 .collect();
+            let accs_a: Vec<(usize, Vec3)> = self
+                .centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.chem.flags[i] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+                .map(|(i, &x)| (i, add(matvec(r_rel, x), t_rel)))
+                .collect();
+            let accs_b: Vec<(usize, Vec3)> = self
+                .centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.chem.flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+                .map(|(j, &x)| (j, x))
+                .collect();
             let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
             for (i, j, mid, d) in tn_pairs {
+                if ((self.chem.flags[i] & CHEM_TYR_OH != 0)
+                    && (used_hb_a.contains(&i) || used_chb_a.contains(&i)))
+                    || ((self.chem.flags[j] & CHEM_TYR_OH != 0)
+                        && (used_hb_b.contains(&j) || used_chb_b.contains(&j)))
+                {
+                    continue;
+                }
                 let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 if da_ani < 5.5 || db_ani < 5.5 {
+                    continue;
+                }
+                let da_acc = accs_a
+                    .iter()
+                    .filter(|&&(idx, _)| idx != i)
+                    .map(|&(_, c)| norm(sub(c, mid)))
+                    .fold(99.0f64, f64::min);
+                let db_acc = accs_b
+                    .iter()
+                    .filter(|&&(idx, _)| idx != j)
+                    .map(|&(_, c)| norm(sub(c, mid)))
+                    .fold(99.0f64, f64::min);
+                if da_acc < 3.45 || db_acc < 3.45 {
                     continue;
                 }
                 let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);

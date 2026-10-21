@@ -86,6 +86,20 @@ def atom_chemistry_flags(names, coords=None):
                     d_ani = np.linalg.norm(ani_xyz - coords_arr[i], axis=-1)
                     if np.min(d_ani) < 4.5:
                         flags[i] &= ~(0x10 | 0x20)
+        # Single-proton Tyr OH (0x10) whose hydroxyl proton is already donated
+        # to an intra-monomer H-bond acceptor (|res_i - res_m| >= 2, d < 3.8 A)
+        # cannot donate that proton to an interfacial anion bridge.
+        for i, f in enumerate(flags):
+            if (f & 0x10) != 0:
+                res_i = names[i][1]
+                acc_idx = [
+                    m for m, fm in enumerate(flags)
+                    if abs(names[m][1] - res_i) >= 2 and (fm & (0x02 | 0x08 | 0x40)) != 0
+                ]
+                if acc_idx:
+                    d_acc = np.linalg.norm(coords_arr[acc_idx] - coords_arr[i], axis=-1)
+                    if np.min(d_acc) < 3.8:
+                        flags[i] &= ~0x10
     return flags
 
 

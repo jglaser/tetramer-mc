@@ -428,5 +428,30 @@ To resolve both degeneracies in `src/morph_mc.rs`, `tools/chemistry_gap/train_ch
 | **`nuc29_decoy (6, 57)`** (`sw = 6000`) | $-29.96$ | **$-15.66$** | $-18.83$ | **$+0.43 \pm 0.07$** | **$+5.39\,k_BT$** | **Unbound** ($+11.13\,k_BT$ weaker than `native m1`) |
 | **`nuc29_pair (13, 157)`** (strongest of 169 in `nuc-29`) | $-29.10$ | **$-19.94$** | $-20.84$ | **$+1.99 \pm 0.23$** | **$+3.83\,k_BT$** | **Unbound** (all 169 `nuc-29` decoys $\Delta G^* > +3.4\,k_BT$) |
 
+### 8.11 Single-Proton `TYR_OH` Valency & Acceptor-Oxygen Midpoint Exclusion (`nuc-30` Fix)
+
+In `nuc-30` (through sweep 51,400), both 3-body gelation (`largest_free = 8–9`) and the `nuc-29` `TYR 53 OH` decoy (`0` copies) were completely eliminated, and the surface prior birthed a `native m1` memory slot (`slot 19`, $d_t = 2.47\text{ \AA}, d\theta = 11.8^\circ$). However, ~85% of contacts in `nuc-30` (`cl0..cl5`) formed a non-native decoy on the **same `TYR 23` patch** (`TYR 23 OH (184) -- ASN 37 ND2 (290)`, rotated $131.6^\circ$ relative to `native m1`, plus a minor `TYR 20 OH (157) -- GLN 41 NE2 (325)` decoy `cl2`):
+1. **Cross-shell single-proton `TYR_OH` double-counting and backward-amide `OD1` overlap (`cl0, cl1, cl3, cl4, cl5`)**: In `TYR 23 OH -- ASN 37`, `TYR 23 OH (184)` donates a **direct $3.10\text{–}3.19\text{ \AA}$ H-bond** to `ASN 37 OD1 (289)` (`s_hb = 0.994`). Because `ASN 37 OD1` and `ND2` are covalently bonded to the same `CG` carbon ($2.25\text{ \AA}$ apart), `TYR 23 OH` is automatically $3.95\text{–}4.16\text{ \AA}$ from `ASN 37 ND2 (290)` and was simultaneously awarded a $-11.5\text{ to }-12.4\,k_BT$ `s_cl` bridge — even though `TYR 23 OH` has only **one** hydroxyl proton (`-O-H`) and the negatively polarized carbonyl oxygen `ASN 37 OD1` sits right on top of the $\text{Cl}^-$ midpoint at $d(\text{mid}, \text{OD1}) = 1.82\text{–}3.41\text{ \AA}$ (vs. $\min d(\text{mid}, \text{ACC}) = 3.55\text{–}3.82\text{ \AA}$ across `native m1` and all `nuc-26` `native m1` dimers).
+2. **Intra-monomer H-bond donor availability of `TYR 20 OH` (`cl2`)**: Inside the monomer, `TYR 20 OH (157)` already donates its single hydroxyl proton to `LYS 96 O` ($3.54\text{ \AA}$) and `SER 100 OG` ($3.55\text{ \AA}$), whereas `TYR 23 OH (184)` has no intra-monomer H-bond acceptor within $4.63\text{ \AA}$ (its lone pair accepts from `MET 105 N` at $3.39\text{ \AA}$, locking its `-O-H` proton outward into solvent).
+
+To enforce these physical constraints in `tools/chemistry_gap/train_chemistry_model.py`, `examples/chemistry-model-monomer.json`, and `src/morph_mc.rs`:
+1. **Intra-monomer single-proton `TYR_OH (0x10)` donor availability**: Any `TYR OH` atom whose single hydroxyl proton is within $3.8\text{ \AA}$ of an intra-monomer H-bond acceptor (`0x02 | 0x08 | 0x40`, $|n_i - n_m| \ge 2$) has `0x10` cleared (`TYR 20 OH` at $3.54\text{ \AA}$ and `TYR 53 OH` at $3.23\text{ \AA}$ cleared; `TYR 23 OH` at $4.63\text{ \AA}$ retained).
+2. **Cross-shell single-proton `TYR_OH` valency conservation**: Any `CHEM_TYR_OH` atom already matched in the direct $2.7\text{–}3.9\text{ \AA}$ H-bond shell (`used_hb` or `used_chb`) cannot simultaneously participate in the $3.4\text{–}4.5\text{ \AA}$ ion-bridge shell (`s_cl`).
+3. **Acceptor-oxygen steric & electrostatic midpoint exclusion (`d(mid, ACC) >= 3.45 Å`)**: A candidate $\text{Cl}^-$ midpoint `mid` cannot lie within $3.45\text{ \AA}$ of any H-bond acceptor oxygen (`CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC`, excluding the bridging atoms `i` and `j`) on either monomer.
+
+| Contact / Decoy ($\varepsilon = 0.0029$, $w = 6.0\text{ \AA}$, $c = 2.8\text{ mM}$) | Pre-Fix $E_{\text{start}}$ ($k_BT$) | Pre-Fix $\ln K$ | Post-Fix $E_{\text{start}}$ ($k_BT$) | Post-Fix $E_{\min}$ ($k_BT$) | Post-Fix $\ln K$ | Post-Fix $\Delta G^*$ ($2.8\text{ mM}$) | Physical Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| **`native m1`** ($4_3$ screw dimer) | $-29.49$ | $+11.56$ | **$-29.49$** | **$-30.38$** | **$+11.30 \pm 0.08$** | **$-5.48\,k_BT$** | **100% preserved** |
+| **`nuc26_m1 (6, 138)`** (real `m1` dimer) | $-27.76$ | $+11.25$ | **$-27.76$** | **$-30.70$** | **$+11.25 \pm 0.41$** | **$-5.43\,k_BT$** | **100% preserved** |
+| **`nuc26_m1 (91, 194)`** (real `m1` dimer) | $-29.14$ | $+10.90$ | **$-29.14$** | **$-31.11$** | **$+10.90 \pm 0.13$** | **$-5.08\,k_BT$** | **100% preserved** |
+| **`native m6`** ($C_2$ crystal dimer) | $-21.39$ | $+9.38$ | **$-21.39$** | **$-31.47$** | **$+8.93 \pm 0.20$** | **$-3.11\,k_BT$** | **100% preserved** |
+| **`nuc30_cl0 (2, 82)`** (`61` copies, `TYR 23--ASN 37`) | $-28.69$ | $+10.87$ | **$-18.50$** | $-18.84$ | **$+1.90 \pm 0.54$** | **$+3.92\,k_BT$** | **Unbound** ($+8.97\,k_BT$ swing) |
+| **`nuc30_cl1 (1, 46)`** (`43` copies, `ASN 37--TYR 23`) | $-28.05$ | $+10.49$ | **$-15.86$** | $-18.66$ | **$-0.92 \pm 0.16$** | **$+6.74\,k_BT$** | **Unbound** ($+11.41\,k_BT$ swing) |
+| **`nuc30_cl2 (3, 217)`** (`24` copies, `GLN 41--TYR 20`) | $-24.69$ | $+7.59$ | **$-16.15$** | $-17.77$ | **$+0.86 \pm 0.25$** | **$+4.96\,k_BT$** | **Unbound** ($+6.73\,k_BT$ swing) |
+| **`nuc30_cl3 (9, 202)`** (`6` copies) | $-23.22$ | $+8.15$ | **$0.00$** | $0.00$ | **$-1.39 \pm 0.02$** | **$+7.21\,k_BT$** | **Unbound** ($+9.54\,k_BT$ swing) |
+| **`nuc30_cl4 (14, 151)`** (`6` copies) | $-21.97$ | $+8.88$ | **$-10.13$** | $-14.74$ | **$-1.28 \pm 0.17$** | **$+7.10\,k_BT$** | **Unbound** ($+10.16\,k_BT$ swing) |
+| **`nuc30_cl5 (34, 222)`** (`5` copies) | $-23.79$ | $+6.49$ | **$-11.91$** | $-16.41$ | **$-2.81 \pm 0.12$** | **$+8.63\,k_BT$** | **Unbound** ($+9.30\,k_BT$ swing) |
+
+
 
 

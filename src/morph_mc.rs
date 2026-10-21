@@ -915,9 +915,19 @@ impl MemorySettings {
         };
         let rg = rotation(g.orientation);
         let mut last = g;
-        for _ in 0..32 {
+        for attempt in 0..32 {
+            // Progressively shrink perturbation scale after initial full-sigma attempts
+            // so tight lock-and-key contacts (e.g. m1, m6 with ~0.04 A steric clearance)
+            // sample inside their narrow H-bond/salt-bridge well rather than selecting
+            // outward-displaced (+1.5 A) tail draws that break short-range H-bonds.
+            let s_scale = if attempt < 2 {
+                1.0
+            } else {
+                (0.75f64).powi((attempt - 1) as i32).max(0.08)
+            };
             let w: Vec3 = loop {
-                let w: Vec3 = std::array::from_fn(|_| self.sigma_rotation * normal(rng));
+                let w: Vec3 =
+                    std::array::from_fn(|_| s_scale * self.sigma_rotation * normal(rng));
                 if norm(w) < std::f64::consts::PI {
                     break w;
                 }
@@ -929,8 +939,9 @@ impl MemorySettings {
                 let s = (theta / 2.).sin() / theta;
                 [(theta / 2.).cos(), w[0] * s, w[1] * s, w[2] * s]
             };
-            let position: Vec3 =
-                std::array::from_fn(|k| g.position[k] + self.sigma_translation * normal(rng));
+            let position: Vec3 = std::array::from_fn(|k| {
+                g.position[k] + s_scale * self.sigma_translation * normal(rng)
+            });
             let cand = Pose {
                 position,
                 orientation: quaternion(matmul(rg, rotation(e))),
@@ -944,7 +955,7 @@ impl MemorySettings {
         // isotropic 0.5 A / 5 deg perturbations: draw a finer perturbation and retract along the
         // outward separation vector until the monomer hard cores are clash-free.
         let w: Vec3 = loop {
-            let w: Vec3 = std::array::from_fn(|_| 0.35 * self.sigma_rotation * normal(rng));
+            let w: Vec3 = std::array::from_fn(|_| 0.10 * self.sigma_rotation * normal(rng));
             if norm(w) < std::f64::consts::PI {
                 break w;
             }
@@ -959,15 +970,15 @@ impl MemorySettings {
         let r_cand = matmul(rg, rotation(e));
         let q_cand = quaternion(r_cand);
         let pos0: Vec3 =
-            std::array::from_fn(|k| g.position[k] + 0.35 * self.sigma_translation * normal(rng));
+            std::array::from_fn(|k| g.position[k] + 0.10 * self.sigma_translation * normal(rng));
         let gn = norm(g.position);
         let n_out = if gn > 1e-8 {
             scale(g.position, 1.0 / gn)
         } else {
             [1.0, 0.0, 0.0]
         };
-        for step in 0..=16 {
-            let shift = 0.15 * (step as f64);
+        for step in 0..=32 {
+            let shift = 0.06 * (step as f64);
             let cand = Pose {
                 position: add(pos0, scale(n_out, shift)),
                 orientation: q_cand,
@@ -1911,12 +1922,22 @@ impl MorphMc {
                 }
                 if !selected.is_empty() {
                     let mut out = Vec::with_capacity(2 * selected.len());
-                    for (pose, e_pair) in selected {
-                        let w = if beta > 0. {
-                            (-beta * e_pair).clamp(-25.0, 25.0).exp()
+                    let pool_span = half_count.max(1);
+                    for (idx, (pose, e_pair)) in selected.into_iter().enumerate() {
+                        // Weight each selected mode by its chemical-complementarity rank in
+                        // its pool (by_motif or by_area) combined with a tempered Boltzmann
+                        // factor so un-relaxed lock-and-key H-bond contacts (whose 0.45 A
+                        // directional wells are narrower than the coarse angular grid) are
+                        // not exponentially suppressed relative to broad apolar patches.
+                        let rank = (idx % pool_span) as f64;
+                        let w_rank = 1.0 / (1.0 + 0.12 * rank);
+                        let beta_eff = (0.12 * beta).clamp(0.0, 0.15);
+                        let w_boltz = if beta_eff > 0.0 {
+                            (-beta_eff * e_pair.clamp(-15.0, 5.0)).exp()
                         } else {
                             1.0
                         };
+                        let w = w_rank * w_boltz;
                         let r_inv = transpose(rotation(pose.orientation));
                         let inv_pose = Pose {
                             position: matvec(r_inv, pose.position).map(|x| -x),
@@ -5824,13 +5845,23 @@ mod tests {
                 },
             ),
         ];
+        let mem_s = MemorySettings {
+            lambda: 0.25,
+            lambda_prior: 3.0,
+            lambda_floor: 1e-4,
+            death: 0.05,
+            sigma_translation: 0.5,
+            sigma_rotation: 5f64.to_radians(),
+            floor_sigma: 20.0,
+        };
         for (name, nat) in nat_modes {
             let r_nat = rotation(nat.orientation);
             let mut best_sc = 999.0f64;
             let mut best_dt = 999.0f64;
             let mut best_dth = 999.0f64;
             let mut best_e = 0.0f64;
-            for &(p, _) in &prior {
+            let mut best_w = 0.0f64;
+            for &(p, w) in &prior {
                 let dt = norm(sub(p.position, nat.position));
                 let r_p = rotation(p.orientation);
                 let r_diff = matmul(transpose(r_p), r_nat);
@@ -5842,16 +5873,33 @@ mod tests {
                     best_dt = dt;
                     best_dth = dth;
                     best_e = mc.pair_surrogate_energy(identity, p);
+                    best_w = w;
                 }
             }
             println!(
-                "  {name}: best_sc={best_sc:.2} (dt={best_dt:.2} A, dth={best_dth:.1} deg, E={best_e:+.2} kT), E_nat={:+.2} kT",
+                "  {name}: best_sc={best_sc:.2} (dt={best_dt:.2} A, dth={best_dth:.1} deg, E={best_e:+.2} kT, w={best_w:.5}), E_nat={:+.2} kT",
                 mc.pair_surrogate_energy(identity, nat)
             );
             if name == "m1" || name == "m6" {
                 assert!(
                     best_sc < 1.8 && best_dt < 3.0 && best_dth < 20.0,
                     "expected {name} to be discovered in surface prior, got sc={best_sc:.2} (dt={best_dt:.2} A, dth={best_dth:.1} deg)"
+                );
+                assert!(
+                    best_w > 0.002,
+                    "expected {name} prior weight not to be Boltzmann-crushed, got w={best_w:.5}"
+                );
+                let mut sum_draw_e = 0.0f64;
+                for _ in 0..64 {
+                    let drawn = mem_s.draw(&mut rng, &[nat], &[], &mc.tree);
+                    assert!(!mc.tree.overlaps(&placed_id, &Placed::new(drawn)));
+                    sum_draw_e += mc.pair_surrogate_energy(identity, drawn);
+                }
+                let mean_draw_e = sum_draw_e / 64.0;
+                println!("    {name} MemorySettings::draw mean_E = {mean_draw_e:+.2} kT");
+                assert!(
+                    mean_draw_e < -5.0,
+                    "expected annealed MemorySettings::draw around {name} to stay in attractive basin, got mean_E={mean_draw_e:+.2}"
                 );
             }
         }

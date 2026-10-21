@@ -349,8 +349,15 @@ When a `ChemistryModel` is loaded, `MorphMc::generate_surface_normal_prior` now 
    - **`area_score` (extensive polar H-bond network)**: Counts complementary donor–acceptor and salt-bridge pairs across the $6.5\text{ \AA}$ contact patch with opposing normals ($\hat{\mathbf{n}}_a \cdot \hat{\mathbf{n}}_b < -0.25$).
 4. **Contact-pivoted 5-tilt + radial retraction un-clashing (Stage 2)**: Top Stage-1 candidates from both pools are un-clashed around the contact point $\mathbf{x}_i + (r_i + r_j + 0.6\text{ \AA})\hat{\mathbf{n}}_i$ across 5 local tilts ($0^\circ, \pm 10^\circ$) and outward radial steps ($0.25\text{ \AA}$ increments) using `SphereTree::overlaps`, then allocated equally ($32 + 32$ prior modes, plus their $64$ exact $SE(3)$ inverses) between the `motif_score` and `area_score` rankings:
 
-| Native Crystal Mode | Physical Interface Class | $E_{\text{pair}}^{\text{nat}}$ | Closest Prior Mode (`sc`) | $\Delta t$ ($\text{\AA}$) | $\Delta \theta$ ($\text{deg}$) | Discovery Channel |
-|---|---|---:|---:|---:|---:|---|
-| **`m1`** (2-fold dimer) | High-specificity side-chain motif (`Tyr23` + `Asn113/103` + `Arg114`) | $-22.12\,k_BT$ | **`1.23`** | **$2.16\text{ \AA}$** | **$11.7^\circ$** | `motif_score` (valency $\le 2$) |
-| **`m6`** (screw dimer) | Broad $\beta$-sheet/loop H-bond network (`18 sc-bb`, `4 bb-bb`) | $-10.89\,k_BT$ | **`1.68`** | **$2.80\text{ \AA}$** | **$18.5^\circ$** | `area_score` (polar network) |
+| Native Crystal Mode | Physical Interface Class | $E_{\text{pair}}^{\text{nat}}$ | Closest Prior Mode (`sc`) | $\Delta t$ ($\text{\AA}$) | $\Delta \theta$ ($\text{deg}$) | Prior Weight $w$ | Discovery Channel |
+|---|---|---:|---:|---:|---:|---:|---|
+| **`m1`** (2-fold dimer) | High-specificity side-chain motif (`Tyr23` + `Asn113/103` + `Arg114`) | $-22.12\,k_BT$ | **`1.23`** | **$2.16\text{ \AA}$** | **$11.7^\circ$** | **$0.00446$** ($0.89\%$ w/ inv) | `motif_score` (valency $\le 2$) |
+| **`m6`** (screw dimer) | Broad $\beta$-sheet/loop H-bond network (`18 sc-bb`, `4 bb-bb`) | $-10.89\,k_BT$ | **`1.68`** | **$2.80\text{ \AA}$** | **$18.5^\circ$** | **$0.01302$** ($2.60\%$ w/ inv) | `area_score` (polar network) |
+
+5. **Tempered complementarity-rank + Boltzmann prior weighting (`nuc-20`, `nuc-21` diagnosis)**:
+   - At the $\sim 2\text{–}3\text{ \AA}$ resolution of Stage-2 surface-normal docking, narrow $0.45\text{ \AA}$ H-bond wells have not yet locked in (`E_pair = +4.52 kT` for `m1` and `+1.95 kT` for `m6`), so weighting selected prior modes by untempered $\exp(-\beta E_{\text{pair}})$ suppressed `m1` and `m6` weights to $w = 0.00025$ and $w = 0.00090$ ($\sim 100\times$ below apolar modes).
+   - Weighting each selected mode by its within-pool complementarity rank $w_{\text{rank}} = (1 + 0.12\,\text{rank})^{-1}$ multiplied by a tempered Boltzmann factor $\exp(-\beta_{\text{eff}} \text{clamp}(E_{\text{pair}}, -15, 5))$ ($\beta_{\text{eff}} = \min(0.12\beta, 0.15)$) boosts `m1` weight by $17.8\times$ ($w = 0.00446$) and `m6` weight by $14.5\times$ ($w = 0.01302$).
+6. **Progressive $\sigma$-annealing in `MemorySettings::draw`**:
+   - At isotropic `--memory-sigma 0.5 A, 5 deg`, a $5^\circ$ center-of-mass rotation sweeps the $20\text{ \AA}$ monomer rim by $1.75\text{ \AA}$, causing $97.0\%$ (`m1`) and $99.4\%$ (`m6`) hard-core steric clashes; running 32 rejection trials at full $\sigma$ selectively accepted $+1.5\text{ \AA}$ outward-jumped tail draws that broke all short-range H-bonds (degrading birthed slot energies to $-5.30\,k_BT$ for `m1` and $+2.30\,k_BT$ for `m6`).
+   - `MemorySettings::draw` now anneals the perturbation scale $s_{\text{scale}} = \max(0.75^{\text{attempt}-1}, 0.08)$ after the first 2 full-$\sigma$ attempts, keeping clash-free births around tight lock-and-key contacts deep inside their attractive H-bond basins ($\langle E_{\text{pair}}\rangle = -18.98\,k_BT$ for `m1` and $-8.83\,k_BT$ for `m6`).
 

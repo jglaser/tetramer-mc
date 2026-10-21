@@ -209,12 +209,14 @@ impl ChemistryModel {
         }
     }
 
-    /// Combine raw hydration-shell solvation `e_solv_raw` and pairwise chemistry features into
-    /// the total 2-body residual energy (kT), applying optional `solv_cap` and `burial_gate`.
+    /// Combine raw hydration-shell solvation `e_solv_raw`, buried hydration-shell atom sum
+    /// `a1_burial = sum(u_a) + sum(u_b)`, and pairwise chemistry features into the total 2-body
+    /// residual energy (kT), applying optional `solv_cap` and `burial_gate`.
     #[inline]
     pub fn combine_pair_energy(
         &self,
         e_solv_raw: f64,
+        a1_burial: f64,
         s_hb: f64,
         s_chb: f64,
         s_cl: f64,
@@ -229,7 +231,7 @@ impl ChemistryModel {
             e_solv_raw
         };
         let g_burial = if self.burial_gate[1] > self.burial_gate[0] {
-            let t = ((-e_solv_raw - self.burial_gate[0])
+            let t = ((a1_burial - self.burial_gate[0])
                 / (self.burial_gate[1] - self.burial_gate[0]))
                 .clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
@@ -523,7 +525,7 @@ impl ChemistryModel {
         }
 
         self.combine_pair_energy(
-            e_solv, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg,
+            e_solv, a1, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg,
         )
     }
 
@@ -3272,9 +3274,9 @@ impl MorphMc {
         self.well_chem_and_patch_between_inner(p, q, self.chem.has_cooperativity())
     }
 
-    /// Directed 6.0 A patch contacts `(patch_p_from_q, patch_q_from_p)` between pose `p` and pose `q`.
+    /// Directed 2.8 A hydration-shell patch contacts `(patch_p_from_q, patch_q_from_p)` between pose `p` and pose `q`.
     pub fn patch_pair_between(&self, p: Pose, q: Pose) -> (PatchContact, PatchContact) {
-        let reach = 2. * self.tree.bound + 6.0;
+        let reach = 2. * self.tree.bound + 2.8;
         let dpq = sub(q.position, p.position);
         if dpq[0] * dpq[0] + dpq[1] * dpq[1] + dpq[2] * dpq[2] > reach * reach {
             return (PatchContact::default(), PatchContact::default());
@@ -3288,19 +3290,18 @@ impl MorphMc {
         let q_in_p = matvec(rpt, dpq);
         let mut active_a = Vec::new();
         self.tree
-            .active_atoms_in_frame(&r_rel, &t_rel, &q_in_p, 6.0, &mut active_a);
+            .active_atoms_in_frame(&r_rel, &t_rel, &q_in_p, 2.8, &mut active_a);
         if active_a.is_empty() {
             return (PatchContact::default(), PatchContact::default());
         }
         let mut u6_a = Vec::new();
         let mut u6_b = Vec::new();
         let mut any = false;
-        let vmax = self.vdw.iter().copied().fold(0.0_f64, f64::max);
         for (i, ya) in active_a {
             let ri = self.vdw[i];
-            for j in self.template_grid.near_within(&ya, ri + vmax + 6.0) {
+            for j in self.template_grid.near(&ya) {
                 let r_sum = ri + self.vdw[j];
-                let r_cut = r_sum + 6.0;
+                let r_cut = r_sum + 2.8;
                 let diff = sub(ya, self.centers[j]);
                 let d2 = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
                 if d2 < r_cut * r_cut {
@@ -3310,7 +3311,7 @@ impl MorphMc {
                         any = true;
                     }
                     let g = (d2.sqrt() - r_sum).max(0.0);
-                    let u6 = 1.0 - g * (1.0 / 6.0);
+                    let u6 = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
                     if u6 > u6_a[i] {
                         u6_a[i] = u6;
                     }
@@ -3372,7 +3373,7 @@ impl MorphMc {
                 PatchContact::default(),
             );
         }
-        if self.well.width < 2.8 || (need_patch && self.well.width < 6.0) {
+        if self.well.width < 2.8 {
             let (pa, pb) = if need_patch {
                 self.patch_pair_between(p, q)
             } else {
@@ -3471,8 +3472,8 @@ impl MorphMc {
                 if d2 < r_well * r_well {
                     well_count += 1;
                     if need_patch {
-                        let r_6 = r_sum + 6.0;
-                        if d2 < r_6 * r_6 {
+                        let r_28 = r_sum + 2.8;
+                        if d2 < r_28 * r_28 {
                             if !any_patch {
                                 u6_a.resize(n, 0.0);
                                 u6_b.resize(n, 0.0);
@@ -3481,7 +3482,7 @@ impl MorphMc {
                             let d = d2.sqrt();
                             d_cached = d;
                             let g = (d - r_sum).max(0.0);
-                            let u6 = 1.0 - g * (1.0 / 6.0);
+                            let u6 = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
                             if u6 > u6_a[i] {
                                 u6_a[i] = u6;
                             }
@@ -3592,7 +3593,7 @@ impl MorphMc {
             return (well_count, 0.0, pa, pb);
         }
 
-        let e_solv = if has_solv {
+        let (e_solv, a1_burial) = if has_solv {
             let mut a1 = 0.0f64;
             let mut a2 = 0.0f64;
             let mut a05 = 0.0f64;
@@ -3604,9 +3605,12 @@ impl MorphMc {
                 }
             }
             let sw = &self.chem.solv_weights;
-            sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05
+            (
+                sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05,
+                a1,
+            )
         } else {
-            0.0
+            (0.0, 999.0)
         };
 
         let mut s_cl = 0.0f64;
@@ -3695,7 +3699,7 @@ impl MorphMc {
         }
 
         let e_chem = self.chem.combine_pair_energy(
-            e_solv, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg,
+            e_solv, a1_burial, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg,
         );
         (well_count, e_chem, pa, pb)
     }

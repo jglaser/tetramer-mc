@@ -167,10 +167,10 @@ def main():
     flags = atom_chemistry_flags(names)
     weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
     solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5226]
-    solv_cap = 13.0
-    burial_gate = [3.0, 6.0]
-    coop_weights = [0.0, 14.0]
-    junc_weights = [6.0, 0.0]
+    solv_cap = 12.5
+    burial_gate = [12.0, 26.0]
+    coop_weights = [2.2, 4.0]
+    junc_weights = [2.0, 2.5]
     model = {
         'flags': flags,
         'weights': weights,

@@ -211,6 +211,27 @@ impl ChemistryModel {
             || ((fi & CHEM_ANI != 0) && (fj & CHEM_CAT != 0))
             || ((fi & CHEM_ANI != 0) && (fj & CHEM_NDON != 0))
             || ((fi & CHEM_NDON != 0) && (fj & CHEM_ANI != 0))
+            || ((fi & CHEM_TYR_OH != 0) && (fj & CHEM_NACC != 0))
+            || ((fi & CHEM_NACC != 0) && (fj & CHEM_TYR_OH != 0))
+    }
+
+    fn direct_complementary(fi: u8, fj: u8) -> bool {
+        ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
+            || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
+            || ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
+            || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
+            || ((fi & CHEM_CAT != 0) && (fj & CHEM_ANI != 0))
+            || ((fi & CHEM_ANI != 0) && (fj & CHEM_CAT != 0))
+            || ((fi & CHEM_TYR_OH != 0) && (fj & CHEM_NACC != 0))
+            || ((fi & CHEM_NACC != 0) && (fj & CHEM_TYR_OH != 0))
+    }
+
+    /// Whether chemical flag byte `f` represents a polar or charged side-chain functional group
+    /// (cationic, anionic, aromatic OH, amide ND2/NE2, or dual donor+acceptor hydroxyl Ser/Thr/Tyr OH),
+    /// as opposed to pure backbone NH (`CHEM_NDON | CHEM_BB_NH`) or backbone CO (`CHEM_NACC | CHEM_BB_CO`).
+    fn is_sidechain_polar(f: u8) -> bool {
+        (f & (CHEM_CAT | CHEM_ANI | CHEM_TYR_OH | CHEM_AMIDE_ND)) != 0
+            || (f & (CHEM_NDON | CHEM_NACC)) == (CHEM_NDON | CHEM_NACC)
     }
 
     /// Pairwise chemistry residual energy (kT) between body `p` and body `q` with template
@@ -1376,7 +1397,7 @@ impl MorphMc {
                     continue;
                 }
                 let d = sub(test_pt, xj);
-                let cut = rj + probe - 0.2;
+                let cut = rj + probe - 0.35;
                 if d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < cut * cut {
                     exposed = false;
                     break;
@@ -1396,6 +1417,12 @@ impl MorphMc {
     /// Generate `count` monomer-only surface-normal-opposed relative poses `(Pose, weight)`
     /// (plus reciprocal inverse poses for symmetry) that are hard-core valid and within
     /// `contact_gap`, optionally weighted by `exp(-beta * E_pair(identity, rel))` (clamped to `<= 25`).
+    ///
+    /// When `self.chem` is enabled with per-atom chemical functional group flags, systematically
+    /// aligns deduplicated complementary polar/charged surface atom pairs `(i, j)` across 12
+    /// axial twist angles and a 5-point local normal tilt cone (`0 deg`, `+-10 deg`) with radial
+    /// outward un-clashing (`0.25 A` steps up to `2.0 A`), then selects `count` diverse
+    /// low-energy dimer modes ranked by `pair_surrogate_energy`.
     pub fn generate_surface_normal_prior(
         &self,
         rng: &mut StdRng,
@@ -1411,6 +1438,504 @@ impl MorphMc {
             orientation: [1., 0., 0., 0.],
         };
         let placed_id = Placed::new(identity);
+
+        if self.chem.is_enabled() && self.chem.flags.len() == self.centers.len() {
+            let mut pol_rep: Vec<usize> = Vec::new();
+            for &i in &surf {
+                let fi = self.chem.flags[i];
+                if fi == 0 {
+                    continue;
+                }
+                let xi = self.centers[i];
+                if pol_rep.iter().all(|&k| {
+                    self.chem.flags[k] != fi || norm(sub(xi, self.centers[k])) >= 2.5
+                }) {
+                    pol_rep.push(i);
+                }
+            }
+            let sc_rep: Vec<usize> = {
+                let v: Vec<usize> = pol_rep
+                    .iter()
+                    .copied()
+                    .filter(|&i| ChemistryModel::is_sidechain_polar(self.chem.flags[i]))
+                    .collect();
+                if v.is_empty() {
+                    pol_rep.clone()
+                } else {
+                    v
+                }
+            };
+            let mut comp_pairs: Vec<(usize, usize)> = Vec::new();
+            for &i in &sc_rep {
+                let fi = self.chem.flags[i];
+                for &j in &sc_rep {
+                    if i != j {
+                        let fj = self.chem.flags[j];
+                        if ChemistryModel::direct_complementary(fi, fj) {
+                            comp_pairs.push((i, j));
+                        }
+                    }
+                }
+                for &j in &pol_rep {
+                    if !ChemistryModel::is_sidechain_polar(self.chem.flags[j]) {
+                        let fj = self.chem.flags[j];
+                        if ChemistryModel::direct_complementary(fi, fj) {
+                            comp_pairs.push((i, j));
+                        }
+                    }
+                }
+            }
+            if !comp_pairs.is_empty() {
+                let mut surf_rep: Vec<usize> = Vec::new();
+                for &i in &surf {
+                    let xi = self.centers[i];
+                    if surf_rep
+                        .iter()
+                        .all(|&k| norm(sub(xi, self.centers[k])) >= 2.2)
+                    {
+                        surf_rep.push(i);
+                    }
+                }
+                let sr_centers: Vec<Vec3> = surf_rep.iter().map(|&idx| self.centers[idx]).collect();
+                let sr_cut = 2.6;
+                let sr_cut2 = sr_cut * sr_cut;
+                let sr_bound_cut2 = (self.tree.bound + sr_cut) * (self.tree.bound + sr_cut);
+
+                let pol_centers: Vec<Vec3> = pol_rep.iter().map(|&idx| self.centers[idx]).collect();
+                let pol_flags: Vec<u8> = pol_rep.iter().map(|&idx| self.chem.flags[idx]).collect();
+                let pol_normals: Vec<Vec3> =
+                    pol_rep.iter().map(|&idx| self.body_normals[idx]).collect();
+                let pol_cut = 6.5;
+                let pol_cut2 = pol_cut * pol_cut;
+                let motif_cut2 = 5.8 * 5.8;
+                let hb_cut2 = 4.3 * 4.3;
+                let pol_bound_cut2 = (self.tree.bound + pol_cut) * (self.tree.bound + pol_cut);
+
+                let build_voxel_csr = |pts: &[Vec3], cut: f64, cell: f64| {
+                    let half = self.tree.bound + cut + cell;
+                    let dim = ((2.0 * half / cell).ceil() as usize).max(1);
+                    let r_exp2 = (cut + 0.5 * 3.0f64.sqrt() * cell).powi(2);
+                    let mut offsets = Vec::with_capacity(dim * dim * dim + 1);
+                    let mut atoms = Vec::new();
+                    offsets.push(0u32);
+                    for ix in 0..dim {
+                        let cx = -half + (ix as f64 + 0.5) * cell;
+                        for iy in 0..dim {
+                            let cy = -half + (iy as f64 + 0.5) * cell;
+                            for iz in 0..dim {
+                                let cz = -half + (iz as f64 + 0.5) * cell;
+                                for (a_idx, &xa) in pts.iter().enumerate() {
+                                    let dx = xa[0] - cx;
+                                    let dy = xa[1] - cy;
+                                    let dz = xa[2] - cz;
+                                    if dx * dx + dy * dy + dz * dz <= r_exp2 {
+                                        atoms.push(a_idx as u16);
+                                    }
+                                }
+                                offsets.push(atoms.len() as u32);
+                            }
+                        }
+                    }
+                    (half, 1.0 / cell, dim as isize, offsets, atoms)
+                };
+
+                let (sr_half, sr_inv_cell, sr_dim, sr_offsets, sr_atoms) =
+                    build_voxel_csr(&sr_centers, sr_cut, 2.6);
+                let (pol_half, pol_inv_cell, pol_dim, pol_offsets, pol_atoms) =
+                    build_voxel_csr(&pol_centers, pol_cut, 3.25);
+
+                let sr_clashes = |r_rel: [[f64; 3]; 3], t_rel: Vec3| -> bool {
+                    let r_rel_t = transpose(r_rel);
+                    let q_in_p = scale(matvec(r_rel_t, t_rel), -1.0);
+                    for &xb in &sr_centers {
+                        let d_center = sub(xb, q_in_p);
+                        if d_center[0] * d_center[0]
+                            + d_center[1] * d_center[1]
+                            + d_center[2] * d_center[2]
+                            > sr_bound_cut2
+                        {
+                            continue;
+                        }
+                        let xb_w = add(matvec(r_rel, xb), t_rel);
+                        let ix = ((xb_w[0] + sr_half) * sr_inv_cell).floor() as isize;
+                        let iy = ((xb_w[1] + sr_half) * sr_inv_cell).floor() as isize;
+                        let iz = ((xb_w[2] + sr_half) * sr_inv_cell).floor() as isize;
+                        if ix < 0
+                            || ix >= sr_dim
+                            || iy < 0
+                            || iy >= sr_dim
+                            || iz < 0
+                            || iz >= sr_dim
+                        {
+                            continue;
+                        }
+                        let v_idx = ((ix * sr_dim + iy) * sr_dim + iz) as usize;
+                        let start = sr_offsets[v_idx] as usize;
+                        let end = sr_offsets[v_idx + 1] as usize;
+                        for &a_u16 in &sr_atoms[start..end] {
+                            let dx = sub(xb_w, sr_centers[a_u16 as usize]);
+                            if dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2] < sr_cut2 {
+                                return true;
+                            }
+                        }
+                    }
+                    false
+                };
+
+                let score_pol_comp = |r_rel: [[f64; 3]; 3], t_rel: Vec3| -> (usize, usize) {
+                    let r_rel_t = transpose(r_rel);
+                    let q_in_p = scale(matvec(r_rel_t, t_rel), -1.0);
+                    let mut val_a = [0u8; 256];
+                    let mut motif_score = 0isize;
+                    let mut area_score = 0usize;
+                    for (b_idx, &xb) in pol_centers.iter().enumerate() {
+                        let d_center = sub(xb, q_in_p);
+                        if d_center[0] * d_center[0]
+                            + d_center[1] * d_center[1]
+                            + d_center[2] * d_center[2]
+                            > pol_bound_cut2
+                        {
+                            continue;
+                        }
+                        let xb_w = add(matvec(r_rel, xb), t_rel);
+                        let ix = ((xb_w[0] + pol_half) * pol_inv_cell).floor() as isize;
+                        let iy = ((xb_w[1] + pol_half) * pol_inv_cell).floor() as isize;
+                        let iz = ((xb_w[2] + pol_half) * pol_inv_cell).floor() as isize;
+                        if ix < 0
+                            || ix >= pol_dim
+                            || iy < 0
+                            || iy >= pol_dim
+                            || iz < 0
+                            || iz >= pol_dim
+                        {
+                            continue;
+                        }
+                        let v_idx = ((ix * pol_dim + iy) * pol_dim + iz) as usize;
+                        let start = pol_offsets[v_idx] as usize;
+                        let end = pol_offsets[v_idx + 1] as usize;
+                        if start == end {
+                            continue;
+                        }
+                        let nb_w = matvec(r_rel, pol_normals[b_idx]);
+                        let fb = pol_flags[b_idx];
+                        let scb = ChemistryModel::is_sidechain_polar(fb);
+                        let mut val_b = 0u8;
+                        for &a_u16 in &pol_atoms[start..end] {
+                            let a_idx = a_u16 as usize;
+                            let dx = sub(xb_w, pol_centers[a_idx]);
+                            let d2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+                            if d2 > pol_cut2 {
+                                continue;
+                            }
+                            let na = pol_normals[a_idx];
+                            let dot_n = na[0] * nb_w[0] + na[1] * nb_w[1] + na[2] * nb_w[2];
+                            if dot_n >= -0.25 {
+                                continue;
+                            }
+                            let fa = pol_flags[a_idx];
+                            let is_comp = ChemistryModel::direct_complementary(fa, fb);
+                            if is_comp {
+                                area_score += 1;
+                            }
+                            if d2 > motif_cut2 {
+                                continue;
+                            }
+                            if d2 <= hb_cut2
+                                && (((fa & CHEM_PURE_ACC != 0) && (fb & CHEM_PURE_ACC != 0))
+                                    || ((fa & CHEM_PURE_DON != 0) && (fb & CHEM_PURE_DON != 0))
+                                    || ((fa & CHEM_CAT != 0) && (fb & CHEM_CAT != 0))
+                                    || ((fa & CHEM_ANI != 0) && (fb & CHEM_ANI != 0)))
+                            {
+                                motif_score -= 2;
+                                continue;
+                            }
+                            if is_comp && val_b < 2 && a_idx < 256 && val_a[a_idx] < 2 {
+                                let sca = ChemistryModel::is_sidechain_polar(fa);
+                                if !sca && !scb && d2 > hb_cut2 {
+                                    continue;
+                                }
+                                val_b += 1;
+                                val_a[a_idx] += 1;
+                                let mut w = if sca && scb { 2isize } else { 1isize };
+                                if ((fa & CHEM_TYR_OH != 0)
+                                    && (fb & (CHEM_AMIDE_ND | CHEM_CAT) != 0))
+                                    || ((fb & CHEM_TYR_OH != 0)
+                                        && (fa & (CHEM_AMIDE_ND | CHEM_CAT) != 0))
+                                {
+                                    w += 2;
+                                } else if ((fa & (CHEM_CAT | CHEM_ANI)) != 0)
+                                    || ((fb & (CHEM_CAT | CHEM_ANI)) != 0)
+                                {
+                                    w += 1;
+                                }
+                                motif_score += w;
+                            }
+                        }
+                    }
+                    (motif_score.max(0) as usize, area_score)
+                };
+
+                // Stage 1: Coarse complementary patch alignment across 12 twists at gap = 1.8 A.
+                let min_com_dist = 0.95 * self.tree.bound;
+                let mut stage1_motif: Vec<(usize, usize, usize, usize)> = Vec::new();
+                let mut stage1_area: Vec<(usize, usize, usize, usize)> = Vec::new();
+                for &(i, j) in &comp_pairs {
+                    let ni = self.body_normals[i];
+                    let nj = self.body_normals[j];
+                    let target = [-ni[0], -ni[1], -ni[2]];
+                    let r_align = rotation_between_unit(nj, target);
+                    let sep1 = self.vdw[i] + self.vdw[j] + 1.8;
+                    let xi_shift = add(self.centers[i], scale(ni, sep1));
+                    let mut best_m: Option<(usize, usize)> = None;
+                    let mut best_a: Option<(usize, usize)> = None;
+                    for k in 0..12usize {
+                        let psi = (k as f64) * (2.0 * std::f64::consts::PI / 12.0);
+                        let half_psi = 0.5 * psi;
+                        let q_twist = [
+                            half_psi.cos(),
+                            ni[0] * half_psi.sin(),
+                            ni[1] * half_psi.sin(),
+                            ni[2] * half_psi.sin(),
+                        ];
+                        let r0 = matmul(rotation(q_twist), r_align);
+                        let t0 = sub(xi_shift, matvec(r0, self.centers[j]));
+                        if norm(t0) < min_com_dist || sr_clashes(r0, t0) {
+                            continue;
+                        }
+                        let (m_score, a_score) = score_pol_comp(r0, t0);
+                        if m_score >= 14 && best_m.map_or(true, |(best_c, _)| m_score > best_c) {
+                            best_m = Some((m_score, k));
+                        }
+                        if a_score >= 18 && best_a.map_or(true, |(best_c, _)| a_score > best_c) {
+                            best_a = Some((a_score, k));
+                        }
+                    }
+                    if let Some((m_score, k)) = best_m {
+                        stage1_motif.push((m_score, i, j, k));
+                    }
+                    if let Some((a_score, k)) = best_a {
+                        stage1_area.push((a_score, i, j, k));
+                    }
+                }
+                stage1_motif.sort_by(|a, b| b.0.cmp(&a.0));
+                stage1_area.sort_by(|a, b| b.0.cmp(&a.0));
+
+                // Filter stage1 with per-atom diversity cap before Stage 2 un-clashing,
+                // allocating half the Stage-2 budget to high-specificity motif contacts and
+                // half to extensive polar-network area contacts.
+                let mut top_stage1: Vec<(u8, usize, usize, usize, usize)> = Vec::new();
+                let motif_stage2 = (count * 3).max(180);
+                let area_stage2 = (count * 5).max(320);
+                for (tag, pool, limit, caps) in [
+                    (0u8, &stage1_motif, motif_stage2, [2usize, 4, 8]),
+                    (1u8, &stage1_area, area_stage2, [2usize, 5, 8]),
+                ] {
+                    let mut s1_use: std::collections::HashMap<usize, usize> =
+                        std::collections::HashMap::new();
+                    let mut added = 0usize;
+                    for cap in caps {
+                        for &(c_score, i, j, k) in pool {
+                            if added >= limit {
+                                break;
+                            }
+                            if top_stage1.iter().any(|&(t_tag, _, ti, tj, tk)| {
+                                t_tag == tag && ti == i && tj == j && tk == k
+                            }) {
+                                continue;
+                            }
+                            if *s1_use.get(&i).unwrap_or(&0) >= cap
+                                || *s1_use.get(&j).unwrap_or(&0) >= cap
+                            {
+                                continue;
+                            }
+                            *s1_use.entry(i).or_insert(0) += 1;
+                            *s1_use.entry(j).or_insert(0) += 1;
+                            top_stage1.push((tag, c_score, i, j, k));
+                            added += 1;
+                        }
+                    }
+                }
+
+                // Stage 2: Exact 5-tilt + radial retraction un-clashing with SphereTree::overlaps.
+                let tilt_half = 0.5 * 10f64.to_radians();
+                let mut by_motif: Vec<(usize, usize, f64, usize, usize, Pose)> = Vec::new();
+                let mut by_area: Vec<(usize, usize, f64, usize, usize, Pose)> = Vec::new();
+                for &(tag, s1_score, i, j, k) in &top_stage1 {
+                    let ni = self.body_normals[i];
+                    let nj = self.body_normals[j];
+                    let target = [-ni[0], -ni[1], -ni[2]];
+                    let r_align = rotation_between_unit(nj, target);
+                    let psi = (k as f64) * (2.0 * std::f64::consts::PI / 12.0);
+                    let half_psi = 0.5 * psi;
+                    let q_twist = [
+                        half_psi.cos(),
+                        ni[0] * half_psi.sin(),
+                        ni[1] * half_psi.sin(),
+                        ni[2] * half_psi.sin(),
+                    ];
+                    let r_base = matmul(rotation(q_twist), r_align);
+                    let ref_ax = if ni[0].abs() < 0.9 {
+                        [1.0, 0.0, 0.0]
+                    } else {
+                        [0.0, 1.0, 0.0]
+                    };
+                    let u1_raw = [
+                        ni[1] * ref_ax[2] - ni[2] * ref_ax[1],
+                        ni[2] * ref_ax[0] - ni[0] * ref_ax[2],
+                        ni[0] * ref_ax[1] - ni[1] * ref_ax[0],
+                    ];
+                    let u1 = scale(u1_raw, 1.0 / norm(u1_raw).max(1e-12));
+                    let u2 = [
+                        ni[1] * u1[2] - ni[2] * u1[1],
+                        ni[2] * u1[0] - ni[0] * u1[2],
+                        ni[0] * u1[1] - ni[1] * u1[0],
+                    ];
+                    let r_tilts = [
+                        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                        cayley(scale(u1, tilt_half)),
+                        cayley(scale(u1, -tilt_half)),
+                        cayley(scale(u2, tilt_half)),
+                        cayley(scale(u2, -tilt_half)),
+                    ];
+                    let base_sep = self.vdw[i] + self.vdw[j] + 0.6;
+                    let mut best_s = 99usize;
+                    let mut best_pose: Option<Pose> = None;
+                    for r_tilt in &r_tilts {
+                        let r_rel = matmul(*r_tilt, r_base);
+                        let q_rel = quaternion(r_rel);
+                        let n_dir = matvec(*r_tilt, ni);
+                        let rj_rot = matvec(r_rel, self.centers[j]);
+                        let t0 = sub(add(self.centers[i], scale(n_dir, base_sep)), rj_rot);
+                        let t_norm = norm(t0);
+                        if t_norm < 1e-6 {
+                            continue;
+                        }
+                        let t_hat = scale(t0, 1.0 / t_norm);
+                        let max_s = best_s.min(8);
+                        let pos_max = add(t0, scale(t_hat, 0.25 * (max_s as f64)));
+                        let pose_max = Pose {
+                            position: pos_max,
+                            orientation: q_rel,
+                        };
+                        if self.tree.overlaps(&placed_id, &Placed::new(pose_max)) {
+                            continue;
+                        }
+                        for s in 0..=max_s {
+                            let pos = add(t0, scale(t_hat, 0.25 * (s as f64)));
+                            let cand = Pose {
+                                position: pos,
+                                orientation: q_rel,
+                            };
+                            if !self.tree.overlaps(&placed_id, &Placed::new(cand)) {
+                                if s < best_s {
+                                    best_s = s;
+                                    best_pose = Some(cand);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if let Some(pose) = best_pose {
+                        let e_pair = self.pair_surrogate_energy(identity, pose);
+                        if tag == 0 {
+                            let (s2_m, _) =
+                                score_pol_comp(rotation(pose.orientation), pose.position);
+                            by_motif.push((s2_m, s1_score, e_pair, i, j, pose));
+                        } else {
+                            by_area.push((0, s1_score, e_pair, i, j, pose));
+                        }
+                    }
+                }
+
+                // Select top poses from both the motif-specificity ranking and the
+                // extensive-network ranking so both compact motif contacts (m1) and
+                // broad polar contacts (m6) are represented in the memory prior.
+                by_motif.sort_by(|a, b| {
+                    let sa = (a.0 as f64) - 0.15 * a.2.clamp(-6.0, 6.0);
+                    let sb = (b.0 as f64) - 0.15 * b.2.clamp(-6.0, 6.0);
+                    sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                });
+                by_area.sort_by(|a, b| {
+                    let sa = 0.8 * (a.1 as f64) - a.2;
+                    let sb = 0.8 * (b.1 as f64) - b.2;
+                    sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+                });
+
+                let mut selected: Vec<(Pose, f64)> = Vec::with_capacity(count);
+                let rot_cut = 20f64.to_radians();
+                let half_count = count / 2;
+                for (pool, target_sel, caps) in [
+                    (&by_motif, half_count, [1usize, 2, usize::MAX]),
+                    (&by_area, count, [2usize, 5, usize::MAX]),
+                ] {
+                    let mut atom_use: std::collections::HashMap<usize, usize> =
+                        std::collections::HashMap::new();
+                    for cap in caps {
+                        for &(_, _, e_pair, i, j, pose) in pool {
+                            if selected.len() >= target_sel {
+                                break;
+                            }
+                            if *atom_use.get(&i).unwrap_or(&0) >= cap
+                                || *atom_use.get(&j).unwrap_or(&0) >= cap
+                            {
+                                continue;
+                            }
+                            let r_p = rotation(pose.orientation);
+                            let r_inv = transpose(r_p);
+                            let inv_pos = matvec(r_inv, pose.position).map(|x| -x);
+                            let distinct = selected.iter().all(|&(q, _)| {
+                                let r_q = rotation(q.orientation);
+                                let same_direct = if norm(sub(pose.position, q.position)) < 3.5 {
+                                    let r_diff = matmul(transpose(r_p), r_q);
+                                    let tr = r_diff[0][0] + r_diff[1][1] + r_diff[2][2];
+                                    ((tr - 1.0) * 0.5).clamp(-1.0, 1.0).acos() < rot_cut
+                                } else {
+                                    false
+                                };
+                                let same_inv = if norm(sub(inv_pos, q.position)) < 3.5 {
+                                    let r_diff = matmul(transpose(r_inv), r_q);
+                                    let tr = r_diff[0][0] + r_diff[1][1] + r_diff[2][2];
+                                    ((tr - 1.0) * 0.5).clamp(-1.0, 1.0).acos() < rot_cut
+                                } else {
+                                    false
+                                };
+                                !same_direct && !same_inv
+                            });
+                            if distinct {
+                                *atom_use.entry(i).or_insert(0) += 1;
+                                *atom_use.entry(j).or_insert(0) += 1;
+                                selected.push((pose, e_pair));
+                            }
+                        }
+                    }
+                }
+                if !selected.is_empty() {
+                    let mut out = Vec::with_capacity(2 * selected.len());
+                    for (pose, e_pair) in selected {
+                        let w = if beta > 0. {
+                            (-beta * e_pair).clamp(-25.0, 25.0).exp()
+                        } else {
+                            1.0
+                        };
+                        let r_inv = transpose(rotation(pose.orientation));
+                        let inv_pose = Pose {
+                            position: matvec(r_inv, pose.position).map(|x| -x),
+                            orientation: quaternion(r_inv),
+                        };
+                        out.push((pose, 0.5 * w));
+                        out.push((inv_pose, 0.5 * w));
+                    }
+                    let wsum: f64 = out.iter().map(|&(_, w)| w).sum();
+                    if wsum > 0.0 {
+                        for item in &mut out {
+                            item.1 /= wsum;
+                        }
+                    }
+                    return out;
+                }
+            }
+        }
+
         let gap_max = self.contact_gap.unwrap_or(2.8).min(2.5);
         let mut out = Vec::with_capacity(2 * count);
         let max_trials = (count * 50).max(500);
@@ -5220,5 +5745,115 @@ mod tests {
             );
         }
         assert!((ca - cb).abs() < 0.025, "contact fraction {ca:.4} vs {cb:.4}");
+    }
+
+    #[test]
+    fn chemical_complementarity_surface_prior_discovers_monomer_native_contacts() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let shape_path = root.join("examples/monomer-shape.json");
+        let chem_path = root.join("examples/chemistry-model-monomer.json");
+        if !shape_path.exists() || !chem_path.exists() {
+            return;
+        }
+        let shape: Shape =
+            serde_json::from_str(&std::fs::read_to_string(&shape_path).unwrap()).unwrap();
+        let chem: ChemistryModel =
+            serde_json::from_str(&std::fs::read_to_string(&chem_path).unwrap()).unwrap();
+        let n = shape.atoms.len();
+        let tree = SphereTree::new(shape).unwrap();
+        let wall = Container::new(150.0, &tree).unwrap();
+        let model = SolvationModel {
+            probe: 1.4,
+            pressure: 0.0,
+            coefficients: vec![[0.0; 3]; n],
+            atom_types: (0..n).collect(),
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 0.0,
+            width: 0.6,
+        };
+        let identity = Pose {
+            position: [0.0; 3],
+            orientation: [1.0, 0.0, 0.0, 0.0],
+        };
+        let mc = MorphMc::new(tree, wall, model, well, vec![identity], vec![true])
+            .unwrap()
+            .with_chemistry_model(chem)
+            .unwrap()
+            .with_contact_library(2.8)
+            .unwrap();
+        let t0 = std::time::Instant::now();
+        let mut rng = StdRng::seed_from_u64(42);
+        let prior = mc.generate_surface_normal_prior(&mut rng, 64, 0.5);
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        println!("generate_surface_normal_prior(64) took {elapsed_ms:.1} ms, len={}", prior.len());
+        assert_eq!(prior.len(), 128);
+        let placed_id = Placed::new(identity);
+        for &(p, w) in &prior {
+            assert!(!mc.tree.overlaps(&placed_id, &Placed::new(p)));
+            assert!(w > 0.0);
+        }
+        let nat_modes = [
+            (
+                "m1",
+                Pose {
+                    position: [19.47624995357571, 18.42510338365495, -9.475000000000003],
+                    orientation: [0.7071067811865477, 0.0, 0.0, 0.7071067811865475],
+                },
+            ),
+            (
+                "m2",
+                Pose {
+                    position: [19.47624995357571, 18.42510338365495, 28.424999999999994],
+                    orientation: [0.7071067811865477, 0.0, 0.0, 0.7071067811865475],
+                },
+            ),
+            (
+                "m4",
+                Pose {
+                    position: [-20.073750046424273, -20.07375004642428, -19.451561877005823],
+                    orientation: [0.0, 0.7071067811865477, -0.7071067811865475, 0.0],
+                },
+            ),
+            (
+                "m6",
+                Pose {
+                    position: [21.124896616345055, -21.124896616345048, -0.5015618770058232],
+                    orientation: [0.0, 0.7071067811865475, 0.7071067811865477, 0.0],
+                },
+            ),
+        ];
+        for (name, nat) in nat_modes {
+            let r_nat = rotation(nat.orientation);
+            let mut best_sc = 999.0f64;
+            let mut best_dt = 999.0f64;
+            let mut best_dth = 999.0f64;
+            let mut best_e = 0.0f64;
+            for &(p, _) in &prior {
+                let dt = norm(sub(p.position, nat.position));
+                let r_p = rotation(p.orientation);
+                let r_diff = matmul(transpose(r_p), r_nat);
+                let tr = r_diff[0][0] + r_diff[1][1] + r_diff[2][2];
+                let dth = ((tr - 1.0) * 0.5).clamp(-1.0, 1.0).acos().to_degrees();
+                let sc = ((dt / 2.0).powi(2) + (dth / 20.0).powi(2)).sqrt();
+                if sc < best_sc {
+                    best_sc = sc;
+                    best_dt = dt;
+                    best_dth = dth;
+                    best_e = mc.pair_surrogate_energy(identity, p);
+                }
+            }
+            println!(
+                "  {name}: best_sc={best_sc:.2} (dt={best_dt:.2} A, dth={best_dth:.1} deg, E={best_e:+.2} kT), E_nat={:+.2} kT",
+                mc.pair_surrogate_energy(identity, nat)
+            );
+            if name == "m1" || name == "m6" {
+                assert!(
+                    best_sc < 1.8 && best_dt < 3.0 && best_dth < 20.0,
+                    "expected {name} to be discovered in surface prior, got sc={best_sc:.2} (dt={best_dt:.2} A, dth={best_dth:.1} deg)"
+                );
+            }
+        }
     }
 }

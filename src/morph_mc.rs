@@ -336,10 +336,9 @@ impl ChemistryModel {
         let mut min_d_b = vec![99.0f64; n];
         let mut min_comp_b = vec![99.0f64; n];
 
-        let mut s_hb = 0.0f64;
-        let mut s_chb = 0.0f64;
         let mut s_wb_raw = 0.0f64;
-        let mut chb_mids: Vec<Vec3> = Vec::new();
+        let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
+        let mut chb_cands: Vec<(usize, usize, f64, Vec3, f64)> = Vec::new();
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
         let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
 
@@ -402,15 +401,12 @@ impl ChemistryModel {
                     if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
                     {
-                        s_hb += gh;
+                        hb_cands.push((i, j, gh));
                     }
                     if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
                     {
-                        s_chb += gh;
-                        if d < 3.6 {
-                            chb_mids.push(scale(add(ya, xb), 0.5));
-                        }
+                        chb_cands.push((i, j, gh, scale(add(ya, xb), 0.5), d));
                     }
                 }
                 if (3.4..=4.5).contains(&d)
@@ -441,6 +437,40 @@ impl ChemistryModel {
         let sw = &self.solv_weights;
         let e_solv = sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05;
 
+        hb_cands.sort_by(|a, b| {
+            b.2.total_cmp(&a.2)
+                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+        });
+        let mut used_hb_a = Vec::new();
+        let mut used_hb_b = Vec::new();
+        let mut s_hb = 0.0f64;
+        for (i, j, gh) in hb_cands {
+            if !used_hb_a.contains(&i) && !used_hb_b.contains(&j) {
+                used_hb_a.push(i);
+                used_hb_b.push(j);
+                s_hb += gh;
+            }
+        }
+
+        chb_cands.sort_by(|a, b| {
+            b.2.total_cmp(&a.2)
+                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+        });
+        let mut used_chb_a = Vec::new();
+        let mut used_chb_b = Vec::new();
+        let mut s_chb = 0.0f64;
+        let mut chb_mids: Vec<Vec3> = Vec::new();
+        for (i, j, gh, mid_ij, d) in chb_cands {
+            if !used_chb_a.contains(&i) && !used_chb_b.contains(&j) {
+                used_chb_a.push(i);
+                used_chb_b.push(j);
+                s_chb += gh;
+                if d < 3.6 {
+                    chb_mids.push(mid_ij);
+                }
+            }
+        }
+
         let mut s_cl = 0.0f64;
         if !tn_pairs.is_empty() && !chb_mids.is_empty() {
             let cats_a: Vec<Vec3> = centers
@@ -455,8 +485,25 @@ impl ChemistryModel {
                 .filter(|&(j, _)| self.flags[j] & CHEM_CAT != 0)
                 .map(|(_, &x)| x)
                 .collect();
+            let anis_a: Vec<Vec3> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.flags[i] & CHEM_ANI != 0)
+                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
+                .collect();
+            let anis_b: Vec<Vec3> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.flags[j] & CHEM_ANI != 0)
+                .map(|(_, &x)| x)
+                .collect();
             let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
             for (i, j, mid, d) in tn_pairs {
+                let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                if da_ani < 5.5 || db_ani < 5.5 {
+                    continue;
+                }
                 let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 if da < 8.0 && db < 8.0 {
@@ -576,10 +623,9 @@ impl ChemistryModel {
         let mut min_d_b = vec![99.0f64; n];
         let mut min_comp_b = vec![99.0f64; n];
 
-        let mut s_hb = 0.0f64;
-        let mut s_chb = 0.0f64;
         let mut s_wb_raw = 0.0f64;
-        let mut chb_mids: Vec<Vec3> = Vec::new();
+        let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
+        let mut chb_cands: Vec<(usize, usize, f64, Vec3, f64)> = Vec::new();
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
         let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
 
@@ -620,15 +666,12 @@ impl ChemistryModel {
                     if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
                     {
-                        s_hb += g;
+                        hb_cands.push((i, j, g));
                     }
                     if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
                     {
-                        s_chb += g;
-                        if d < 3.6 {
-                            chb_mids.push(scale(add(ya, xb), 0.5));
-                        }
+                        chb_cands.push((i, j, g, scale(add(ya, xb), 0.5), d));
                     }
                 }
                 if (3.4..=4.5).contains(&d)
@@ -642,6 +685,40 @@ impl ChemistryModel {
                         || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0)))
                 {
                     clash_candidates.push((i, j, d));
+                }
+            }
+        }
+
+        hb_cands.sort_by(|a, b| {
+            b.2.total_cmp(&a.2)
+                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+        });
+        let mut used_hb_a = Vec::new();
+        let mut used_hb_b = Vec::new();
+        let mut s_hb = 0.0f64;
+        for (i, j, g) in hb_cands {
+            if !used_hb_a.contains(&i) && !used_hb_b.contains(&j) {
+                used_hb_a.push(i);
+                used_hb_b.push(j);
+                s_hb += g;
+            }
+        }
+
+        chb_cands.sort_by(|a, b| {
+            b.2.total_cmp(&a.2)
+                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+        });
+        let mut used_chb_a = Vec::new();
+        let mut used_chb_b = Vec::new();
+        let mut s_chb = 0.0f64;
+        let mut chb_mids: Vec<Vec3> = Vec::new();
+        for (i, j, g, mid_ij, d) in chb_cands {
+            if !used_chb_a.contains(&i) && !used_chb_b.contains(&j) {
+                used_chb_a.push(i);
+                used_chb_b.push(j);
+                s_chb += g;
+                if d < 3.6 {
+                    chb_mids.push(mid_ij);
                 }
             }
         }
@@ -660,8 +737,25 @@ impl ChemistryModel {
                 .filter(|&(j, _)| self.flags[j] & CHEM_CAT != 0)
                 .map(|(_, &x)| x)
                 .collect();
+            let anis_a: Vec<Vec3> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.flags[i] & CHEM_ANI != 0)
+                .map(|(_, &x)| matvec(rqt, sub(add(matvec(rp, x), p.position), q.position)))
+                .collect();
+            let anis_b: Vec<Vec3> = centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.flags[j] & CHEM_ANI != 0)
+                .map(|(_, &x)| x)
+                .collect();
             let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
             for (i, j, mid, d) in tn_pairs {
+                let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                if da_ani < 5.5 || db_ani < 5.5 {
+                    continue;
+                }
                 let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 if da < 8.0 && db < 8.0 {
@@ -3434,10 +3528,9 @@ impl MorphMc {
         let mut min_d_b: Vec<f64> = Vec::new();
         let mut min_comp_b: Vec<f64> = Vec::new();
 
-        let mut s_hb = 0.0f64;
-        let mut s_chb = 0.0f64;
         let mut s_wb_raw = 0.0f64;
-        let mut chb_mids: Vec<Vec3> = Vec::new();
+        let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
+        let mut chb_cands: Vec<(usize, usize, f64, Vec3, f64)> = Vec::new();
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
         let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
 
@@ -3554,15 +3647,12 @@ impl MorphMc {
                     if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
                     {
-                        s_hb += gh;
+                        hb_cands.push((i, j, gh));
                     }
                     if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
                     {
-                        s_chb += gh;
-                        if d < 3.6 {
-                            chb_mids.push(scale(add(ya, xb), 0.5));
-                        }
+                        chb_cands.push((i, j, gh, scale(add(ya, xb), 0.5), d));
                     }
                 }
                 if (3.4..=4.5).contains(&d)
@@ -3613,6 +3703,40 @@ impl MorphMc {
             (0.0, 999.0)
         };
 
+        hb_cands.sort_by(|a, b| {
+            b.2.total_cmp(&a.2)
+                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+        });
+        let mut used_hb_a = Vec::new();
+        let mut used_hb_b = Vec::new();
+        let mut s_hb = 0.0f64;
+        for (i, j, gh) in hb_cands {
+            if !used_hb_a.contains(&i) && !used_hb_b.contains(&j) {
+                used_hb_a.push(i);
+                used_hb_b.push(j);
+                s_hb += gh;
+            }
+        }
+
+        chb_cands.sort_by(|a, b| {
+            b.2.total_cmp(&a.2)
+                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+        });
+        let mut used_chb_a = Vec::new();
+        let mut used_chb_b = Vec::new();
+        let mut s_chb = 0.0f64;
+        let mut chb_mids: Vec<Vec3> = Vec::new();
+        for (i, j, gh, mid_ij, d) in chb_cands {
+            if !used_chb_a.contains(&i) && !used_chb_b.contains(&j) {
+                used_chb_a.push(i);
+                used_chb_b.push(j);
+                s_chb += gh;
+                if d < 3.6 {
+                    chb_mids.push(mid_ij);
+                }
+            }
+        }
+
         let mut s_cl = 0.0f64;
         if !tn_pairs.is_empty() && !chb_mids.is_empty() {
             let cats_a: Vec<Vec3> = self
@@ -3629,8 +3753,27 @@ impl MorphMc {
                 .filter(|&(j, _)| self.chem.flags[j] & CHEM_CAT != 0)
                 .map(|(_, &x)| x)
                 .collect();
+            let anis_a: Vec<Vec3> = self
+                .centers
+                .iter()
+                .enumerate()
+                .filter(|&(i, _)| self.chem.flags[i] & CHEM_ANI != 0)
+                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
+                .collect();
+            let anis_b: Vec<Vec3> = self
+                .centers
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| self.chem.flags[j] & CHEM_ANI != 0)
+                .map(|(_, &x)| x)
+                .collect();
             let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
             for (i, j, mid, d) in tn_pairs {
+                let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
+                if da_ani < 5.5 || db_ani < 5.5 {
+                    continue;
+                }
                 let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
                 if da < 8.0 && db < 8.0 {

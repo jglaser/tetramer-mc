@@ -30,7 +30,7 @@ PDB_CORPUS = [
 ]
 
 
-def atom_chemistry_flags(names):
+def atom_chemistry_flags(names, coords=None):
     """Compute the 8-bit chemistry flag per heavy atom from (resname, resnum, atomname)."""
     first = min(x[1] for x in names)
     last = max(x[1] for x in names)
@@ -76,6 +76,16 @@ def atom_chemistry_flags(names):
                 or (r == 'ARG' and a in ('NE', 'NH1', 'NH2'))):
             f |= 0x80
         flags.append(f)
+    if coords is not None:
+        coords_arr = np.asarray(coords, dtype=float)
+        ani_idx = [i for i, f in enumerate(flags) if (f & 0x02) != 0]
+        if ani_idx:
+            ani_xyz = coords_arr[ani_idx]
+            for i, f in enumerate(flags):
+                if (f & (0x10 | 0x20)) != 0:
+                    d_ani = np.linalg.norm(ani_xyz - coords_arr[i], axis=-1)
+                    if np.min(d_ani) < 4.5:
+                        flags[i] &= ~(0x10 | 0x20)
     return flags
 
 
@@ -164,7 +174,9 @@ def harvest_pdb_interfaces():
 
 def main():
     names = json.load(open(f'{O_DIR}/atom_types_monomer.json'))['atoms']
-    flags = atom_chemistry_flags(names)
+    shape = json.load(open(SHAPE_PATH))
+    coords = [a['center'] for a in shape['atoms']]
+    flags = atom_chemistry_flags(names, coords=coords)
     weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
     solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5226]
     solv_cap = 12.5

@@ -20,9 +20,16 @@ use tetramer_mc::{
 };
 
 #[derive(Parser)]
+#[command(version = env!("GIT_HASH"))]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
+}
+
+fn file_sha256(path: &std::path::Path) -> Option<String> {
+    fs::read(path)
+        .ok()
+        .map(|bytes| tetramer_mc::simulation::hash_bytes(&bytes))
 }
 
 #[derive(Subcommand)]
@@ -650,7 +657,13 @@ fn main() -> Result<()> {
             // level -> replica holding it
             let mut holder: Vec<usize> = (0..replicas).collect();
             let mut swaps = vec![(0u64, 0u64); replicas - 1];
-            let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
+            let exe_sha = std::env::current_exe().ok().and_then(|p| file_sha256(&p));
+            let shape_sha = file_sha256(&shape);
+            let meta = json!({"git_hash": env!("GIT_HASH"),
+                "git_dirty": env!("GIT_DIRTY") == "true",
+                "executable_sha256": exe_sha,
+                "shape_sha256": shape_sha,
+                "shape": shape, "seed_config": seed_config, "seed_count": seed_count,
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "ladder": ladder, "width": width, "sweeps": sweeps, "swap_every": swap_every,
                 "sample_every": sample_every, "seed": seed, "charge_groups": charge_groups,
@@ -955,7 +968,15 @@ fn main() -> Result<()> {
                     "--memory-only requires --memory-lambda-floor > 0"
                 );
             }
-            let meta = json!({"shape": shape, "seed_config": seed_config, "seed_count": seed_count,
+            let exe_sha = std::env::current_exe().ok().and_then(|p| file_sha256(&p));
+            let shape_sha = file_sha256(&shape);
+            let chem_sha = chemistry_model.as_deref().and_then(file_sha256);
+            let meta = json!({"git_hash": env!("GIT_HASH"),
+                "git_dirty": env!("GIT_DIRTY") == "true",
+                "executable_sha256": exe_sha,
+                "shape_sha256": shape_sha,
+                "chemistry_model_sha256": chem_sha,
+                "shape": shape, "seed_config": seed_config, "seed_count": seed_count,
                 "free_bodies": free_bodies, "concentration_um": concentration_um, "vessel_radius": radius,
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
                 "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,

@@ -92,6 +92,14 @@ pub struct ChemistryModel {
     /// Half-saturation scale `W_0` (default `4.0`) for `W_ABC / (W_ABC + W_0)`.
     #[serde(default = "default_junc_w0")]
     pub junc_w0: f64,
+    /// Learned monomer-level Cl-bridge pre-organization activity per atom `a_i in (0, 1]`
+    /// (default `1.0` if empty).
+    #[serde(default)]
+    pub atom_cl_activity: Vec<f64>,
+    /// Learned continuous Gaussian environment weights `[c_cat, w_ani, w_acc, w_hb]`
+    /// for smooth, cutoff-free anion-bridge scoring (default `[0.04, 1.5, 2.0, 2.0]`).
+    #[serde(default = "default_cl_env_weights")]
+    pub cl_env_weights: [f64; 4],
 }
 
 fn default_coop_s0() -> f64 {
@@ -100,6 +108,10 @@ fn default_coop_s0() -> f64 {
 
 fn default_junc_w0() -> f64 {
     4.0
+}
+
+fn default_cl_env_weights() -> [f64; 4] {
+    [0.04, 1.5, 2.0, 2.0]
 }
 
 /// Precompute outward unit surface normals in the body frame for each template sphere `i`
@@ -170,6 +182,152 @@ const CHEM_PURE_DON: u8 = 0x80;
 impl ChemistryModel {
     pub fn has_solvation(&self) -> bool {
         self.solv_weights.iter().any(|&w| w != 0.)
+    }
+
+    fn eval_cl_score(
+        &self,
+        tn_pairs: &[(usize, usize, Vec3, f64)],
+        centers: &[Vec3],
+        map_a: impl Fn(Vec3) -> Vec3,
+    ) -> f64 {
+        if tn_pairs.is_empty() {
+            return 0.0;
+        }
+        let ew = if self.cl_env_weights.iter().all(|&x| x == 0.0) {
+            default_cl_env_weights()
+        } else {
+            self.cl_env_weights
+        };
+        let c_cat = ew[0].max(1e-4);
+        let w_ani = ew[1];
+        let w_acc = ew[2];
+        let w_hb = ew[3];
+        let cats_a: Vec<Vec3> = centers
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| self.flags[i] & CHEM_CAT != 0)
+            .map(|(_, &x)| map_a(x))
+            .collect();
+        let cats_b: Vec<Vec3> = centers
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| self.flags[j] & CHEM_CAT != 0)
+            .map(|(_, &x)| x)
+            .collect();
+        let anis_a: Vec<Vec3> = centers
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| self.flags[i] & CHEM_ANI != 0)
+            .map(|(_, &x)| map_a(x))
+            .collect();
+        let anis_b: Vec<Vec3> = centers
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| self.flags[j] & CHEM_ANI != 0)
+            .map(|(_, &x)| x)
+            .collect();
+        let accs_a: Vec<(usize, Vec3)> = centers
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| self.flags[i] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+            .map(|(i, &x)| (i, map_a(x)))
+            .collect();
+        let accs_b: Vec<(usize, Vec3)> = centers
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| self.flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
+            .map(|(j, &x)| (j, x))
+            .collect();
+        let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
+        for &(i, j, mid, d) in tn_pairs {
+            let act_i = self.atom_cl_activity.get(i).copied().unwrap_or(1.0);
+            let act_j = self.atom_cl_activity.get(j).copied().unwrap_or(1.0);
+            let act = act_i * act_j;
+            if act <= 1e-6 {
+                continue;
+            }
+            let u_d = (d - 4.05) / 0.50;
+            let g_d = (-u_d * u_d).exp();
+            let phi_cat_a: f64 = cats_a
+                .iter()
+                .map(|&c| {
+                    let u = (norm(sub(c, mid)) - 6.5).max(0.0) / 2.0;
+                    (-u * u).exp()
+                })
+                .sum();
+            let phi_cat_b: f64 = cats_b
+                .iter()
+                .map(|&c| {
+                    let u = (norm(sub(c, mid)) - 6.5).max(0.0) / 2.0;
+                    (-u * u).exp()
+                })
+                .sum();
+            let g_cat = (phi_cat_a / (phi_cat_a + c_cat)) * (phi_cat_b / (phi_cat_b + c_cat));
+            let phi_ani: f64 = anis_a
+                .iter()
+                .chain(anis_b.iter())
+                .map(|&c| {
+                    let u = (norm(sub(c, mid)) - 3.0).max(0.0) / 1.8;
+                    (-u * u).exp()
+                })
+                .sum();
+            let phi_acc_a: f64 = accs_a
+                .iter()
+                .filter(|&&(idx, _)| idx != i)
+                .map(|&(_, c)| {
+                    let u = (norm(sub(c, mid)) - 2.80).max(0.0) / 0.28;
+                    (-u * u).exp()
+                })
+                .sum();
+            let phi_acc_b: f64 = accs_b
+                .iter()
+                .filter(|&&(idx, _)| idx != j)
+                .map(|&(_, c)| {
+                    let u = (norm(sub(c, mid)) - 2.80).max(0.0) / 0.28;
+                    (-u * u).exp()
+                })
+                .sum();
+            let phi_acc = phi_acc_a + phi_acc_b;
+            let phi_hb = if self.flags[i] & CHEM_TYR_OH != 0 {
+                let ya = map_a(centers[i]);
+                accs_b
+                    .iter()
+                    .map(|&(_, c)| {
+                        let u = (norm(sub(c, ya)) - 2.80).max(0.0) / 0.55;
+                        (-u * u).exp()
+                    })
+                    .fold(0.0f64, f64::max)
+            } else {
+                let xb = centers[j];
+                accs_a
+                    .iter()
+                    .map(|&(_, c)| {
+                        let u = (norm(sub(c, xb)) - 2.80).max(0.0) / 0.55;
+                        (-u * u).exp()
+                    })
+                    .fold(0.0f64, f64::max)
+            };
+            let val =
+                act * g_d * g_cat * (-w_ani * phi_ani - w_acc * phi_acc - w_hb * phi_hb).exp();
+            if val > 1e-6 {
+                cl_cands.push((i, j, val));
+            }
+        }
+        cl_cands.sort_by(|a, b| {
+            b.2.total_cmp(&a.2)
+                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+        });
+        let mut used_a = Vec::new();
+        let mut used_b = Vec::new();
+        let mut s_cl = 0.0f64;
+        for (i, j, val) in cl_cands {
+            if !used_a.contains(&i) && !used_b.contains(&j) {
+                used_a.push(i);
+                used_b.push(j);
+                s_cl += val;
+            }
+        }
+        s_cl
     }
 
     pub fn has_junction(&self) -> bool {
@@ -409,7 +567,7 @@ impl ChemistryModel {
                         chb_cands.push((i, j, gh, scale(add(ya, xb), 0.5), d));
                     }
                 }
-                if (3.4..=4.5).contains(&d)
+                if (3.2..=4.9).contains(&d)
                     && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
                         || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
                 {
@@ -459,105 +617,15 @@ impl ChemistryModel {
         let mut used_chb_a = Vec::new();
         let mut used_chb_b = Vec::new();
         let mut s_chb = 0.0f64;
-        let mut chb_mids: Vec<Vec3> = Vec::new();
-        for (i, j, gh, mid_ij, d) in chb_cands {
+        for (i, j, gh, _, _) in chb_cands {
             if !used_chb_a.contains(&i) && !used_chb_b.contains(&j) {
                 used_chb_a.push(i);
                 used_chb_b.push(j);
                 s_chb += gh;
-                if d < 3.6 {
-                    chb_mids.push(mid_ij);
-                }
             }
         }
 
-        let mut s_cl = 0.0f64;
-        if !tn_pairs.is_empty() && !chb_mids.is_empty() {
-            let cats_a: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.flags[i] & CHEM_CAT != 0)
-                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
-                .collect();
-            let cats_b: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.flags[j] & CHEM_CAT != 0)
-                .map(|(_, &x)| x)
-                .collect();
-            let anis_a: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.flags[i] & CHEM_ANI != 0)
-                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
-                .collect();
-            let anis_b: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.flags[j] & CHEM_ANI != 0)
-                .map(|(_, &x)| x)
-                .collect();
-            let accs_a: Vec<(usize, Vec3)> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.flags[i] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
-                .map(|(i, &x)| (i, add(matvec(r_rel, x), t_rel)))
-                .collect();
-            let accs_b: Vec<(usize, Vec3)> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
-                .map(|(j, &x)| (j, x))
-                .collect();
-            let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
-            for (i, j, mid, d) in tn_pairs {
-                if ((self.flags[i] & CHEM_TYR_OH != 0)
-                    && (used_hb_a.contains(&i) || used_chb_a.contains(&i)))
-                    || ((self.flags[j] & CHEM_TYR_OH != 0)
-                        && (used_hb_b.contains(&j) || used_chb_b.contains(&j)))
-                {
-                    continue;
-                }
-                let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                if da_ani < 5.5 || db_ani < 5.5 {
-                    continue;
-                }
-                let da_acc = accs_a
-                    .iter()
-                    .filter(|&&(idx, _)| idx != i)
-                    .map(|&(_, c)| norm(sub(c, mid)))
-                    .fold(99.0f64, f64::min);
-                let db_acc = accs_b
-                    .iter()
-                    .filter(|&&(idx, _)| idx != j)
-                    .map(|&(_, c)| norm(sub(c, mid)))
-                    .fold(99.0f64, f64::min);
-                if da_acc < 3.45 || db_acc < 3.45 {
-                    continue;
-                }
-                let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                if da < 8.0 && db < 8.0 {
-                    let d_chb = chb_mids.iter().map(|&m| norm(sub(m, mid))).fold(99.0f64, f64::min);
-                    if d_chb < 8.5 {
-                        let u1 = (d - 4.05) / 0.40;
-                        let u2 = (d_chb.max(5.0) - 5.0) / 3.0;
-                        cl_cands.push((i, j, (-u1 * u1 - u2 * u2).exp()));
-                    }
-                }
-            }
-            cl_cands.sort_by(|a, b| b.2.total_cmp(&a.2));
-            let mut used_a = Vec::new();
-            let mut used_b = Vec::new();
-            for (i, j, val) in cl_cands {
-                if !used_a.contains(&i) && !used_b.contains(&j) {
-                    used_a.push(i);
-                    used_b.push(j);
-                    s_cl += val;
-                }
-            }
-        }
+        let s_cl = self.eval_cl_score(&tn_pairs, centers, |x| add(matvec(r_rel, x), t_rel));
 
         let mut s_clash = 0.0f64;
         for (i, j, d) in clash_candidates {
@@ -706,7 +774,7 @@ impl ChemistryModel {
                         chb_cands.push((i, j, g, scale(add(ya, xb), 0.5), d));
                     }
                 }
-                if (3.4..=4.5).contains(&d)
+                if (3.2..=4.9).contains(&d)
                     && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
                         || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
                 {
@@ -743,105 +811,17 @@ impl ChemistryModel {
         let mut used_chb_a = Vec::new();
         let mut used_chb_b = Vec::new();
         let mut s_chb = 0.0f64;
-        let mut chb_mids: Vec<Vec3> = Vec::new();
-        for (i, j, g, mid_ij, d) in chb_cands {
+        for (i, j, g, _, _) in chb_cands {
             if !used_chb_a.contains(&i) && !used_chb_b.contains(&j) {
                 used_chb_a.push(i);
                 used_chb_b.push(j);
                 s_chb += g;
-                if d < 3.6 {
-                    chb_mids.push(mid_ij);
-                }
             }
         }
 
-        let mut s_cl = 0.0f64;
-        if !tn_pairs.is_empty() && !chb_mids.is_empty() {
-            let cats_a: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.flags[i] & CHEM_CAT != 0)
-                .map(|(_, &x)| matvec(rqt, sub(add(matvec(rp, x), p.position), q.position)))
-                .collect();
-            let cats_b: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.flags[j] & CHEM_CAT != 0)
-                .map(|(_, &x)| x)
-                .collect();
-            let anis_a: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.flags[i] & CHEM_ANI != 0)
-                .map(|(_, &x)| matvec(rqt, sub(add(matvec(rp, x), p.position), q.position)))
-                .collect();
-            let anis_b: Vec<Vec3> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.flags[j] & CHEM_ANI != 0)
-                .map(|(_, &x)| x)
-                .collect();
-            let accs_a: Vec<(usize, Vec3)> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.flags[i] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
-                .map(|(i, &x)| (i, matvec(rqt, sub(add(matvec(rp, x), p.position), q.position))))
-                .collect();
-            let accs_b: Vec<(usize, Vec3)> = centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
-                .map(|(j, &x)| (j, x))
-                .collect();
-            let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
-            for (i, j, mid, d) in tn_pairs {
-                if ((self.flags[i] & CHEM_TYR_OH != 0)
-                    && (used_hb_a.contains(&i) || used_chb_a.contains(&i)))
-                    || ((self.flags[j] & CHEM_TYR_OH != 0)
-                        && (used_hb_b.contains(&j) || used_chb_b.contains(&j)))
-                {
-                    continue;
-                }
-                let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                if da_ani < 5.5 || db_ani < 5.5 {
-                    continue;
-                }
-                let da_acc = accs_a
-                    .iter()
-                    .filter(|&&(idx, _)| idx != i)
-                    .map(|&(_, c)| norm(sub(c, mid)))
-                    .fold(99.0f64, f64::min);
-                let db_acc = accs_b
-                    .iter()
-                    .filter(|&&(idx, _)| idx != j)
-                    .map(|&(_, c)| norm(sub(c, mid)))
-                    .fold(99.0f64, f64::min);
-                if da_acc < 3.45 || db_acc < 3.45 {
-                    continue;
-                }
-                let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                if da < 8.0 && db < 8.0 {
-                    let d_chb = chb_mids.iter().map(|&m| norm(sub(m, mid))).fold(99.0f64, f64::min);
-                    if d_chb < 8.5 {
-                        let u1 = (d - 4.05) / 0.40;
-                        let u2 = (d_chb.max(5.0) - 5.0) / 3.0;
-                        cl_cands.push((i, j, (-u1 * u1 - u2 * u2).exp()));
-                    }
-                }
-            }
-            cl_cands.sort_by(|a, b| b.2.total_cmp(&a.2));
-            let mut used_a = Vec::new();
-            let mut used_b = Vec::new();
-            for (i, j, val) in cl_cands {
-                if !used_a.contains(&i) && !used_b.contains(&j) {
-                    used_a.push(i);
-                    used_b.push(j);
-                    s_cl += val;
-                }
-            }
-        }
+        let s_cl = self.eval_cl_score(&tn_pairs, centers, |x| {
+            matvec(rqt, sub(add(matvec(rp, x), p.position), q.position))
+        });
 
         let mut s_clash = 0.0f64;
         for (i, j, d) in clash_candidates {
@@ -3719,7 +3699,7 @@ impl MorphMc {
                         chb_cands.push((i, j, gh, scale(add(ya, xb), 0.5), d));
                     }
                 }
-                if (3.4..=4.5).contains(&d)
+                if (3.2..=4.9).contains(&d)
                     && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
                         || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
                 {
@@ -3789,111 +3769,17 @@ impl MorphMc {
         let mut used_chb_a = Vec::new();
         let mut used_chb_b = Vec::new();
         let mut s_chb = 0.0f64;
-        let mut chb_mids: Vec<Vec3> = Vec::new();
-        for (i, j, gh, mid_ij, d) in chb_cands {
+        for (i, j, gh, _, _) in chb_cands {
             if !used_chb_a.contains(&i) && !used_chb_b.contains(&j) {
                 used_chb_a.push(i);
                 used_chb_b.push(j);
                 s_chb += gh;
-                if d < 3.6 {
-                    chb_mids.push(mid_ij);
-                }
             }
         }
 
-        let mut s_cl = 0.0f64;
-        if !tn_pairs.is_empty() && !chb_mids.is_empty() {
-            let cats_a: Vec<Vec3> = self
-                .centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.chem.flags[i] & CHEM_CAT != 0)
-                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
-                .collect();
-            let cats_b: Vec<Vec3> = self
-                .centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.chem.flags[j] & CHEM_CAT != 0)
-                .map(|(_, &x)| x)
-                .collect();
-            let anis_a: Vec<Vec3> = self
-                .centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.chem.flags[i] & CHEM_ANI != 0)
-                .map(|(_, &x)| add(matvec(r_rel, x), t_rel))
-                .collect();
-            let anis_b: Vec<Vec3> = self
-                .centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.chem.flags[j] & CHEM_ANI != 0)
-                .map(|(_, &x)| x)
-                .collect();
-            let accs_a: Vec<(usize, Vec3)> = self
-                .centers
-                .iter()
-                .enumerate()
-                .filter(|&(i, _)| self.chem.flags[i] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
-                .map(|(i, &x)| (i, add(matvec(r_rel, x), t_rel)))
-                .collect();
-            let accs_b: Vec<(usize, Vec3)> = self
-                .centers
-                .iter()
-                .enumerate()
-                .filter(|&(j, _)| self.chem.flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC) != 0)
-                .map(|(j, &x)| (j, x))
-                .collect();
-            let mut cl_cands: Vec<(usize, usize, f64)> = Vec::new();
-            for (i, j, mid, d) in tn_pairs {
-                if ((self.chem.flags[i] & CHEM_TYR_OH != 0)
-                    && (used_hb_a.contains(&i) || used_chb_a.contains(&i)))
-                    || ((self.chem.flags[j] & CHEM_TYR_OH != 0)
-                        && (used_hb_b.contains(&j) || used_chb_b.contains(&j)))
-                {
-                    continue;
-                }
-                let da_ani = anis_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                let db_ani = anis_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                if da_ani < 5.5 || db_ani < 5.5 {
-                    continue;
-                }
-                let da_acc = accs_a
-                    .iter()
-                    .filter(|&&(idx, _)| idx != i)
-                    .map(|&(_, c)| norm(sub(c, mid)))
-                    .fold(99.0f64, f64::min);
-                let db_acc = accs_b
-                    .iter()
-                    .filter(|&&(idx, _)| idx != j)
-                    .map(|&(_, c)| norm(sub(c, mid)))
-                    .fold(99.0f64, f64::min);
-                if da_acc < 3.45 || db_acc < 3.45 {
-                    continue;
-                }
-                let da = cats_a.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                let db = cats_b.iter().map(|&c| norm(sub(c, mid))).fold(99.0f64, f64::min);
-                if da < 8.0 && db < 8.0 {
-                    let d_chb = chb_mids.iter().map(|&m| norm(sub(m, mid))).fold(99.0f64, f64::min);
-                    if d_chb < 8.5 {
-                        let u1 = (d - 4.05) / 0.40;
-                        let u2 = (d_chb.max(5.0) - 5.0) / 3.0;
-                        cl_cands.push((i, j, (-u1 * u1 - u2 * u2).exp()));
-                    }
-                }
-            }
-            cl_cands.sort_by(|a, b| b.2.total_cmp(&a.2));
-            let mut used_a = Vec::new();
-            let mut used_b = Vec::new();
-            for (i, j, val) in cl_cands {
-                if !used_a.contains(&i) && !used_b.contains(&j) {
-                    used_a.push(i);
-                    used_b.push(j);
-                    s_cl += val;
-                }
-            }
-        }
+        let s_cl = self
+            .chem
+            .eval_cl_score(&tn_pairs, &self.centers, |x| add(matvec(r_rel, x), t_rel));
 
         let mut s_clash = 0.0f64;
         for (i, j, d) in clash_candidates {
@@ -5682,6 +5568,7 @@ mod tests {
             junc_weights: [4.2, 0.7],
             junc_w0: 4.0,
             wb_cap: 5.0,
+            ..ChemistryModel::default()
         };
         let start = vec![
             Pose { position: [0., 0., 0.], orientation: [1., 0., 0., 0.] },
@@ -5833,6 +5720,7 @@ mod tests {
             junc_weights: [4.2, 0.7],
             junc_w0: 4.0,
             wb_cap: 5.0,
+            ..ChemistryModel::default()
         };
         let start = vec![
             Pose {

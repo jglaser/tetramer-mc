@@ -172,9 +172,9 @@ enum Cmd {
         /// Free-body concentration in micromolar over the vessel volume.
         #[arg(long)]
         concentration_um: f64,
-        #[arg(long)]
+        #[arg(long, default_value_t = 0.0)]
         epsilon: f64,
-        #[arg(long, default_value_t = 1.0)]
+        #[arg(long, default_value_t = 0.0)]
         width: f64,
         /// Hard-sphere morphometric solvation on (default) or off (square well only).
         #[arg(long)]

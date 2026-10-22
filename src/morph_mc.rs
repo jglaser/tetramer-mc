@@ -3554,6 +3554,9 @@ impl MorphMc {
 
     /// Pairwise square-well atom contacts between pose `p` and pose `q`.
     pub fn well_pair_between(&self, p: Pose, q: Pose) -> usize {
+        if self.well.width <= 0.0 {
+            return 0;
+        }
         let reach = 2. * self.tree.bound + self.well.width;
         let dpq = sub(q.position, p.position);
         if dpq[0] * dpq[0] + dpq[1] * dpq[1] + dpq[2] * dpq[2] > reach * reach {
@@ -3718,21 +3721,16 @@ impl MorphMc {
                 PatchContact::default(),
             );
         }
-        if self.well.width < 2.8 {
-            let (pa, pb) = if need_patch {
-                self.patch_pair_between(p, q)
-            } else {
-                (PatchContact::default(), PatchContact::default())
-            };
-            return (
-                self.well_pair_between(p, q),
-                self.chem_pair_between(p, q),
-                pa,
-                pb,
-            );
-        }
-        let max_chem_cut = if self.chem.has_solvation() { 6.6 } else { 5.25 };
-        let well_reach = 2. * self.tree.bound + self.well.width;
+        let max_chem_cut = if self.chem.has_solvation() || need_patch {
+            6.6
+        } else {
+            5.25
+        };
+        let well_reach = if self.well.width > 0.0 {
+            2. * self.tree.bound + self.well.width
+        } else {
+            0.0
+        };
         let chem_reach = 2. * self.tree.bound + max_chem_cut;
         let max_reach = well_reach.max(chem_reach);
         let dpq = sub(q.position, p.position);
@@ -3802,8 +3800,12 @@ impl MorphMc {
             for j in self.template_grid.near(&ya) {
                 let xb = self.centers[j];
                 let r_sum = ri + self.vdw[j];
-                let r_well = r_sum + self.well.width;
-                let r_chem = if has_solv {
+                let r_well = if self.well.width > 0.0 {
+                    r_sum + self.well.width
+                } else {
+                    0.0
+                };
+                let r_chem = if has_solv || need_patch {
                     (r_sum + 2.8).max(5.25)
                 } else {
                     5.25
@@ -3817,24 +3819,24 @@ impl MorphMc {
                 let mut d_cached = -1.0f64;
                 if d2 < r_well * r_well {
                     well_count += 1;
-                    if need_patch {
-                        let r_28 = r_sum + 2.8;
-                        if d2 < r_28 * r_28 {
-                            if !any_patch {
-                                u6_a.resize(n, 0.0);
-                                u6_b.resize(n, 0.0);
-                                any_patch = true;
-                            }
-                            let d = d2.sqrt();
-                            d_cached = d;
-                            let g = (d - r_sum).max(0.0);
-                            let u6 = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
-                            if u6 > u6_a[i] {
-                                u6_a[i] = u6;
-                            }
-                            if u6 > u6_b[j] {
-                                u6_b[j] = u6;
-                            }
+                }
+                if need_patch && in_chem_a {
+                    let r_28 = r_sum + 2.8;
+                    if d2 < r_28 * r_28 {
+                        if !any_patch {
+                            u6_a.resize(n, 0.0);
+                            u6_b.resize(n, 0.0);
+                            any_patch = true;
+                        }
+                        let d = d2.sqrt();
+                        d_cached = d;
+                        let g = (d - r_sum).max(0.0);
+                        let u6 = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
+                        if u6 > u6_a[i] {
+                            u6_a[i] = u6;
+                        }
+                        if u6 > u6_b[j] {
+                            u6_b[j] = u6;
                         }
                     }
                 }

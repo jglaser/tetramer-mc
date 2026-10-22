@@ -288,15 +288,13 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
     rho_self = np.sum(r3[None, :] * np.exp(-((D_mat / 3.5) ** 2)), axis=1)
     s_exp = np.exp(-rho_self / 45.0)
 
-    is_cat = ((flags_arr & 0x01) != 0).astype(float)
-    is_ani = ((flags_arr & 0x02) != 0).astype(float)
-    is_ndon = (((flags_arr & 0x04) != 0) & ((flags_arr & 0x01) == 0)).astype(float)
-    is_nacc = (((flags_arr & 0x08) != 0) & ((flags_arr & 0x02) == 0)).astype(float)
-    is_tyr = ((flags_arr & 0x10) != 0).astype(float)
-    is_amd = ((flags_arr & 0x20) != 0).astype(float)
-    is_pacc = ((flags_arr & 0x40) != 0).astype(float)
-    is_pdon = ((flags_arr & 0x80) != 0).astype(float)
-    atom_types = np.stack([is_cat, is_ani, is_ndon, is_nacc, is_tyr, is_amd, is_pacc, is_pdon], axis=1)
+    atom_types = np.zeros((N, 10), dtype=float)
+    for i, (r, n, a) in enumerate(names):
+        f = flags[i]
+        for b in range(8):
+            atom_types[i, b] = 1.0 if (f & (1 << b)) else 0.0
+        atom_types[i, 8] = 1.0 if a in ('N', 'CA', 'C', 'O') else 0.0
+        atom_types[i, 9] = (R_vdw[i] - 1.7) / 0.3
 
     sigmas = [2.2, 3.6, 5.2, 7.5]
     env_feats = []
@@ -321,9 +319,12 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         ])
 
     nat_modes = {
+        'm0': ([0.0, 0.0, 37.9], [1.0, 0.0, 0.0, 0.0]),
         'm1': ([19.47624995357571, 18.42510338365495, -9.475000000000003], [0.7071067811865477, 0.0, 0.0, 0.7071067811865475]),
         'm2': ([19.47624995357571, 18.42510338365495, 28.424999999999994], [0.7071067811865477, 0.0, 0.0, 0.7071067811865475]),
+        'm3': ([-39.54999999999998, -1.6486466627693304, 8.973438122994171], [0.0, 1.0, 0.0, 0.0]),
         'm4': ([-20.073750046424273, -20.07375004642428, -19.451561877005823], [0.0, 0.7071067811865477, -0.7071067811865475, 0.0]),
+        'm5': ([21.124896616345055, -21.124896616345048, 37.39843812299417], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0]),
         'm6': ([21.124896616345055, -21.124896616345048, -0.5015618770058232], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0]),
     }
 
@@ -417,7 +418,8 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
                     ii.append(i)
                     jj.append(j)
                     dd.append(d)
-        if len(ii) < 6:
+        min_pairs = 1 if label > 0 else 6
+        if len(ii) < min_pairs:
             continue
         ii = np.array(ii, dtype=int)
         jj = np.array(jj, dtype=int)
@@ -426,11 +428,12 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         pose_data.append((name, label, ii, jj, psi))
 
     D = 8
+    A_MAX = 1.0
     rng = np.random.default_rng(7)
     Wu0 = rng.normal(0.0, 0.15, size=(M, D))
     Wv0 = rng.normal(0.0, 0.15, size=(M, D))
     wa0 = np.zeros(M)
-    ba0 = 0.5
+    ba0 = 0.0
     p0 = np.concatenate([Wu0.ravel(), Wv0.ravel(), wa0, [ba0]])
     c0 = 0.25
 
@@ -450,7 +453,7 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         U = U_raw / un
         V = V_raw / vn
         z = np.clip(F_norm @ wa + ba, -20.0, 20.0)
-        a = np.where(active_mask, 1.0 / (1.0 + np.exp(-z)), 0.0)
+        a = np.where(active_mask, A_MAX / (1.0 + np.exp(-z)), 0.0)
         return U, V, a
 
     def eval_all(p):
@@ -481,8 +484,8 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         V = V_raw / vn
         z = np.clip(F_norm @ wa + ba, -20.0, 20.0)
         sig = 1.0 / (1.0 + np.exp(-z))
-        a = np.where(active_mask, sig, 0.0)
-        da_dz = np.where(active_mask, sig * (1.0 - sig), 0.0)
+        a = np.where(active_mask, A_MAX * sig, 0.0)
+        da_dz = np.where(active_mask, A_MAX * sig * (1.0 - sig), 0.0)
 
         reg = 1e-3 * float(np.sum(Wu * Wu) + np.sum(Wv * Wv) + np.sum(wa * wa))
         g_Wu = 2e-3 * Wu
@@ -510,10 +513,22 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
             S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
 
             if label > 0:
-                w_pose = 60.0 if name == 'nat_m2' else (28.0 if ('nat_' in name or 'slot' in name or 'capture' in name) else 6.0)
-                target = 0.55 if name == 'nat_m2' else (1.15 if ('slot' in name) else 1.50)
-                if S < target:
-                    diff = S - target
+                two_sided = False
+                if name in ('nat_m0', 'nat_m5'):
+                    w_pose, target = 60.0, 0.60
+                elif name == 'nat_m2':
+                    w_pose, target = 120.0, 2.20
+                elif name == 'nat_m4':
+                    w_pose, target = 80.0, 4.50
+                elif name in ('nat_m6', 'capture_m6', 'POS_prior_m6'):
+                    w_pose, target, two_sided = 60.0, 2.60, True
+                elif 'slot' in name:
+                    w_pose, target, two_sided = 35.0, 0.85, True
+                else:
+                    w_pose, target, two_sided = 80.0, 1.00, True
+                if S < target or (two_sided and S > target + 0.10):
+                    t_eff = target if S < target else (target + 0.10)
+                    diff = S - t_eff
                     tot_loss += w_pose * diff * diff
                     dL_dS = 2.0 * w_pose * diff
                 else:
@@ -556,7 +571,7 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         grad = np.concatenate([g_Wu.ravel(), g_Wv.ravel(), g_wa, [g_ba]])
         return tot_loss, grad
 
-    res = minimize(loss_and_grad, p0, jac=True, method='L-BFGS-B', options={'maxiter': 500})
+    res = minimize(loss_and_grad, p0, jac=True, method='L-BFGS-B', options={'maxiter': 600})
     Wu, Wv, wa, ba = unpack(res.x)
     U, V, a = compute_atoms(Wu, Wv, wa, ba)
     scores = eval_all(res.x)
@@ -671,12 +686,12 @@ def main():
     atom_cl_activity, cl_env_weights, intra_w = fit_cl_bridge_parameters(names, coords, flags)
     cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(names, coords, vdw, flags)
     weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
-    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5226]
+    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
     solv_cap = 12.5
     burial_gate = [12.0, 26.0]
     coop_weights = [2.2, 4.0]
     junc_weights = [2.0, 2.5]
-    cos_weights = [2.5, 3.0]
+    cos_weights = [3.2, 3.4]
     model = {
         'flags': flags,
         'weights': weights,

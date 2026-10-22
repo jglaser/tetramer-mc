@@ -134,6 +134,8 @@ enum Cmd {
         memory_lambda_floor: f64,
         #[arg(long, default_value_t = 0.)]
         memory_lambda: f64,
+        #[arg(long = "memory-lambda-N", visible_alias = "memory-lambda-n", default_value_t = 0.)]
+        memory_lambda_n: f64,
         #[arg(long, default_value_t = 0.)]
         memory_lambda_prior: f64,
         #[arg(long)]
@@ -213,11 +215,13 @@ enum Cmd {
         /// poses by their monomer-monomer pair energy (`exp(-beta * E_pair)`).
         #[arg(long, default_value_t = 0.5)]
         surface_prior_beta: f64,
-        /// Poisson memory: intensity per contact entry (0 with --memory-lambda-floor 0: off;
-        /// needs --dock-library). Memory slots join the docking components; each contact
-        /// formed costs 2 lambda kT in the acceptance (exactly compensated in equilibrium).
         #[arg(long, default_value_t = 0.)]
         memory_lambda: f64,
+        /// Intensive Poisson memory contact intensity `lambda * N`: sets `lambda = memory_lambda_n / N_bodies`
+        /// so the expected number of contact-derived memory slots `lambda * N_entries = memory_lambda_n * (N_entries / N)`
+        /// is independent of system size `N` (e.g. `64.0` matches `--memory-lambda 0.25` at `N = 256`).
+        #[arg(long = "memory-lambda-N", visible_alias = "memory-lambda-n", default_value_t = 0.)]
+        memory_lambda_n: f64,
         /// Floor intensity (expected number of floor slots); > 0 switches memory on.
         #[arg(long, default_value_t = 0.)]
         memory_lambda_floor: f64,
@@ -495,6 +499,7 @@ fn main() -> Result<()> {
             dock_uniform_weight,
             memory_lambda_floor,
             memory_lambda,
+            memory_lambda_n,
             memory_lambda_prior,
             memory_prior_model,
             memory_death,
@@ -605,11 +610,20 @@ fn main() -> Result<()> {
                         } else {
                             0.0
                         };
+                        ensure!(
+                            !(memory_lambda > 0.0 && memory_lambda_n > 0.0),
+                            "specify at most one of --memory-lambda and --memory-lambda-N"
+                        );
+                        let eff_memory_lambda = if memory_lambda_n > 0.0 {
+                            memory_lambda_n / (mc.poses().len().max(1) as f64)
+                        } else {
+                            memory_lambda
+                        };
                         mc = mc.with_memory(
                             MemorySettings {
                                 lambda_floor: memory_lambda_floor,
                                 lambda_prior: eff_lambda_prior,
-                                lambda: memory_lambda,
+                                lambda: eff_memory_lambda,
                                 death: memory_death,
                                 sigma_translation: memory_sigma_translation,
                                 sigma_rotation: memory_sigma_rotation_degrees.to_radians(),
@@ -644,7 +658,7 @@ fn main() -> Result<()> {
                 "dock_sigma_translation": dock_sigma_translation,
                 "dock_sigma_rotation_degrees": dock_sigma_rotation_degrees,
                 "dock_uniform_weight": dock_uniform_weight, "memory_lambda_floor": memory_lambda_floor,
-                "memory_lambda": memory_lambda, "memory_lambda_prior": memory_lambda_prior,
+                "memory_lambda": memory_lambda, "memory_lambda_n": memory_lambda_n, "memory_lambda_prior": memory_lambda_prior,
                 "memory_prior_model": memory_prior_model, "memory_death": memory_death,
                 "memory_sigma_translation": memory_sigma_translation,
                 "memory_sigma_rotation_degrees": memory_sigma_rotation_degrees,
@@ -811,6 +825,7 @@ fn main() -> Result<()> {
             surface_prior_samples,
             surface_prior_beta,
             memory_lambda,
+            memory_lambda_n,
             memory_lambda_floor,
             memory_lambda_prior,
             memory_prior_model,
@@ -895,10 +910,19 @@ fn main() -> Result<()> {
             } else {
                 Vec::new()
             };
+            let eff_memory_lambda = if memory_lambda_n > 0.0 {
+                memory_lambda_n / (mc.poses().len().max(1) as f64)
+            } else {
+                memory_lambda
+            };
             if memory_lambda_floor > 0. {
                 ensure!(
                     dock_library || memory_only,
                     "memory needs --dock-library or --memory-only"
+                );
+                ensure!(
+                    !(memory_lambda > 0.0 && memory_lambda_n > 0.0),
+                    "specify at most one of --memory-lambda and --memory-lambda-N"
                 );
                 let mut prior = match &memory_prior_model {
                     Some(f) => prior_from_model(f, &shape, radius)?,
@@ -916,7 +940,7 @@ fn main() -> Result<()> {
                     MemorySettings {
                         lambda_floor: memory_lambda_floor,
                         lambda_prior: eff_lambda_prior,
-                        lambda: memory_lambda,
+                        lambda: eff_memory_lambda,
                         death: memory_death,
                         sigma_translation: memory_sigma_translation,
                         sigma_rotation: memory_sigma_rotation_degrees.to_radians(),
@@ -948,7 +972,8 @@ fn main() -> Result<()> {
                 "cluster_size_scaling": !cluster_no_size_scaling,
                 "gca_probability": gca_probability, "gca_fk_beta": gca_fk_beta,
                 "center_shift_probability": center_shift_probability,
-                "memory_lambda": memory_lambda,
+                "memory_lambda": eff_memory_lambda,
+                "memory_lambda_n": memory_lambda_n,
                 "memory_lambda_floor": memory_lambda_floor, "memory_lambda_prior": memory_lambda_prior,
                 "memory_prior_model": memory_prior_model, "memory_death": memory_death,
                 "memory_sigma_translation": memory_sigma_translation,

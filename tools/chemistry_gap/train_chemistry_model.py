@@ -272,10 +272,8 @@ def fit_cl_bridge_parameters(names, coords, flags):
 
 def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
     """Fit D=8 unit-norm contrastive cosine-similarity embeddings (cos_u, cos_v) and
-    surface activity cos_activity on monomer surface atoms from crystal contacts + MC decoys."""
-    import glob as _glob
-    import re as _re
-
+    surface activity cos_activity on monomer surface atoms using ONLY positive crystal
+    contact examples and the P x P polar-atom partition function to supply negatives."""
     X = np.array(coords, dtype=float)
     R_vdw = np.array(vdw, dtype=float)
     flags_arr = np.array(flags, dtype=int)
@@ -304,11 +302,17 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         env_feats.append(K @ (atom_types * s_exp[:, None]))
     F_raw = np.concatenate([atom_types, s_exp[:, None]] + env_feats, axis=1)
     active_mask = flags_arr > 0
-    f_mean = F_raw[active_mask].mean(axis=0)
-    f_std = F_raw[active_mask].std(axis=0) + 1e-6
-    F_norm = (F_raw - f_mean) / f_std
-    F_norm[~active_mask] = 0.0
-    M = F_norm.shape[1]
+    polar_idx = np.where(active_mask)[0]
+    P = len(polar_idx)
+    full_to_p = {int(idx): p for p, idx in enumerate(polar_idx)}
+
+    F_pol = F_raw[polar_idx]
+    F_pol = (F_pol - F_pol.mean(axis=0)) / (F_pol.std(axis=0) + 1e-6)
+    Df_sq = np.sum((F_pol[:, None, :] - F_pol[None, :, :]) ** 2, axis=-1)
+    K_chem = np.exp(-Df_sq / (2.0 * F_pol.shape[1]))
+    np.fill_diagonal(K_chem, 0.0)
+    K_chem /= np.sum(K_chem, axis=1, keepdims=True) + 1e-8
+    L_chem = np.eye(P) - 0.5 * (K_chem + K_chem.T)
 
     def quat_to_rot(q):
         w, x, y, z = q
@@ -328,277 +332,226 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         'm6': ([21.124896616345055, -21.124896616345048, -0.5015618770058232], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0]),
     }
 
-    def nearest_nat(t, R):
-        best = 999.0
-        for t0, q0 in nat_modes.values():
-            R0 = quat_to_rot(q0)
-            for t_ref, R_ref in [(np.array(t0), R0), (-R0.T @ np.array(t0), R0.T)]:
-                dt = float(np.linalg.norm(t - t_ref))
-                tr = np.trace(R.T @ R_ref)
-                dth = float(np.degrees(np.arccos(np.clip((tr - 1.0) * 0.5, -1.0, 1.0))))
-                sc = float(np.sqrt((dt / 3.0) ** 2 + (dth / 20.0) ** 2))
-                if sc < best:
-                    best = sc
-        return best
-
-    poses = []
+    pos_poses = []
     for name, (t0, q0) in nat_modes.items():
-        poses.append((f'nat_{name}', +1, np.array(t0), quat_to_rot(q0)))
-    poses.append((
+        pos_poses.append((f'nat_{name}', np.array(t0), quat_to_rot(q0)))
+    pos_poses.append((
         'capture_m6',
-        +1,
         np.array([22.297474636863532, -21.25884591642077, -1.0185602607119532]),
         quat_to_rot([-0.036576369473634514, 0.701699829098772, 0.7109986930404457, -0.023672302664642158]),
     ))
-    poses.extend([
-        ('POS_prior_m1', +1,
-         np.array([18.9261, 18.8879, -11.4981]),
-         quat_to_rot([0.659633, 0.036818, 0.008074, 0.750642])),
-        ('POS_prior_m6', +1,
-         np.array([-21.1790, 21.1476, 1.7209]),
-         quat_to_rot([-0.011068, 0.711302, 0.702446, 0.022274])),
-        ('POS_nuc31_slot7', +1,
-         np.array([21.528165880904805, 18.556308740309735, -8.070774298408796]),
-         quat_to_rot([0.7305936337271589, -0.07729144601600103, 0.11926261926913809, 0.6678588191939717])),
-        ('POS_nuc31_slot17', +1,
-         np.array([21.547563930808884, 18.644502601529382, -8.334628197098734]),
-         quat_to_rot([0.7492067105606828, -0.07443445777189878, 0.08330666157706808, 0.6528467021314641])),
-    ])
 
-    c_mon = json.load(open(f'{D_DIR}/contacts_monomer.json'))
-    for idx, c in enumerate(c_mon):
-        p = c['pose'] if 'pose' in c else c
-        t = np.array(p['position'])
-        R = quat_to_rot(p['orientation'])
-        if nearest_nat(t, R) > 1.5:
-            poses.append((f'cmon_{idx}', -1, t, R))
+    W_pos = np.zeros((P, P), dtype=float)
+    pos_mask = np.zeros((P, P), dtype=bool)
+    pos_pose_data = []
+    for name, t, R in pos_poses:
+        if name == 'nat_m2':
+            w_m, d_cut = 50.0, 5.35
+        elif name in ('nat_m0', 'nat_m5'):
+            w_m, d_cut = 60.0, 5.0
+        elif name == 'nat_m4':
+            w_m, d_cut = 14.0, 5.0
+        else:
+            w_m, d_cut = 5.0, 4.35
+        for idx_dir, (tr, Rr) in enumerate([(t, R), (-R.T @ t, R.T)]):
+            YA = (X @ Rr.T) + tr
+            pairs = tree_x.query_ball_tree(cKDTree(YA), d_cut)
+            ii, jj, dd = [], [], []
+            for j, a_list in enumerate(pairs):
+                if flags_arr[j] == 0:
+                    continue
+                pj = full_to_p[j]
+                for i in a_list:
+                    if flags_arr[i] == 0:
+                        continue
+                    pi = full_to_p[i]
+                    d = float(np.linalg.norm(YA[i] - X[j]))
+                    if d < d_cut:
+                        psi = np.exp(-((max(d, 2.8) - 3.35) / 0.80) ** 2)
+                        W_pos[pi, pj] = max(W_pos[pi, pj], w_m * max(psi, 0.5))
+                        W_pos[pj, pi] = max(W_pos[pj, pi], w_m * max(psi, 0.5))
+                        pos_mask[pi, pj] = True
+                        pos_mask[pj, pi] = True
+                    if d < 5.0 and idx_dir == 0:
+                        ii.append(pi)
+                        jj.append(pj)
+                        dd.append(d)
+            if idx_dir == 0 and len(ii) >= 1:
+                ii = np.array(ii, dtype=int)
+                jj = np.array(jj, dtype=int)
+                dd = np.array(dd, dtype=float)
+                psi = np.exp(-((np.maximum(dd, 2.8) - 3.35) / 0.80) ** 2)
+                pos_pose_data.append((name, ii, jj, psi))
 
-    b32 = json.load(open(f'{D_DIR}/contacts_blind_top32.json'))
-    for idx, c in enumerate(b32):
-        p = c['pose'] if 'pose' in c else c
-        t = np.array(p['position'])
-        R = quat_to_rot(p['orientation'])
-        if nearest_nat(t, R) > 1.5:
-            poses.append((f'b32_{idx}', -1, t, R))
+    neg_mask = ~pos_mask
+    active_atom = W_pos.sum(axis=1) > 0
+    W_neg_prior = np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) * neg_mask
 
-    from collections import deque as _deque
-    for run in ('nuc-26', 'nuc-27', 'nuc-28', 'nuc-29', 'nuc-30', 'nuc-31', 'nuc-32'):
-        tr_path = f'/vast/xvg/tetramer-mc-runs/morph-growth-20261012/{run}/trajectory.jsonl'
-        if not os.path.exists(tr_path):
-            continue
-        with open(tr_path) as f:
-            tail = list(_deque(f, maxlen=4))
-        for line in tail[::2]:
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            for s in rec.get('memory', []):
-                t = np.array(s['position'])
-                R = quat_to_rot(s['orientation'])
-                sc = nearest_nat(t, R)
-                if sc > 1.8 and len(poses) < 320:
-                    poses.append((f'{run}_neg_{len(poses)}', -1, t, R))
-                elif sc < 0.85 and sum(1 for _, l, _, _ in poses if l > 0) < 35:
-                    poses.append((f'{run}_pos_{len(poses)}', +1, t, R))
+    D = 8
+    c0 = 0.25
+    tau = 0.15
+    rng = np.random.default_rng(7)
+    U0 = rng.normal(0.0, 0.5, size=(P, D))
+    V0 = rng.normal(0.0, 0.5, size=(P, D))
+    U0[:, 0] = 0.70
+    V0[:, 0] = -0.70
+    theta_uv0 = np.concatenate([U0.ravel(), V0.ravel()])
 
-    d41_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'contacts_nuc41_decoys.json')
-    if os.path.exists(d41_path):
-        for idx, c in enumerate(json.load(open(d41_path))):
-            p = c['pose'] if 'pose' in c else c
-            t = np.array(p['position'])
-            R = quat_to_rot(p['orientation'])
-            if nearest_nat(t, R) > 1.8:
-                poses.append((f'd41_{idx}', -1, t, R))
+    def loss_uv(theta_uv):
+        U = theta_uv[:P * D].reshape(P, D)
+        V = theta_uv[P * D:].reshape(P, D)
+        nu = np.sqrt(np.sum(U * U, axis=1, keepdims=True) + 1e-8)
+        nv = np.sqrt(np.sum(V * V, axis=1, keepdims=True) + 1e-8)
+        Un = U / nu
+        Vn = V / nv
+        UV = Un @ Vn.T
+        S_mat = 0.5 * (UV + UV.T)
 
-    pose_data = []
-    for name, label, t, R in poses:
+        # 1. InfoNCE partition-function loss over the P x P polar atom matrix
+        logits = S_mat / tau
+        logits_max = np.max(logits, axis=1, keepdims=True)
+        part_w = pos_mask.astype(float) + W_neg_prior
+        exp_l = part_w * np.exp(logits - logits_max)
+        Z_row = np.sum(exp_l, axis=1, keepdims=True)
+        prob_row = exp_l / Z_row
+        row_weight = np.sum(W_pos, axis=1, keepdims=True)
+        tot_loss = float(-np.sum(W_pos * (logits - logits_max - np.log(Z_row))))
+        dS_mat = -(W_pos - row_weight * prob_row) / tau
+
+        # 2. Off-diagonal partition repulsion on non-partner pairs (s_ik <= -0.48)
+        diff_neg = np.maximum(0.0, S_mat - (-0.48)) * neg_mask
+        tot_loss += float(np.sum(0.5 * W_neg_prior * diff_neg * diff_neg))
+        dS_mat += W_neg_prior * diff_neg
+
+        # 3. Positive crystal partner alignment (s_ij -> +0.85)
+        diff_pos = np.minimum(0.0, S_mat - 0.85) * pos_mask
+        tot_loss += float(np.sum(5.0 * W_pos * diff_pos * diff_pos))
+        dS_mat += 10.0 * W_pos * diff_pos
+
+        dUV = 0.5 * (dS_mat + dS_mat.T)
+        g_Un = dUV @ Vn + 2e-3 * (L_chem @ Un)
+        g_Vn = dUV.T @ Un + 2e-3 * (L_chem @ Vn)
+        tot_loss += 1e-3 * float(np.sum(Un * (L_chem @ Un)) + np.sum(Vn * (L_chem @ Vn)))
+        tot_loss += 1e-4 * float(np.sum(U * U) + np.sum(V * V))
+        g_U = (g_Un - Un * np.sum(g_Un * Un, axis=1, keepdims=True)) / nu + 2e-4 * U
+        g_V = (g_Vn - Vn * np.sum(g_Vn * Vn, axis=1, keepdims=True)) / nv + 2e-4 * V
+        return tot_loss, np.concatenate([g_U.ravel(), g_V.ravel()])
+
+    res_uv = minimize(loss_uv, theta_uv0, jac=True, method='L-BFGS-B', options={'maxiter': 600})
+    U_opt = res_uv.x[:P * D].reshape(P, D)
+    V_opt = res_uv.x[P * D:].reshape(P, D)
+    Un = U_opt / np.sqrt(np.sum(U_opt * U_opt, axis=1, keepdims=True) + 1e-8)
+    Vn = V_opt / np.sqrt(np.sum(V_opt * V_opt, axis=1, keepdims=True) + 1e-8)
+    S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
+
+    # Stage B: calibrate scalar activities a_i > 0 on positive crystal modes only
+    A_MIN, A_MAX, A_BG = 0.25, 1.60, 0.75
+    a0 = np.full(P, A_BG)
+
+    def loss_a(a_raw):
+        a = np.clip(a_raw, A_MIN, A_MAX)
+        tot_loss = 0.0
+        g_a = np.zeros(P, dtype=float)
+        for name, ii, jj, psi in pos_pose_data:
+            s_cos = S_mat[ii, jj]
+            wi = psi * a[ii]
+            wj = psi * a[jj]
+            num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
+            den_a = np.bincount(ii, weights=wj, minlength=P)
+            num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
+            den_b = np.bincount(jj, weights=wi, minlength=P)
+            inv_da = 1.0 / (den_a + c0)
+            inv_db = 1.0 / (den_b + c0)
+            ca = num_a * inv_da
+            cb = num_b * inv_db
+            S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
+            if name in ('nat_m0', 'nat_m5'):
+                w_pose, target, two_sided = 250.0, 0.55, False
+            elif name == 'nat_m2':
+                w_pose, target, two_sided = 350.0, 1.80, True
+            elif name == 'nat_m4':
+                w_pose, target, two_sided = 200.0, 4.75, True
+            elif name in ('nat_m6', 'capture_m6'):
+                w_pose, target, two_sided = 150.0, 2.65, True
+            else:
+                w_pose, target, two_sided = 150.0, 1.40, True
+            if S < target or (two_sided and S > target + 0.05):
+                t_eff = target if S < target else (target + 0.05)
+                diff = S - t_eff
+                tot_loss += w_pose * diff * diff
+                dL_dS = 2.0 * w_pose * diff
+                g_a += 0.5 * dL_dS * (ca + cb)
+                ai_d = a[ii] * inv_da[ii]
+                aj_d = a[jj] * inv_db[jj]
+                g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
+                g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
+                np.add.at(g_a, jj, g_wj * psi)
+                np.add.at(g_a, ii, g_wi * psi)
+        tot_loss += 0.05 * float(np.sum((a - A_BG) ** 2))
+        g_a = (g_a + 0.10 * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
+        return tot_loss, g_a
+
+    res_a = minimize(loss_a, a0, jac=True, method='L-BFGS-B', options={'maxiter': 400})
+    a_pol = np.clip(res_a.x, A_MIN, A_MAX)
+
+    def eval_pose_score(t, R):
         YA = (X @ R.T) + t
         pairs = tree_x.query_ball_tree(cKDTree(YA), 5.0)
         ii, jj, dd = [], [], []
         for j, a_list in enumerate(pairs):
             if flags_arr[j] == 0:
                 continue
+            pj = full_to_p[j]
             for i in a_list:
                 if flags_arr[i] == 0:
                     continue
+                pi = full_to_p[i]
                 d = float(np.linalg.norm(YA[i] - X[j]))
                 if d < 5.0:
-                    ii.append(i)
-                    jj.append(j)
+                    ii.append(pi)
+                    jj.append(pj)
                     dd.append(d)
-        min_pairs = 1 if label > 0 else 6
-        if len(ii) < min_pairs:
-            continue
+        if not ii:
+            return None
         ii = np.array(ii, dtype=int)
         jj = np.array(jj, dtype=int)
         dd = np.array(dd, dtype=float)
         psi = np.exp(-((np.maximum(dd, 2.8) - 3.35) / 0.80) ** 2)
-        pose_data.append((name, label, ii, jj, psi))
+        s_cos = S_mat[ii, jj]
+        wi = psi * a_pol[ii]
+        wj = psi * a_pol[jj]
+        num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
+        den_a = np.bincount(ii, weights=wj, minlength=P)
+        num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
+        den_b = np.bincount(jj, weights=wi, minlength=P)
+        return 0.5 * float(np.sum(a_pol * num_a / (den_a + c0)) + np.sum(a_pol * num_b / (den_b + c0)))
 
-    D = 8
-    A_MAX = 1.0
-    rng = np.random.default_rng(7)
-    Wu0 = rng.normal(0.0, 0.15, size=(M, D))
-    Wv0 = rng.normal(0.0, 0.15, size=(M, D))
-    wa0 = np.zeros(M)
-    ba0 = 0.0
-    p0 = np.concatenate([Wu0.ravel(), Wv0.ravel(), wa0, [ba0]])
-    c0 = 0.25
+    pos_scores = [s for _, t, R in pos_poses if (s := eval_pose_score(t, R)) is not None]
+    # Held-out evaluation on non-native decoys (never used in training)
+    neg_scores = []
+    c_mon = json.load(open(f'{D_DIR}/contacts_monomer.json'))
+    for c in c_mon:
+        lbl = c.get('label', '')
+        if not lbl.startswith('native') and lbl != 'capture #9':
+            p = c['pose'] if 'pose' in c else c
+            s = eval_pose_score(np.array(p['position']), quat_to_rot(p['orientation']))
+            if s is not None:
+                neg_scores.append(s)
+    d41_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'contacts_nuc41_decoys.json')
+    if os.path.exists(d41_path):
+        for c in json.load(open(d41_path)):
+            p = c['pose'] if 'pose' in c else c
+            s = eval_pose_score(np.array(p['position']), quat_to_rot(p['orientation']))
+            if s is not None:
+                neg_scores.append(s)
 
-    def unpack(p):
-        idx = M * D
-        Wu = p[:idx].reshape(M, D)
-        Wv = p[idx:2 * idx].reshape(M, D)
-        wa = p[2 * idx:2 * idx + M]
-        ba = p[2 * idx + M]
-        return Wu, Wv, wa, ba
-
-    def compute_atoms(Wu, Wv, wa, ba):
-        U_raw = F_norm @ Wu
-        V_raw = F_norm @ Wv
-        un = np.linalg.norm(U_raw, axis=1, keepdims=True) + 1e-8
-        vn = np.linalg.norm(V_raw, axis=1, keepdims=True) + 1e-8
-        U = U_raw / un
-        V = V_raw / vn
-        z = np.clip(F_norm @ wa + ba, -20.0, 20.0)
-        a = np.where(active_mask, A_MAX / (1.0 + np.exp(-z)), 0.0)
-        return U, V, a
-
-    def eval_all(p):
-        Wu, Wv, wa, ba = unpack(p)
-        U, V, a = compute_atoms(Wu, Wv, wa, ba)
-        scores = []
-        for name, label, ii, jj, psi in pose_data:
-            s_cos = 0.5 * (np.sum(U[ii] * V[jj], axis=1) + np.sum(U[jj] * V[ii], axis=1))
-            wj = psi * a[jj]
-            wi = psi * a[ii]
-            num_a = np.bincount(ii, weights=wj * s_cos, minlength=N)
-            den_a = np.bincount(ii, weights=wj, minlength=N)
-            num_b = np.bincount(jj, weights=wi * s_cos, minlength=N)
-            den_b = np.bincount(jj, weights=wi, minlength=N)
-            ca = num_a / (den_a + c0)
-            cb = num_b / (den_b + c0)
-            S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-            scores.append((name, label, S))
-        return scores
-
-    def loss_and_grad(p):
-        Wu, Wv, wa, ba = unpack(p)
-        U_raw = F_norm @ Wu
-        V_raw = F_norm @ Wv
-        un = np.linalg.norm(U_raw, axis=1, keepdims=True) + 1e-8
-        vn = np.linalg.norm(V_raw, axis=1, keepdims=True) + 1e-8
-        U = U_raw / un
-        V = V_raw / vn
-        z = np.clip(F_norm @ wa + ba, -20.0, 20.0)
-        sig = 1.0 / (1.0 + np.exp(-z))
-        a = np.where(active_mask, A_MAX * sig, 0.0)
-        da_dz = np.where(active_mask, A_MAX * sig * (1.0 - sig), 0.0)
-
-        reg = 1e-3 * float(np.sum(Wu * Wu) + np.sum(Wv * Wv) + np.sum(wa * wa))
-        g_Wu = 2e-3 * Wu
-        g_Wv = 2e-3 * Wv
-        g_wa = 2e-3 * wa
-        g_ba = 0.0
-
-        g_U = np.zeros_like(U)
-        g_V = np.zeros_like(V)
-        g_a = np.zeros_like(a)
-        tot_loss = reg
-
-        for name, label, ii, jj, psi in pose_data:
-            s_cos = 0.5 * (np.sum(U[ii] * V[jj], axis=1) + np.sum(U[jj] * V[ii], axis=1))
-            wj = psi * a[jj]
-            wi = psi * a[ii]
-            num_a = np.bincount(ii, weights=wj * s_cos, minlength=N)
-            den_a = np.bincount(ii, weights=wj, minlength=N)
-            num_b = np.bincount(jj, weights=wi * s_cos, minlength=N)
-            den_b = np.bincount(jj, weights=wi, minlength=N)
-            inv_da = 1.0 / (den_a + c0)
-            inv_db = 1.0 / (den_b + c0)
-            ca = num_a * inv_da
-            cb = num_b * inv_db
-            S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-
-            if label > 0:
-                two_sided = False
-                if name in ('nat_m0', 'nat_m5'):
-                    w_pose, target = 60.0, 0.60
-                elif name == 'nat_m2':
-                    w_pose, target = 120.0, 2.20
-                elif name == 'nat_m4':
-                    w_pose, target = 80.0, 4.50
-                elif name in ('nat_m6', 'capture_m6', 'POS_prior_m6'):
-                    w_pose, target, two_sided = 60.0, 2.60, True
-                elif 'slot' in name:
-                    w_pose, target, two_sided = 35.0, 0.85, True
-                else:
-                    w_pose, target, two_sided = 80.0, 1.35, True
-                if S < target or (two_sided and S > target + 0.10):
-                    t_eff = target if S < target else (target + 0.10)
-                    diff = S - t_eff
-                    tot_loss += w_pose * diff * diff
-                    dL_dS = 2.0 * w_pose * diff
-                else:
-                    continue
-            else:
-                w_pose = 45.0 if name.startswith('d41_') else 12.0
-                target = -0.85 if name.startswith('d41_') else -0.45
-                if S > target:
-                    diff = S - target
-                    tot_loss += w_pose * diff * diff
-                    dL_dS = 2.0 * w_pose * diff
-                else:
-                    continue
-
-            g_a += 0.5 * dL_dS * (ca + cb)
-            alpha_i = 0.5 * dL_dS * a * inv_da
-            beta_j = 0.5 * dL_dS * a * inv_db
-
-            dL_ds = alpha_i[ii] * wj + beta_j[jj] * wi
-            dL_dwj = alpha_i[ii] * (s_cos - ca[ii])
-            dL_dwi = beta_j[jj] * (s_cos - cb[jj])
-
-            np.add.at(g_a, jj, dL_dwj * psi)
-            np.add.at(g_a, ii, dL_dwi * psi)
-
-            half_ds = 0.5 * dL_ds[:, None]
-            np.add.at(g_U, ii, half_ds * V[jj])
-            np.add.at(g_V, jj, half_ds * U[ii])
-            np.add.at(g_U, jj, half_ds * V[ii])
-            np.add.at(g_V, ii, half_ds * U[jj])
-
-        proj_U = (g_U - U * np.sum(g_U * U, axis=1, keepdims=True)) / un
-        proj_V = (g_V - V * np.sum(g_V * V, axis=1, keepdims=True)) / vn
-        g_Wu += F_norm.T @ proj_U
-        g_Wv += F_norm.T @ proj_V
-        g_z = g_a * da_dz
-        g_wa += F_norm.T @ g_z
-        g_ba += float(np.sum(g_z))
-
-        grad = np.concatenate([g_Wu.ravel(), g_Wv.ravel(), g_wa, [g_ba]])
-        return tot_loss, grad
-
-    res = minimize(loss_and_grad, p0, jac=True, method='L-BFGS-B', options={'maxiter': 600})
-    Wu, Wv, wa, ba = unpack(res.x)
-    U, V, a = compute_atoms(Wu, Wv, wa, ba)
-    scores = eval_all(res.x)
-    pos_scores = [s for _, l, s in scores if l > 0]
-    neg_scores = [s for _, l, s in scores if l < 0]
-
-    cos_u = []
-    cos_v = []
-    cos_activity = []
-    for i in range(N):
-        if active_mask[i]:
-            cos_u.append([round(float(x), 6) for x in U[i]])
-            cos_v.append([round(float(x), 6) for x in V[i]])
-            cos_activity.append(round(float(a[i]), 6))
-        else:
-            cos_u.append([0.0] * D)
-            cos_v.append([0.0] * D)
-            cos_activity.append(0.0)
+    cos_u = [[0.0] * D for _ in range(N)]
+    cos_v = [[0.0] * D for _ in range(N)]
+    cos_activity = [0.0] * N
+    for p_idx, full_i in enumerate(polar_idx):
+        cos_u[full_i] = [round(float(x), 6) for x in Un[p_idx]]
+        cos_v[full_i] = [round(float(x), 6) for x in Vn[p_idx]]
+        cos_activity[full_i] = round(float(a_pol[p_idx]), 6)
     return cos_u, cos_v, cos_activity, (len(pos_scores), sum(s > 0 for s in pos_scores), len(neg_scores), sum(s < 0 for s in neg_scores))
 
 
@@ -695,12 +648,12 @@ def main():
     atom_cl_activity, cl_env_weights, intra_w = fit_cl_bridge_parameters(names, coords, flags)
     cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(names, coords, vdw, flags)
     weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
-    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5150]
+    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
     solv_cap = 12.5
     burial_gate = [12.0, 26.0]
     coop_weights = [2.2, 4.0]
     junc_weights = [2.0, 2.5]
-    cos_weights = [3.2, 8.0]
+    cos_weights = [3.2, 12.0]
     model = {
         'flags': flags,
         'weights': weights,

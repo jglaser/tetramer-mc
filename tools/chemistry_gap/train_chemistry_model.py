@@ -397,10 +397,19 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
                 t = np.array(s['position'])
                 R = quat_to_rot(s['orientation'])
                 sc = nearest_nat(t, R)
-                if sc > 1.8 and len(poses) < 230:
+                if sc > 1.8 and len(poses) < 320:
                     poses.append((f'{run}_neg_{len(poses)}', -1, t, R))
                 elif sc < 0.85 and sum(1 for _, l, _, _ in poses if l > 0) < 35:
                     poses.append((f'{run}_pos_{len(poses)}', +1, t, R))
+
+    d41_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'contacts_nuc41_decoys.json')
+    if os.path.exists(d41_path):
+        for idx, c in enumerate(json.load(open(d41_path))):
+            p = c['pose'] if 'pose' in c else c
+            t = np.array(p['position'])
+            R = quat_to_rot(p['orientation'])
+            if nearest_nat(t, R) > 1.8:
+                poses.append((f'd41_{idx}', -1, t, R))
 
     pose_data = []
     for name, label, t, R in poses:
@@ -525,7 +534,7 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
                 elif 'slot' in name:
                     w_pose, target, two_sided = 35.0, 0.85, True
                 else:
-                    w_pose, target, two_sided = 80.0, 1.00, True
+                    w_pose, target, two_sided = 80.0, 1.35, True
                 if S < target or (two_sided and S > target + 0.10):
                     t_eff = target if S < target else (target + 0.10)
                     diff = S - t_eff
@@ -534,8 +543,8 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
                 else:
                     continue
             else:
-                w_pose = 8.0
-                target = -0.45
+                w_pose = 45.0 if name.startswith('d41_') else 12.0
+                target = -0.85 if name.startswith('d41_') else -0.45
                 if S > target:
                     diff = S - target
                     tot_loss += w_pose * diff * diff
@@ -686,12 +695,12 @@ def main():
     atom_cl_activity, cl_env_weights, intra_w = fit_cl_bridge_parameters(names, coords, flags)
     cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(names, coords, vdw, flags)
     weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
-    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
+    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.5150]
     solv_cap = 12.5
     burial_gate = [12.0, 26.0]
     coop_weights = [2.2, 4.0]
     junc_weights = [2.0, 2.5]
-    cos_weights = [3.2, 3.4]
+    cos_weights = [3.2, 8.0]
     model = {
         'flags': flags,
         'weights': weights,

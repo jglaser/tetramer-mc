@@ -652,7 +652,7 @@ def main():
     solv_cap = 12.5
     burial_gate = [12.0, 26.0]
     coop_weights = [2.2, 4.0]
-    junc_weights = [2.0, 2.5]
+    junc_weights = [4.0, 2.5]
     cos_weights = [3.2, 12.0]
     model = {
         'flags': flags,
@@ -663,7 +663,7 @@ def main():
         'coop_weights': coop_weights,
         'coop_s0': 15.0,
         'junc_weights': junc_weights,
-        'junc_w0': 4.0,
+        'junc_w0': 1.0,
         'wb_cap': 5.0,
         'atom_cl_activity': atom_cl_activity,
         'cl_env_weights': cl_env_weights,

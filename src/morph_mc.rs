@@ -423,10 +423,10 @@ impl ChemistryModel {
         0.5 * (sum_a + sum_b)
     }
 
-    /// Stillinger-Weber / Tersoff bond-order saturation `phi(s) = s / (s + s_0)` for `s > 0.5`.
+    /// Stillinger-Weber / Tersoff bond-order saturation `phi(s) = s / (s + s_0)` for `s > 0.0`.
     #[inline]
     pub fn coop_phi(&self, s: f64) -> f64 {
-        if s <= 0.5 {
+        if s <= 0.0 {
             0.0
         } else {
             let s0 = if self.coop_s0 > 0.0 { self.coop_s0 } else { 15.0 };
@@ -2815,7 +2815,7 @@ impl MorphMc {
                 let (w_pq, c_pq, pb, pc) = self.well_chem_and_patch_between(p, self.poses[c]);
                 wp += w_pq;
                 ch += c_pq;
-                if pb.s > 0.5 || pc.s > 0.5 {
+                if pb.s > 0.0 || pc.s > 0.0 {
                     new_pairs.push((c, pb, pc));
                 }
             }
@@ -2824,17 +2824,36 @@ impl MorphMc {
         (wp, ch)
     }
 
-    /// Body-frame 3-body junction vector `(n_body, c_vec, norm_v)` on vertex body `v`
-    /// from its contacts with `c1` and `c2`, combining the 3D outward surface normal
-    /// `n_body = sum_{i in v} w_i n_i^body` and the 8D chemical donor/acceptor polarity vector
-    /// `c_vec = gamma_c sum_{i in v} w_i a_i (u_i - v_i)` (`w_i = u_i^(v,c1) u_i^(v,c2)`).
+    /// Cutoff-free 2-knot piecewise-linear radial surface-field junction energy on vertex body `v`
+    /// from its contacts `p1` and `p2`:
+    /// - Inner contact-core hat `B_1(u) = max(0, 4u - 3)` (`g in [0, 0.7 A]`, peaking at `g = 0`)
+    ///   accumulates `V_core = sum_{i in v} B_1(u_{1,i}) B_1(u_{2,i}) psi_i` and penalizes steric/chemical
+    ///   patch crowding via `+w_sat * ||V_core||`.
+    /// - Outer hydration-collar hat `B_2(u) = min(4/3 u, 4(1 - u))` (`g in [0, 2.8 A]`, peaking at `g = 0.7 A`)
+    ///   accumulates `V_collar = g_cos(p1) g_cos(p2) sum_{i in v} B_2(u_{1,i}) B_2(u_{2,i}) psi_i` and rewards
+    ///   contiguous multi-patch rim dewetting via `-w_seal * ||V_collar||` without graph-triangle rules.
     #[inline]
-    fn vertex_junction_vec(&self, p1: &PatchContact, p2: &PatchContact) -> (Vec3, [f64; 8], f64) {
+    fn vertex_surface_field_junc(&self, p1: &PatchContact, p2: &PatchContact) -> f64 {
         let (Some(u1), Some(u2)) = (&p1.u6, &p2.u6) else {
-            return ([0.0; 3], [0.0; 8], 0.0);
+            return 0.0;
         };
-        let mut g = [0.0f64; 3];
-        let mut c = [0.0f64; 8];
+        let w_seal = self.chem.junc_weights[0];
+        let w_sat = self.chem.junc_weights[1];
+        let w0 = if self.chem.junc_w0 > 0.0 {
+            self.chem.junc_w0
+        } else {
+            1.0
+        };
+        let g_pair = p1.g_cos * p2.g_cos;
+        let need_collar = w_seal != 0.0 && g_pair > 0.0;
+        let need_core = w_sat != 0.0;
+        if !need_collar && !need_core {
+            return 0.0;
+        }
+        let mut g_core = [0.0f64; 3];
+        let mut c_core = [0.0f64; 8];
+        let mut g_col = [0.0f64; 3];
+        let mut c_col = [0.0f64; 8];
         let has_cos = self.chem.has_cosine();
         const GAMMA_C: f64 = 0.35;
         for (i, ((&a, &b), &nb)) in u1
@@ -2843,81 +2862,81 @@ impl MorphMc {
             .zip(self.body_normals.iter())
             .enumerate()
         {
-            let w = a * b;
-            if w > 0.0 {
-                g[0] += w * nb[0];
-                g[1] += w * nb[1];
-                g[2] += w * nb[2];
-                if has_cos {
-                    let wc = GAMMA_C * w * self.chem.cos_activity[i];
-                    if wc > 0.0 {
-                        let ui = &self.chem.cos_u[i];
-                        let vi = &self.chem.cos_v[i];
-                        for k in 0..8 {
-                            c[k] += wc * (ui[k] - vi[k]);
+            if a <= 0.0 || b <= 0.0 {
+                continue;
+            }
+            if need_core {
+                let b1_a = (4.0 * a - 3.0).max(0.0);
+                let b1_b = (4.0 * b - 3.0).max(0.0);
+                let w1 = b1_a * b1_b;
+                if w1 > 0.0 {
+                    g_core[0] += w1 * nb[0];
+                    g_core[1] += w1 * nb[1];
+                    g_core[2] += w1 * nb[2];
+                    if has_cos {
+                        let wc = GAMMA_C * w1 * self.chem.cos_activity[i];
+                        if wc > 0.0 {
+                            let ui = &self.chem.cos_u[i];
+                            let vi = &self.chem.cos_v[i];
+                            for k in 0..8 {
+                                c_core[k] += wc * (ui[k] - vi[k]);
+                            }
+                        }
+                    }
+                }
+            }
+            if need_collar {
+                let b2_a = ((4.0 / 3.0) * a).min(4.0 * (1.0 - a));
+                let b2_b = ((4.0 / 3.0) * b).min(4.0 * (1.0 - b));
+                let w2 = b2_a * b2_b;
+                if w2 > 0.0 {
+                    g_col[0] += w2 * nb[0];
+                    g_col[1] += w2 * nb[1];
+                    g_col[2] += w2 * nb[2];
+                    if has_cos {
+                        let wc = GAMMA_C * w2 * self.chem.cos_activity[i];
+                        if wc > 0.0 {
+                            let ui = &self.chem.cos_u[i];
+                            let vi = &self.chem.cos_v[i];
+                            for k in 0..8 {
+                                c_col[k] += wc * (ui[k] - vi[k]);
+                            }
                         }
                     }
                 }
             }
         }
-        let mut n2 = g[0] * g[0] + g[1] * g[1] + g[2] * g[2];
-        if has_cos {
-            for k in 0..8 {
-                n2 += c[k] * c[k];
+        let mut e = 0.0f64;
+        if need_core {
+            let mut n2 = g_core[0] * g_core[0] + g_core[1] * g_core[1] + g_core[2] * g_core[2];
+            if has_cos {
+                for k in 0..8 {
+                    n2 += c_core[k] * c_core[k];
+                }
+            }
+            e += w_sat * n2.sqrt();
+        }
+        if need_collar {
+            let mut n2 = g_col[0] * g_col[0] + g_col[1] * g_col[1] + g_col[2] * g_col[2];
+            if has_cos {
+                for k in 0..8 {
+                    n2 += c_col[k] * c_col[k];
+                }
+            }
+            if n2 > 0.0 {
+                let norm_col = n2.sqrt();
+                e -= w_seal * g_pair * (n2 / (norm_col + w0));
             }
         }
-        (g, c, n2.sqrt())
+        e
     }
 
-    /// Triangle zero-vector-sum cancellation stabilization
-    /// `g_tri * W_ABC (1 - R_ABC^2) [w_sat + w_seal (1 - R_ABC^2) / (W_ABC + W_0)]`
-    /// subtracted when a closed 3-body triangle `(A, B, C)` seals its triple-junction vectors
-    /// (`V_A + V_B + V_C -> 0` where `||V_A + V_B + V_C||^2 = sum_v ||V_v||^2 + 2 sum_{u<v} <V_u, V_v>`).
-    #[inline]
-    fn triangle_junction_cancel_term(
-        &self,
-        v_a: (Vec3, [f64; 8], f64),
-        v_b: (Vec3, [f64; 8], f64),
-        v_c: (Vec3, [f64; 8], f64),
-        g_tri: f64,
-    ) -> f64 {
-        if g_tri <= 0.0 {
-            return 0.0;
-        }
-        let (n_a, c_a, norm_a) = v_a;
-        let (n_b, c_b, norm_b) = v_b;
-        let (n_c, c_c, norm_c) = v_c;
-        let w_abc = norm_a + norm_b + norm_c;
-        if w_abc <= 1e-12 {
-            return 0.0;
-        }
-        let sum_n = add(add(n_a, n_b), n_c);
-        let mut sum_sq = sum_n[0] * sum_n[0] + sum_n[1] * sum_n[1] + sum_n[2] * sum_n[2];
-        for k in 0..8 {
-            let sc = c_a[k] + c_b[k] + c_c[k];
-            sum_sq += sc * sc;
-        }
-        let r_abc = (sum_sq.sqrt() / w_abc).clamp(0.0, 1.0);
-        let one_m_r2 = 1.0 - r_abc * r_abc;
-        if one_m_r2 <= 0.0 {
-            return 0.0;
-        }
-        let w_seal = self.chem.junc_weights[0];
-        let w_sat = self.chem.junc_weights[1];
-        let w0 = if self.chem.junc_w0 > 0.0 {
-            self.chem.junc_w0
-        } else {
-            4.0
-        };
-        g_tri * w_abc * one_m_r2 * (w_sat + w_seal * one_m_r2 / (w_abc + w0))
-    }
-
-    /// Cooperative 3-body contribution of all wedges `(c1, b, c2)` and `(b, c1, d)` involving
-    /// body `b` at `pose_b` given its sparse list of active patch contacts `contacts: &[(c, pb, pc)]`.
+    /// Cooperative many-body surface-field contribution of all wedges `(c1, b, c2)` and `(b, c1, d)`
+    /// involving body `b` given its sparse list of active patch contacts `contacts: &[(c, pb, pc)]`.
     fn coop_single_body_sparse(
         &self,
         b: usize,
-        pose_b: Pose,
+        _pose_b: Pose,
         contacts: &[(usize, PatchContact, PatchContact)],
     ) -> f64 {
         if !self.chem.has_cooperativity() || self.patch.is_empty() || contacts.is_empty() {
@@ -2926,12 +2945,6 @@ impl MorphMc {
         let w_wedge = self.chem.coop_weights[0];
         let w_tri = self.chem.coop_weights[1];
         let has_junc = self.chem.has_junction();
-        let w_sat = self.chem.junc_weights[1];
-        let r_b = if has_junc {
-            rotation(pose_b.orientation)
-        } else {
-            [[0.0; 3]; 3]
-        };
         let lookup_eff_phi_b = |d: usize| -> f64 {
             for &(c, ref pb, ref pc) in contacts {
                 if c == d {
@@ -2942,61 +2955,36 @@ impl MorphMc {
             0.0
         };
         let mut e_coop = 0.0f64;
-        // 1. Vertex on body b and triangles {b, c1, c2}: pairs (c1, c2) both contacting b.
+        // 1. Vertex on body b: pairs (c1, c2) both contacting b.
         for idx1 in 0..contacts.len() {
-            let (c1, ref pb_c1, ref pc_c1) = contacts[idx1];
+            let (c1, ref pb_c1, _) = contacts[idx1];
+            if pb_c1.s <= 0.0 {
+                continue;
+            }
             let phi_bc1 = self.chem.coop_eff_phi(pb_c1);
             let u_bc1 = pb_c1.u;
-            for &(c2, ref pb_c2, ref pc_c2) in &contacts[idx1 + 1..] {
+            for &(c2, ref pb_c2, _) in &contacts[idx1 + 1..] {
+                if pb_c2.s <= 0.0 {
+                    continue;
+                }
                 let phi_bc2 = self.chem.coop_eff_phi(pb_c2);
                 let u_bc2 = pb_c2.u;
-                let mut vb = ([0.0; 3], [0.0; 8], 0.0);
-                let mut vb_computed = false;
-                if pb_c1.s > 0.5 && pb_c2.s > 0.5 {
-                    if phi_bc1 > 0.0 && phi_bc2 > 0.0 {
-                        let psi_b = ChemistryModel::coop_psi(u_bc1, u_bc2);
-                        let wedge_b = phi_bc1 * phi_bc2 * psi_b;
-                        let phi_c1c2 = 0.5
-                            * (self.chem.coop_eff_phi(&self.patch[c1][c2])
-                                + self.chem.coop_eff_phi(&self.patch[c2][c1]));
-                        e_coop -= (w_wedge + w_tri * phi_c1c2) * wedge_b;
-                    }
-                    if has_junc {
-                        vb = self.vertex_junction_vec(pb_c1, pb_c2);
-                        vb_computed = true;
-                        e_coop += w_sat * vb.2;
-                    }
+                if phi_bc1 > 0.0 && phi_bc2 > 0.0 {
+                    let psi_b = ChemistryModel::coop_psi(u_bc1, u_bc2);
+                    let wedge_b = phi_bc1 * phi_bc2 * psi_b;
+                    let phi_c1c2 = 0.5
+                        * (self.chem.coop_eff_phi(&self.patch[c1][c2])
+                            + self.chem.coop_eff_phi(&self.patch[c2][c1]));
+                    e_coop -= (w_wedge + w_tri * phi_c1c2) * wedge_b;
                 }
-                if has_junc && (self.patch[c1][c2].s > 0.5 || self.patch[c2][c1].s > 0.5) {
-                    let g_bc1 = 0.5 * (pb_c1.g_cos + pc_c1.g_cos);
-                    let g_bc2 = 0.5 * (pb_c2.g_cos + pc_c2.g_cos);
-                    let g_c1c2 = 0.5 * (self.patch[c1][c2].g_cos + self.patch[c2][c1].g_cos);
-                    let g_tri = (g_bc1 * g_bc2 * g_c1c2).cbrt();
-                    if g_tri > 0.0 {
-                        if !vb_computed {
-                            vb = self.vertex_junction_vec(pb_c1, pb_c2);
-                        }
-                        let vc1 = self.vertex_junction_vec(pc_c1, &self.patch[c1][c2]);
-                        let vc2 = self.vertex_junction_vec(pc_c2, &self.patch[c2][c1]);
-                        let v_b = (matvec(r_b, vb.0), vb.1, vb.2);
-                        let v_c1 = (
-                            matvec(rotation(self.poses[c1].orientation), vc1.0),
-                            vc1.1,
-                            vc1.2,
-                        );
-                        let v_c2 = (
-                            matvec(rotation(self.poses[c2].orientation), vc2.0),
-                            vc2.1,
-                            vc2.2,
-                        );
-                        e_coop -= self.triangle_junction_cancel_term(v_b, v_c1, v_c2, g_tri);
-                    }
+                if has_junc {
+                    e_coop += self.vertex_surface_field_junc(pb_c1, pb_c2);
                 }
             }
         }
         // 2. Vertex on neighbor c: wedge (b, d) on vertex c for d != b, c.
         for &(c, _, ref pc_c) in contacts {
-            if pc_c.s <= 0.5 {
+            if pc_c.s <= 0.0 {
                 continue;
             }
             let phi_cb = self.chem.coop_eff_phi(pc_c);
@@ -3007,7 +2995,7 @@ impl MorphMc {
                     continue;
                 }
                 let p_cd = &self.patch[c][d];
-                if p_cd.s <= 0.5 {
+                if p_cd.s <= 0.0 {
                     continue;
                 }
                 let phi_cd = self.chem.coop_eff_phi(p_cd);
@@ -3018,16 +3006,15 @@ impl MorphMc {
                     e_coop -= (w_wedge + w_tri * phi_bd) * wedge_c;
                 }
                 if has_junc {
-                    let vc = self.vertex_junction_vec(pc_c, p_cd);
-                    e_coop += w_sat * vc.2;
+                    e_coop += self.vertex_surface_field_junc(pc_c, p_cd);
                 }
             }
         }
         e_coop
     }
 
-    /// Total 3-body cooperative energy across the full `n x n` patch matrix `mat` at body `poses`.
-    fn coop_total_from_matrix(&self, mat: &[Vec<PatchContact>], poses: &[Pose]) -> f64 {
+    /// Total cooperative many-body surface-field energy across the full `n x n` patch matrix `mat`.
+    fn coop_total_from_matrix(&self, mat: &[Vec<PatchContact>], _poses: &[Pose]) -> f64 {
         if !self.chem.has_cooperativity() || mat.is_empty() {
             return 0.0;
         }
@@ -3035,17 +3022,11 @@ impl MorphMc {
         let w_wedge = self.chem.coop_weights[0];
         let w_tri = self.chem.coop_weights[1];
         let has_junc = self.chem.has_junction();
-        let w_sat = self.chem.junc_weights[1];
-        let rots: Vec<[[f64; 3]; 3]> = if has_junc {
-            poses.iter().map(|p| rotation(p.orientation)).collect()
-        } else {
-            Vec::new()
-        };
         let mut e_coop = 0.0f64;
         for i in 0..n {
             let mut active: Vec<(usize, f64, Vec3)> = Vec::new();
             for j in 0..n {
-                if j != i && mat[i][j].s > 0.5 {
+                if j != i && mat[i][j].s > 0.0 {
                     active.push((j, self.chem.coop_eff_phi(&mat[i][j]), mat[i][j].u));
                 }
             }
@@ -3061,38 +3042,7 @@ impl MorphMc {
                         e_coop -= (w_wedge + w_tri * phi_jk) * wedge_i;
                     }
                     if has_junc {
-                        let vi = self.vertex_junction_vec(&mat[i][j], &mat[i][k]);
-                        e_coop += w_sat * vi.2;
-                    }
-                }
-            }
-        }
-        if has_junc {
-            for i in 0..n {
-                for j in (i + 1)..n {
-                    if mat[i][j].s <= 0.5 && mat[j][i].s <= 0.5 {
-                        continue;
-                    }
-                    let g_ij = 0.5 * (mat[i][j].g_cos + mat[j][i].g_cos);
-                    for k in (j + 1)..n {
-                        if (mat[i][k].s <= 0.5 && mat[k][i].s <= 0.5)
-                            || (mat[j][k].s <= 0.5 && mat[k][j].s <= 0.5)
-                        {
-                            continue;
-                        }
-                        let g_ik = 0.5 * (mat[i][k].g_cos + mat[k][i].g_cos);
-                        let g_jk = 0.5 * (mat[j][k].g_cos + mat[k][j].g_cos);
-                        let g_tri = (g_ij * g_ik * g_jk).cbrt();
-                        if g_tri <= 0.0 {
-                            continue;
-                        }
-                        let vi = self.vertex_junction_vec(&mat[i][j], &mat[i][k]);
-                        let vj = self.vertex_junction_vec(&mat[j][i], &mat[j][k]);
-                        let vk = self.vertex_junction_vec(&mat[k][i], &mat[k][j]);
-                        let v_i = (matvec(rots[i], vi.0), vi.1, vi.2);
-                        let v_j = (matvec(rots[j], vj.0), vj.1, vj.2);
-                        let v_k = (matvec(rots[k], vk.0), vk.1, vk.2);
-                        e_coop -= self.triangle_junction_cancel_term(v_i, v_j, v_k, g_tri);
+                        e_coop += self.vertex_surface_field_junc(&mat[i][j], &mat[i][k]);
                     }
                 }
             }
@@ -3114,7 +3064,7 @@ impl MorphMc {
                 let pc = self.pair_cache[b][c];
                 wp_old += pc.well as usize;
                 ch_old_pair += pc.chem;
-                if has_coop && (self.patch[b][c].s > 0.5 || self.patch[c][b].s > 0.5) {
+                if has_coop && (self.patch[b][c].s > 0.0 || self.patch[c][b].s > 0.0) {
                     old_coop_contacts.push((c, self.patch[b][c].clone(), self.patch[c][b].clone()));
                 }
             }
@@ -3128,10 +3078,10 @@ impl MorphMc {
                 let (w_pq, c_pq, pb, pc) = self.well_chem_and_patch_between(new, self.poses[c]);
                 wp_new += w_pq;
                 ch_new_pair += c_pq;
-                if has_coop && (pb.s > 0.5 || pc.s > 0.5) {
+                if has_coop && (pb.s > 0.0 || pc.s > 0.0) {
                     new_coop_contacts.push((c, pb.clone(), pc.clone()));
                 }
-                if w_pq > 0 || c_pq != 0.0 || (has_coop && (pb.s > 0.5 || pc.s > 0.5)) {
+                if w_pq > 0 || c_pq != 0.0 || (has_coop && (pb.s > 0.0 || pc.s > 0.0)) {
                     new_pairs.push((c, w_pq as u32, c_pq, pb, pc));
                 }
             }
@@ -3690,7 +3640,7 @@ impl MorphMc {
             }
         }
         let vn = norm(v);
-        if s > 0.5 && vn > 1e-12 {
+        if s > 0.0 && vn > 1e-12 {
             let u6_arc = if self.chem.has_junction() {
                 Some(Arc::from(u6))
             } else {
@@ -6337,5 +6287,90 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn piecewise_linear_surface_field_resolves_4_cycle_and_penalizes_core_crowding() {
+        // 1. Verify exact partition identity u = B_1(u) + (3/4) B_2(u) on u in [0, 1].
+        for k in 0..=100 {
+            let u = k as f64 / 100.0;
+            let b1 = (4.0 * u - 3.0).max(0.0);
+            let b2 = ((4.0 / 3.0) * u).min(4.0 * (1.0 - u));
+            assert!(
+                (b1 + 0.75 * b2 - u).abs() < 1e-14,
+                "hat basis partition failed at u={u}: B1={b1}, B2={b2}"
+            );
+        }
+        // 2. Verify on 1L2Y monomer crystal model that the inter-helix 4-cycle corner (m2- + m4+)
+        // receives attractive hydration-collar sealing without requiring a closed 3-body triangle,
+        // while overlapping inner-core contacts receive repulsive crowding (+w_sat ||V_core||).
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let shape_path = root.join("examples/monomer-shape.json");
+        let chem_path = root.join("examples/chemistry-model-monomer.json");
+        if !shape_path.exists() || !chem_path.exists() {
+            return;
+        }
+        let shape: Shape =
+            serde_json::from_str(&std::fs::read_to_string(&shape_path).unwrap()).unwrap();
+        let chem: ChemistryModel =
+            serde_json::from_str(&std::fs::read_to_string(&chem_path).unwrap()).unwrap();
+        let n = shape.atoms.len();
+        let tree = SphereTree::new(shape).unwrap();
+        let wall = Container::new(150.0, &tree).unwrap();
+        let model = SolvationModel {
+            probe: 1.4,
+            pressure: 0.0,
+            coefficients: vec![[0.0; 3]; n],
+            atom_types: (0..n).collect(),
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 0.0,
+            width: 0.6,
+        };
+        let p_id = Pose {
+            position: [0.0; 3],
+            orientation: [1.0, 0.0, 0.0, 0.0],
+        };
+        let p_m2_inv = Pose {
+            position: [-18.425103383654946, 19.476249953575714, -28.424999999999994],
+            orientation: [0.7071067811865477, 0.0, 0.0, -0.7071067811865475],
+        };
+        let p_m4 = Pose {
+            position: [-20.073750046424273, -20.07375004642428, -19.451561877005823],
+            orientation: [0.0, 0.7071067811865477, -0.7071067811865475, 0.0],
+        };
+        let mc = MorphMc::new(
+            tree,
+            wall,
+            model,
+            well,
+            vec![p_id, p_m2_inv, p_m4],
+            vec![true, false, false],
+        )
+        .unwrap()
+        .with_chemistry_model(chem)
+        .unwrap();
+
+        let (_, _, p_id_m2, _) = mc.well_chem_and_patch_between(p_id, p_m2_inv);
+        let (_, _, p_id_m4, _) = mc.well_chem_and_patch_between(p_id, p_m4);
+        let (_, _, p_m2_m4, _) = mc.well_chem_and_patch_between(p_m2_inv, p_m4);
+        // The diagonal (p_m2_inv, p_m4) is open (m3, g_cos = 0.0), so there is no closed triangle.
+        assert_eq!(p_m2_m4.g_cos, 0.0);
+        // Yet on vertex p_id, the contiguous m2- and m4+ patches seal their hydration collars (e_junc < -2.0 kT).
+        let e_junc_corner = mc.vertex_surface_field_junc(&p_id_m2, &p_id_m4);
+        assert!(
+            e_junc_corner < -2.0,
+            "expected negative hydration-collar sealing on m2- x m4+ 4-cycle corner, got {e_junc_corner:+.3} kT"
+        );
+        // Conversely, two non-complementary patches competing for the same inner contact core (g_cos = 0)
+        // incur a strictly positive inner-core crowding penalty (+w_sat * ||V_core|| > 10 kT).
+        let mut p_crowd = p_id_m4.clone();
+        p_crowd.g_cos = 0.0;
+        let e_junc_crowd = mc.vertex_surface_field_junc(&p_id_m4, &p_crowd);
+        assert!(
+            e_junc_crowd > 5.0,
+            "expected positive inner-core crowding penalty on overlapping site, got {e_junc_crowd:+.3} kT"
+        );
     }
 }

@@ -480,7 +480,36 @@ To replace hand-tuned chemistry feature weights with a unified data-driven surfa
 2. **Three-Body Chemical Zero-Vector-Sum & Similarity-Gated Cooperativity**:
    - **Chemical similarity gate on 3-body cooperativity (`PatchContact::g_cos`, `coop_eff_phi`)**: Each contact $(A, B)$ stores $g_{\text{cos}}(A, B) = \text{clamp}(S_{\text{cos}}(A, B) / 0.18, 0, 1)$, gating open-wedge and closed-triangle cooperativity via $\phi_{\text{eff}}(A, B) = \phi(s_{AB})\, g_{\text{cos}}(A, B)$ and $g_{\text{tri}} = (g_{AB} g_{BC} g_{CA})^{1/3}$ so non-native contacts ($S_{\text{cos}} \le 0$) receive zero 3-body cooperative attraction while retaining full repulsive crowding saturation $w_{\text{sat}}\|\mathbf{V}_v\|$.
    - **11D geometric + chemical zero-vector-sum at triple junctions (`vertex_junction_vec`, `triangle_junction_cancel_term`)**: At a triple junction where vertex $v \in \{A, B, C\}$ contacts both neighbors $u$ and $w$ with seam overlap $w_i^{(v;uw)} = u_i^{(v,u)} u_i^{(v,w)}$, the 3D outward normal vector $\mathbf{N}_v \in \mathbb{R}^3$ is augmented with the 8D net chemical polarity vector $\mathbf{C}_v = \gamma_{\text{chem}} \sum_{i \in v} w_i^{(v;uw)} a_i (\hat{\mathbf{u}}_i - \hat{\mathbf{v}}_i) \in \mathbb{R}^8$ ($\gamma_{\text{chem}} = 0.35$) to form $\mathbf{V}_v = (\mathbf{N}_v, \mathbf{C}_v) \in \mathbb{R}^{11}$. In a closed cycle of donor$\to$acceptor$\to$donor contacts around a triple junction, $\sum_{v \in \{A,B,C\}} (\hat{\mathbf{u}}_v - \hat{\mathbf{v}}_v) = \mathbf{0}$, so the same algebraic identity decomposes both geometric normal cancellation and chemical polarity cancellation:
-     $$\|\mathbf{V}_A + \mathbf{V}_B + \mathbf{V}_C\|^2 = \sum_{v \in \{A,B,C\}} \|\mathbf{V}_v\|^2 + 2 \sum_{u < v} \Bigl(\langle \mathbf{N}_u, \mathbf{N}_v \rangle + \langle \mathbf{C}_u, \mathbf{C}_v \rangle\Bigr), \qquad R_{ABC}^2 = \frac{\|\mathbf{V}_A + \mathbf{V}_B + \mathbf{V}_C\|^2}{\bigl(\|\mathbf{V}_A\| + \|\mathbf{V}_B\| + \|\mathbf{V}_C\|\bigr)^2}$$
+     $$\|\mathbf{V}_A + \mathbf{V}_B + \mathbf{V}_C\|^2 = \sum_{v \in \{A,B,C\}} \|\mathbf{V}_v\|^2 + 2 \sum_{u < v} \Bigl(\langle \mathbf{N}_u, \mathbf{N}_v \rangle + \langle \mathbf{C}_u, \mathbf{C}_v \rangle\Bigr), \qquad R_{ABC}^2 = \frac{\|\mathbf{V}_A + \mathbf{V}_B + \mathbf{V}_C\|^2}{\bigl(\|\mathbf{V}_A\| + \|\mathbf{N}_B\| + \|\mathbf{V}_C\|\bigr)^2}$$
+
+### 8.14 Cutoff-Free Piecewise-Linear Radial Surface-Field Many-Body Hamiltonian (`vertex_surface_field_junc`)
+
+![Cutoff-free piecewise-linear surface-field Hamiltonian](figures/surface_field_many_body_hamiltonian.png)
+
+In $N=256$ unseeded nucleation/growth (`nuc-45` at $10^6$ sweeps), the system formed eight high-selectivity ($95\%$) 1D $4_3$ screw protofilaments (`{m0, m1, m2}`, 323 native bonds) without 3D lateral extension (`{m4, m6}`). Crystallographic and multi-body `pair-binding` analysis revealed why the triangle-cancellation formulation of Section 8.13 frustrated 3D lateral packing:
+- Along a single 1D $4_3$ screw helix $H_1$, `m1` ($-c/4$), `m2` ($+3c/4$), and `m0` ($+c$) form a closed 3-cycle ($\mathrm{m1} \circ \mathrm{m2} = \mathrm{m0}$).
+- Between adjacent antiparallel $4_3$ screw helices $H_1$ and $H_2$, the shortest lateral loop is a **4-cycle** ($H_1[0] \xrightarrow{\mathrm{m1}} H_1[1] \xrightarrow{\mathrm{m4}} H_2[-3] \xrightarrow{\mathrm{m2}} H_2[0] \xrightarrow{\mathrm{m6}} H_1[0]$) whose diagonal is **`m3` (`min_gap = +2.45 Å`, $g_{\cos} = 0$)**. Because `m3` is an open gap, a 3-body triangle cancellation rule never fires on the `(m2, m4)` corner, leaving an uncancelled $+17.5\,k_{\text{B}}T$ open-wedge penalty that depressed the 4-cycle corner association constant to $\ln K_{\text{site}} = -11.14 < \ln K_{\text{crit}} (+13.29)$.
+
+To eliminate all `s > 0.5` step cutoffs and graph-cycle rules while unifying the 2-body contrastive cosine embeddings with the many-body vertex interaction (`MorphMc::vertex_surface_field_junc` in `src/morph_mc.rs`):
+1. **Exact 2-knot piecewise-linear radial hat basis on $g \in [0, 2.8\text{ \AA}]$**:
+   Given the per-atom $2.8\text{ \AA}$ gap coordinate $u_i = \operatorname{clamp}(1 - g_i/2.8,\, 0,\, 1) \in [0, 1]$ at knots $\gamma \in \{0.0,\, 0.7,\, 2.8\}\text{ \AA}$ ($u \in \{1.0, 0.75, 0.0\}$), the two piecewise-linear hat functions are:
+   $$B_1(u) = \max(0,\, 4u - 3) \in [0, 1] \quad (\text{inner contact core, } g \in [0, 0.7\text{ \AA}]),$$
+   $$B_2(u) = \min\!\left(\frac{4}{3}u,\, 4(1 - u)\right) \in [0, 1] \quad (\text{outer hydration collar, peaking at } g = 0.7\text{ \AA}),$$
+   satisfying the exact partition identity $u = B_1(u) + \frac{3}{4}B_2(u)$ with zero additional memory or distance queries.
+2. **Pure-vertex 11D surface-field functional (`junc_weights = [4.0, 2.5]`, `junc_w0 = 1.0`, zero graph loops)**:
+   With the 11D learned atom feature vector $\boldsymbol{\psi}_i = \mathbf{n}_i^{\text{body}} \oplus \gamma_c a_i(\hat{\mathbf{u}}_i - \hat{\mathbf{v}}_i) \in \mathbb{R}^{11}$ ($\gamma_c = 0.35$) on vertex body $A$, any pair of active contacts $(B, C)$ on $A$ ($s > 0.0$) induces:
+   $$\mathbf{V}_{\text{core}, A}^{(B, C)} = \sum_{i \in A} B_1(u_i^B)\,B_1(u_i^C)\,\boldsymbol{\psi}_i, \qquad \mathbf{V}_{\text{collar}, A}^{(B, C)} = \sum_{i \in A} B_2(u_i^B)\,B_2(u_i^C)\,\boldsymbol{\psi}_i,$$
+   $$E_{\text{junc}}(A; B, C) = +w_{\text{sat}}\,\bigl\|\mathbf{V}_{\text{core}, A}^{(B, C)}\bigr\| \;-\; w_{\text{seal}}\,g_{\cos}(A, B)\,g_{\cos}(A, C)\,\frac{\bigl\|\mathbf{V}_{\text{collar}, A}^{(B, C)}\bigr\|^2}{\bigl\|\mathbf{V}_{\text{collar}, A}^{(B, C)}\bigr\| + w_0}.$$
+   Because non-overlapping crystal patches have disjoint inner cores ($\|\mathbf{V}_{\text{core}}\| \approx 0$) while contiguous crystal patches (`m1 x m2` in 1D 3-cycles and `m2 x m4` in 3D 4-cycles) share a hydration-collar rim ($\|\mathbf{V}_{\text{collar}}\| = 0.56\text{--}1.41$), this pure-vertex functional stabilizes both 3-cycles and 4-cycles without any graph-triangle queries or opposite-sign 4-body terms:
+
+| Multi-Body Crystal Growth Site (`pair-binding`, $c_0 = 2.8\text{ mM}$, $\ln K_{\text{crit}} = +13.29$) | Old Cutoff + Triangle Rule | No Junction (`junc = [0, 0]`) | **New Piecewise-Linear Surface Field** (`B1` core + `B2` collar) |
+|---|---:|---:|---:|
+| **1. 1D Helix Tip** (`m1 + m2 + m0`) | $+14.41$ | $+13.87$ | **$+14.34 \pm 0.06$** ($E_{\min} = -53.3\,k_{\text{B}}T$) |
+| **2. Lateral 1st Monomer via `m6`** ($C_2$ bridge) | $+5.31$ | $+5.31$ | **$+6.02 \pm 0.42$** ($E_{\min} = -45.3\,k_{\text{B}}T$) |
+| **3. Lateral 1st Monomer via `m4`** ($C_2$ bridge) | $-3.27$ | $+4.08$ | **$+6.97 \pm 0.27$** ($E_{\min} = -40.3\,k_{\text{B}}T$) |
+| **4. Lateral 2nd Monomer — 4-Cycle Corner** (`m2 + m4`) | **$-11.14$** (blocked) | $+5.41$ (subcritical) | **$+14.74 \pm 0.19$** ($E_{\min} = -52.9\,k_{\text{B}}T$, **supercritical!**) |
+| **5. Lateral 4th Monomer — Full 3D Turn** (`m1 + m2 + m4`) | $+8.46$ (subcritical) | $+26.08$ | **$+31.01 \pm 0.03$** ($E_{\min} = -82.3\,k_{\text{B}}T$, **deeply locked!**) |
+
 
 
 

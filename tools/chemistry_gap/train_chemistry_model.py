@@ -344,44 +344,48 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
     W_pos = np.zeros((P, P), dtype=float)
     pos_mask = np.zeros((P, P), dtype=bool)
     pos_pose_data = []
+    rmax = float(np.max(R_vdw))
+    d_max = 2.0 * rmax + 2.8
     for name, t, R in pos_poses:
         if name == 'nat_m2':
-            w_m, d_cut = 50.0, 5.35
+            w_m = 55.0
         elif name in ('nat_m0', 'nat_m5'):
-            w_m, d_cut = 60.0, 5.0
+            w_m = 60.0
         elif name == 'nat_m4':
-            w_m, d_cut = 14.0, 5.0
+            w_m = 18.0
         else:
-            w_m, d_cut = 5.0, 4.35
+            w_m = 5.0
         for idx_dir, (tr, Rr) in enumerate([(t, R), (-R.T @ t, R.T)]):
             YA = (X @ Rr.T) + tr
-            pairs = tree_x.query_ball_tree(cKDTree(YA), d_cut)
-            ii, jj, dd = [], [], []
+            pairs = tree_x.query_ball_tree(cKDTree(YA), d_max)
+            ii, jj, psi_list = [], [], []
             for j, a_list in enumerate(pairs):
                 if flags_arr[j] == 0:
                     continue
                 pj = full_to_p[j]
+                rj = R_vdw[j]
                 for i in a_list:
                     if flags_arr[i] == 0:
                         continue
                     pi = full_to_p[i]
                     d = float(np.linalg.norm(YA[i] - X[j]))
-                    if d < d_cut:
-                        psi = np.exp(-((max(d, 2.8) - 3.35) / 0.80) ** 2)
-                        W_pos[pi, pj] = max(W_pos[pi, pj], w_m * max(psi, 0.5))
-                        W_pos[pj, pi] = max(W_pos[pj, pi], w_m * max(psi, 0.5))
+                    g = d - (R_vdw[i] + rj)
+                    if g < 2.8:
+                        u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
+                        psi = min((4.0 / 3.0) * u, 1.0)
+                        W_pos[pi, pj] = max(W_pos[pi, pj], w_m * max(psi, 0.4))
+                        W_pos[pj, pi] = max(W_pos[pj, pi], w_m * max(psi, 0.4))
                         pos_mask[pi, pj] = True
                         pos_mask[pj, pi] = True
-                    if d < 5.0 and idx_dir == 0:
-                        ii.append(pi)
-                        jj.append(pj)
-                        dd.append(d)
+                        if idx_dir == 0 and psi > 0.0:
+                            ii.append(pi)
+                            jj.append(pj)
+                            psi_list.append(psi)
             if idx_dir == 0 and len(ii) >= 1:
                 ii = np.array(ii, dtype=int)
                 jj = np.array(jj, dtype=int)
-                dd = np.array(dd, dtype=float)
-                psi = np.exp(-((np.maximum(dd, 2.8) - 3.35) / 0.80) ** 2)
-                pos_pose_data.append((name, ii, jj, psi))
+                psi_arr = np.array(psi_list, dtype=float)
+                pos_pose_data.append((name, ii, jj, psi_arr))
 
     neg_mask = ~pos_mask
     active_atom = W_pos.sum(axis=1) > 0
@@ -468,13 +472,13 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
             if name in ('nat_m0', 'nat_m5'):
                 w_pose, target, two_sided = 250.0, 0.55, False
             elif name == 'nat_m2':
-                w_pose, target, two_sided = 350.0, 1.80, True
+                w_pose, target, two_sided = 350.0, 3.60, True
             elif name == 'nat_m4':
-                w_pose, target, two_sided = 200.0, 4.75, True
+                w_pose, target, two_sided = 250.0, 4.30, True
             elif name in ('nat_m6', 'capture_m6'):
-                w_pose, target, two_sided = 150.0, 2.65, True
+                w_pose, target, two_sided = 250.0, 0.75, True
             else:
-                w_pose, target, two_sided = 150.0, 1.40, True
+                w_pose, target, two_sided = 200.0, 2.35, True
             if S < target or (two_sided and S > target + 0.05):
                 t_eff = target if S < target else (target + 0.05)
                 diff = S - t_eff
@@ -496,27 +500,31 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
 
     def eval_pose_score(t, R):
         YA = (X @ R.T) + t
-        pairs = tree_x.query_ball_tree(cKDTree(YA), 5.0)
-        ii, jj, dd = [], [], []
+        pairs = tree_x.query_ball_tree(cKDTree(YA), d_max)
+        ii, jj, psi_list = [], [], []
         for j, a_list in enumerate(pairs):
             if flags_arr[j] == 0:
                 continue
             pj = full_to_p[j]
+            rj = R_vdw[j]
             for i in a_list:
                 if flags_arr[i] == 0:
                     continue
                 pi = full_to_p[i]
                 d = float(np.linalg.norm(YA[i] - X[j]))
-                if d < 5.0:
-                    ii.append(pi)
-                    jj.append(pj)
-                    dd.append(d)
+                g = d - (R_vdw[i] + rj)
+                if g < 2.8:
+                    u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
+                    psi = min((4.0 / 3.0) * u, 1.0)
+                    if psi > 0.0:
+                        ii.append(pi)
+                        jj.append(pj)
+                        psi_list.append(psi)
         if not ii:
             return None
         ii = np.array(ii, dtype=int)
         jj = np.array(jj, dtype=int)
-        dd = np.array(dd, dtype=float)
-        psi = np.exp(-((np.maximum(dd, 2.8) - 3.35) / 0.80) ** 2)
+        psi = np.array(psi_list, dtype=float)
         s_cos = S_mat[ii, jj]
         wi = psi * a_pol[ii]
         wj = psi * a_pol[jj]
@@ -647,13 +655,13 @@ def main():
     flags = atom_chemistry_flags(names, coords=coords)
     atom_cl_activity, cl_env_weights, intra_w = fit_cl_bridge_parameters(names, coords, flags)
     cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(names, coords, vdw, flags)
-    weights = [1.45, 2.0, 12.5, 0.45, 1.8, 1.15, 2.2]
+    weights = [1.38, 2.00, 0.0, 0.55, 1.35, 1.25, 2.05]
     solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
     solv_cap = 12.5
-    burial_gate = [12.0, 26.0]
-    coop_weights = [2.2, 4.0]
-    junc_weights = [4.0, 2.5]
-    cos_weights = [3.2, 12.0]
+    burial_gate = [14.0, 0.0]
+    coop_weights = [2.0, 3.6]
+    junc_weights = [3.8, 2.6]
+    cos_weights = [3.15, 3.85]
     model = {
         'flags': flags,
         'weights': weights,
@@ -664,7 +672,7 @@ def main():
         'coop_s0': 15.0,
         'junc_weights': junc_weights,
         'junc_w0': 1.0,
-        'wb_cap': 5.0,
+        'wb_cap': 18.0,
         'atom_cl_activity': atom_cl_activity,
         'cl_env_weights': cl_env_weights,
         'cos_u': cos_u,

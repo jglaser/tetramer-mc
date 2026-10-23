@@ -373,8 +373,41 @@ impl ChemistryModel {
             && self.cos_weights.iter().any(|&w| w != 0.0)
     }
 
+    /// Inner contact-core hat basis `B_1(u) = max(0, 4u - 3)` on normalized proximity `u in [0, 1]`.
+    #[inline]
+    pub fn hat_b1(u: f64) -> f64 {
+        (4.0 * u - 3.0).max(0.0)
+    }
+
+    /// Outer hydration-collar hat basis `B_2(u) = min(4/3 u, 4(1 - u))` on `u in [0, 1]`.
+    #[inline]
+    pub fn hat_b2(u: f64) -> f64 {
+        ((4.0 / 3.0) * u).min(4.0 * (1.0 - u)).max(0.0)
+    }
+
+    /// Combined contact+collar support `B_12(u) = B_1(u) + B_2(u) = min(4/3 u, 1)` on `u in [0, 1]`.
+    #[inline]
+    pub fn hat_b12(u: f64) -> f64 {
+        ((4.0 / 3.0) * u).clamp(0.0, 1.0)
+    }
+
+    /// Monotonically increasing direct H-bond / salt-bridge / burial radial weight `B_1(u) + 0.25 B_2(u)`.
+    #[inline]
+    pub fn hat_hb(u: f64) -> f64 {
+        Self::hat_b1(u) + 0.25 * Self::hat_b2(u)
+    }
+
+    /// Hydration-collar water-bridge radial weight `B_2(u) (1 - B_1(u))`.
+    #[inline]
+    pub fn hat_wb(u: f64) -> f64 {
+        let b1 = Self::hat_b1(u);
+        let b2 = Self::hat_b2(u);
+        b2 * (1.0 - b1)
+    }
+
     /// Evaluate the symmetric contrastive cosine-similarity score `S_cos(A, B)` across
-    /// active inter-monomer atom pairs within 5.0 A.
+    /// active inter-monomer atom pairs `(i, j, psi)` in the 2.8 A hydration shell, where
+    /// `psi = B_12(u_ij)` is the piecewise-linear radial weight.
     pub fn eval_cos_score(&self, cos_pairs: &[(usize, usize, f64)], n: usize) -> f64 {
         if !self.has_cosine() || cos_pairs.is_empty() {
             return 0.0;
@@ -384,14 +417,15 @@ impl ChemistryModel {
         let mut den_a = vec![0.0f64; n];
         let mut num_b = vec![0.0f64; n];
         let mut den_b = vec![0.0f64; n];
-        for &(i, j, d) in cos_pairs {
+        for &(i, j, psi) in cos_pairs {
+            if psi <= 0.0 {
+                continue;
+            }
             let ai = self.cos_activity[i];
             let aj = self.cos_activity[j];
             if ai <= 1e-8 || aj <= 1e-8 {
                 continue;
             }
-            let u_rad = (d.max(2.8) - 3.35) * (1.0 / 0.80);
-            let psi = (-u_rad * u_rad).exp();
             let ui = &self.cos_u[i];
             let vi = &self.cos_v[i];
             let uj = &self.cos_u[j];
@@ -478,6 +512,10 @@ impl ChemistryModel {
                 / (self.burial_gate[1] - self.burial_gate[0]))
                 .clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
+        } else if self.burial_gate[0] > 0.0 {
+            let a2 = a1_burial * a1_burial;
+            let b02 = self.burial_gate[0] * self.burial_gate[0];
+            a2 / (a2 + b02)
         } else {
             1.0
         };
@@ -538,7 +576,9 @@ impl ChemistryModel {
     }
 
     /// Pairwise interface solvation + chemistry energy (kT) using atom radii `vdw` and a
-    /// prebuilt template `BallGrid` (`cell >= 2*vmax + 2.8` when `has_solvation()`, else `>= 5.25`).
+    /// prebuilt template `BallGrid` (`cell >= 2*vmax + 2.8`).
+    /// All 2-body terms use the unified 2-knot piecewise-linear radial basis `(B_1(u), B_2(u))`
+    /// on the 2.8 A hydration shell `u = clamp(1 - g / 2.8, 0, 1)`.
     pub fn pair_energy_with_radii_and_grid(
         &self,
         centers: &[Vec3],
@@ -548,9 +588,6 @@ impl ChemistryModel {
         p: Pose,
         q: Pose,
     ) -> f64 {
-        if !self.has_solvation() {
-            return self.pair_energy_with_grid(centers, bound, grid, p, q);
-        }
         let max_cut = 6.6;
         if !self.is_enabled() || norm(sub(q.position, p.position)) > 2. * bound + max_cut {
             return 0.;
@@ -575,15 +612,15 @@ impl ChemistryModel {
             return 0.;
         }
 
+        let has_solv = self.has_solvation();
+        let has_cos = self.has_cosine();
+        let need_cl = self.weights[2] != 0.0;
         let mut p2 = 0.0f64;
         let mut p3 = 0.0f64;
         let mut max_u_a = vec![0.0f64; n];
         let mut max_u_b = vec![0.0f64; n];
-
-        let mut min_d_a = vec![99.0f64; n];
-        let mut min_comp_a = vec![99.0f64; n];
-        let mut min_d_b = vec![99.0f64; n];
-        let mut min_comp_b = vec![99.0f64; n];
+        let mut max_comp_u_a = vec![0.0f64; n];
+        let mut max_comp_u_b = vec![0.0f64; n];
 
         let mut s_wb_raw = 0.0f64;
         let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
@@ -591,7 +628,6 @@ impl ChemistryModel {
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
         let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
         let mut cos_pairs: Vec<(usize, usize, f64)> = Vec::new();
-        let has_cos = self.has_cosine();
 
         for &(i, ya) in &active_a {
             let fi = self.flags[i];
@@ -600,96 +636,97 @@ impl ChemistryModel {
                 let xb = centers[j];
                 let r_sum = ri + vdw[j];
                 let r_solv = r_sum + 2.8;
-                let r_lim = r_solv.max(5.25);
                 let diff = sub(ya, xb);
                 let d2 = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
-                if d2 >= r_lim * r_lim {
+                if d2 >= r_solv * r_solv {
                     continue;
                 }
                 let d = d2.sqrt();
                 let g = d - r_sum;
-                if g < 2.8 {
-                    let u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
+                if g >= 2.8 {
+                    continue;
+                }
+                let u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
+                if u <= 0.0 {
+                    continue;
+                }
+                if has_solv {
                     let u2 = u * u;
                     p2 += u2;
                     p3 += u2 * u;
-                    if u > max_u_a[i] {
-                        max_u_a[i] = u;
-                    }
-                    if u > max_u_b[j] {
-                        max_u_b[j] = u;
-                    }
                 }
-                if d >= 5.25 {
-                    continue;
+                if u > max_u_a[i] {
+                    max_u_a[i] = u;
+                }
+                if u > max_u_b[j] {
+                    max_u_b[j] = u;
                 }
                 let fj = self.flags[j];
-                if fi != 0 && d < min_d_a[i] {
-                    min_d_a[i] = d;
-                }
-                if fj != 0 && d < min_d_b[j] {
-                    min_d_b[j] = d;
-                }
                 if fi == 0 || fj == 0 {
                     continue;
                 }
-                if has_cos && d < 5.0 {
-                    cos_pairs.push((i, j, d));
+                if has_cos {
+                    cos_pairs.push((i, j, Self::hat_b12(u)));
                 }
                 let comp = Self::complementary(fi, fj);
                 if comp {
-                    if d < min_comp_a[i] {
-                        min_comp_a[i] = d;
+                    if u > max_comp_u_a[i] {
+                        max_comp_u_a[i] = u;
                     }
-                    if d < min_comp_b[j] {
-                        min_comp_b[j] = d;
+                    if u > max_comp_u_b[j] {
+                        max_comp_u_b[j] = u;
                     }
-                    if (3.95..=5.25).contains(&d) {
-                        let u = (d - 4.55) / 0.45;
-                        s_wb_raw += (-u * u).exp();
-                    }
+                    s_wb_raw += Self::hat_wb(u);
                 }
-                if d < 3.9 {
-                    let u = (d.max(2.7) - 2.95) / 0.45;
-                    let gh = (-u * u).exp();
+                let gh = Self::hat_hb(u);
+                if gh > 0.0 {
                     if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
                     {
                         hb_cands.push((i, j, gh));
                     }
-                    if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
-                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
+                    if ((fi & CHEM_CAT != 0) && (fj & (CHEM_NACC | CHEM_ANI) != 0))
+                        || ((fj & CHEM_CAT != 0) && (fi & (CHEM_NACC | CHEM_ANI) != 0))
+                        || ((fi & CHEM_ANI != 0) && (fj & CHEM_NDON != 0))
+                        || ((fj & CHEM_ANI != 0) && (fi & CHEM_NDON != 0))
                     {
                         chb_cands.push((i, j, gh, scale(add(ya, xb), 0.5), d));
                     }
+                    if ((fi & CHEM_PURE_ACC != 0) && (fj & CHEM_PURE_ACC != 0))
+                        || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0))
+                    {
+                        clash_candidates.push((i, j, gh));
+                    }
                 }
-                if (3.2..=4.9).contains(&d)
+                if need_cl
+                    && (3.2..=4.9).contains(&d)
                     && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
                         || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
                 {
                     tn_pairs.push((i, j, scale(add(ya, xb), 0.5), d));
                 }
-                if d < 4.0
-                    && (((fi & CHEM_PURE_ACC != 0) && (fj & CHEM_PURE_ACC != 0))
-                        || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0)))
-                {
-                    clash_candidates.push((i, j, d));
-                }
             }
         }
 
-        let mut a1 = 0.0f64;
-        let mut a2 = 0.0f64;
-        let mut a05 = 0.0f64;
-        for &u in max_u_a.iter().chain(max_u_b.iter()) {
-            if u > 0.0 {
-                a1 += u;
-                a2 += u * u;
-                a05 += u.sqrt();
+        let (e_solv, a1_burial) = if has_solv {
+            let mut a1 = 0.0f64;
+            let mut a2 = 0.0f64;
+            let mut a05 = 0.0f64;
+            for &u in max_u_a.iter().chain(max_u_b.iter()) {
+                if u > 0.0 {
+                    a1 += u;
+                    a2 += u * u;
+                    a05 += u.sqrt();
+                }
             }
-        }
-        let sw = &self.solv_weights;
-        let e_solv = sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05;
+            let sw = &self.solv_weights;
+            (
+                sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05,
+                a1,
+            )
+        } else {
+            (0.0, 999.0)
+        };
 
         hb_cands.sort_by(|a, b| {
             b.2.total_cmp(&a.2)
@@ -721,60 +758,65 @@ impl ChemistryModel {
             }
         }
 
-        let s_cl = self.eval_cl_score(&tn_pairs, centers, |x| add(matvec(r_rel, x), t_rel));
+        let s_cl = if need_cl {
+            self.eval_cl_score(&tn_pairs, centers, |x| add(matvec(r_rel, x), t_rel))
+        } else {
+            0.0
+        };
 
         let mut s_clash = 0.0f64;
-        for (i, j, d) in clash_candidates {
-            if min_comp_a[i] >= 3.65 && min_comp_b[j] >= 3.65 {
-                let u = (d.max(2.8) - 2.8) / 0.8;
-                s_clash += (-u * u).exp();
-            }
+        for (i, j, w_cl) in clash_candidates {
+            let uncomp_a = 1.0 - Self::hat_b12(max_comp_u_a[i]);
+            let uncomp_b = 1.0 - Self::hat_b12(max_comp_u_b[j]);
+            s_clash += w_cl * uncomp_a * uncomp_b;
         }
         let s_wb = s_wb_raw.min(self.wb_cap) * (-1.5 * s_clash).exp();
 
         let mut unp_pol = 0.0f64;
         let mut unp_chg = 0.0f64;
-        for (i, (&dmin, &dcomp)) in min_d_a.iter().zip(&min_comp_a).enumerate() {
-            if dmin >= 4.25 {
+        for (i, (&ua, &uc)) in max_u_a.iter().zip(&max_comp_u_a).enumerate() {
+            if ua <= 0.0 {
                 continue;
             }
             let fi = self.flags[i];
-            let is_chg = (fi & (CHEM_CAT | CHEM_ANI)) != 0;
-            let is_npol = !is_chg && ((fi & (CHEM_NDON | CHEM_NACC)) != 0);
-            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
-                let u = (dmin.max(2.9) - 2.9) / 0.75;
-                unp_pol += (-u * u).exp();
+            if fi == 0 {
+                continue;
             }
-            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
-                let u = (dmin.max(3.0) - 3.0) / 0.95;
-                unp_chg += (-u * u).exp();
+            let du = (Self::hat_hb(ua) - Self::hat_b12(uc)).max(0.0);
+            if du > 0.0 {
+                if (fi & (CHEM_CAT | CHEM_ANI)) != 0 {
+                    unp_chg += du;
+                } else if (fi & (CHEM_NDON | CHEM_NACC)) != 0 {
+                    unp_pol += du;
+                }
             }
         }
-        for (j, (&dmin, &dcomp)) in min_d_b.iter().zip(&min_comp_b).enumerate() {
-            if dmin >= 4.25 {
+        for (j, (&ub, &uc)) in max_u_b.iter().zip(&max_comp_u_b).enumerate() {
+            if ub <= 0.0 {
                 continue;
             }
             let fj = self.flags[j];
-            let is_chg = (fj & (CHEM_CAT | CHEM_ANI)) != 0;
-            let is_npol = !is_chg && ((fj & (CHEM_NDON | CHEM_NACC)) != 0);
-            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
-                let u = (dmin.max(2.9) - 2.9) / 0.75;
-                unp_pol += (-u * u).exp();
+            if fj == 0 {
+                continue;
             }
-            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
-                let u = (dmin.max(3.0) - 3.0) / 0.95;
-                unp_chg += (-u * u).exp();
+            let du = (Self::hat_hb(ub) - Self::hat_b12(uc)).max(0.0);
+            if du > 0.0 {
+                if (fj & (CHEM_CAT | CHEM_ANI)) != 0 {
+                    unp_chg += du;
+                } else if (fj & (CHEM_NDON | CHEM_NACC)) != 0 {
+                    unp_pol += du;
+                }
             }
         }
 
         let s_cos = self.eval_cos_score(&cos_pairs, n);
 
         self.combine_pair_energy(
-            e_solv, a1, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg, s_cos,
+            e_solv, a1_burial, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg, s_cos,
         )
     }
 
-    /// Pairwise chemistry residual energy (kT) using a prebuilt template `BallGrid` (cell >= 5.25 A).
+    /// Pairwise chemistry residual energy (kT) using a prebuilt template `BallGrid` and default 1.5 A radii.
     pub fn pair_energy_with_grid(
         &self,
         centers: &[Vec3],
@@ -783,214 +825,8 @@ impl ChemistryModel {
         p: Pose,
         q: Pose,
     ) -> f64 {
-        if !self.is_enabled() || norm(sub(q.position, p.position)) > 2. * bound + 5.25 {
-            return 0.;
-        }
-        let n = centers.len();
-        let rp = rotation(p.orientation);
-        let rqt = transpose(rotation(q.orientation));
-        let cut = 5.25;
-        // Transform flagged atoms of p into the frame of q, keeping those within bound + cut.
-        let mut active_a: Vec<(usize, Vec3)> = Vec::new();
-        for (i, &x) in centers.iter().enumerate() {
-            if self.flags[i] == 0 {
-                continue;
-            }
-            let y = matvec(rqt, sub(add(matvec(rp, x), p.position), q.position));
-            if norm(y) <= bound + cut {
-                active_a.push((i, y));
-            }
-        }
-        let rpt = transpose(rp);
-        let rq = rotation(q.orientation);
-        let mut active_b: Vec<(usize, Vec3)> = Vec::new();
-        for (j, &x) in centers.iter().enumerate() {
-            if self.flags[j] == 0 {
-                continue;
-            }
-            let y = matvec(rpt, sub(add(matvec(rq, x), q.position), p.position));
-            if norm(y) <= bound + cut {
-                active_b.push((j, y));
-            }
-        }
-        if active_a.is_empty() && active_b.is_empty() {
-            return 0.;
-        }
-        let mut min_d_a = vec![99.0f64; n];
-        let mut min_comp_a = vec![99.0f64; n];
-        let mut min_d_b = vec![99.0f64; n];
-        let mut min_comp_b = vec![99.0f64; n];
-
-        let mut s_wb_raw = 0.0f64;
-        let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
-        let mut chb_cands: Vec<(usize, usize, f64, Vec3, f64)> = Vec::new();
-        let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
-        let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
-        let mut cos_pairs: Vec<(usize, usize, f64)> = Vec::new();
-        let has_cos = self.has_cosine();
-
-        for &(i, ya) in &active_a {
-            let fi = self.flags[i];
-            for j in grid.near(&ya) {
-                let xb = centers[j];
-                let d = norm(sub(ya, xb));
-                if d >= cut {
-                    continue;
-                }
-                if d < min_d_a[i] {
-                    min_d_a[i] = d;
-                }
-                if d < min_d_b[j] {
-                    min_d_b[j] = d;
-                }
-                let fj = self.flags[j];
-                if fj == 0 {
-                    continue;
-                }
-                if has_cos && d < 5.0 {
-                    cos_pairs.push((i, j, d));
-                }
-                let comp = Self::complementary(fi, fj);
-                if comp {
-                    if d < min_comp_a[i] {
-                        min_comp_a[i] = d;
-                    }
-                    if d < min_comp_b[j] {
-                        min_comp_b[j] = d;
-                    }
-                    if (3.95..=5.25).contains(&d) {
-                        let u = (d - 4.55) / 0.45;
-                        s_wb_raw += (-u * u).exp();
-                    }
-                }
-                if d < 3.9 {
-                    let u = (d.max(2.7) - 2.95) / 0.45;
-                    let g = (-u * u).exp();
-                    if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
-                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
-                    {
-                        hb_cands.push((i, j, g));
-                    }
-                    if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
-                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
-                    {
-                        chb_cands.push((i, j, g, scale(add(ya, xb), 0.5), d));
-                    }
-                }
-                if (3.2..=4.9).contains(&d)
-                    && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
-                        || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
-                {
-                    tn_pairs.push((i, j, scale(add(ya, xb), 0.5), d));
-                }
-                if d < 4.0
-                    && (((fi & CHEM_PURE_ACC != 0) && (fj & CHEM_PURE_ACC != 0))
-                        || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0)))
-                {
-                    clash_candidates.push((i, j, d));
-                }
-            }
-        }
-
-        hb_cands.sort_by(|a, b| {
-            b.2.total_cmp(&a.2)
-                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
-        });
-        let mut used_hb_a = Vec::new();
-        let mut used_hb_b = Vec::new();
-        let mut s_hb = 0.0f64;
-        for (i, j, g) in hb_cands {
-            if !used_hb_a.contains(&i) && !used_hb_b.contains(&j) {
-                used_hb_a.push(i);
-                used_hb_b.push(j);
-                s_hb += g;
-            }
-        }
-
-        chb_cands.sort_by(|a, b| {
-            b.2.total_cmp(&a.2)
-                .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
-        });
-        let mut used_chb_a = Vec::new();
-        let mut used_chb_b = Vec::new();
-        let mut s_chb = 0.0f64;
-        for (i, j, g, _, _) in chb_cands {
-            if !used_chb_a.contains(&i) && !used_chb_b.contains(&j) {
-                used_chb_a.push(i);
-                used_chb_b.push(j);
-                s_chb += g;
-            }
-        }
-
-        let s_cl = self.eval_cl_score(&tn_pairs, centers, |x| {
-            matvec(rqt, sub(add(matvec(rp, x), p.position), q.position))
-        });
-
-        let mut s_clash = 0.0f64;
-        for (i, j, d) in clash_candidates {
-            if min_comp_a[i] >= 3.65 && min_comp_b[j] >= 3.65 {
-                let u = (d.max(2.8) - 2.8) / 0.8;
-                s_clash += (-u * u).exp();
-            }
-        }
-        let s_wb = s_wb_raw.min(self.wb_cap) * (-1.5 * s_clash).exp();
-
-        let mut unp_pol = 0.0f64;
-        let mut unp_chg = 0.0f64;
-        for &(i, _) in &active_a {
-            let fi = self.flags[i];
-            let dmin = min_d_a[i];
-            let dcomp = min_comp_a[i];
-            let is_chg = (fi & (CHEM_CAT | CHEM_ANI)) != 0;
-            let is_npol = !is_chg && ((fi & (CHEM_NDON | CHEM_NACC)) != 0);
-            if is_npol && dmin < 3.9 && dcomp >= 3.65 {
-                let u = (dmin.max(2.9) - 2.9) / 0.7;
-                unp_pol += (-u * u).exp();
-            }
-            if is_chg && dmin < 4.0 && dcomp >= 4.30 {
-                let u = (dmin.max(3.0) - 3.0) / 0.9;
-                unp_chg += (-u * u).exp();
-            }
-        }
-        for &(j, yb) in &active_b {
-            let fj = self.flags[j];
-            let dcomp = min_comp_b[j];
-            let is_chg = (fj & (CHEM_CAT | CHEM_ANI)) != 0;
-            let is_npol = !is_chg && ((fj & (CHEM_NDON | CHEM_NACC)) != 0);
-            if (is_npol && dcomp >= 3.65) || (is_chg && dcomp >= 4.30) {
-                let mut dmin = min_d_b[j];
-                for i in grid.near(&yb) {
-                    if self.flags[i] == 0 {
-                        let d = norm(sub(yb, centers[i]));
-                        if d < dmin {
-                            dmin = d;
-                        }
-                    }
-                }
-                if is_npol && dmin < 3.9 {
-                    let u = (dmin.max(2.9) - 2.9) / 0.7;
-                    unp_pol += (-u * u).exp();
-                }
-                if is_chg && dmin < 4.0 {
-                    let u = (dmin.max(3.0) - 3.0) / 0.9;
-                    unp_chg += (-u * u).exp();
-                }
-            }
-        }
-
-        let s_cos = self.eval_cos_score(&cos_pairs, n);
-        let e_cos = if s_cos >= 0.0 {
-            -self.cos_weights[0] * s_cos
-        } else {
-            -self.cos_weights[1] * s_cos
-        };
-
-        let w = &self.weights;
-        -w[0] * s_hb - w[1] * s_chb - w[2] * s_cl - w[3] * s_wb
-            + w[4] * s_clash
-            + w[5] * unp_pol
-            + w[6] * unp_chg
-            + e_cos
+        let vdw = vec![1.5; centers.len()];
+        self.pair_energy_with_radii_and_grid(centers, &vdw, bound, grid, p, q)
     }
 }
 
@@ -1609,11 +1445,12 @@ impl MorphMc {
             "invalid chemistry model weights"
         );
         let vmax = self.vdw.iter().copied().fold(0., f64::max);
-        let cell = (2. * vmax + 2.8).max(5.25);
+        let g_reach = if chem.has_cooperativity() { 4.2 } else { 2.8 };
+        let cell = (2. * vmax + g_reach).max(5.25);
         if chem.is_enabled() {
             let t_cell = cell.max(2. * vmax + self.well.width);
             self.template_grid = BallGrid::new(&self.centers, t_cell);
-            self.chem_grid = Some(BallGrid::new(&self.centers, cell));
+            self.chem_grid = Some(BallGrid::new(&self.centers, (2. * vmax + 2.8).max(5.25)));
         } else {
             self.chem_grid = None;
         }
@@ -3550,10 +3387,10 @@ impl MorphMc {
         self.well_chem_and_patch_between_inner(p, q, self.chem.has_cooperativity())
     }
 
-    /// Directed 2.8 A hydration-shell patch contacts `(patch_p_from_q, patch_q_from_p)` between pose `p` and pose `q`.
+    /// Directed hydration-collar patch contacts `(patch_p_from_q, patch_q_from_p)` between pose `p` and pose `q`.
     pub fn patch_pair_between(&self, p: Pose, q: Pose) -> (PatchContact, PatchContact) {
         let has_cos = self.chem.has_cosine();
-        let cut_patch = if has_cos { 5.25 } else { 2.8 };
+        let cut_patch = 8.0;
         let reach = 2. * self.tree.bound + cut_patch;
         let dpq = sub(q.position, p.position);
         if dpq[0] * dpq[0] + dpq[1] * dpq[1] + dpq[2] * dpq[2] > reach * reach {
@@ -3575,28 +3412,28 @@ impl MorphMc {
         let mut u6_a = Vec::new();
         let mut u6_b = Vec::new();
         let mut cos_pairs: Vec<(usize, usize, f64)> = Vec::new();
-        let mut any = false;
+        let mut any_patch = false;
+        let mut any_28 = false;
         for (i, ya) in active_a {
             let ri = self.vdw[i];
             let fi = if has_cos { self.chem.flags[i] } else { 0 };
             for j in self.template_grid.near(&ya) {
                 let r_sum = ri + self.vdw[j];
-                let r_cut = r_sum + 2.8;
-                let r_lim = if has_cos { r_cut.max(5.0) } else { r_cut };
+                let r_patch = r_sum + 4.2;
                 let diff = sub(ya, self.centers[j]);
                 let d2 = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
-                if d2 >= r_lim * r_lim {
+                if d2 >= r_patch * r_patch {
                     continue;
                 }
                 let d = d2.sqrt();
-                if d2 < r_cut * r_cut {
-                    if !any {
+                let g = d - r_sum;
+                if g < 4.2 {
+                    if !any_patch {
                         u6_a.resize(n, 0.0);
                         u6_b.resize(n, 0.0);
-                        any = true;
+                        any_patch = true;
                     }
-                    let g = (d - r_sum).max(0.0);
-                    let u6 = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
+                    let u6 = ((4.2 - g.max(0.0)) * (1.0 / 4.2)).clamp(0.0, 1.0);
                     if u6 > u6_a[i] {
                         u6_a[i] = u6;
                     }
@@ -3604,15 +3441,19 @@ impl MorphMc {
                         u6_b[j] = u6;
                     }
                 }
-                if has_cos && fi != 0 && d < 5.0 {
-                    let fj = self.chem.flags[j];
-                    if fj != 0 {
-                        cos_pairs.push((i, j, d));
+                if g < 2.8 {
+                    any_28 = true;
+                    if has_cos && fi != 0 {
+                        let fj = self.chem.flags[j];
+                        if fj != 0 {
+                            let u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
+                            cos_pairs.push((i, j, ChemistryModel::hat_b12(u)));
+                        }
                     }
                 }
             }
         }
-        if !any {
+        if !any_28 {
             return (PatchContact::default(), PatchContact::default());
         }
         let g_cos = if has_cos {
@@ -3671,11 +3512,7 @@ impl MorphMc {
                 PatchContact::default(),
             );
         }
-        let max_chem_cut = if self.chem.has_solvation() || need_patch {
-            6.6
-        } else {
-            5.25
-        };
+        let max_chem_cut = if need_patch { 8.0 } else { 6.6 };
         let well_reach = if self.well.width > 0.0 {
             2. * self.tree.bound + self.well.width
         } else {
@@ -3704,6 +3541,8 @@ impl MorphMc {
         let rpt = transpose(rp);
         let q_in_p = matvec(rpt, dpq);
         let has_solv = self.chem.has_solvation();
+        let has_cos = self.chem.has_cosine();
+        let need_cl = self.chem.weights[2] != 0.0;
         let extra = self.well.width.max(max_chem_cut);
         let mut active_a = Vec::new();
         self.tree
@@ -3719,13 +3558,10 @@ impl MorphMc {
         let mut p3 = 0.0f64;
         let mut max_u_a: Vec<f64> = Vec::new();
         let mut max_u_b: Vec<f64> = Vec::new();
+        let mut max_comp_u_a: Vec<f64> = Vec::new();
+        let mut max_comp_u_b: Vec<f64> = Vec::new();
         let mut u6_a: Vec<f64> = Vec::new();
         let mut u6_b: Vec<f64> = Vec::new();
-
-        let mut min_d_a: Vec<f64> = Vec::new();
-        let mut min_comp_a: Vec<f64> = Vec::new();
-        let mut min_d_b: Vec<f64> = Vec::new();
-        let mut min_comp_b: Vec<f64> = Vec::new();
 
         let mut s_wb_raw = 0.0f64;
         let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
@@ -3733,7 +3569,6 @@ impl MorphMc {
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
         let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
         let mut cos_pairs: Vec<(usize, usize, f64)> = Vec::new();
-        let has_cos = self.chem.has_cosine();
 
         let r_chem_bound2 = (self.tree.bound + max_chem_cut) * (self.tree.bound + max_chem_cut);
         for (i, ya) in active_a {
@@ -3755,125 +3590,104 @@ impl MorphMc {
                 } else {
                     0.0
                 };
-                let r_chem = if has_solv || need_patch {
-                    (r_sum + 2.8).max(5.25)
-                } else {
-                    5.25
-                };
-                let r_outer = r_well.max(r_chem);
+                let r_28 = r_sum + 2.8;
+                let r_patch = if need_patch { r_sum + 4.2 } else { r_28 };
+                let r_outer = r_well.max(r_patch);
                 let diff = sub(ya, xb);
                 let d2 = diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2];
                 if d2 >= r_outer * r_outer {
                     continue;
                 }
-                let mut d_cached = -1.0f64;
                 if d2 < r_well * r_well {
                     well_count += 1;
                 }
-                if need_patch && in_chem_a {
-                    let r_28 = r_sum + 2.8;
-                    if d2 < r_28 * r_28 {
-                        if !any_patch {
-                            u6_a.resize(n, 0.0);
-                            u6_b.resize(n, 0.0);
-                            any_patch = true;
-                        }
-                        let d = d2.sqrt();
-                        d_cached = d;
-                        let g = (d - r_sum).max(0.0);
-                        let u6 = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
-                        if u6 > u6_a[i] {
-                            u6_a[i] = u6;
-                        }
-                        if u6 > u6_b[j] {
-                            u6_b[j] = u6;
-                        }
+                if !in_chem_a || d2 >= r_patch * r_patch {
+                    continue;
+                }
+                let d = d2.sqrt();
+                let g = d - r_sum;
+                if need_patch && g < 4.2 {
+                    if !any_patch {
+                        u6_a.resize(n, 0.0);
+                        u6_b.resize(n, 0.0);
+                        any_patch = true;
+                    }
+                    let u6 = ((4.2 - g.max(0.0)) * (1.0 / 4.2)).clamp(0.0, 1.0);
+                    if u6 > u6_a[i] {
+                        u6_a[i] = u6;
+                    }
+                    if u6 > u6_b[j] {
+                        u6_b[j] = u6;
                     }
                 }
-                if !in_chem_a || d2 >= r_chem * r_chem {
+                if g >= 2.8 {
+                    continue;
+                }
+                let u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
+                if u <= 0.0 {
                     continue;
                 }
                 if !any_chem {
-                    if has_solv {
-                        max_u_a.resize(n, 0.0);
-                        max_u_b.resize(n, 0.0);
-                    }
-                    min_d_a.resize(n, 99.0);
-                    min_comp_a.resize(n, 99.0);
-                    min_d_b.resize(n, 99.0);
-                    min_comp_b.resize(n, 99.0);
+                    max_u_a.resize(n, 0.0);
+                    max_u_b.resize(n, 0.0);
+                    max_comp_u_a.resize(n, 0.0);
+                    max_comp_u_b.resize(n, 0.0);
                     any_chem = true;
                 }
-                let d = if d_cached >= 0.0 { d_cached } else { d2.sqrt() };
                 if has_solv {
-                    let g = d - r_sum;
-                    if g < 2.8 {
-                        let u = ((2.8 - g) * (1.0 / 2.8)).clamp(0.0, 1.0);
-                        let u2 = u * u;
-                        p2 += u2;
-                        p3 += u2 * u;
-                        if u > max_u_a[i] {
-                            max_u_a[i] = u;
-                        }
-                        if u > max_u_b[j] {
-                            max_u_b[j] = u;
-                        }
-                    }
+                    let u2 = u * u;
+                    p2 += u2;
+                    p3 += u2 * u;
                 }
-                if d >= 5.25 {
-                    continue;
+                if u > max_u_a[i] {
+                    max_u_a[i] = u;
+                }
+                if u > max_u_b[j] {
+                    max_u_b[j] = u;
                 }
                 let fj = self.chem.flags[j];
-                if fi != 0 && d < min_d_a[i] {
-                    min_d_a[i] = d;
-                }
-                if fj != 0 && d < min_d_b[j] {
-                    min_d_b[j] = d;
-                }
                 if fi == 0 || fj == 0 {
                     continue;
                 }
-                if has_cos && d < 5.0 {
-                    cos_pairs.push((i, j, d));
+                if has_cos {
+                    cos_pairs.push((i, j, ChemistryModel::hat_b12(u)));
                 }
                 let comp = ChemistryModel::complementary(fi, fj);
                 if comp {
-                    if d < min_comp_a[i] {
-                        min_comp_a[i] = d;
+                    if u > max_comp_u_a[i] {
+                        max_comp_u_a[i] = u;
                     }
-                    if d < min_comp_b[j] {
-                        min_comp_b[j] = d;
+                    if u > max_comp_u_b[j] {
+                        max_comp_u_b[j] = u;
                     }
-                    if (3.95..=5.25).contains(&d) {
-                        let u = (d - 4.55) / 0.45;
-                        s_wb_raw += (-u * u).exp();
-                    }
+                    s_wb_raw += ChemistryModel::hat_wb(u);
                 }
-                if d < 3.9 {
-                    let u = (d.max(2.7) - 2.95) / 0.45;
-                    let gh = (-u * u).exp();
+                let gh = ChemistryModel::hat_hb(u);
+                if gh > 0.0 {
                     if ((fi & CHEM_NDON != 0) && (fj & CHEM_NACC != 0))
                         || ((fi & CHEM_NACC != 0) && (fj & CHEM_NDON != 0))
                     {
                         hb_cands.push((i, j, gh));
                     }
-                    if ((fi & CHEM_CAT != 0) && (fj & CHEM_NACC != 0))
-                        || ((fi & CHEM_NACC != 0) && (fj & CHEM_CAT != 0))
+                    if ((fi & CHEM_CAT != 0) && (fj & (CHEM_NACC | CHEM_ANI) != 0))
+                        || ((fj & CHEM_CAT != 0) && (fi & (CHEM_NACC | CHEM_ANI) != 0))
+                        || ((fi & CHEM_ANI != 0) && (fj & CHEM_NDON != 0))
+                        || ((fj & CHEM_ANI != 0) && (fi & CHEM_NDON != 0))
                     {
                         chb_cands.push((i, j, gh, scale(add(ya, xb), 0.5), d));
                     }
+                    if ((fi & CHEM_PURE_ACC != 0) && (fj & CHEM_PURE_ACC != 0))
+                        || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0))
+                    {
+                        clash_candidates.push((i, j, gh));
+                    }
                 }
-                if (3.2..=4.9).contains(&d)
+                if need_cl
+                    && (3.2..=4.9).contains(&d)
                     && (((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
                         || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
                 {
                     tn_pairs.push((i, j, scale(add(ya, xb), 0.5), d));
-                }
-                if d < 4.0
-                    && (((fi & CHEM_PURE_ACC != 0) && (fj & CHEM_PURE_ACC != 0))
-                        || ((fi & CHEM_PURE_DON != 0) && (fj & CHEM_PURE_DON != 0)))
-                {
-                    clash_candidates.push((i, j, d));
                 }
             }
         }
@@ -3888,7 +3702,7 @@ impl MorphMc {
         } else {
             1.0
         };
-        let (pa, pb) = if any_patch {
+        let (pa, pb) = if any_patch && any_chem {
             (
                 self.build_patch_contact(&u6_a, g_cos),
                 self.build_patch_contact(&u6_b, g_cos),
@@ -3951,51 +3765,55 @@ impl MorphMc {
             }
         }
 
-        let s_cl = self
-            .chem
-            .eval_cl_score(&tn_pairs, &self.centers, |x| add(matvec(r_rel, x), t_rel));
+        let s_cl = if need_cl {
+            self.chem
+                .eval_cl_score(&tn_pairs, &self.centers, |x| add(matvec(r_rel, x), t_rel))
+        } else {
+            0.0
+        };
 
         let mut s_clash = 0.0f64;
-        for (i, j, d) in clash_candidates {
-            if min_comp_a[i] >= 3.65 && min_comp_b[j] >= 3.65 {
-                let u = (d.max(2.8) - 2.8) / 0.8;
-                s_clash += (-u * u).exp();
-            }
+        for (i, j, w_cl) in clash_candidates {
+            let uncomp_a = 1.0 - ChemistryModel::hat_b12(max_comp_u_a[i]);
+            let uncomp_b = 1.0 - ChemistryModel::hat_b12(max_comp_u_b[j]);
+            s_clash += w_cl * uncomp_a * uncomp_b;
         }
         let s_wb = s_wb_raw.min(self.chem.wb_cap) * (-1.5 * s_clash).exp();
 
         let mut unp_pol = 0.0f64;
         let mut unp_chg = 0.0f64;
-        for (i, (&dmin, &dcomp)) in min_d_a.iter().zip(&min_comp_a).enumerate() {
-            if dmin >= 4.25 {
+        for (i, (&ua, &uc)) in max_u_a.iter().zip(&max_comp_u_a).enumerate() {
+            if ua <= 0.0 {
                 continue;
             }
             let fi = self.chem.flags[i];
-            let is_chg = (fi & (CHEM_CAT | CHEM_ANI)) != 0;
-            let is_npol = !is_chg && ((fi & (CHEM_NDON | CHEM_NACC)) != 0);
-            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
-                let u = (dmin.max(2.9) - 2.9) / 0.75;
-                unp_pol += (-u * u).exp();
+            if fi == 0 {
+                continue;
             }
-            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
-                let u = (dmin.max(3.0) - 3.0) / 0.95;
-                unp_chg += (-u * u).exp();
+            let du = (ChemistryModel::hat_hb(ua) - ChemistryModel::hat_b12(uc)).max(0.0);
+            if du > 0.0 {
+                if (fi & (CHEM_CAT | CHEM_ANI)) != 0 {
+                    unp_chg += du;
+                } else if (fi & (CHEM_NDON | CHEM_NACC)) != 0 {
+                    unp_pol += du;
+                }
             }
         }
-        for (j, (&dmin, &dcomp)) in min_d_b.iter().zip(&min_comp_b).enumerate() {
-            if dmin >= 4.25 {
+        for (j, (&ub, &uc)) in max_u_b.iter().zip(&max_comp_u_b).enumerate() {
+            if ub <= 0.0 {
                 continue;
             }
             let fj = self.chem.flags[j];
-            let is_chg = (fj & (CHEM_CAT | CHEM_ANI)) != 0;
-            let is_npol = !is_chg && ((fj & (CHEM_NDON | CHEM_NACC)) != 0);
-            if is_npol && dmin < 4.15 && dcomp >= 3.65 {
-                let u = (dmin.max(2.9) - 2.9) / 0.75;
-                unp_pol += (-u * u).exp();
+            if fj == 0 {
+                continue;
             }
-            if is_chg && dmin < 4.25 && dcomp >= 4.30 {
-                let u = (dmin.max(3.0) - 3.0) / 0.95;
-                unp_chg += (-u * u).exp();
+            let du = (ChemistryModel::hat_hb(ub) - ChemistryModel::hat_b12(uc)).max(0.0);
+            if du > 0.0 {
+                if (fj & (CHEM_CAT | CHEM_ANI)) != 0 {
+                    unp_chg += du;
+                } else if (fj & (CHEM_NDON | CHEM_NACC)) != 0 {
+                    unp_pol += du;
+                }
             }
         }
 

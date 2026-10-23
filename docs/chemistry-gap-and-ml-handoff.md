@@ -510,6 +510,42 @@ To eliminate all `s > 0.5` step cutoffs and graph-cycle rules while unifying the
 | **4. Lateral 2nd Monomer — 4-Cycle Corner** (`m2 + m4`) | **$-11.14$** (blocked) | $+5.41$ (subcritical) | **$+14.74 \pm 0.19$** ($E_{\min} = -52.9\,k_{\text{B}}T$, **supercritical!**) |
 | **5. Lateral 4th Monomer — Full 3D Turn** (`m1 + m2 + m4`) | $+8.46$ (subcritical) | $+26.08$ | **$+31.01 \pm 0.03$** ($E_{\min} = -82.3\,k_{\text{B}}T$, **deeply locked!**) |
 
+### 8.15 Complete Unification of 2-Body and Many-Body Terms on the $(B_1(u), B_2(u))$ Piecewise-Linear Radial Basis & Free-Energy ($\ln K$) Calibration
+
+Diagnosing the lateral nucleation barrier in `nuc-48`..`nuc-51` revealed that even after making the 3-body vertex junction cutoff-free in Section 8.14, the **2-body terms** in `src/morph_mc.rs` and `tools/chemistry_gap/train_chemistry_model.py` still mixed incompatible radial kernels and hard distance cutoffs:
+1. **Radial registry shift between `eval_cos_score` ($d < 5.0\,\text{\AA}$) and polar desolvation (`dcomp >= 3.65/4.30 Å`) on lateral crystal contacts `m4` and `m6`**:
+   - At crystallographic lateral contact `m4` ($\Delta r = 0$), 5 polar/charged interface pairs sit at $d = 3.92\text{--}4.46\,\text{\AA}$ ($g = 0.65\text{--}1.15\,\text{\AA}$, hydration collar), where `eval_cos_score` was already strongly attractive ($E_{\cos} = -12.71\,k_{\text{B}}T$), but `unp_pol` and `unp_chg` imposed a hard step cutoff (`d < 4.15/4.25` vs. `dcomp >= 3.65/4.30`) that treated those collar pairs as uncompensated ($E_{\text{unp}} = +7.37\,k_{\text{B}}T$) while `s_hb` and `s_chb` ($d_0 = 3.10\text{--}3.15\,\text{\AA}$) had barely turned on ($E_{\text{hb+chb}} = -2.23\,k_{\text{B}}T$).
+   - Conversely, when `m4` compressed to steric contact ($\Delta r = -0.3\,\text{\AA}$, `contacts_monomer.json`), `s_hb` and `s_chb` turned on ($-7.61\,k_{\text{B}}T$) and `unp` dropped ($+1.66\,k_{\text{B}}T$), but 6 new peripheral polar atoms entered the outer $d < 5.0\,\text{\AA}$ shell of `eval_cos_score`, flipping $S_{\cos}$ from $+3.66$ to $-0.02$ and collapsing the 2-body association constant of `native m4` to $\ln K = -6.97$.
+2. **Anionic salt-bridge and carboxylate H-bond omission in `chb_cands`**:
+   - `chb_cands` only checked `CHEM_CAT` (`Lys`/`Arg`), omitting `CHEM_ANI` (`Asp`/`Glu`) salt bridges (`CHEM_CAT`–`CHEM_ANI`) and carboxylate–amide H-bonds (`CHEM_ANI`–`CHEM_NDON`, such as `ASP 101 OD1/OD2 -- ASN 65 ND2` in `m6`).
+
+To eliminate all remaining radial step cutoffs and unify the entire 2-body and many-body Hamiltonian onto the same 2-knot piecewise-linear radial basis $(B_1(u), B_2(u))$ on $u_{ij} = \operatorname{clamp}((2.8 - g_{ij})/2.8,\, 0,\, 1)$ (`src/morph_mc.rs`, `tools/chemistry_gap/train_chemistry_model.py`, `examples/chemistry-model-monomer.json`):
+1. **Unified 2-knot piecewise-linear radial basis across all 2-body and 3-body terms**:
+   - **Inner contact-core hat**: $B_1(u) = \max(0,\, 4u - 3)$ ($g \in [0, 0.7\,\text{\AA}]$).
+   - **Outer hydration-collar hat**: $B_2(u) = \min(\tfrac{4}{3}u,\, 4(1 - u))$ ($g \in [0, 2.8\,\text{\AA}]$, peaking at $g = 0.7\,\text{\AA}$).
+   - **Exact proximity partition (`SolvationFeatures`)**: $u = B_1(u) + \tfrac{3}{4}B_2(u)$, with $p_2 = \sum u_{ij}^2$, $p_3 = \sum u_{ij}^3$, $a_q = \sum (u_i^q + u_j^q)$, and rational Hill burial gate $g_{\text{burial}}(a_1) = a_1^2 / (a_1^2 + a_0^2)$ (`burial_gate = [14.0, 0.0]`).
+   - **Combined contact+collar support (`hat_b12`)**: $B_{12}(u) = B_1(u) + B_2(u) = \min(\tfrac{4}{3}u,\, 1)$, used identically for `eval_cos_score` pair weights $\psi_{ij} = B_{12}(u_{ij})$ and complementary polar/charged compensation $B_{12}(u_{i,\text{comp}})$.
+   - **Direct H-bond, salt-bridge, clash, and burial core (`hat_hb`)**: $B_{\text{hb}}(u) = B_1(u) + \tfrac{1}{4}B_2(u)$ across `s_hb`, `s_chb` (including `CHEM_CAT | CHEM_ANI`), and `s_clash`.
+   - **Hydration-collar water-bridge weight (`hat_wb`)**: $B_{\text{wb}}(u) = B_2(u)(1 - B_1(u))$ with soft Michaelis-Menten saturation $s_{\text{wb}} / (1 + s_{\text{wb}} / \text{wb\_cap})$ (`wb_cap = 18.0`).
+   - **Cutoff-free uncompensated polar/charged burial**:
+     $$\Delta B_{\text{unp}}(u_i, u_{i,\text{comp}}) = \max\!\bigl(0,\, B_{\text{hb}}(u_i) - B_{12}(u_{i,\text{comp}})\bigr),$$
+     which vanishes identically whenever the closest steric contact is complementary ($u_{i,\text{comp}} = u_i$, since $B_{12}(u) \ge B_{\text{hb}}(u)$ for all $u \in [0, 1]$) and reaches $100\%$ compensation as soon as any complementary partner enters the $g \le 0.7\,\text{\AA}$ contact+collar zone ($u_{i,\text{comp}} \ge 0.75$).
+
+| Mode / Crystal Growth Site (`pair-binding --no-solvation --width 0.6 --eps-walk 0.0`, $c_0 = 2.8\text{ mM}$, $\ln K_{\text{crit}} = +13.29$) | Legacy Step-Cutoff $\ln K$ | **Unified $(B_1, B_2)$ Basis $E_{\text{start}}$ ($k_{\text{B}}T$)** | **Unified $(B_1, B_2)$ Basis $E_{\min}$ ($k_{\text{B}}T$)** | **Unified $(B_1, B_2)$ Basis $\ln K$** | Physical Regime |
+|---|---:|---:|---:|---:|---|
+| **`native m1`** (2-body $4_3$ screw dimer) | $+4.93 \pm 0.06$ | $-25.54$ | $-26.16$ | **$+7.54 \pm 0.07$** | Attractive subcritical dimer ($\Delta G = +5.75\,k_{\text{B}}T$) |
+| **`native m2`** (2-body $4_3$ screw dimer) | $+3.18 \pm 0.45$ | $-10.69$ | $-20.76$ | **$+4.43 \pm 0.34$** | Attractive subcritical dimer ($\Delta G = +8.86\,k_{\text{B}}T$) |
+| **`native m4`** (2-body $C_2$ lateral dimer) | **$-6.97 \pm 0.05$** | $-18.17$ | $-26.62$ | **$+8.80 \pm 0.04$** | Registry shift fixed ($+15.77$ log-unit gain!) |
+| **`native m6` / `capture #9`** (2-body $C_2$ lateral dimer) | $+5.95 / +8.29$ | $-24.73 / -19.67$ | $-28.50 / -28.31$ | **$+9.59 / +9.55$** | Attractive subcritical dimer ($\Delta G = +3.70\,k_{\text{B}}T$) |
+| **`native m0, m3, m5`** (minor crystal contacts) | $-2.40\text{ to }-2.17$ | $+0.35\text{ to }+1.63$ | $-1.47\text{ to }0.00$ | **$-2.34\text{ to }-2.03$** | Weak peripheral contacts |
+| **All 24 `non-native #0..14` & `capture #0..8` decoys** | $\le -14.12$ | $+11.3\text{ to }+68.9$ | $-0.76\text{ to }+18.4$ | **$-11.87\text{ to }-25.60$** | All non-native decoys strongly unbound |
+| **1. 1D Helix Tip** (`m1 + m2 + m0`) | $+14.34 \pm 0.06$ | $-45.57$ | $-49.83$ | **$+25.68 \pm 0.16$** | Supercritical 1D tip growth ($\Delta G = -12.39\,k_{\text{B}}T$) |
+| **2. Lateral 1st Monomer via `m6`** ($C_2$ bridge) | $+6.02 \pm 0.42$ | $-27.89$ | $-30.01$ | **$+11.88 \pm 0.07$** | Near-critical 1st lateral step ($\Delta G = +1.41\,k_{\text{B}}T$) |
+| **3. Lateral 1st Monomer via `m4`** ($C_2$ bridge) | $+6.97 \pm 0.27$ | $-27.86$ | $-37.21$ | **$+17.11 \pm 0.39$** | Supercritical 1st lateral step ($\Delta G = -3.82\,k_{\text{B}}T$) |
+| **4. Lateral 2nd Monomer — 4-Cycle Corner** (`m2 + m4`) | $+14.74 \pm 0.19$ | $-47.54$ | $-58.52$ | **$+34.68 \pm 0.07$** | Deeply supercritical 4-cycle corner ($\Delta G = -21.39\,k_{\text{B}}T$) |
+| **5. Lateral 4th Monomer — Full 3D Turn** (`m1 + m2 + m4`) | $+31.01 \pm 0.03$ | $-77.69$ | $-80.86$ | **$+52.09 \pm 0.05$** | Locked 3D crystal step ($\Delta G = -38.80\,k_{\text{B}}T$) |
+
+
 
 
 

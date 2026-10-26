@@ -50,7 +50,7 @@ enum Cmd {
         #[arg(long)]
         shape: PathBuf,
         #[arg(long)]
-        seed_config: PathBuf,
+        seed_config: Option<PathBuf>,
         #[arg(long, default_value_t = 32)]
         seed_count: usize,
         #[arg(long)]
@@ -79,6 +79,21 @@ enum Cmd {
         /// Optional SE(3)-invariant interface chemistry residual model JSON (eps-independent).
         #[arg(long)]
         chemistry_model: Option<PathBuf>,
+        /// Optional salt type (`nacl`, `nano3`, `na2so4`, `so4`, `nh42so4`, `none`) configuring
+        /// the Hofmeister ion-bridge channels and `hofmeister_weights` on `--chemistry-model`.
+        #[arg(long)]
+        salt_type: Option<String>,
+        /// Optional bulk salt molarity (mol/L) used with `--salt-type`.
+        #[arg(long)]
+        salt_concentration_m: Option<f64>,
+        /// Optional explicit 4-component ion concentrations `c_hal,c_chao,c_so4,c_na` in mol/L
+        /// (overrides `--salt-type` / `--salt-concentration-m` when provided).
+        #[arg(long, value_delimiter = ',')]
+        salt_concs: Option<Vec<f64>>,
+        /// Use zero-free-parameter Langmuir bridge weights `[1, 1, 1, 1, 1]` instead of the
+        /// like-charge-screened link weights `[1.0, 2.25, 1.0, 1.0, 1.0]`.
+        #[arg(long)]
+        hofmeister_zero_param: bool,
         /// Probability per step of an FK-bonded rigid cluster move (`step_cluster`).
         #[arg(long, default_value_t = 0.)]
         cluster_probability: f64,
@@ -173,7 +188,7 @@ enum Cmd {
         shape: PathBuf,
         /// Config whose `initial_poses` (first `seed_count`) form the fixed native seed.
         #[arg(long)]
-        seed_config: PathBuf,
+        seed_config: Option<PathBuf>,
         #[arg(long, default_value_t = 32)]
         seed_count: usize,
         #[arg(long)]
@@ -268,6 +283,21 @@ enum Cmd {
         /// Optional SE(3)-invariant interface chemistry residual model JSON.
         #[arg(long)]
         chemistry_model: Option<PathBuf>,
+        /// Optional salt type (`nacl`, `nano3`, `na2so4`, `so4`, `nh42so4`, `none`) configuring
+        /// the Hofmeister ion-bridge channels and `hofmeister_weights` on `--chemistry-model`.
+        #[arg(long)]
+        salt_type: Option<String>,
+        /// Optional bulk salt molarity (mol/L) used with `--salt-type`.
+        #[arg(long)]
+        salt_concentration_m: Option<f64>,
+        /// Optional explicit 4-component ion concentrations `c_hal,c_chao,c_so4,c_na` in mol/L
+        /// (overrides `--salt-type` / `--salt-concentration-m` when provided).
+        #[arg(long, value_delimiter = ',')]
+        salt_concs: Option<Vec<f64>>,
+        /// Use zero-free-parameter Langmuir bridge weights `[1, 1, 1, 1, 1]` instead of the
+        /// like-charge-screened link weights `[1.0, 2.25, 1.0, 1.0, 1.0]`.
+        #[arg(long)]
+        hofmeister_zero_param: bool,
         /// Probability per step of an FK-bonded rigid cluster move (`step_cluster`).
         #[arg(long, default_value_t = 0.)]
         cluster_probability: f64,
@@ -349,6 +379,62 @@ fn shape_tree(path: &PathBuf) -> Result<SphereTree> {
     SphereTree::new(serde_json::from_slice::<Shape>(&fs::read(path)?)?)
 }
 
+fn apply_salt_config(
+    chem: &mut ChemistryModel,
+    salt_type: &Option<String>,
+    salt_concentration_m: Option<f64>,
+    salt_concs: &Option<Vec<f64>>,
+    hofmeister_zero_param: bool,
+) -> Result<()> {
+    let mut configured = false;
+    if let Some(vec) = salt_concs {
+        ensure!(
+            vec.len() == 4 && vec.iter().all(|&c| c >= 0.0 && c.is_finite()),
+            "--salt-concs expects 4 non-negative numbers: c_hal,c_chao,c_so4,c_na"
+        );
+        chem.salt_concs = [vec[0], vec[1], vec[2], vec[3]];
+        configured = true;
+    } else if let Some(st) = salt_type {
+        let c = salt_concentration_m.unwrap_or(0.5);
+        ensure!(c >= 0.0 && c.is_finite(), "--salt-concentration-m must be non-negative");
+        let key = st.trim().to_ascii_lowercase();
+        chem.salt_concs = match key.as_str() {
+            "nacl" | "nabr" | "kcl" | "halide" => [c, 0.0, 0.0, c],
+            "nano3" | "nascn" | "nai" | "chaotrope" => [0.0, c, 0.0, c],
+            "na2so4" => [0.0, 0.0, c, 2.0 * c],
+            "so4" | "nh42so4" | "mgso4" | "kosmotrope" => [0.0, 0.0, c, 0.0],
+            "none" | "0" => [0.0; 4],
+            other => anyhow::bail!(
+                "unknown --salt-type '{other}' (expected nacl, nano3, na2so4, so4, nh42so4, or none)"
+            ),
+        };
+        configured = true;
+    } else if let Some(c) = salt_concentration_m {
+        ensure!(c >= 0.0 && c.is_finite(), "--salt-concentration-m must be non-negative");
+        // Scale existing non-zero salt channels or default to NaCl
+        let sum: f64 = chem.salt_concs.iter().sum();
+        if sum > 0.0 {
+            let scale = c / chem.salt_concs.iter().cloned().fold(0.0f64, f64::max);
+            for x in &mut chem.salt_concs {
+                *x *= scale;
+            }
+        } else {
+            chem.salt_concs = [c, 0.0, 0.0, c];
+        }
+        configured = true;
+    }
+    if configured && chem.hofmeister_weights.iter().all(|&w| w == 0.0) {
+        chem.hofmeister_weights = if hofmeister_zero_param {
+            [1.0, 1.0, 1.0, 1.0, 1.0]
+        } else {
+            [1.0, 2.25, 1.0, 1.0, 1.0]
+        };
+    } else if hofmeister_zero_param {
+        chem.hofmeister_weights = [1.0, 1.0, 1.0, 1.0, 1.0];
+    }
+    Ok(())
+}
+
 fn hard_sphere(n: usize, on: bool) -> SolvationModel {
     SolvationModel {
         probe: 1.4,
@@ -367,21 +453,36 @@ fn hard_sphere(n: usize, on: bool) -> SolvationModel {
 /// placed uniformly without contact in a vessel sized for the free-body concentration.
 fn start_state(
     tree: &SphereTree,
-    seed_config: &PathBuf,
+    seed_config: &Option<PathBuf>,
     seed_count: usize,
     free_bodies: usize,
     concentration_um: f64,
     seed: u64,
 ) -> Result<(Vec<Pose>, Vec<bool>, f64)> {
-    let cfg: Value = serde_json::from_slice(&fs::read(seed_config)?)?;
-    let mut seedp: Vec<Pose> = serde_json::from_value(cfg["initial_poses"].clone())?;
-    seedp.truncate(seed_count);
-    let c: [f64; 3] = std::array::from_fn(|k| {
-        seedp.iter().map(|p| p.position[k]).sum::<f64>() / seedp.len() as f64
-    });
-    for p in &mut seedp {
-        p.position = sub(p.position, c);
-    }
+    ensure!(
+        seed_count == 0 || seed_config.is_some(),
+        "--seed-config is required when --seed-count > 0"
+    );
+    let cfg: Option<Value> = match seed_config {
+        Some(f) => Some(serde_json::from_slice(&fs::read(f)?)?),
+        None => None,
+    };
+    let mut seedp: Vec<Pose> = if seed_count > 0 {
+        let c = cfg.as_ref().expect("seed_config present");
+        let mut v: Vec<Pose> = serde_json::from_value(c["initial_poses"].clone())?;
+        v.truncate(seed_count);
+        if !v.is_empty() {
+            let center: [f64; 3] = std::array::from_fn(|k| {
+                v.iter().map(|p| p.position[k]).sum::<f64>() / v.len() as f64
+            });
+            for p in &mut v {
+                p.position = sub(p.position, center);
+            }
+        }
+        v
+    } else {
+        Vec::new()
+    };
     let rho = concentration_um * 1e-6 * 6.02214076e23 / 1e27; // A^-3
     let volume = free_bodies as f64 / rho;
     let radius = (3. * volume / (4. * std::f64::consts::PI)).cbrt();
@@ -390,7 +491,7 @@ fn start_state(
     let mut poses = seedp.clone();
     let mut placed: Vec<Placed> = poses.iter().map(|&p| Placed::new(p)).collect();
     // Optional free bodies at given poses (recentred seed frame), e.g. lattice sites.
-    if let Some(v) = cfg.get("placed_free_poses") {
+    if let Some(v) = cfg.as_ref().and_then(|c| c.get("placed_free_poses")) {
         let given: Vec<Pose> = serde_json::from_value(v.clone())?;
         ensure!(
             given.len() <= free_bodies,
@@ -485,6 +586,10 @@ fn main() -> Result<()> {
             like_charge_weight,
             like_charge_cutoff,
             chemistry_model,
+            salt_type,
+            salt_concentration_m,
+            salt_concs,
+            hofmeister_zero_param,
             cluster_probability,
             cluster_max_size,
             cluster_fk_beta,
@@ -531,10 +636,17 @@ fn main() -> Result<()> {
                 Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                 None => Vec::new(),
             };
-            let chem: ChemistryModel = match &chemistry_model {
+            let mut chem: ChemistryModel = match &chemistry_model {
                 Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                 None => ChemistryModel::default(),
             };
+            apply_salt_config(
+                &mut chem,
+                &salt_type,
+                salt_concentration_m,
+                &salt_concs,
+                hofmeister_zero_param,
+            )?;
             fs::create_dir_all(&out)?;
             let tree = shape_tree(&shape)?;
             let n = tree.shape.atoms.len();
@@ -852,6 +964,10 @@ fn main() -> Result<()> {
             like_charge_weight,
             like_charge_cutoff,
             chemistry_model,
+            salt_type,
+            salt_concentration_m,
+            salt_concs,
+            hofmeister_zero_param,
             cluster_probability,
             cluster_max_size,
             cluster_fk_beta,
@@ -898,10 +1014,19 @@ fn main() -> Result<()> {
                 Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                 None => Vec::new(),
             };
-            let chem: ChemistryModel = match &chemistry_model {
+            let mut chem: ChemistryModel = match &chemistry_model {
                 Some(f) => serde_json::from_slice(&fs::read(f)?)?,
                 None => ChemistryModel::default(),
             };
+            apply_salt_config(
+                &mut chem,
+                &salt_type,
+                salt_concentration_m,
+                &salt_concs,
+                hofmeister_zero_param,
+            )?;
+            let salt_concs_effective = chem.salt_concs;
+            let hofmeister_weights_effective = chem.hofmeister_weights;
             let mut mc = mc
                 .with_like_charge(LikeCharge {
                     weight: like_charge_weight,
@@ -981,6 +1106,9 @@ fn main() -> Result<()> {
                 "epsilon": epsilon, "width": width, "solvation": !no_solvation, "sweeps": sweeps,
                 "charge_groups": charge_groups, "like_charge_weight": like_charge_weight,
                 "like_charge_cutoff": like_charge_cutoff, "chemistry_model": chemistry_model,
+                "salt_type": salt_type, "salt_concentration_m": salt_concentration_m,
+                "salt_concs_effective": salt_concs_effective,
+                "hofmeister_weights_effective": hofmeister_weights_effective,
                 "dock_library_beta": dock_library_beta,
                 "surface_prior_samples": surface_prior_samples,
                 "surface_prior_beta": surface_prior_beta,

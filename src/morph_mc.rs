@@ -117,6 +117,22 @@ pub struct ChemistryModel {
     /// `-g_burial * w_cos_pos * S_cos` for `S_cos >= 0`, and `-w_cos_neg * S_cos` (`> 0` repulsive) for `S_cos < 0`.
     #[serde(default)]
     pub cos_weights: [f64; 2],
+    /// Optional 4-component salt concentrations `[c_hal, c_chao, c_so4, c_na]` in mol/L
+    /// for Hofmeister ion-bridge channels (default `[0.0; 4]`, backward-compatible).
+    #[serde(default)]
+    pub salt_concs: [f64; 4],
+    /// Optional 5-component Hofmeister Langmuir dissociation constants `[Kd_hal, Kd_chao_cc, Kd_chao_cp, Kd_so4, Kd_na]`
+    /// in mol/L (default `[0.25, 0.08, 0.15, 0.05, 0.40]`).
+    #[serde(default = "default_hofmeister_kd")]
+    pub hofmeister_kd: [f64; 5],
+    /// Optional 5-component Hofmeister bridge coupling weights `[w_hal, w_chao_cc, w_chao_cp, w_so4, w_na]` in kT
+    /// multiplying `ln(1 + c_I / Kd_I) * s_I` (default `[0.0; 5]`; set `[1.0; 5]` for zero-free-parameter Langmuir scaling).
+    #[serde(default)]
+    pub hofmeister_weights: [f64; 5],
+    /// Optional 4-component bulk Hofmeister surface-tension slopes `[sigma_hal, sigma_chao, sigma_so4, sigma_na]`
+    /// in L/mol scaling attractive hydration-shell burial (`e_solv < 0`) by `1 + sum_I sigma_I * c_I`.
+    #[serde(default)]
+    pub hofmeister_sigma: [f64; 4],
 }
 
 fn default_coop_s0() -> f64 {
@@ -129,6 +145,10 @@ fn default_junc_w0() -> f64 {
 
 fn default_cl_env_weights() -> [f64; 4] {
     [0.04, 1.5, 2.0, 2.0]
+}
+
+fn default_hofmeister_kd() -> [f64; 5] {
+    [0.25, 0.08, 0.15, 0.05, 0.40]
 }
 
 /// Precompute outward unit surface normals in the body frame for each template sphere `i`
@@ -363,7 +383,74 @@ impl ChemistryModel {
             && (self.weights.iter().any(|&w| w != 0.)
                 || self.has_solvation()
                 || self.has_cooperativity()
-                || self.has_cosine())
+                || self.has_cosine()
+                || self.has_hofmeister())
+    }
+
+    pub fn has_hofmeister(&self) -> bool {
+        self.salt_concs.iter().any(|&c| c > 0.0)
+            && (self.hofmeister_weights.iter().any(|&w| w != 0.0)
+                || self.hofmeister_sigma.iter().any(|&s| s != 0.0))
+    }
+
+    /// Evaluate the 5 Hofmeister ion-bridge scores `[s_hal, s_chao_cc, s_chao_cp, s_so4, s_na]`
+    /// via deterministic 1-to-1 greedy matching per channel.
+    pub fn eval_hofmeister_scores(
+        cands: &[Vec<(usize, usize, f64)>; 5],
+    ) -> [f64; 5] {
+        let mut out = [0.0f64; 5];
+        for (ch, list) in cands.iter().enumerate() {
+            if list.is_empty() {
+                continue;
+            }
+            let mut sorted = list.clone();
+            sorted.sort_by(|a, b| {
+                b.2.total_cmp(&a.2)
+                    .then_with(|| (a.0.min(a.1), a.0.max(a.1)).cmp(&(b.0.min(b.1), b.0.max(b.1))))
+            });
+            let mut used_a = Vec::new();
+            let mut used_b = Vec::new();
+            let mut s = 0.0f64;
+            for (i, j, val) in sorted {
+                if !used_a.contains(&i) && !used_b.contains(&j) {
+                    used_a.push(i);
+                    used_b.push(j);
+                    s += val;
+                }
+            }
+            out[ch] = s;
+        }
+        out
+    }
+
+    /// Evaluate the grand-canonical Langmuir ion-bridge free energy `E_hof` (in kT)
+    /// from the 5 Hofmeister bridge channel scores `s_hof = [s_hal, s_chao_cc, s_chao_cp, s_so4, s_na]`.
+    #[inline]
+    pub fn eval_hofmeister_bridge_energy(&self, s_hof: &[f64; 5]) -> f64 {
+        if !self.has_hofmeister() {
+            return 0.0;
+        }
+        let kd = if self.hofmeister_kd.iter().all(|&k| k == 0.0) {
+            default_hofmeister_kd()
+        } else {
+            self.hofmeister_kd
+        };
+        let c_hal = self.salt_concs[0].max(0.0);
+        let c_chao = self.salt_concs[1].max(0.0);
+        let c_so4 = self.salt_concs[2].max(0.0);
+        let c_na = self.salt_concs[3].max(0.0);
+        let mu = [
+            (1.0 + c_hal / kd[0].max(1e-4)).ln(),
+            (1.0 + c_chao / kd[1].max(1e-4)).ln(),
+            (1.0 + c_chao / kd[2].max(1e-4)).ln(),
+            (1.0 + c_so4 / kd[3].max(1e-4)).ln(),
+            (1.0 + c_na / kd[4].max(1e-4)).ln(),
+        ];
+        let mut e = 0.0f64;
+        for m in 0..5 {
+            e -= self.hofmeister_weights[m] * mu[m] * s_hof[m];
+        }
+        e
     }
 
     pub fn has_cosine(&self) -> bool {
@@ -503,10 +590,20 @@ impl ChemistryModel {
         unp_chg: f64,
         s_cos: f64,
     ) -> f64 {
-        let e_solv = if self.solv_cap > 0.0 {
-            e_solv_raw.max(-self.solv_cap)
+        let hof_surf = if self.has_hofmeister() && e_solv_raw < 0.0 {
+            let mut s = 1.0f64;
+            for k in 0..4 {
+                s += self.hofmeister_sigma[k] * self.salt_concs[k].max(0.0);
+            }
+            s.max(0.1)
         } else {
-            e_solv_raw
+            1.0
+        };
+        let e_solv_scaled = e_solv_raw * hof_surf;
+        let e_solv = if self.solv_cap > 0.0 {
+            e_solv_scaled.max(-self.solv_cap)
+        } else {
+            e_solv_scaled
         };
         let g_burial = if self.burial_gate[1] > self.burial_gate[0] {
             let t = ((a1_burial - self.burial_gate[0])
@@ -531,6 +628,55 @@ impl ChemistryModel {
             + w[5] * unp_pol
             + w[6] * unp_chg
             + e_cos
+    }
+
+    #[inline]
+    pub fn record_hofmeister_pair(
+        fi: u8,
+        fj: u8,
+        i: usize,
+        j: usize,
+        d: f64,
+        hof_cands: &mut [Vec<(usize, usize, f64)>; 5],
+    ) {
+        if (3.2..=5.0).contains(&d) {
+            if ((fi & CHEM_TYR_OH != 0) && (fj & CHEM_AMIDE_ND != 0))
+                || ((fj & CHEM_TYR_OH != 0) && (fi & CHEM_AMIDE_ND != 0))
+            {
+                let u = (d - 4.05) / 0.55;
+                hof_cands[0].push((i, j, (-u * u).exp()));
+            } else if ((fi & CHEM_CAT != 0) && (fj & CHEM_NDON != 0) && (fj & CHEM_CAT == 0))
+                || ((fj & CHEM_CAT != 0) && (fi & CHEM_NDON != 0) && (fi & CHEM_CAT == 0))
+            {
+                let u = (d - 4.15) / 0.55;
+                hof_cands[0].push((i, j, 0.5 * (-u * u).exp()));
+            }
+        }
+        if (3.2..=5.8).contains(&d) && (fi & CHEM_CAT != 0) && (fj & CHEM_CAT != 0) {
+            let u = (d - 4.50) / 0.80;
+            hof_cands[1].push((i, j, (-u * u).exp()));
+        }
+        if (3.0..=5.4).contains(&d)
+            && (((fi & CHEM_CAT != 0) && (fj & (CHEM_NDON | CHEM_NACC) != 0))
+                || ((fj & CHEM_CAT != 0) && (fi & (CHEM_NDON | CHEM_NACC) != 0)))
+        {
+            let u = (d - 4.20) / 0.70;
+            hof_cands[2].push((i, j, (-u * u).exp()));
+        }
+        if (3.4..=6.0).contains(&d)
+            && (((fi & CHEM_CAT != 0) && (fj & (CHEM_CAT | CHEM_NDON | CHEM_NACC) != 0))
+                || ((fj & CHEM_CAT != 0) && (fi & (CHEM_CAT | CHEM_NDON | CHEM_NACC) != 0)))
+        {
+            let u = (d - 4.70) / 0.80;
+            hof_cands[3].push((i, j, (-u * u).exp()));
+        }
+        if (2.2..=4.6).contains(&d)
+            && (fi & (CHEM_PURE_ACC | CHEM_ANI) != 0)
+            && (fj & (CHEM_PURE_ACC | CHEM_ANI) != 0)
+        {
+            let u = (d - 3.40) / 0.65;
+            hof_cands[4].push((i, j, (-u * u).exp()));
+        }
     }
 
     #[inline]
@@ -615,6 +761,7 @@ impl ChemistryModel {
 
         let has_solv = self.has_solvation();
         let has_cos = self.has_cosine();
+        let has_hof = self.has_hofmeister();
         let need_cl = self.weights[2] != 0.0;
         let mut p2 = 0.0f64;
         let mut p3 = 0.0f64;
@@ -628,6 +775,7 @@ impl ChemistryModel {
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
         let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
         let mut cos_pairs: Vec<(usize, usize, f64)> = Vec::new();
+        let mut hof_cands: [Vec<(usize, usize, f64)>; 5] = Default::default();
 
         for &(i, ya) in &active_a {
             let fi = self.flags[i];
@@ -703,6 +851,9 @@ impl ChemistryModel {
                         || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
                 {
                     tn_pairs.push((i, j, scale(add(ya, xb), 0.5), d));
+                }
+                if has_hof {
+                    Self::record_hofmeister_pair(fi, fj, i, j, d, &mut hof_cands);
                 }
             }
         }
@@ -820,10 +971,16 @@ impl ChemistryModel {
         }
 
         let s_cos = self.eval_cos_score(&cos_pairs, n);
+        let e_hof = if has_hof {
+            let s_hof = Self::eval_hofmeister_scores(&hof_cands);
+            self.eval_hofmeister_bridge_energy(&s_hof)
+        } else {
+            0.0
+        };
 
         self.combine_pair_energy(
             e_solv, a1_burial, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg, s_cos,
-        )
+        ) + e_hof
     }
 
     /// Pairwise chemistry residual energy (kT) using a prebuilt template `BallGrid` and default 1.5 A radii.
@@ -3562,6 +3719,7 @@ impl MorphMc {
         let q_in_p = matvec(rpt, dpq);
         let has_solv = self.chem.has_solvation();
         let has_cos = self.chem.has_cosine();
+        let has_hof = self.chem.has_hofmeister();
         let need_cl = self.chem.weights[2] != 0.0;
         let extra = self.well.width.max(max_chem_cut);
         let mut active_a = Vec::new();
@@ -3588,6 +3746,7 @@ impl MorphMc {
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
         let mut clash_candidates: Vec<(usize, usize, f64)> = Vec::new();
         let mut cos_pairs: Vec<(usize, usize, f64)> = Vec::new();
+        let mut hof_cands: [Vec<(usize, usize, f64)>; 5] = Default::default();
 
         let r_chem_bound2 = (self.tree.bound + max_chem_cut) * (self.tree.bound + max_chem_cut);
         for (i, ya) in active_a {
@@ -3706,6 +3865,9 @@ impl MorphMc {
                         || ((fi & CHEM_AMIDE_ND != 0) && (fj & CHEM_TYR_OH != 0)))
                 {
                     tn_pairs.push((i, j, scale(add(ya, xb), 0.5), d));
+                }
+                if has_hof {
+                    ChemistryModel::record_hofmeister_pair(fi, fj, i, j, d, &mut hof_cands);
                 }
             }
         }
@@ -3846,9 +4008,15 @@ impl MorphMc {
             }
         }
 
+        let e_hof = if has_hof {
+            let s_hof = ChemistryModel::eval_hofmeister_scores(&hof_cands);
+            self.chem.eval_hofmeister_bridge_energy(&s_hof)
+        } else {
+            0.0
+        };
         let e_chem = self.chem.combine_pair_energy(
             e_solv, a1_burial, s_hb, s_chb, s_cl, s_wb, s_clash, unp_pol, unp_chg, s_cos,
-        );
+        ) + e_hof;
         (well_count, e_chem, pa, pb)
     }
 

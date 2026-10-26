@@ -1,0 +1,235 @@
+{
+  "polymorph": "trigonal-9HRU",
+  "pdb_id": "9HRU",
+  "space_group": "P 31 2 1",
+  "salt_type": "SO4",
+  "salt_conc_M": 0.2,
+  "rmsd_to_1LYZ_A": 1.024,
+  "n_contacts": 4,
+  "contacts": [
+    {
+      "partner_chain": "B",
+      "symop": "y,x,-z",
+      "d_com_crystal": 29.741,
+      "d_com_retracted": 30.321,
+      "s_retract": 0.58,
+      "min_gap_crystal": -0.135,
+      "n_overlap_crystal": 3,
+      "n_buried_crystal": 290,
+      "t_crystal": [
+        17.7593,
+        22.1464,
+        -8.8691
+      ],
+      "t_retracted": [
+        18.1056,
+        22.5783,
+        -9.0421
+      ],
+      "q_rel": [
+        0.627534,
+        0.06346,
+        -0.040008,
+        0.774967
+      ],
+      "R_rel": [
+        [
+          -0.204348,
+          -0.977714,
+          0.048145
+        ],
+        [
+          0.967558,
+          -0.209201,
+          -0.141657
+        ],
+        [
+          0.148572,
+          0.017636,
+          0.988744
+        ]
+      ],
+      "bridging_ions": [
+        {
+          "ion": "MES",
+          "atom_a": 909,
+          "res_a": "ASP119:N",
+          "atom_b": 899,
+          "res_b": "GLY117:CA",
+          "d_a": 2.69,
+          "d_b": 3.25
+        },
+        {
+          "ion": "SO4",
+          "atom_a": 882,
+          "res_a": "ARG114:NH2",
+          "atom_b": 190,
+          "res_b": "SER24:OG",
+          "d_a": 3.93,
+          "d_b": 2.46
+        }
+      ]
+    },
+    {
+      "partner_chain": "B",
+      "symop": "x,y,z",
+      "d_com_crystal": 29.836,
+      "d_com_retracted": 31.596,
+      "s_retract": 1.76,
+      "min_gap_crystal": -0.338,
+      "n_overlap_crystal": 12,
+      "n_buried_crystal": 738,
+      "t_crystal": [
+        20.7632,
+        -21.4252,
+        -0.2114
+      ],
+      "t_retracted": [
+        21.988,
+        -22.689,
+        -0.2239
+      ],
+      "q_rel": [
+        0.006953,
+        0.707255,
+        0.706406,
+        -0.027076
+      ],
+      "R_rel": [
+        [
+          0.000516,
+          0.999594,
+          -0.028477
+        ],
+        [
+          0.998841,
+          -0.001885,
+          -0.048089
+        ],
+        [
+          -0.048123,
+          -0.028419,
+          -0.998437
+        ]
+      ],
+      "bridging_ions": []
+    },
+    {
+      "partner_chain": "B",
+      "symop": "-x,-x+y,-z+1/3",
+      "d_com_crystal": 35.213,
+      "d_com_retracted": 35.953,
+      "s_retract": 0.74,
+      "min_gap_crystal": -0.239,
+      "n_overlap_crystal": 3,
+      "n_buried_crystal": 342,
+      "t_crystal": [
+        -1.8801,
+        10.8737,
+        -33.4393
+      ],
+      "t_retracted": [
+        -1.9197,
+        11.1022,
+        -34.142
+      ],
+      "q_rel": [
+        0.986486,
+        0.023017,
+        -0.038791,
+        -0.157512
+      ],
+      "R_rel": [
+        [
+          0.947371,
+          0.30898,
+          -0.083785
+        ],
+        [
+          -0.312552,
+          0.949321,
+          -0.033191
+        ],
+        [
+          0.069283,
+          0.057631,
+          0.995931
+        ]
+      ],
+      "bridging_ions": [
+        {
+          "ion": "MES",
+          "atom_a": 909,
+          "res_a": "ASP119:N",
+          "atom_b": 577,
+          "res_b": "ARG73:NH1",
+          "d_a": 2.69,
+          "d_b": 2.96
+        },
+        {
+          "ion": "SO4",
+          "atom_a": 882,
+          "res_a": "ARG114:NH2",
+          "atom_b": 578,
+          "res_b": "ARG73:NH2",
+          "d_a": 3.93,
+          "d_b": 2.73
+        }
+      ]
+    },
+    {
+      "partner_chain": "B",
+      "symop": "x-y,-y,-z+2/3",
+      "d_com_crystal": 35.388,
+      "d_com_retracted": 35.388,
+      "s_retract": 0.0,
+      "min_gap_crystal": 0.422,
+      "n_overlap_crystal": 0,
+      "n_buried_crystal": 16,
+      "t_crystal": [
+        -2.3701,
+        31.4019,
+        16.1433
+      ],
+      "t_retracted": [
+        -2.3701,
+        31.4019,
+        16.1433
+      ],
+      "q_rel": [
+        0.358953,
+        -0.040443,
+        0.001217,
+        -0.932478
+      ],
+      "R_rel": [
+        [
+          -0.739035,
+          0.669333,
+          0.076299
+        ],
+        [
+          -0.66953,
+          -0.742303,
+          0.026764
+        ],
+        [
+          0.074551,
+          -0.031304,
+          0.996726
+        ]
+      ],
+      "bridging_ions": [
+        {
+          "ion": "SO4",
+          "atom_a": 807,
+          "res_a": "ASN106:ND2",
+          "atom_b": 882,
+          "res_b": "ARG114:NH2",
+          "d_a": 2.87,
+          "d_b": 3.14
+        }
+      ]
+    }
+  ]
+}

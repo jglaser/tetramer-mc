@@ -1,0 +1,383 @@
+{
+  "polymorph": "tetragonal-1IEE",
+  "pdb_id": "1IEE",
+  "space_group": "P 43 21 2",
+  "salt_type": "NaCl",
+  "salt_conc_M": 0.85,
+  "rmsd_to_1LYZ_A": 1.145,
+  "n_contacts": 8,
+  "contacts": [
+    {
+      "partner_chain": "A",
+      "symop": "-y+1/2,x+1/2,z+3/4",
+      "d_com_crystal": 28.303,
+      "d_com_retracted": 29.183,
+      "s_retract": 0.88,
+      "min_gap_crystal": -0.18,
+      "n_overlap_crystal": 4,
+      "n_buried_crystal": 285,
+      "t_crystal": [
+        19.7292,
+        17.99,
+        -9.389
+      ],
+      "t_retracted": [
+        20.3426,
+        18.5493,
+        -9.681
+      ],
+      "q_rel": [
+        0.707107,
+        -0.007488,
+        0.011417,
+        0.706975
+      ],
+      "R_rel": [
+        [
+          0.000112,
+          -0.999985,
+          0.005558
+        ],
+        [
+          0.999643,
+          0.000261,
+          0.026733
+        ],
+        [
+          -0.026734,
+          0.005553,
+          0.999627
+        ]
+      ],
+      "bridging_ions": [
+        {
+          "ion": "CL",
+          "atom_a": 871,
+          "res_a": "ASN113:ND2",
+          "atom_b": 184,
+          "res_b": "TYR23:OH",
+          "d_a": 3.41,
+          "d_b": 2.98
+        }
+      ]
+    },
+    {
+      "partner_chain": "A",
+      "symop": "y+1/2,-x+1/2,z+1/4",
+      "d_com_crystal": 28.303,
+      "d_com_retracted": 29.183,
+      "s_retract": 0.88,
+      "min_gap_crystal": -0.18,
+      "n_overlap_crystal": 4,
+      "n_buried_crystal": 285,
+      "t_crystal": [
+        -18.2368,
+        19.7763,
+        8.7949
+      ],
+      "t_retracted": [
+        -18.8038,
+        20.3912,
+        9.0684
+      ],
+      "q_rel": [
+        0.707107,
+        0.007488,
+        -0.011417,
+        -0.706975
+      ],
+      "R_rel": [
+        [
+          0.000112,
+          0.999643,
+          -0.026734
+        ],
+        [
+          -0.999985,
+          0.000261,
+          0.005553
+        ],
+        [
+          0.005558,
+          0.026733,
+          0.999627
+        ]
+      ],
+      "bridging_ions": [
+        {
+          "ion": "CL",
+          "atom_a": 184,
+          "res_a": "TYR23:OH",
+          "atom_b": 871,
+          "res_b": "ASN113:ND2",
+          "d_a": 2.98,
+          "d_b": 3.41
+        }
+      ]
+    },
+    {
+      "partner_chain": "A",
+      "symop": "y,x,-z",
+      "d_com_crystal": 29.74,
+      "d_com_retracted": 31.88,
+      "s_retract": 2.14,
+      "min_gap_crystal": -0.303,
+      "n_overlap_crystal": 12,
+      "n_buried_crystal": 714,
+      "t_crystal": [
+        21.6511,
+        -20.3661,
+        -0.9638
+      ],
+      "t_retracted": [
+        23.209,
+        -21.8316,
+        -1.0332
+      ],
+      "q_rel": [
+        0.0,
+        -0.685048,
+        -0.728484,
+        0.004508
+      ],
+      "R_rel": [
+        [
+          -0.061419,
+          0.998093,
+          -0.006176
+        ],
+        [
+          0.998093,
+          0.061378,
+          -0.006568
+        ],
+        [
+          -0.006176,
+          -0.006568,
+          -0.999959
+        ]
+      ],
+      "bridging_ions": []
+    },
+    {
+      "partner_chain": "A",
+      "symop": "-y,-x,-z+1/2",
+      "d_com_crystal": 32.847,
+      "d_com_retracted": 34.067,
+      "s_retract": 1.22,
+      "min_gap_crystal": -0.771,
+      "n_overlap_crystal": 13,
+      "n_buried_crystal": 634,
+      "t_crystal": [
+        -17.5659,
+        -19.2315,
+        -20.0125
+      ],
+      "t_retracted": [
+        -18.2184,
+        -19.9458,
+        -20.7558
+      ],
+      "q_rel": [
+        0.0,
+        -0.728421,
+        0.684873,
+        -0.018776
+      ],
+      "R_rel": [
+        [
+          0.061194,
+          -0.997751,
+          0.027353
+        ],
+        [
+          -0.997751,
+          -0.061899,
+          -0.025718
+        ],
+        [
+          0.027353,
+          -0.025718,
+          -0.999295
+        ]
+      ],
+      "bridging_ions": []
+    },
+    {
+      "partner_chain": "A",
+      "symop": "x,y,z",
+      "d_com_crystal": 37.223,
+      "d_com_retracted": 37.223,
+      "s_retract": 0.0,
+      "min_gap_crystal": 0.077,
+      "n_overlap_crystal": 0,
+      "n_buried_crystal": 25,
+      "t_crystal": [
+        0.3942,
+        -0.601,
+        -37.2161
+      ],
+      "t_retracted": [
+        0.3942,
+        -0.601,
+        -37.2161
+      ],
+      "q_rel": [
+        1.0,
+        -0.0,
+        0.0,
+        -0.0
+      ],
+      "R_rel": [
+        [
+          1.0,
+          -0.0,
+          0.0
+        ],
+        [
+          -0.0,
+          1.0,
+          0.0
+        ],
+        [
+          -0.0,
+          -0.0,
+          1.0
+        ]
+      ],
+      "bridging_ions": []
+    },
+    {
+      "partner_chain": "A",
+      "symop": "x,y,z",
+      "d_com_crystal": 37.223,
+      "d_com_retracted": 37.223,
+      "s_retract": 0.0,
+      "min_gap_crystal": 0.077,
+      "n_overlap_crystal": 0,
+      "n_buried_crystal": 25,
+      "t_crystal": [
+        -0.3942,
+        0.601,
+        37.2161
+      ],
+      "t_retracted": [
+        -0.3942,
+        0.601,
+        37.2161
+      ],
+      "q_rel": [
+        1.0,
+        0.0,
+        -0.0,
+        0.0
+      ],
+      "R_rel": [
+        [
+          1.0,
+          -0.0,
+          -0.0
+        ],
+        [
+          0.0,
+          1.0,
+          -0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "bridging_ions": []
+    },
+    {
+      "partner_chain": "A",
+      "symop": "-y+1/2,x+1/2,z+3/4",
+      "d_com_crystal": 38.65,
+      "d_com_retracted": 39.15,
+      "s_retract": 0.5,
+      "min_gap_crystal": -0.44,
+      "n_overlap_crystal": 2,
+      "n_buried_crystal": 264,
+      "t_crystal": [
+        19.335,
+        18.591,
+        27.827
+      ],
+      "t_retracted": [
+        19.5851,
+        18.8315,
+        28.187
+      ],
+      "q_rel": [
+        0.707107,
+        -0.007488,
+        0.011417,
+        0.706975
+      ],
+      "R_rel": [
+        [
+          0.000112,
+          -0.999985,
+          0.005558
+        ],
+        [
+          0.999643,
+          0.000261,
+          0.026733
+        ],
+        [
+          -0.026734,
+          0.005553,
+          0.999627
+        ]
+      ],
+      "bridging_ions": []
+    },
+    {
+      "partner_chain": "A",
+      "symop": "y+1/2,-x+1/2,z+1/4",
+      "d_com_crystal": 38.65,
+      "d_com_retracted": 39.15,
+      "s_retract": 0.5,
+      "min_gap_crystal": -0.44,
+      "n_overlap_crystal": 2,
+      "n_buried_crystal": 264,
+      "t_crystal": [
+        -17.8426,
+        19.1753,
+        -28.4211
+      ],
+      "t_retracted": [
+        -18.0734,
+        19.4234,
+        -28.7888
+      ],
+      "q_rel": [
+        0.707107,
+        0.007488,
+        -0.011417,
+        -0.706975
+      ],
+      "R_rel": [
+        [
+          0.000112,
+          0.999643,
+          -0.026734
+        ],
+        [
+          -0.999985,
+          0.000261,
+          0.005553
+        ],
+        [
+          0.005558,
+          0.026733,
+          0.999627
+        ]
+      ],
+      "bridging_ions": []
+    }
+  ]
+}

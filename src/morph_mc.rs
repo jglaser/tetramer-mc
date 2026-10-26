@@ -61,7 +61,8 @@ pub struct ChemistryModel {
     pub flags: Vec<u8>,
     /// Feature weights [w_hb, w_chb, w_cl, w_wb, w_clash, w_upol, w_uchg] in kT.
     pub weights: [f64; 7],
-    /// Cap on raw water-bridge pair score before clash gating (default 5.0).
+    /// Optional cap (`> 0`) on water-bridge score before clash gating (`0.0` = uncapped per-atom saturation).
+    #[serde(default)]
     pub wb_cap: f64,
     /// Optional 5-feature hydration-shell morphometric solvation weights
     /// `[w_p2, w_p3, w_a1, w_a2, w_a05]` in kT for pairwise gap `g = d - (r_i + r_j) < 2.8 A`.
@@ -622,7 +623,6 @@ impl ChemistryModel {
         let mut max_comp_u_a = vec![0.0f64; n];
         let mut max_comp_u_b = vec![0.0f64; n];
 
-        let mut s_wb_raw = 0.0f64;
         let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
         let mut chb_cands: Vec<(usize, usize, f64, Vec3, f64)> = Vec::new();
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
@@ -676,7 +676,6 @@ impl ChemistryModel {
                     if u > max_comp_u_b[j] {
                         max_comp_u_b[j] = u;
                     }
-                    s_wb_raw += Self::hat_wb(u);
                 }
                 let gh = Self::hat_hb(u);
                 if gh > 0.0 {
@@ -770,7 +769,18 @@ impl ChemistryModel {
             let uncomp_b = 1.0 - Self::hat_b12(max_comp_u_b[j]);
             s_clash += w_cl * uncomp_a * uncomp_b;
         }
-        let s_wb = s_wb_raw.min(self.wb_cap) * (-1.5 * s_clash).exp();
+        let mut s_wb_raw = 0.0f64;
+        for &uc in max_comp_u_a.iter().chain(max_comp_u_b.iter()) {
+            if uc > 0.0 {
+                s_wb_raw += 0.5 * Self::hat_wb(uc);
+            }
+        }
+        let s_wb_capped = if self.wb_cap > 0.0 {
+            s_wb_raw.min(self.wb_cap)
+        } else {
+            s_wb_raw
+        };
+        let s_wb = s_wb_capped * (-1.5 * s_clash).exp();
 
         let mut unp_pol = 0.0f64;
         let mut unp_chg = 0.0f64;
@@ -3563,7 +3573,6 @@ impl MorphMc {
         let mut u6_a: Vec<f64> = Vec::new();
         let mut u6_b: Vec<f64> = Vec::new();
 
-        let mut s_wb_raw = 0.0f64;
         let mut hb_cands: Vec<(usize, usize, f64)> = Vec::new();
         let mut chb_cands: Vec<(usize, usize, f64, Vec3, f64)> = Vec::new();
         let mut tn_pairs: Vec<(usize, usize, Vec3, f64)> = Vec::new();
@@ -3660,7 +3669,6 @@ impl MorphMc {
                     if u > max_comp_u_b[j] {
                         max_comp_u_b[j] = u;
                     }
-                    s_wb_raw += ChemistryModel::hat_wb(u);
                 }
                 let gh = ChemistryModel::hat_hb(u);
                 if gh > 0.0 {
@@ -3778,7 +3786,18 @@ impl MorphMc {
             let uncomp_b = 1.0 - ChemistryModel::hat_b12(max_comp_u_b[j]);
             s_clash += w_cl * uncomp_a * uncomp_b;
         }
-        let s_wb = s_wb_raw.min(self.chem.wb_cap) * (-1.5 * s_clash).exp();
+        let mut s_wb_raw = 0.0f64;
+        for &uc in max_comp_u_a.iter().chain(max_comp_u_b.iter()) {
+            if uc > 0.0 {
+                s_wb_raw += 0.5 * ChemistryModel::hat_wb(uc);
+            }
+        }
+        let s_wb_capped = if self.chem.wb_cap > 0.0 {
+            s_wb_raw.min(self.chem.wb_cap)
+        } else {
+            s_wb_raw
+        };
+        let s_wb = s_wb_capped * (-1.5 * s_clash).exp();
 
         let mut unp_pol = 0.0f64;
         let mut unp_chg = 0.0f64;

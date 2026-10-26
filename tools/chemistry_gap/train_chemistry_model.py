@@ -270,10 +270,10 @@ def fit_cl_bridge_parameters(names, coords, flags):
     return atom_cl_activity, cl_env_weights, [round(w_intra_acc, 4), round(w_intra_ani, 4)]
 
 
-def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
+def fit_contrastive_cosine_embeddings(names, coords, vdw, flags, weights, cos_weights):
     """Fit D=8 unit-norm contrastive cosine-similarity embeddings (cos_u, cos_v) and
-    surface activity cos_activity on monomer surface atoms using ONLY positive crystal
-    contact examples and the P x P polar-atom partition function to supply negatives."""
+    surface activity cos_activity on monomer surface atoms using a universal interface-agnostic
+    energy-balance link function and self-generated slide/twist perturbations."""
     X = np.array(coords, dtype=float)
     R_vdw = np.array(vdw, dtype=float)
     flags_arr = np.array(flags, dtype=int)
@@ -281,6 +281,128 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
     tree_x = cKDTree(X)
     D_mat = np.linalg.norm(X[:, None, :] - X[None, :, :], axis=-1)
     np.fill_diagonal(D_mat, 999.0)
+
+    CHEM_CAT, CHEM_ANI, CHEM_NDON, CHEM_NACC = 1, 2, 4, 8
+    CHEM_TYR_OH, CHEM_AMIDE_ND, CHEM_PURE_ACC, CHEM_PURE_DON = 16, 32, 64, 128
+
+    def comp(fi, fj):
+        return bool(
+            ((fi & CHEM_NDON) and (fj & CHEM_NACC)) or ((fi & CHEM_NACC) and (fj & CHEM_NDON)) or
+            ((fi & CHEM_CAT) and (fj & CHEM_NACC)) or ((fi & CHEM_NACC) and (fj & CHEM_CAT)) or
+            ((fi & CHEM_CAT) and (fj & CHEM_ANI)) or ((fi & CHEM_ANI) and (fj & CHEM_CAT)) or
+            ((fi & CHEM_ANI) and (fj & CHEM_NDON)) or ((fi & CHEM_NDON) and (fj & CHEM_ANI)) or
+            ((fi & CHEM_TYR_OH) and (fj & CHEM_NACC)) or ((fi & CHEM_NACC) and (fj & CHEM_TYR_OH))
+        )
+
+    def hat_b1(u):
+        return max(0.0, 4.0 * u - 3.0)
+
+    def hat_b2(u):
+        return max(0.0, min((4.0 / 3.0) * u, 4.0 * (1.0 - u)))
+
+    def hat_b12(u):
+        return min(max((4.0 / 3.0) * u, 0.0), 1.0)
+
+    def hat_hb(u):
+        return hat_b1(u) + 0.25 * hat_b2(u)
+
+    def hat_wb(u):
+        return hat_b2(u) * (1.0 - hat_b1(u))
+
+    def axis_angle_rot(axis, theta):
+        axis = np.asarray(axis, dtype=float)
+        axis /= np.linalg.norm(axis) + 1e-12
+        c, s = np.cos(theta), np.sin(theta)
+        x, y, z = axis
+        K = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])
+        return np.eye(3) + s * K + (1 - c) * (K @ K)
+
+    def eval_base_polar_energy(t, R):
+        """Exact non-cosine 2-body polar energy E_pol^(0)(t, R) matching morph_mc.rs."""
+        YB = (X @ R.T) + t
+        pairs = tree_x.query_ball_tree(cKDTree(YB), 6.8)
+        hb_cands, chb_cands, clash_cands = [], [], []
+        max_u_a = np.zeros(N)
+        max_u_b = np.zeros(N)
+        max_comp_a = np.zeros(N)
+        max_comp_b = np.zeros(N)
+        for i, js in enumerate(pairs):
+            fi = int(flags[i])
+            for j in js:
+                fj = int(flags[j])
+                d = float(np.linalg.norm(X[i] - YB[j]))
+                g = d - (R_vdw[i] + R_vdw[j])
+                if g >= 2.8:
+                    continue
+                u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
+                if u <= 0.0:
+                    continue
+                if u > max_u_a[i]:
+                    max_u_a[i] = u
+                if u > max_u_b[j]:
+                    max_u_b[j] = u
+                if fi == 0 or fj == 0:
+                    continue
+                if comp(fi, fj):
+                    if u > max_comp_a[i]:
+                        max_comp_a[i] = u
+                    if u > max_comp_b[j]:
+                        max_comp_b[j] = u
+                gh = hat_hb(u)
+                if gh > 0.0:
+                    if ((fi & CHEM_NDON) and (fj & CHEM_NACC)) or ((fi & CHEM_NACC) and (fj & CHEM_NDON)):
+                        hb_cands.append((gh, min(i, j), max(i, j), i, j))
+                    if (((fi & CHEM_CAT) and (fj & (CHEM_NACC | CHEM_ANI)))
+                            or ((fj & CHEM_CAT) and (fi & (CHEM_NACC | CHEM_ANI)))
+                            or ((fi & CHEM_ANI) and (fj & CHEM_NDON))
+                            or ((fj & CHEM_ANI) and (fi & CHEM_NDON))):
+                        chb_cands.append((gh, min(i, j), max(i, j), i, j))
+                    if ((fi & CHEM_PURE_ACC) and (fj & CHEM_PURE_ACC)) or ((fi & CHEM_PURE_DON) and (fj & CHEM_PURE_DON)):
+                        clash_cands.append((gh, i, j))
+        hb_cands.sort(key=lambda x: (-x[0], x[1], x[2]))
+        ua, ub = set(), set()
+        s_hb = 0.0
+        for gh, _, _, i, j in hb_cands:
+            if i not in ua and j not in ub:
+                ua.add(i)
+                ub.add(j)
+                s_hb += gh
+        chb_cands.sort(key=lambda x: (-x[0], x[1], x[2]))
+        ua, ub = set(), set()
+        s_chb = 0.0
+        for gh, _, _, i, j in chb_cands:
+            if i not in ua and j not in ub:
+                ua.add(i)
+                ub.add(j)
+                s_chb += gh
+        s_clash = sum(gh * (1.0 - hat_b12(max_comp_a[i])) * (1.0 - hat_b12(max_comp_b[j])) for gh, i, j in clash_cands)
+        s_wb_raw = 0.5 * (
+            sum(hat_wb(u) for u in max_comp_a if u > 0.0)
+            + sum(hat_wb(u) for u in max_comp_b if u > 0.0)
+        )
+        s_wb = s_wb_raw * np.exp(-1.5 * s_clash)
+        unp_pol = sum(
+            max(0.0, hat_hb(max_u_a[i]) - hat_b12(max_comp_a[i]))
+            for i in range(N)
+            if flags[i] and not (flags[i] & (CHEM_CAT | CHEM_ANI)) and (flags[i] & (CHEM_NDON | CHEM_NACC))
+        )
+        unp_pol += sum(
+            max(0.0, hat_hb(max_u_b[j]) - hat_b12(max_comp_b[j]))
+            for j in range(N)
+            if flags[j] and not (flags[j] & (CHEM_CAT | CHEM_ANI)) and (flags[j] & (CHEM_NDON | CHEM_NACC))
+        )
+        unp_chg = sum(
+            max(0.0, hat_hb(max_u_a[i]) - hat_b12(max_comp_a[i]))
+            for i in range(N)
+            if (flags[i] & (CHEM_CAT | CHEM_ANI))
+        )
+        unp_chg += sum(
+            max(0.0, hat_hb(max_u_b[j]) - hat_b12(max_comp_b[j]))
+            for j in range(N)
+            if (flags[j] & (CHEM_CAT | CHEM_ANI))
+        )
+        w = weights
+        return -w[0] * s_hb - w[1] * s_chb - w[3] * s_wb + w[4] * s_clash + w[5] * unp_pol + w[6] * unp_chg
 
     r3 = np.maximum(R_vdw, 1.0) ** 3
     rho_self = np.sum(r3[None, :] * np.exp(-((D_mat / 3.5) ** 2)), axis=1)
@@ -315,6 +437,8 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
     L_chem = np.eye(P) - 0.5 * (K_chem + K_chem.T)
 
     def quat_to_rot(q):
+        q = np.asarray(q, dtype=float)
+        q /= np.linalg.norm(q)
         w, x, y, z = q
         return np.array([
             [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
@@ -332,64 +456,99 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         'm6': ([21.124896616345055, -21.124896616345048, -0.5015618770058232], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0]),
     }
 
-    pos_poses = []
-    for name, (t0, q0) in nat_modes.items():
-        pos_poses.append((f'nat_{name}', np.array(t0), quat_to_rot(q0)))
+    rmax = float(np.max(R_vdw))
+    d_max = 2.0 * rmax + 2.8
+
+    def extract_pairs(t, R):
+        YB = (X @ R.T) + t
+        pairs = tree_x.query_ball_tree(cKDTree(YB), d_max)
+        ii, jj, u_list, psi_list = [], [], [], []
+        min_g = 999.0
+        for i, b_list in enumerate(pairs):
+            ri = R_vdw[i]
+            for j in b_list:
+                d = float(np.linalg.norm(X[i] - YB[j]))
+                g = d - (ri + R_vdw[j])
+                if g < min_g:
+                    min_g = g
+                if g < 2.8 and flags_arr[i] > 0 and flags_arr[j] > 0:
+                    u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
+                    psi = min((4.0 / 3.0) * u, 1.0)
+                    ii.append(full_to_p[i])
+                    jj.append(full_to_p[j])
+                    u_list.append(u)
+                    psi_list.append(psi)
+        return min_g, np.array(ii, int), np.array(jj, int), np.array(u_list, float), np.array(psi_list, float)
+
+    pos_poses = [(f'nat_{name}', np.array(t0, float), quat_to_rot(q0)) for name, (t0, q0) in nat_modes.items()]
     pos_poses.append((
         'capture_m6',
         np.array([22.297474636863532, -21.25884591642077, -1.0185602607119532]),
         quat_to_rot([-0.036576369473634514, 0.701699829098772, 0.7109986930404457, -0.023672302664642158]),
     ))
 
+    # Self-generated local slide/twist perturbations around positive crystal contacts
+    pert_poses_info = []
+    W_pert = np.zeros((P, P), dtype=float)
+    for k, (t0, q0) in nat_modes.items():
+        t0 = np.array(t0, float)
+        R0 = quat_to_rot(q0)
+        n_hat = t0 / (np.linalg.norm(t0) + 1e-12)
+        ref = np.array([1.0, 0.0, 0.0]) if abs(n_hat[0]) < 0.8 else np.array([0.0, 1.0, 0.0])
+        t1 = np.cross(n_hat, ref)
+        t1 /= np.linalg.norm(t1)
+        t2 = np.cross(n_hat, t1)
+        for dt_mag in (4.5, 7.0):
+            for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
+                slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
+                for dth in (-0.42, 0.0, 0.42):
+                    for ax in (n_hat, t1):
+                        R_p = axis_angle_rot(ax, dth) @ R0
+                        t_base = t0 + slide
+                        for shift in np.linspace(-3.0, 4.0, 15):
+                            t_p = t_base + shift * n_hat
+                            min_g, ii, jj, u_arr, psi_arr = extract_pairs(t_p, R_p)
+                            if min_g >= -0.05 and len(ii) >= 8:
+                                pert_poses_info.append((k, ii, jj, psi_arr))
+                                for pi, pj, psi in zip(ii, jj, psi_arr):
+                                    W_pert[pi, pj] += 1.5 * psi
+                                    W_pert[pj, pi] += 1.5 * psi
+                                break
+
     W_pos = np.zeros((P, P), dtype=float)
     pos_mask = np.zeros((P, P), dtype=bool)
     pos_pose_data = []
-    rmax = float(np.max(R_vdw))
-    d_max = 2.0 * rmax + 2.8
+    w_cos_pos = cos_weights[0]
     for name, t, R in pos_poses:
-        if name == 'nat_m2':
-            w_m = 55.0
-        elif name in ('nat_m0', 'nat_m5'):
-            w_m = 60.0
-        elif name == 'nat_m4':
-            w_m = 18.0
-        else:
-            w_m = 5.0
-        for idx_dir, (tr, Rr) in enumerate([(t, R), (-R.T @ t, R.T)]):
-            YA = (X @ Rr.T) + tr
-            pairs = tree_x.query_ball_tree(cKDTree(YA), d_max)
-            ii, jj, psi_list = [], [], []
-            for j, a_list in enumerate(pairs):
-                if flags_arr[j] == 0:
-                    continue
-                pj = full_to_p[j]
-                rj = R_vdw[j]
-                for i in a_list:
-                    if flags_arr[i] == 0:
-                        continue
-                    pi = full_to_p[i]
-                    d = float(np.linalg.norm(YA[i] - X[j]))
-                    g = d - (R_vdw[i] + rj)
-                    if g < 2.8:
-                        u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
-                        psi = min((4.0 / 3.0) * u, 1.0)
-                        W_pos[pi, pj] = max(W_pos[pi, pj], w_m * max(psi, 0.4))
-                        W_pos[pj, pi] = max(W_pos[pj, pi], w_m * max(psi, 0.4))
-                        pos_mask[pi, pj] = True
-                        pos_mask[pj, pi] = True
-                        if idx_dir == 0 and psi > 0.0:
-                            ii.append(pi)
-                            jj.append(pj)
-                            psi_list.append(psi)
-            if idx_dir == 0 and len(ii) >= 1:
-                ii = np.array(ii, dtype=int)
-                jj = np.array(jj, dtype=int)
-                psi_arr = np.array(psi_list, dtype=float)
-                pos_pose_data.append((name, ii, jj, psi_arr))
+        _, ii, jj, u_arr, psi_arr = extract_pairs(t, R)
+        if len(ii) == 0:
+            continue
+        is_inv = bool((np.linalg.norm(R @ t + t) < 3.0) and (np.linalg.norm(R @ R - np.eye(3)) < 0.25))
+        psi_sum = float(np.sum(psi_arr))
+        w_norm = 200.0 / max(psi_sum, 1.0)
+        max_u_i = np.zeros(P)
+        max_u_j = np.zeros(P)
+        for pi, pj, u in zip(ii, jj, u_arr):
+            if u > max_u_i[pi]:
+                max_u_i[pi] = u
+            if u > max_u_j[pj]:
+                max_u_j[pj] = u
+        for pi, pj, u, psi in zip(ii, jj, u_arr, psi_arr):
+            if u >= 0.25 or u >= 0.70 * max_u_i[pi] or u >= 0.70 * max_u_j[pj]:
+                w_pair = w_norm * psi
+                W_pos[pi, pj] = max(W_pos[pi, pj], w_pair)
+                W_pos[pj, pi] = max(W_pos[pj, pi], w_pair)
+                pos_mask[pi, pj] = True
+                pos_mask[pj, pi] = True
+        e_pol0 = eval_base_polar_energy(t, R)
+        e_asymp = -15.5 if is_inv else -18.2
+        e_target = e_asymp * (psi_sum / (psi_sum + 4.2))
+        s_target = max(0.55, (e_pol0 - e_target) / w_cos_pos)
+        pos_pose_data.append((name, ii, jj, psi_arr, is_inv, e_pol0, e_target, s_target))
 
     neg_mask = ~pos_mask
     active_atom = W_pos.sum(axis=1) > 0
-    W_neg_prior = np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) * neg_mask
+    W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) + W_pert) * neg_mask
 
     D = 8
     c0 = 0.25
@@ -422,8 +581,8 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
         tot_loss = float(-np.sum(W_pos * (logits - logits_max - np.log(Z_row))))
         dS_mat = -(W_pos - row_weight * prob_row) / tau
 
-        # 2. Off-diagonal partition repulsion on non-partner pairs (s_ik <= -0.48)
-        diff_neg = np.maximum(0.0, S_mat - (-0.48)) * neg_mask
+        # 2. Off-diagonal partition repulsion on non-partner pairs (s_ik <= -0.52)
+        diff_neg = np.maximum(0.0, S_mat - (-0.52)) * neg_mask
         tot_loss += float(np.sum(0.5 * W_neg_prior * diff_neg * diff_neg))
         dS_mat += W_neg_prior * diff_neg
 
@@ -448,15 +607,15 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
     Vn = V_opt / np.sqrt(np.sum(V_opt * V_opt, axis=1, keepdims=True) + 1e-8)
     S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
 
-    # Stage B: calibrate scalar activities a_i > 0 on positive crystal modes only
-    A_MIN, A_MAX, A_BG = 0.25, 1.60, 0.75
+    # Stage B: calibrate scalar activities a_i > 0 via universal energy-balance link function
+    A_MIN, A_MAX, A_BG = 0.20, 1.65, 0.70
     a0 = np.full(P, A_BG)
 
     def loss_a(a_raw):
         a = np.clip(a_raw, A_MIN, A_MAX)
         tot_loss = 0.0
         g_a = np.zeros(P, dtype=float)
-        for name, ii, jj, psi in pos_pose_data:
+        for name, ii, jj, psi, is_inv, e_pol0, e_target, target in pos_pose_data:
             s_cos = S_mat[ii, jj]
             wi = psi * a[ii]
             wj = psi * a[jj]
@@ -469,21 +628,37 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
             ca = num_a * inv_da
             cb = num_b * inv_db
             S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-            if name in ('nat_m0', 'nat_m5'):
-                w_pose, target, two_sided = 250.0, 0.55, False
-            elif name == 'nat_m2':
-                w_pose, target, two_sided = 350.0, 3.60, True
-            elif name == 'nat_m4':
-                w_pose, target, two_sided = 250.0, 4.30, True
-            elif name in ('nat_m6', 'capture_m6'):
-                w_pose, target, two_sided = 250.0, 0.75, True
-            else:
-                w_pose, target, two_sided = 200.0, 2.35, True
-            if S < target or (two_sided and S > target + 0.05):
+            w_pose = 250.0
+            if S < target or S > target + 0.05:
                 t_eff = target if S < target else (target + 0.05)
                 diff = S - t_eff
                 tot_loss += w_pose * diff * diff
                 dL_dS = 2.0 * w_pose * diff
+                g_a += 0.5 * dL_dS * (ca + cb)
+                ai_d = a[ii] * inv_da[ii]
+                aj_d = a[jj] * inv_db[jj]
+                g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
+                g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
+                np.add.at(g_a, jj, g_wj * psi)
+                np.add.at(g_a, ii, g_wi * psi)
+        for _, ii, jj, psi in pert_poses_info:
+            s_cos = S_mat[ii, jj]
+            wi = psi * a[ii]
+            wj = psi * a[jj]
+            num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
+            den_a = np.bincount(ii, weights=wj, minlength=P)
+            num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
+            den_b = np.bincount(jj, weights=wi, minlength=P)
+            inv_da = 1.0 / (den_a + c0)
+            inv_db = 1.0 / (den_b + c0)
+            ca = num_a * inv_da
+            cb = num_b * inv_db
+            S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
+            if S > -0.35:
+                diff = S - (-0.35)
+                w_p = 15.0
+                tot_loss += w_p * diff * diff
+                dL_dS = 2.0 * w_p * diff
                 g_a += 0.5 * dL_dS * (ca + cb)
                 ai_d = a[ii] * inv_da[ii]
                 aj_d = a[jj] * inv_db[jj]
@@ -499,32 +674,9 @@ def fit_contrastive_cosine_embeddings(names, coords, vdw, flags):
     a_pol = np.clip(res_a.x, A_MIN, A_MAX)
 
     def eval_pose_score(t, R):
-        YA = (X @ R.T) + t
-        pairs = tree_x.query_ball_tree(cKDTree(YA), d_max)
-        ii, jj, psi_list = [], [], []
-        for j, a_list in enumerate(pairs):
-            if flags_arr[j] == 0:
-                continue
-            pj = full_to_p[j]
-            rj = R_vdw[j]
-            for i in a_list:
-                if flags_arr[i] == 0:
-                    continue
-                pi = full_to_p[i]
-                d = float(np.linalg.norm(YA[i] - X[j]))
-                g = d - (R_vdw[i] + rj)
-                if g < 2.8:
-                    u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
-                    psi = min((4.0 / 3.0) * u, 1.0)
-                    if psi > 0.0:
-                        ii.append(pi)
-                        jj.append(pj)
-                        psi_list.append(psi)
-        if not ii:
+        _, ii, jj, _, psi = extract_pairs(t, R)
+        if len(ii) == 0:
             return None
-        ii = np.array(ii, dtype=int)
-        jj = np.array(jj, dtype=int)
-        psi = np.array(psi_list, dtype=float)
         s_cos = S_mat[ii, jj]
         wi = psi * a_pol[ii]
         wj = psi * a_pol[jj]
@@ -654,14 +806,16 @@ def main():
     vdw = [a['radius'] for a in shape['atoms']]
     flags = atom_chemistry_flags(names, coords=coords)
     atom_cl_activity, cl_env_weights, intra_w = fit_cl_bridge_parameters(names, coords, flags)
-    cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(names, coords, vdw, flags)
-    weights = [1.38, 2.00, 0.0, 0.55, 1.35, 1.25, 2.05]
+    weights = [1.38, 2.00, 0.0, 0.65, 1.35, 1.25, 2.05]
+    cos_weights = [3.35, 6.50]
+    cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(
+        names, coords, vdw, flags, weights, cos_weights
+    )
     solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
     solv_cap = 12.5
     burial_gate = [14.0, 0.0]
     coop_weights = [2.0, 3.6]
     junc_weights = [3.8, 2.6]
-    cos_weights = [3.15, 3.85]
     model = {
         'flags': flags,
         'weights': weights,
@@ -672,7 +826,7 @@ def main():
         'coop_s0': 15.0,
         'junc_weights': junc_weights,
         'junc_w0': 1.0,
-        'wb_cap': 18.0,
+        'wb_cap': 0.0,
         'atom_cl_activity': atom_cl_activity,
         'cl_env_weights': cl_env_weights,
         'cos_u': cos_u,

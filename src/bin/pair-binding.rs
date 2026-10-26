@@ -182,10 +182,15 @@ fn make_pair(a: &Args, tree: &SphereTree, env: &[Pose]) -> Result<Pair> {
         Some(f) => serde_json::from_slice(&fs::read(f)?)?,
         None => Vec::new(),
     };
-    let chem: ChemistryModel = match &a.chemistry_model {
+    let mut chem: ChemistryModel = match &a.chemistry_model {
         Some(f) => serde_json::from_slice(&fs::read(f)?)?,
         None => ChemistryModel::default(),
     };
+    if a.no_solvation {
+        chem.solv_weights = [0.0; 5];
+        chem.solv_cap = 0.0;
+        chem.burial_gate = [0.0; 2];
+    }
     let mc = MorphMc::new(tree.clone(), wall, SolvationModel { pressure: 0., coefficients: vec![[0.; 3]], ..model },
         SquareWell { epsilon: 1., width: a.width }, bodies.clone(), vec![true; bodies.len()])?
         .with_like_charge(LikeCharge { weight: 1., cutoff: a.like_charge_cutoff, groups })?

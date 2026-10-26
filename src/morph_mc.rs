@@ -2860,9 +2860,10 @@ impl MorphMc {
         e_coop
     }
 
-    /// Total cooperative many-body surface-field energy across the full `n x n` patch matrix `mat`.
-    fn coop_total_from_matrix(&self, mat: &[Vec<PatchContact>], _poses: &[Pose]) -> f64 {
-        if !self.chem.has_cooperativity() || mat.is_empty() {
+    /// Cooperative many-body surface-field energy on a subset of vertex bodies `vertices`
+    /// evaluated against the patch matrix `mat`.
+    fn coop_vertices_from_matrix(&self, mat: &[Vec<PatchContact>], vertices: &[usize]) -> f64 {
+        if !self.chem.has_cooperativity() || mat.is_empty() || vertices.is_empty() {
             return 0.0;
         }
         let n = mat.len();
@@ -2870,7 +2871,7 @@ impl MorphMc {
         let w_tri = self.chem.coop_weights[1];
         let has_junc = self.chem.has_junction();
         let mut e_coop = 0.0f64;
-        for i in 0..n {
+        for &i in vertices {
             let mut active: Vec<(usize, f64, Vec3)> = Vec::new();
             for j in 0..n {
                 if j != i && mat[i][j].s > 0.0 {
@@ -2895,6 +2896,15 @@ impl MorphMc {
             }
         }
         e_coop
+    }
+
+    /// Total cooperative many-body surface-field energy across the full `n x n` patch matrix `mat`.
+    fn coop_total_from_matrix(&self, mat: &[Vec<PatchContact>], _poses: &[Pose]) -> f64 {
+        if !self.chem.has_cooperativity() || mat.is_empty() {
+            return 0.0;
+        }
+        let vertices: Vec<usize> = (0..mat.len()).collect();
+        self.coop_vertices_from_matrix(mat, &vertices)
     }
 
     /// Evaluate sparse `SingleBodyDelta` for moving single body `b` from `old` to `new`
@@ -4040,35 +4050,39 @@ impl MorphMc {
         if self.contact_gap.is_none() {
             return (0., Vec::new(), 0, Vec::new());
         }
-        let n = self.poses.len();
-        let mut new_poses = self.poses.clone();
-        for &(b, p) in moves {
-            new_poses[b] = p;
-        }
         let mut updates = Vec::new();
         let mut old_g = Vec::new();
         let mut new_g = Vec::new();
+        let has_mem = self.memory.is_some();
         for &(b, p_new) in moves {
             let p_old = self.poses[b];
-            for c in 0..n {
+            for c in self.body_grid.near(&p_old.position) {
+                if c == b || in_cluster[c] || !self.contact[b][c] {
+                    continue;
+                }
+                let q = self.poses[c];
+                let k_new = self.in_contact_poses(p_new, q);
+                if !k_new {
+                    updates.push((b, c, false));
+                }
+                if has_mem {
+                    old_g.push(rel_pose(p_old, q));
+                    old_g.push(rel_pose(q, p_old));
+                }
+            }
+            for c in self.body_grid.near(&p_new.position) {
                 if c == b || in_cluster[c] {
                     continue;
                 }
-                let k_old = self.contact[b][c];
-                let q_new = new_poses[c];
-                let k_new = self.in_contact_poses(p_new, q_new);
-                if k_old != k_new {
-                    updates.push((b, c, k_new));
-                }
-                if self.memory.is_some() {
-                    let q_old = self.poses[c];
-                    if k_old {
-                        old_g.push(rel_pose(p_old, q_old));
-                        old_g.push(rel_pose(q_old, p_old));
+                let q = self.poses[c];
+                let k_new = self.in_contact_poses(p_new, q);
+                if k_new {
+                    if !self.contact[b][c] {
+                        updates.push((b, c, true));
                     }
-                    if k_new {
-                        new_g.push(rel_pose(p_new, q_new));
-                        new_g.push(rel_pose(q_new, p_new));
+                    if has_mem {
+                        new_g.push(rel_pose(p_new, q));
+                        new_g.push(rel_pose(q, p_new));
                     }
                 }
             }
@@ -4077,12 +4091,12 @@ impl MorphMc {
             return (0., Vec::new(), 0, updates);
         };
         let n_new = mem.entries + new_g.len() - old_g.len();
+        if old_g.is_empty() && new_g.is_empty() {
+            return (0., Vec::new(), n_new, updates);
+        }
         let mut sums = mem.sums.clone();
         let mut d = -mem.s.lambda * (n_new as f64 - mem.entries as f64);
         for (k, m) in mem.slots.iter().enumerate() {
-            if old_g.is_empty() && new_g.is_empty() {
-                break;
-            }
             let removed: f64 = old_g.iter().map(|&g| mem.s.kernel(*m, g)).sum();
             let added: f64 = new_g.iter().map(|&g| mem.s.kernel(*m, g)).sum();
             if removed == 0. && added == 0. {
@@ -4103,7 +4117,9 @@ impl MorphMc {
         updates: &[(usize, usize, bool)],
     ) {
         if let Some(mem) = &mut self.memory {
-            mem.sums = sums;
+            if !sums.is_empty() {
+                mem.sums = sums;
+            }
             mem.entries = entries;
         }
         if self.contact_gap.is_some() {
@@ -4145,7 +4161,14 @@ impl MorphMc {
         let mut members = vec![b0];
         let mut queue = std::collections::VecDeque::from([b0]);
         let mut pinned = false;
-        let max_chem_cut = if self.chem.has_solvation() { 6.6 } else { 5.25 };
+        let max_chem_cut = if self.chem.has_cooperativity() {
+            8.0
+        } else if self.chem.has_solvation() {
+            6.6
+        } else {
+            5.25
+        };
+        let like_reach = 2. * self.charge_extent + self.like.cutoff;
         let max_reach = (2. * self.tree.bound
             + self
                 .well
@@ -4153,16 +4176,19 @@ impl MorphMc {
                 .max(self.like.cutoff)
                 .max(max_chem_cut)
                 .max(6.0))
-        .max(2. * self.charge_extent + self.like.cutoff);
+        .max(like_reach);
 
         if cs.fk_beta > 0. {
             while let Some(u) = queue.pop_front() {
                 let pu = self.poses[u];
-                for v in 0..n {
-                    if in_cluster[v] || norm(sub(self.poses[v].position, pu.position)) > max_reach {
+                for v in self.body_grid.near_within(&pu.position, max_reach) {
+                    if in_cluster[v] {
                         continue;
                     }
-                    let e_uv = self.pair_surrogate_energy(pu, self.poses[v]);
+                    let pc = self.pair_cache[u][v];
+                    let e_uv = -self.well.epsilon * (pc.well as f64)
+                        + self.like.weight * pc.like
+                        + pc.chem;
                     if e_uv < 0. {
                         let p_bond = 1. - (cs.fk_beta * e_uv).exp();
                         if rng.random::<f64>() < p_bond {
@@ -4351,12 +4377,91 @@ impl MorphMc {
                 return Ok(false);
             }
         }
+
+        // Fast sparse path when the FK cluster is a singleton `{b0}`:
+        // avoids cloning the `n x n` patch matrix and avoids `O(n^2)` coop scans.
+        if !is_multibody {
+            let new_b0 = moves[0].1;
+            let old_b0 = self.poses[b0];
+            if !self.hard_valid(b0, new_b0) {
+                self.stats.hard_rejected += 1;
+                return Ok(false);
+            }
+            let delta = self.single_body_well_and_chem_delta(b0, old_b0, new_b0);
+            let d_well = -self.well.epsilon * delta.dp_well as f64;
+            let (dl, old_likes, new_likes) = self.single_body_like_delta(b0, old_b0, new_b0);
+            let mut fk_log_survival_diff = 0.;
+            if cs.fk_beta > 0. {
+                let mut seen_old: Vec<usize> = delta.old_neighbors.clone();
+                for &c in &old_likes {
+                    if !seen_old.contains(&c) {
+                        seen_old.push(c);
+                    }
+                }
+                for c in seen_old {
+                    let pc = self.pair_cache[b0][c];
+                    let e_old =
+                        -self.well.epsilon * (pc.well as f64) + self.like.weight * pc.like + pc.chem;
+                    fk_log_survival_diff -= cs.fk_beta * e_old.min(0.);
+                }
+                let mut seen_new: Vec<(usize, u32, f64, f64)> = Vec::new();
+                for (c, wp, ch, pb, pc) in &delta.new_pairs {
+                    if *wp > 0 || *ch != 0.0 {
+                        seen_new.push((*c, *wp, *ch, 0.0));
+                    }
+                    let _ = (pb, pc);
+                }
+                for &(c, lk) in &new_likes {
+                    if let Some(entry) = seen_new.iter_mut().find(|e| e.0 == c) {
+                        entry.3 = lk;
+                    } else {
+                        seen_new.push((c, 0, 0.0, lk));
+                    }
+                }
+                for (_, wp, ch, lk) in seen_new {
+                    let e_new = -self.well.epsilon * (wp as f64) + self.like.weight * lk + ch;
+                    fk_log_survival_diff += cs.fk_beta * e_new.min(0.);
+                }
+            }
+            let update = self.solv.propose(&moves)?;
+            let (dm, sums, n_entries, partners) = self.memory_delta(b0, new_b0);
+            let de_total = update.delta + d_well + self.like.weight * dl + delta.dc_chem;
+            let log_acc = -de_total + fk_log_survival_diff + dm + log_q_ratio;
+            ensure!(!log_acc.is_nan(), "NaN cluster move acceptance");
+            if log_acc >= 0. || rng.random::<f64>() < log_acc.exp() {
+                self.solv.commit(update);
+                self.pair_count += delta.dp_well;
+                self.like_sum += dl;
+                self.chem_sum += delta.dc_chem;
+                self.commit_single_body_delta(b0, delta, &old_likes, &new_likes);
+                self.body_grid.relocate(b0, &old_b0.position, &new_b0.position);
+                self.poses[b0] = new_b0;
+                self.placed[b0] = Placed::new(new_b0);
+                self.commit_memory(b0, old_b0.position, sums, n_entries, &partners);
+                self.stats.accepted += 1;
+                self.stats.cluster_accepted += 1;
+                if use_dock {
+                    self.stats.cluster_dock_accepted += 1;
+                }
+                if is_reinsertion {
+                    self.stats.cluster_reinsertion_accepted += 1;
+                }
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+
+        let hard_reach = 2. * self.tree.bound;
+        let hard_r2 = hard_reach * hard_reach;
         let placed_moves: Vec<(usize, Placed)> =
             moves.iter().map(|&(b, p)| (b, Placed::new(p))).collect();
         for &(b, ref pb) in &placed_moves {
-            for &d in &spectators {
-                let q = self.poses[d];
-                if norm(sub(q.position, pb.position)) <= 2. * self.tree.bound
+            for d in self.body_grid.near(&pb.position) {
+                if in_cluster[d] {
+                    continue;
+                }
+                let diff = sub(self.poses[d].position, pb.position);
+                if diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2] <= hard_r2
                     && self.tree.overlaps(pb, &self.placed[d])
                 {
                     self.stats.hard_rejected += 1;
@@ -4365,56 +4470,87 @@ impl MorphMc {
             }
             // Also guard against numerical drift creating intra-cluster hard overlaps.
             for &(b2, ref pb2) in &placed_moves {
-                if b2 > b
-                    && norm(sub(pb2.position, pb.position)) <= 2. * self.tree.bound
-                    && self.tree.overlaps(pb, pb2)
-                {
-                    self.stats.hard_rejected += 1;
-                    return Ok(false);
+                if b2 > b {
+                    let diff = sub(pb2.position, pb.position);
+                    if diff[0] * diff[0] + diff[1] * diff[1] + diff[2] * diff[2] <= hard_r2
+                        && self.tree.overlaps(pb, pb2)
+                    {
+                        self.stats.hard_rejected += 1;
+                        return Ok(false);
+                    }
                 }
             }
         }
 
-        // Compute cut pairwise changes between C and V \ C, plus any floating-point
-        // intra-cluster drift so cached pair_count/like_sum/chem_sum stay machine-exact.
+        // Compute cut pairwise changes between C and V \ C using spatial grid lookups,
+        // plus any floating-point intra-cluster drift so cached pair_count/like_sum/chem_sum stay machine-exact.
         let mut dp: i64 = 0;
         let mut dl: f64 = 0.;
         let mut dc: f64 = 0.;
         let mut fk_log_survival_diff = 0.;
 
         let has_coop = self.chem.has_cooperativity();
-        let mut new_patch = if has_coop {
-            self.patch.clone()
-        } else {
-            Vec::new()
-        };
+        let mut patch_updates: Vec<(usize, usize, PatchContact, PatchContact)> = Vec::new();
         let mut cache_updates: Vec<(usize, usize, PairCache)> = Vec::new();
+        let mut cut_seen = vec![false; n];
+        let mut coop_vertex_seen = vec![false; n];
+        let mut coop_vertices: Vec<usize> = Vec::new();
+        if has_coop {
+            for &(b, _) in &moves {
+                coop_vertex_seen[b] = true;
+                coop_vertices.push(b);
+            }
+        }
 
         for &(b, p_new) in &moves {
             let p_old = self.poses[b];
-            for &d in &spectators {
-                let q = self.poses[d];
-                if norm(sub(p_old.position, q.position)) > max_reach
-                    && norm(sub(p_new.position, q.position)) > max_reach
-                {
-                    if has_coop {
-                        new_patch[b][d] = PatchContact::default();
-                        new_patch[d][b] = PatchContact::default();
+            let mut active_spectators = Vec::new();
+            for d in self.body_grid.near_within(&p_old.position, max_reach) {
+                if !in_cluster[d] && !cut_seen[d] {
+                    let pc = self.pair_cache[b][d];
+                    if pc.well != 0
+                        || pc.chem != 0.0
+                        || pc.like != 0.0
+                        || (has_coop && (self.patch[b][d].s > 0.0 || self.patch[d][b].s > 0.0))
+                    {
+                        cut_seen[d] = true;
+                        active_spectators.push(d);
                     }
-                    cache_updates.push((b, d, PairCache::default()));
-                    continue;
                 }
+            }
+            for d in self.body_grid.near_within(&p_new.position, max_reach) {
+                if !in_cluster[d] && !cut_seen[d] {
+                    cut_seen[d] = true;
+                    active_spectators.push(d);
+                }
+            }
+            for &d in &active_spectators {
+                cut_seen[d] = false;
+                let q = self.poses[d];
                 let pc_old = self.pair_cache[b][d];
                 let wp_old = pc_old.well as i64;
                 let ch_old = pc_old.chem;
                 let lk_old = pc_old.like;
-                let (wp_new_u, ch_new, pb, pd) = self.well_chem_and_patch_between(p_new, q);
+                let (wp_new_u, ch_new, pb, pd, lk_new) =
+                    if norm(sub(p_new.position, q.position)) > max_reach {
+                        (0, 0.0, PatchContact::default(), PatchContact::default(), 0.0)
+                    } else {
+                        let (w, c, pb, pd) = self.well_chem_and_patch_between(p_new, q);
+                        let lk = self.like_pair_between(p_new, q);
+                        (w, c, pb, pd, lk)
+                    };
                 if has_coop {
-                    new_patch[b][d] = pb;
-                    new_patch[d][b] = pd;
+                    let had_patch = self.patch[b][d].s > 0.0 || self.patch[d][b].s > 0.0;
+                    let has_patch = pb.s > 0.0 || pd.s > 0.0;
+                    if had_patch || has_patch {
+                        if !coop_vertex_seen[d] {
+                            coop_vertex_seen[d] = true;
+                            coop_vertices.push(d);
+                        }
+                        patch_updates.push((b, d, pb, pd));
+                    }
                 }
                 let wp_new = wp_new_u as i64;
-                let lk_new = self.like_pair_between(p_new, q);
                 cache_updates.push((
                     b,
                     d,
@@ -4442,11 +4578,6 @@ impl MorphMc {
             for &(b2, p2_new) in &moves[idx1 + 1..] {
                 let p2_old = self.poses[b2];
                 if norm(sub(p1_old.position, p2_old.position)) > max_reach {
-                    if has_coop {
-                        new_patch[b1][b2] = PatchContact::default();
-                        new_patch[b2][b1] = PatchContact::default();
-                    }
-                    cache_updates.push((b1, b2, PairCache::default()));
                     continue;
                 }
                 let (wp12_new, ch12_new, p_b1, p_b2) =
@@ -4466,8 +4597,11 @@ impl MorphMc {
                     },
                 ));
                 if has_coop {
-                    new_patch[b1][b2] = p_b1;
-                    new_patch[b2][b1] = p_b2;
+                    let had_patch = self.patch[b1][b2].s > 0.0 || self.patch[b2][b1].s > 0.0;
+                    let has_patch = p_b1.s > 0.0 || p_b2.s > 0.0;
+                    if had_patch || has_patch {
+                        patch_updates.push((b1, b2, p_b1, p_b2));
+                    }
                 }
                 dp += wp12_new as i64 - wp12_old as i64;
                 dl += lk12_new - lk12_old;
@@ -4475,12 +4609,38 @@ impl MorphMc {
             }
         }
         if has_coop {
-            let mut trial_poses = self.poses.clone();
-            for &(b, p_new) in &moves {
-                trial_poses[b] = p_new;
+            // Also include any spectator vertex `v` that contacts two vertices in `coop_vertices`
+            // whose mutual triangle edge `(j, k)` is in `patch_updates`.
+            if self.chem.coop_weights[1] != 0.0 && !patch_updates.is_empty() {
+                for &(u, v, _, _) in &patch_updates {
+                    for w in self.body_grid.near_within(&self.poses[u].position, max_reach) {
+                        if !coop_vertex_seen[w]
+                            && self.patch[w][u].s > 0.0
+                            && self.patch[w][v].s > 0.0
+                        {
+                            coop_vertex_seen[w] = true;
+                            coop_vertices.push(w);
+                        }
+                    }
+                }
             }
-            dc += self.coop_total_from_matrix(&new_patch, &trial_poses)
-                - self.coop_total_from_matrix(&self.patch, &self.poses);
+            let coop_old = self.coop_vertices_from_matrix(&self.patch, &coop_vertices);
+            let mut old_patches: Vec<(usize, usize, PatchContact, PatchContact)> =
+                Vec::with_capacity(patch_updates.len());
+            for (u, v, pu, pv) in &patch_updates {
+                old_patches.push((
+                    *u,
+                    *v,
+                    std::mem::replace(&mut self.patch[*u][*v], pu.clone()),
+                    std::mem::replace(&mut self.patch[*v][*u], pv.clone()),
+                ));
+            }
+            let coop_new = self.coop_vertices_from_matrix(&self.patch, &coop_vertices);
+            for (u, v, pu_old, pv_old) in old_patches {
+                self.patch[u][v] = pu_old;
+                self.patch[v][u] = pv_old;
+            }
+            dc += coop_new - coop_old;
         }
 
         let d_well = -self.well.epsilon * dp as f64;
@@ -4499,7 +4659,10 @@ impl MorphMc {
                 self.pair_cache[v][u] = pc;
             }
             if has_coop {
-                self.patch = new_patch;
+                for (u, v, pu, pv) in patch_updates {
+                    self.patch[u][v] = pu;
+                    self.patch[v][u] = pv;
+                }
             }
             for (b, p_new) in moves {
                 let old_pos = self.poses[b].position;
@@ -4548,10 +4711,16 @@ impl MorphMc {
             }
         };
         let transform = crate::spherical::HalfTurn::new(axis)?;
-        let shadow: Vec<Pose> = self.poses.iter().map(|&p| transform.apply(p)).collect();
 
         let hard_reach = 2. * self.tree.bound;
-        let max_chem_cut = if self.chem.has_solvation() { 6.6 } else { 5.25 };
+        let max_chem_cut = if self.chem.has_cooperativity() {
+            8.0
+        } else if self.chem.has_solvation() {
+            6.6
+        } else {
+            5.25
+        };
+        let like_reach = 2. * self.charge_extent + self.like.cutoff;
         let max_reach = (2. * self.tree.bound
             + self
                 .well
@@ -4559,49 +4728,77 @@ impl MorphMc {
                 .max(self.like.cutoff)
                 .max(max_chem_cut)
                 .max(6.0))
-        .max(2. * self.charge_extent + self.like.cutoff);
+        .max(like_reach);
 
         let mut in_cluster = vec![false; n];
         in_cluster[b0] = true;
-        let mut moves = vec![(b0, shadow[b0])];
-        let mut queue = std::collections::VecDeque::from([b0]);
+        let mut moves = vec![(b0, transform.apply(self.poses[b0]))];
+        let mut queue = std::collections::VecDeque::from([(b0, moves[0].1)]);
         let mut pinned = false;
+        let mut gca_seen = vec![false; n];
+        let mut cross_cache: Vec<(usize, usize, usize, f64, PatchContact, PatchContact, f64)> =
+            Vec::new();
 
-        while let Some(u) = queue.pop_front() {
+        while let Some((u, pu_new)) = queue.pop_front() {
             let pu_old = self.poses[u];
-            let pu_new = shadow[u];
             let placed_u_new = Placed::new(pu_new);
-            for v in 0..n {
-                if in_cluster[v] {
-                    continue;
+            let mut candidates = Vec::new();
+            for v in self.body_grid.near_within(&pu_old.position, max_reach) {
+                if !in_cluster[v] && !gca_seen[v] {
+                    gca_seen[v] = true;
+                    candidates.push(v);
                 }
+            }
+            // Because `HalfTurn` is an involution isometry (`||T(a) - b|| == ||a - T(b)||`),
+            // `||pu_old - pv_new|| == ||pu_new - pv_old||`, so querying `body_grid` around
+            // `pu_new.position` finds all bodies `v` whose shadow `pv_new` is within `max_reach` of `pu_old`.
+            for v in self.body_grid.near_within(&pu_new.position, max_reach) {
+                if !in_cluster[v] && !gca_seen[v] {
+                    gca_seen[v] = true;
+                    candidates.push(v);
+                }
+            }
+            for &v in &candidates {
+                gca_seen[v] = false;
                 let pv_old = self.poses[v];
-                let pv_new = shadow[v];
                 let d_old = norm(sub(pu_old.position, pv_old.position));
-                let d_cross = norm(sub(pu_old.position, pv_new.position));
+                let d_cross = norm(sub(pu_new.position, pv_old.position));
                 if d_old > max_reach && d_cross > max_reach {
                     continue;
                 }
                 let mut bonded = false;
-                if d_cross <= hard_reach {
-                    let placed_v_new = Placed::new(pv_new);
-                    if self.tree.overlaps(&placed_u_new, &self.placed[v])
-                        || self.tree.overlaps(&self.placed[u], &placed_v_new)
-                    {
-                        bonded = true;
-                    }
+                if d_cross <= hard_reach && self.tree.overlaps(&placed_u_new, &self.placed[v]) {
+                    bonded = true;
                 }
                 if !bonded && fk_beta > 0. {
                     let pc_old = self.pair_cache[u][v];
                     let e_old = -self.well.epsilon * (pc_old.well as f64)
                         + self.like.weight * pc_old.like
                         + pc_old.chem;
-                    let e_cross = self.pair_surrogate_energy(pu_old, pv_new);
-                    let de = e_cross - e_old;
-                    if de > 0. {
-                        let p_bond = 1. - (-fk_beta * de).exp();
-                        if rng.random::<f64>() < p_bond {
-                            bonded = true;
+                    if d_cross > max_reach {
+                        // e_cross == 0 since ||pu_new - pv_old|| > max_reach.
+                        let de = -e_old;
+                        if de > 0. {
+                            let p_bond = 1. - (-fk_beta * de).exp();
+                            if rng.random::<f64>() < p_bond {
+                                bonded = true;
+                            }
+                        }
+                    } else {
+                        let (wp_c, ch_c, pu_c, pv_c) =
+                            self.well_chem_and_patch_between(pu_new, pv_old);
+                        let lk_c = self.like_pair_between(pu_new, pv_old);
+                        let e_cross =
+                            -self.well.epsilon * (wp_c as f64) + self.like.weight * lk_c + ch_c;
+                        let de = e_cross - e_old;
+                        if de > 0. {
+                            let p_bond = 1. - (-fk_beta * de).exp();
+                            if rng.random::<f64>() < p_bond {
+                                bonded = true;
+                            }
+                        }
+                        if !bonded {
+                            cross_cache.push((u, v, wp_c, ch_c, pu_c, pv_c, lk_c));
                         }
                     }
                 }
@@ -4611,8 +4808,9 @@ impl MorphMc {
                         break;
                     }
                     in_cluster[v] = true;
+                    let pv_new = transform.apply(pv_old);
                     moves.push((v, pv_new));
-                    queue.push_back(v);
+                    queue.push_back((v, pv_new));
                 }
             }
             if pinned {
@@ -4624,7 +4822,6 @@ impl MorphMc {
             return Ok(false);
         }
         moves.sort_unstable_by_key(|&(i, _)| i);
-        let spectators: Vec<usize> = (0..n).filter(|&a| !in_cluster[a]).collect();
 
         self.stats.attempts += 1;
         for &(_, p_new) in &moves {
@@ -4634,44 +4831,173 @@ impl MorphMc {
             }
         }
 
+        // Fast sparse path when the GCA component is a singleton `{b0}`.
+        if moves.len() == 1 {
+            let new_b0 = moves[0].1;
+            let old_b0 = self.poses[b0];
+            if !self.hard_valid(b0, new_b0) {
+                self.stats.hard_rejected += 1;
+                return Ok(false);
+            }
+            let has_coop = self.chem.has_cooperativity();
+            let mut old_neighbors = Vec::new();
+            let mut wp_old = 0usize;
+            let mut ch_old_pair = 0.0f64;
+            let mut old_coop_contacts = Vec::new();
+            for c in self.body_grid.near(&old_b0.position) {
+                if c != b0 {
+                    old_neighbors.push(c);
+                    let pc = self.pair_cache[b0][c];
+                    wp_old += pc.well as usize;
+                    ch_old_pair += pc.chem;
+                    if has_coop && (self.patch[b0][c].s > 0.0 || self.patch[c][b0].s > 0.0) {
+                        old_coop_contacts.push((
+                            c,
+                            self.patch[b0][c].clone(),
+                            self.patch[c][b0].clone(),
+                        ));
+                    }
+                }
+            }
+            let mut wp_new = 0usize;
+            let mut ch_new_pair = 0.0f64;
+            let mut new_pairs = Vec::new();
+            let mut new_coop_contacts = Vec::new();
+            for c in self.body_grid.near(&new_b0.position) {
+                if c != b0 {
+                    let (w_pq, c_pq, pb, pc) =
+                        if let Some(idx) = cross_cache.iter().position(|x| x.0 == b0 && x.1 == c) {
+                            let (_, _, w, ch, pb, pc, _) = cross_cache.swap_remove(idx);
+                            (w, ch, pb, pc)
+                        } else {
+                            self.well_chem_and_patch_between(new_b0, self.poses[c])
+                        };
+                    wp_new += w_pq;
+                    ch_new_pair += c_pq;
+                    if has_coop && (pb.s > 0.0 || pc.s > 0.0) {
+                        new_coop_contacts.push((c, pb.clone(), pc.clone()));
+                    }
+                    if w_pq > 0 || c_pq != 0.0 || (has_coop && (pb.s > 0.0 || pc.s > 0.0)) {
+                        new_pairs.push((c, w_pq as u32, c_pq, pb, pc));
+                    }
+                }
+            }
+            let coop_delta = if has_coop {
+                self.coop_single_body_sparse(b0, new_b0, &new_coop_contacts)
+                    - self.coop_single_body_sparse(b0, old_b0, &old_coop_contacts)
+            } else {
+                0.0
+            };
+            let delta = SingleBodyDelta {
+                dp_well: wp_new as i64 - wp_old as i64,
+                dc_chem: (ch_new_pair - ch_old_pair) + coop_delta,
+                old_neighbors,
+                new_pairs,
+            };
+            let d_well = -self.well.epsilon * delta.dp_well as f64;
+            let (dl, old_likes, new_likes) = self.single_body_like_delta(b0, old_b0, new_b0);
+            let fk_log_survival_diff = if fk_beta > 0. {
+                fk_beta
+                    * (-self.well.epsilon * (delta.dp_well as f64)
+                        + self.like.weight * dl
+                        + (ch_new_pair - ch_old_pair))
+            } else {
+                0.
+            };
+            let update = self.solv.propose(&moves)?;
+            let (dm, sums, n_entries, partners) = self.memory_delta(b0, new_b0);
+            let de_total = update.delta + d_well + self.like.weight * dl + delta.dc_chem;
+            let log_acc = -de_total + fk_log_survival_diff + dm;
+            ensure!(!log_acc.is_nan(), "NaN GCA acceptance");
+            if log_acc >= 0. || rng.random::<f64>() < log_acc.exp() {
+                self.solv.commit(update);
+                self.pair_count += delta.dp_well;
+                self.like_sum += dl;
+                self.chem_sum += delta.dc_chem;
+                self.commit_single_body_delta(b0, delta, &old_likes, &new_likes);
+                self.body_grid.relocate(b0, &old_b0.position, &new_b0.position);
+                self.poses[b0] = new_b0;
+                self.placed[b0] = Placed::new(new_b0);
+                self.commit_memory(b0, old_b0.position, sums, n_entries, &partners);
+                self.stats.accepted += 1;
+                self.stats.gca_accepted += 1;
+                self.stats.gca_moved_bodies += 1;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+
         let mut dp: i64 = 0;
         let mut dl: f64 = 0.;
         let mut dc: f64 = 0.;
         let mut fk_log_survival_diff = 0.;
 
         let has_coop = self.chem.has_cooperativity();
-        let mut new_patch = if has_coop {
-            self.patch.clone()
-        } else {
-            Vec::new()
-        };
+        let mut patch_updates: Vec<(usize, usize, PatchContact, PatchContact)> = Vec::new();
         let mut cache_updates: Vec<(usize, usize, PairCache)> = Vec::new();
+        let mut cut_seen = vec![false; n];
+        let mut coop_vertex_seen = vec![false; n];
+        let mut coop_vertices: Vec<usize> = Vec::new();
+        if has_coop {
+            for &(b, _) in &moves {
+                coop_vertex_seen[b] = true;
+                coop_vertices.push(b);
+            }
+        }
 
         for &(b, p_new) in &moves {
             let p_old = self.poses[b];
-            for &d in &spectators {
-                let q_old = self.poses[d];
-                if norm(sub(p_old.position, q_old.position)) > max_reach
-                    && norm(sub(p_new.position, q_old.position)) > max_reach
-                {
-                    if has_coop {
-                        new_patch[b][d] = PatchContact::default();
-                        new_patch[d][b] = PatchContact::default();
+            let mut active_spectators = Vec::new();
+            for d in self.body_grid.near_within(&p_old.position, max_reach) {
+                if !in_cluster[d] && !cut_seen[d] {
+                    let pc = self.pair_cache[b][d];
+                    if pc.well != 0
+                        || pc.chem != 0.0
+                        || pc.like != 0.0
+                        || (has_coop && (self.patch[b][d].s > 0.0 || self.patch[d][b].s > 0.0))
+                    {
+                        cut_seen[d] = true;
+                        active_spectators.push(d);
                     }
-                    cache_updates.push((b, d, PairCache::default()));
-                    continue;
                 }
+            }
+            for d in self.body_grid.near_within(&p_new.position, max_reach) {
+                if !in_cluster[d] && !cut_seen[d] {
+                    cut_seen[d] = true;
+                    active_spectators.push(d);
+                }
+            }
+            for &d in &active_spectators {
+                cut_seen[d] = false;
+                let q_old = self.poses[d];
                 let pc_old = self.pair_cache[b][d];
                 let wp_old = pc_old.well as i64;
                 let ch_old = pc_old.chem;
                 let lk_old = pc_old.like;
-                let (wp_new_u, ch_new, pb, pd) = self.well_chem_and_patch_between(p_new, q_old);
+                let (wp_new_u, ch_new, pb, pd, lk_new) = if let Some(idx) =
+                    cross_cache.iter().position(|x| x.0 == b && x.1 == d)
+                {
+                    let (_, _, w, c, pb, pd, lk) = cross_cache.swap_remove(idx);
+                    (w, c, pb, pd, lk)
+                } else if norm(sub(p_new.position, q_old.position)) > max_reach {
+                    (0, 0.0, PatchContact::default(), PatchContact::default(), 0.0)
+                } else {
+                    let (w, c, pb, pd) = self.well_chem_and_patch_between(p_new, q_old);
+                    let lk = self.like_pair_between(p_new, q_old);
+                    (w, c, pb, pd, lk)
+                };
                 if has_coop {
-                    new_patch[b][d] = pb;
-                    new_patch[d][b] = pd;
+                    let had_patch = self.patch[b][d].s > 0.0 || self.patch[d][b].s > 0.0;
+                    let has_patch = pb.s > 0.0 || pd.s > 0.0;
+                    if had_patch || has_patch {
+                        if !coop_vertex_seen[d] {
+                            coop_vertex_seen[d] = true;
+                            coop_vertices.push(d);
+                        }
+                        patch_updates.push((b, d, pb, pd));
+                    }
                 }
                 let wp_new = wp_new_u as i64;
-                let lk_new = self.like_pair_between(p_new, q_old);
                 cache_updates.push((
                     b,
                     d,
@@ -4702,11 +5028,6 @@ impl MorphMc {
             for &(b2, p2_new) in &moves[idx1 + 1..] {
                 let p2_old = self.poses[b2];
                 if norm(sub(p1_old.position, p2_old.position)) > max_reach {
-                    if has_coop {
-                        new_patch[b1][b2] = PatchContact::default();
-                        new_patch[b2][b1] = PatchContact::default();
-                    }
-                    cache_updates.push((b1, b2, PairCache::default()));
                     continue;
                 }
                 let (wp12_new, ch12_new, p_b1, p_b2) =
@@ -4726,8 +5047,11 @@ impl MorphMc {
                     },
                 ));
                 if has_coop {
-                    new_patch[b1][b2] = p_b1;
-                    new_patch[b2][b1] = p_b2;
+                    let had_patch = self.patch[b1][b2].s > 0.0 || self.patch[b2][b1].s > 0.0;
+                    let has_patch = p_b1.s > 0.0 || p_b2.s > 0.0;
+                    if had_patch || has_patch {
+                        patch_updates.push((b1, b2, p_b1, p_b2));
+                    }
                 }
                 dp += wp12_new as i64 - wp12_old as i64;
                 dl += lk12_new - lk12_old;
@@ -4735,12 +5059,36 @@ impl MorphMc {
             }
         }
         if has_coop {
-            let mut trial_poses = self.poses.clone();
-            for &(b, p_new) in &moves {
-                trial_poses[b] = p_new;
+            if self.chem.coop_weights[1] != 0.0 && !patch_updates.is_empty() {
+                for &(u, v, _, _) in &patch_updates {
+                    for w in self.body_grid.near_within(&self.poses[u].position, max_reach) {
+                        if !coop_vertex_seen[w]
+                            && self.patch[w][u].s > 0.0
+                            && self.patch[w][v].s > 0.0
+                        {
+                            coop_vertex_seen[w] = true;
+                            coop_vertices.push(w);
+                        }
+                    }
+                }
             }
-            dc += self.coop_total_from_matrix(&new_patch, &trial_poses)
-                - self.coop_total_from_matrix(&self.patch, &self.poses);
+            let coop_old = self.coop_vertices_from_matrix(&self.patch, &coop_vertices);
+            let mut old_patches: Vec<(usize, usize, PatchContact, PatchContact)> =
+                Vec::with_capacity(patch_updates.len());
+            for (u, v, pu, pv) in &patch_updates {
+                old_patches.push((
+                    *u,
+                    *v,
+                    std::mem::replace(&mut self.patch[*u][*v], pu.clone()),
+                    std::mem::replace(&mut self.patch[*v][*u], pv.clone()),
+                ));
+            }
+            let coop_new = self.coop_vertices_from_matrix(&self.patch, &coop_vertices);
+            for (u, v, pu_old, pv_old) in old_patches {
+                self.patch[u][v] = pu_old;
+                self.patch[v][u] = pv_old;
+            }
+            dc += coop_new - coop_old;
         }
 
         let d_well = -self.well.epsilon * dp as f64;
@@ -4760,7 +5108,10 @@ impl MorphMc {
                 self.pair_cache[v][u] = pc;
             }
             if has_coop {
-                self.patch = new_patch;
+                for (u, v, pu, pv) in patch_updates {
+                    self.patch[u][v] = pu;
+                    self.patch[v][u] = pv;
+                }
             }
             for (b, p_new) in moves {
                 let old_pos = self.poses[b].position;
@@ -6124,6 +6475,153 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn benchmark_step_cluster_n80_monomers() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let shape_path = root.join("examples/monomer-shape.json");
+        let chem_path = root.join("examples/chemistry-model-monomer.json");
+        if !shape_path.exists() || !chem_path.exists() {
+            return;
+        }
+        let shape: Shape =
+            serde_json::from_str(&std::fs::read_to_string(&shape_path).unwrap()).unwrap();
+        let chem: ChemistryModel =
+            serde_json::from_str(&std::fs::read_to_string(&chem_path).unwrap()).unwrap();
+        let n_atoms = shape.atoms.len();
+        let tree = SphereTree::new(shape).unwrap();
+        let wall = Container::new(150.0, &tree).unwrap();
+        let model = SolvationModel {
+            probe: 1.4,
+            pressure: 0.0,
+            coefficients: vec![[0.0; 3]; n_atoms],
+            atom_types: (0..n_atoms).collect(),
+            gauss_convention: GaussConvention::PatchGaussBonnet,
+        };
+        let well = SquareWell {
+            epsilon: 0.0,
+            width: 0.6,
+        };
+        let mut rng = StdRng::seed_from_u64(2026);
+        let identity = Pose {
+            position: [0.0; 3],
+            orientation: [1.0, 0.0, 0.0, 0.0],
+        };
+        let m1 = Pose {
+            position: [19.47624995357571, 18.42510338365495, -9.475000000000003],
+            orientation: [0.7071067811865477, 0.0, 0.0, 0.7071067811865475],
+        };
+        let mut poses = vec![identity];
+        let mut placed = vec![Placed::new(identity)];
+        // Add a few pre-formed oligomers (dimers/trimers along m1) plus dispersed monomers up to N=80
+        for k in 0..8 {
+            let base_pos = [
+                -80.0 + (k % 4) as f64 * 50.0,
+                -50.0 + (k / 4) as f64 * 60.0,
+                45.0,
+            ];
+            let p0 = Pose {
+                position: base_pos,
+                orientation: [1.0, 0.0, 0.0, 0.0],
+            };
+            let p1 = Pose {
+                position: add(base_pos, m1.position),
+                orientation: m1.orientation,
+            };
+            if wall.contains(p0)
+                && wall.contains(p1)
+                && placed.iter().all(|pl| !tree.overlaps(pl, &Placed::new(p0)))
+            {
+                poses.push(p0);
+                placed.push(Placed::new(p0));
+                if placed.iter().all(|pl| !tree.overlaps(pl, &Placed::new(p1))) {
+                    poses.push(p1);
+                    placed.push(Placed::new(p1));
+                }
+            }
+        }
+        while poses.len() < 80 {
+            let r = wall.radius;
+            let pos = loop {
+                let x: Vec3 = std::array::from_fn(|_| (2. * rng.random::<f64>() - 1.) * r);
+                if norm(x) <= r {
+                    break x;
+                }
+            };
+            let q: [f64; 4] = std::array::from_fn(|_| StandardNormal.sample(&mut rng));
+            let qn = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+            let p = Pose {
+                position: pos,
+                orientation: q.map(|x| x / qn),
+            };
+            let pl = Placed::new(p);
+            if wall.contains(p) && placed.iter().all(|other| !tree.overlaps(other, &pl)) {
+                poses.push(p);
+                placed.push(pl);
+            }
+        }
+        let mut fixed = vec![false; 80];
+        fixed[0] = true;
+        let mem_s = MemorySettings {
+            lambda: 0.25,
+            lambda_prior: 1.5,
+            lambda_floor: 1e-4,
+            death: 0.05,
+            sigma_translation: 0.5,
+            sigma_rotation: 5f64.to_radians(),
+            floor_sigma: 20.0,
+        };
+        let mut mc = MorphMc::new(tree, wall, model, well, poses, fixed)
+            .unwrap()
+            .with_chemistry_model(chem)
+            .unwrap()
+            .with_contact_library(2.8)
+            .unwrap();
+        let prior = vec![(m1, 1.0)];
+        mc = mc.with_memory(mem_s, prior, &mut rng).unwrap();
+        let dock = DockSettings {
+            learned: None,
+            library: true,
+            memory_only: true,
+            library_beta: 0.15,
+            components: vec![m1],
+            sigma_translation: 0.5,
+            sigma_rotation: 5f64.to_radians(),
+            uniform_weight: 0.1,
+        };
+        let cs = ClusterSettings {
+            max_size: 16,
+            fk_beta: 0.35,
+            dock_probability: 0.3,
+            reinsertion_probability: 0.05,
+            translation: 1.0,
+            rotation: 10f64.to_radians(),
+            size_scaling: true,
+        };
+        let n_steps = 500usize;
+        let t0 = std::time::Instant::now();
+        for _ in 0..n_steps {
+            mc.step_cluster(&mut rng, &cs, Some(&dock)).unwrap();
+        }
+        let dt_cluster_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        let t1 = std::time::Instant::now();
+        for _ in 0..500 {
+            mc.step_gca(&mut rng, 0.35).unwrap();
+        }
+        let dt_gca_ms = t1.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "N=80 benchmark: {n_steps} step_cluster = {dt_cluster_ms:.1} ms ({:.2} ms/step, multibody={}), 500 step_gca = {dt_gca_ms:.1} ms ({:.2} ms/step, gca_acc={}, gca_moved={})",
+            dt_cluster_ms / n_steps as f64,
+            mc.stats.cluster_multibody_attempts,
+            dt_gca_ms / 500.0,
+            mc.stats.gca_accepted,
+            mc.stats.gca_moved_bodies,
+        );
+        let rc = mc.recompute_chem();
+        let cc = mc.chem_energy();
+        assert!((rc - cc).abs() < 1e-8, "chem drift after N=80 bench: {rc} vs {cc}");
+        assert!(mc.memory_sum_error() < 1e-8);
     }
 
     #[test]

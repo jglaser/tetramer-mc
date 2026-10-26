@@ -95,3 +95,26 @@ import ReversibleSampling
 #print axioms ReversibleSampling.FkClusterMove.boltzmann_mul_fkCutSurvival
 #print axioms ReversibleSampling.FkClusterMove.fk_boundary_flow_balance
 #print axioms ReversibleSampling.FkClusterMove.fk_surrogate_residual_correct
+#print axioms ReversibleSampling.FkClusterMove.boltzmann_mul_fkBetaCutSurvival
+#print axioms ReversibleSampling.FkClusterMove.fk_beta_boundary_flow_balance
+#print axioms ReversibleSampling.FkClusterMove.gcaCutSurvival_ratio
+#print axioms ReversibleSampling.FkClusterMove.gca_cross_flow_balance
+
+/-! Context-frozen Metropolis-Hastings and random-scan composition. -/
+#print axioms ReversibleSampling.frozenAcceptance_measurable
+#print axioms ReversibleSampling.lintegral_frozenProposal
+#print axioms ReversibleSampling.frozen_flow
+#print axioms ReversibleSampling.frozen_mh_accepted_flow_symmetric
+#print axioms ReversibleSampling.frozen_metropolis_hastings_correct
+#print axioms ReversibleSampling.reversible_transport
+#print axioms ReversibleSampling.reversible_const_weight
+#print axioms ReversibleSampling.reversible_finset_sum
+#print axioms ReversibleSampling.random_scan_correct
+#print axioms ReversibleSampling.frozenAcceptance_gibbs
+
+/-! Poisson-memory count detailed balance, prior-rate cancellation, and joint flow balance. -/
+#print axioms ReversibleSampling.PoissonMemory.memoryRate_exp_ratio
+#print axioms ReversibleSampling.PoissonMemory.memory_joint_flow_balance
+#print axioms ReversibleSampling.PoissonMemory.flow_term_closed_form
+#print axioms ReversibleSampling.PoissonMemory.flow_term_symmetric
+#print axioms ReversibleSampling.PoissonMemory.count_detailed_balance

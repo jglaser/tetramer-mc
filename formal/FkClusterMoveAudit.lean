@@ -6,3 +6,7 @@ import ReversibleSampling.FkClusterMove
 #print axioms ReversibleSampling.FkClusterMove.boltzmann_mul_fkCutSurvival
 #print axioms ReversibleSampling.FkClusterMove.fk_boundary_flow_balance
 #print axioms ReversibleSampling.FkClusterMove.fk_surrogate_residual_correct
+#print axioms ReversibleSampling.FkClusterMove.boltzmann_mul_fkBetaCutSurvival
+#print axioms ReversibleSampling.FkClusterMove.fk_beta_boundary_flow_balance
+#print axioms ReversibleSampling.FkClusterMove.gcaCutSurvival_ratio
+#print axioms ReversibleSampling.FkClusterMove.gca_cross_flow_balance

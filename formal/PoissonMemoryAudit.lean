@@ -1,5 +1,7 @@
 import ReversibleSampling.PoissonMemory
 
+#print axioms ReversibleSampling.PoissonMemory.memoryRate_exp_ratio
+#print axioms ReversibleSampling.PoissonMemory.memory_joint_flow_balance
 #print axioms ReversibleSampling.PoissonMemory.flow_term_closed_form
 #print axioms ReversibleSampling.PoissonMemory.flow_term_symmetric
 #print axioms ReversibleSampling.PoissonMemory.count_detailed_balance

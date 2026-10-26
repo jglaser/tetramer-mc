@@ -514,10 +514,12 @@ The sampler's memory (`MemorySettings`, `MorphMc::with_memory`) is a Poisson poi
 `M` of relative poses with configuration-dependent intensity
 
 \[
- \mu_x(m)=\lambda_0F(m)+\lambda\sum_e K(m;g_e),\qquad \Lambda(x)=\lambda_0+\lambda N(x),
+ \mu_x(m)=\lambda_0F(m)+\lambda_{\mathrm{prior}}P(m)+\lambda\sum_e K(m;g_e),\qquad
+ \Lambda(x)=\lambda_0+\lambda_{\mathrm{prior}}+\lambda N(x),
 \]
 
-a normalized floor `F` plus normalized kernels about the `N` current contact entries `g_e`. The
+a normalized floor `F` plus an optional fixed monomer surface-normal-opposed prior `P` plus
+normalized kernels about the `N` current contact entries `g_e`. The
 joint target is `π(x) e^{-Λ(x)} ∏_{m∈M} μ_x(m)`; for every `x` the memory factor is the
 Poisson-process law, so the `x`-marginal is `π` (`conditional_auxiliary_marginal`).
 (A first version used a fixed number of slots with the normalized conditional
@@ -527,8 +529,12 @@ seedless runs never formed a contact. The Poisson version couples a move only to
 sit on changed contacts, plus `e^{-λ ΔN}`.)
 
 - Physical moves of body `b` (local or docking) have context `z` = (other bodies, memory) and
-  are frozen-context moves; the joint density contributes `e^{-λ(N'-N)} ∏_m μ_{x'}(m)/μ_x(m)`,
-  and docking may propose from memory slots because they belong to the frozen context.
+  are frozen-context moves; the joint density contributes `e^{-λ(N'-N)} ∏_m μ_{x'}(m)/μ_x(m)`
+  (where both $\lambda_0$ and $\lambda_{\mathrm{prior}}$ cancel out of $e^{-\Lambda(x')}/e^{-\Lambda(x)}$,
+  proved in `PoissonMemory.memoryRate_exp_ratio` and `PoissonMemory.memory_joint_flow_balance`),
+  and docking may propose from memory slots (including `--memory-only` and Boltzmann-weighted
+  `--dock-library-beta`) because the slots and their cached monomer pair energies belong to
+  the frozen context `z`.
 - The refresh at fixed `x` is Poisson thinning (each slot dies with probability `δ`) and
   superposition (`Poisson(δΛ)` births from `μ_x/Λ`). `PoissonMemory.lean` proves the count part
   of its reversibility: `count_detailed_balance` (the chain `n → n'` with `k` kept slots,
@@ -547,33 +553,40 @@ Focused checks: `lake env lean PoissonMemoryAudit.lean` (`poisson-memory-audit.t
 
 Focused check: `lake build ReversibleSampling.FrozenContext`, then
 `lake env lean FrozenContextAudit.lean` (output in `frozen-context-audit.txt`: only `propext`,
-`Classical.choice` and `Quot.sound`).
+`Classical.choice` and `Quot.sound`). Both `FrozenContext` and `PoissonMemory` are also
+included in the root 103-theorem `Audit.lean` / `check.py` receipt.
 
 ### Fortuin--Kasteleyn rigid-cluster moves and surrogate-residual GCA
 
 `ReversibleSampling/FkClusterMove.lean` proves the algebraic and measure-theoretic
 foundations for collective cluster updates (`MorphMc::step_cluster` and `MorphMc::step_gca`
 in `src/morph_mc.rs`) under the pairwise square-well + like-charge + SE(3) chemistry
-surrogate plus many-body morphometric solvation residual:
+surrogate plus many-body morphometric solvation and 3-body vertex surface-field residual:
 
-- `attractive_add_repulsive` and `boltzmann_mul_fkCutSurvival` prove that for any boundary
-  cut $B$, the product of the pairwise Boltzmann weight $\exp(-E_{\mathrm{cut}})$ and the
-  Fortuin--Kasteleyn cut survival probability $\prod_{e \in B} \exp(\min(0, E_e))$ collapses
-  to $\exp(-E_{\mathrm{cut}}^+)$, cancelling all attractive bond-breaking terms across the cut.
-- `fk_boundary_flow_balance` proves exact detailed-balance flow symmetry
-  $\pi(x) P_{\mathrm{cut}}(x) q(x,y) \alpha(x,y) = \pi(y) P_{\mathrm{cut}}(y) q(y,x) \alpha(y,x)$
+- `attractive_add_repulsive`, `boltzmann_mul_fkCutSurvival`, and
+  `boltzmann_mul_fkBetaCutSurvival` prove that for any boundary cut $B$ and FK inverse
+  temperature $\beta_{\mathrm{fk}}$, the product of the pairwise Boltzmann weight
+  $\exp(-E_{\mathrm{cut}})$ and the Fortuin--Kasteleyn cut survival probability
+  $\prod_{e \in B} \exp(\beta_{\mathrm{fk}} \min(0, E_e))$ equals
+  $\exp(-(E_{\mathrm{cut}} - \beta_{\mathrm{fk}}\min(0, E_{\mathrm{cut}})))$ (and collapses
+  to $\exp(-E_{\mathrm{cut}}^+)$ at $\beta_{\mathrm{fk}}=1$, cancelling all attractive
+  bond-breaking terms across the cut).
+- `fk_boundary_flow_balance` and `fk_beta_boundary_flow_balance` prove exact detailed-balance
+  flow symmetry $\pi(x) P_{\mathrm{cut}}(x) q(x,y) \alpha(x,y) = \pi(y) P_{\mathrm{cut}}(y) q(y,x) \alpha(y,x)$
   for any rigid-cluster proposal $q(x,y)$ (both asymmetric spectator-anchored cluster docking
-  and symmetric local COM / reinsertion / half-turn involution moves) when accepted with the
-  residual ratio $\min(1, \frac{q(y,x)}{q(x,y)} \exp(-(E_{\mathrm{cut}}^+(y) - E_{\mathrm{cut}}^+(x) + E_{\mathrm{res}}(y) - E_{\mathrm{res}}(x))))$.
+  and symmetric local COM / reinsertion / half-turn involution moves).
+- `gcaCutSurvival_ratio` and `gca_cross_flow_balance` prove the cross-energy GCA survival
+  ratio identity $P_{\mathrm{gca}}(y,x)/P_{\mathrm{gca}}(x,y) = \exp(\beta_{\mathrm{fk}}(E_{\mathrm{cross}} - E_{\mathrm{old}}))$
+  and exact pointwise detailed balance for `MorphMc::step_gca` with arbitrary multi-body
+  residual $E_{\mathrm{res}}$ (3-body vertex surface-field junction + morphometric solvation +
+  Poisson memory).
 - `fk_surrogate_residual_correct` lifts any proposal kernel $K_{\mathrm{fk}}$ that is
   reversible for a pairwise FK surrogate measure $\mu_{\mathrm{fk}}$ (such as `HalfTurn` GCA
   or FK cluster transport) to a rejection-completed Markov kernel that is reversible and
-  invariant for the full target $\mu_{\mathrm{fk}}.\mathrm{withDensity}(\exp(-E_{\mathrm{res}}))$,
-  where $E_{\mathrm{res}}$ contains the non-pairwise morphometric solvation free energy and
-  any active Poisson memory correction.
+  invariant for the full target $\mu_{\mathrm{fk}}.\mathrm{withDensity}(\exp(-E_{\mathrm{res}}))$.
 
 Focused check: `lake build ReversibleSampling.FkClusterMove`, then
-`lake env lean FkClusterMoveAudit.lean` (and included in the 84-theorem `Audit.lean` / `check.py` receipt).
+`lake env lean FkClusterMoveAudit.lean` (and included in the 103-theorem `Audit.lean` / `check.py` receipt).
 
 ## Concrete implementation obligations
 

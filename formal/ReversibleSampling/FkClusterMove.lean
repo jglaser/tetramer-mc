@@ -141,4 +141,117 @@ theorem fk_surrogate_residual_correct {X : Type*} [MeasurableSpace X]
     rfl
   simpa only [hmul] using hcorr
 
+/-- General inverse-temperature (`fk_beta`) Fortuin-Kasteleyn cut non-bonding probability
+`P_cut(β_fk, e) = exp(β_fk * min(0, e))` used in `MorphMc::step_cluster` (`cs.fk_beta ≥ 0`). -/
+noncomputable def fkBetaCutSurvival (β_fk e : ℝ) : ℝ :=
+  Real.exp (β_fk * attractivePart e)
+
+/-- Effective weight appearing in the `fk_beta`-scaled cluster Metropolis ratio:
+`exp(-(e_surr - β_fk * min(0, e_surr) + e_res))`. When `β_fk = 1`, this reduces to
+`fkEffectiveWeight`; when `β_fk = 0`, it reduces to `boltzmannWeight`. -/
+noncomputable def fkBetaEffectiveWeight (β_fk e_surr e_res : ℝ) : ℝ :=
+  Real.exp (-(e_surr - β_fk * attractivePart e_surr + e_res))
+
+/-- Fundamental `fk_beta` identity: `boltzmannWeight * fkBetaCutSurvival = fkBetaEffectiveWeight`
+for any `β_fk ∈ ℝ`. -/
+theorem boltzmann_mul_fkBetaCutSurvival (β_fk e_surr e_res : ℝ) :
+    boltzmannWeight e_surr e_res * fkBetaCutSurvival β_fk e_surr =
+      fkBetaEffectiveWeight β_fk e_surr e_res := by
+  unfold boltzmannWeight fkBetaCutSurvival fkBetaEffectiveWeight
+  rw [← Real.exp_add]
+  congr 1
+  ring
+
+/-- Exact pointwise detailed balance for `fk_beta`-recruited rigid cluster moves
+(`MorphMc::step_cluster` with general `cs.fk_beta` and `fk_log_survival_diff =
+β_fk * (min(0, e_new) - min(0, e_old))`). -/
+theorem fk_beta_boundary_flow_balance
+    (β_fk es_x er_x es_y er_y q_fwd q_rev : ℝ)
+    (hq_fwd : 0 < q_fwd) (hq_rev : 0 < q_rev) :
+    let w_x := fkBetaEffectiveWeight β_fk es_x er_x
+    let w_y := fkBetaEffectiveWeight β_fk es_y er_y
+    boltzmannWeight es_x er_x * fkBetaCutSurvival β_fk es_x * q_fwd *
+        min 1 ((w_y * q_rev) / (w_x * q_fwd)) =
+      boltzmannWeight es_y er_y * fkBetaCutSurvival β_fk es_y * q_rev *
+        min 1 ((w_x * q_fwd) / (w_y * q_rev)) := by
+  intro w_x w_y
+  have hwx : 0 < w_x := Real.exp_pos _
+  have hwy : 0 < w_y := Real.exp_pos _
+  have hfx : 0 < w_x * q_fwd := mul_pos hwx hq_fwd
+  have hfy : 0 < w_y * q_rev := mul_pos hwy hq_rev
+  have h1 : boltzmannWeight es_x er_x * fkBetaCutSurvival β_fk es_x * q_fwd = w_x * q_fwd := by
+    rw [boltzmann_mul_fkBetaCutSurvival]
+  have h2 : boltzmannWeight es_y er_y * fkBetaCutSurvival β_fk es_y * q_rev = w_y * q_rev := by
+    rw [boltzmann_mul_fkBetaCutSurvival]
+  rw [h1, h2]
+  rw [mul_min_of_nonneg _ _ (le_of_lt hfx), mul_min_of_nonneg _ _ (le_of_lt hfy)]
+  rw [mul_one, mul_one, mul_div_cancel₀ _ (ne_of_gt hfx),
+    mul_div_cancel₀ _ (ne_of_gt hfy), min_comm]
+
+/-- Forward GCA cross-energy non-bonding probability `P_gca(β_fk, e_old, e_cross) =
+exp(-β_fk * max(0, e_cross - e_old))` used in `MorphMc::step_gca` when pair `(u, v)`
+has `u ∈ C`, `v ∉ C`, and `de = e_cross - e_old`. -/
+noncomputable def gcaCutSurvival (β_fk e_old e_cross : ℝ) : ℝ :=
+  Real.exp (-β_fk * repulsivePart (e_cross - e_old))
+
+/-- Ratio identity for `MorphMc::step_gca`: because `max(0, -de) - max(0, de) = -de`,
+the ratio of reverse-to-forward GCA cut survival probabilities is
+`P_gca(β_fk, e_cross, e_old) / P_gca(β_fk, e_old, e_cross) = exp(β_fk * (e_cross - e_old))`,
+which is exactly `exp(fk_log_survival_diff)` in `step_gca`. When `β_fk = 1`, this cancels
+the pairwise surrogate cut energy change `-(e_cross - e_old)` identically. -/
+theorem gcaCutSurvival_ratio (β_fk e_old e_cross : ℝ) :
+    gcaCutSurvival β_fk e_cross e_old / gcaCutSurvival β_fk e_old e_cross =
+      Real.exp (β_fk * (e_cross - e_old)) := by
+  unfold gcaCutSurvival repulsivePart
+  rw [← Real.exp_sub]
+  congr 1
+  rcases le_total e_old e_cross with h | h
+  · rw [max_eq_left (sub_nonpos.mpr h), max_eq_right (sub_nonneg.mpr h)]; ring
+  · rw [max_eq_right (sub_nonneg.mpr h), max_eq_left (sub_nonpos.mpr h)]; ring
+
+/-- Exact pointwise detailed balance for `MorphMc::step_gca` with general `fk_beta` and
+many-body residual `er_x`, `er_y` (3-body surface-field junction + morphometric solvation +
+Poisson memory). -/
+theorem gca_cross_flow_balance
+    (β_fk e_old er_x e_cross er_y : ℝ) :
+    let w_x := Real.exp (-((1 - β_fk) * e_old + er_x))
+    let w_y := Real.exp (-((1 - β_fk) * e_cross + er_y))
+    boltzmannWeight e_old er_x * gcaCutSurvival β_fk e_old e_cross *
+        min 1 (w_y / w_x) =
+      boltzmannWeight e_cross er_y * gcaCutSurvival β_fk e_cross e_old *
+        min 1 (w_x / w_y) := by
+  intro w_x w_y
+  have hwx : 0 < w_x := Real.exp_pos _
+  have hwy : 0 < w_y := Real.exp_pos _
+  have hcommon :
+      boltzmannWeight e_old er_x * gcaCutSurvival β_fk e_old e_cross =
+        w_x * Real.exp (-β_fk * max e_old e_cross) := by
+    unfold boltzmannWeight gcaCutSurvival repulsivePart
+    dsimp [w_x]
+    rw [← Real.exp_add, ← Real.exp_add]
+    congr 1
+    rcases le_total e_old e_cross with h | h
+    · rw [max_eq_right (sub_nonneg.mpr h), max_eq_right h]; ring
+    · rw [max_eq_left (sub_nonpos.mpr h), max_eq_left h]; ring
+  have hcommon_rev :
+      boltzmannWeight e_cross er_y * gcaCutSurvival β_fk e_cross e_old =
+        w_y * Real.exp (-β_fk * max e_old e_cross) := by
+    unfold boltzmannWeight gcaCutSurvival repulsivePart
+    dsimp [w_y]
+    rw [← Real.exp_add, ← Real.exp_add]
+    congr 1
+    rcases le_total e_old e_cross with h | h
+    · rw [max_eq_left (sub_nonpos.mpr h), max_eq_right h]; ring
+    · rw [max_eq_right (sub_nonneg.mpr h), max_eq_left h]; ring
+  rw [hcommon, hcommon_rev]
+  have h1 : w_x * Real.exp (-β_fk * max e_old e_cross) * min 1 (w_y / w_x) =
+      Real.exp (-β_fk * max e_old e_cross) * (w_x * min 1 (w_y / w_x)) := by ring
+  have h2 : w_y * Real.exp (-β_fk * max e_old e_cross) * min 1 (w_x / w_y) =
+      Real.exp (-β_fk * max e_old e_cross) * (w_y * min 1 (w_x / w_y)) := by ring
+  rw [h1, h2]
+  congr 1
+  rw [mul_min_of_nonneg _ _ (le_of_lt hwx), mul_min_of_nonneg _ _ (le_of_lt hwy)]
+  rw [mul_one, mul_one, mul_div_cancel₀ _ (ne_of_gt hwx),
+    mul_div_cancel₀ _ (ne_of_gt hwy), min_comm]
+
 end ReversibleSampling.FkClusterMove

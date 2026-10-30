@@ -810,8 +810,9 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
     CHEM_CAT, CHEM_ANI, CHEM_NDON, CHEM_NACC = 1, 2, 4, 8
     CHEM_TYR_OH, CHEM_AMIDE_ND, CHEM_PURE_ACC, CHEM_PURE_DON = 16, 32, 64, 128
     kd_default = [0.25, 0.08, 0.15, 0.05, 0.40]
-    w_link = [1.0, 2.25, 1.0, 1.0, 1.0]
-    sigma_hof = [0.14, -0.22, 0.45, 0.05]
+    w_link = [0.22, 0.16, 0.20, 0.14, 0.16]
+    sigma_hof = [0.14, -0.10, 0.45, 0.05]
+    wb_cap = 18.0
 
     polar_idx = np.where(flags_arr > 0)[0]
     P = len(polar_idx)
@@ -855,63 +856,106 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             or ((fi & CHEM_TYR_OH) and (fj & CHEM_NACC)) or ((fi & CHEM_NACC) and (fj & CHEM_TYR_OH))
         )
 
+    # Build 3D multi-scale chemical environment Laplacian L_chem (matching ch60 monomer training)
+    sh_lyz = json.load(open(SHAPE_PATH))
+    X_lyz = np.array([a['center'] for a in sh_lyz['atoms']], dtype=float)
+    R_lyz = np.array([a['radius'] for a in sh_lyz['atoms']], dtype=float)
+    tree_lyz = cKDTree(X_lyz)
+    D_mat_lyz = np.linalg.norm(X_lyz[:, None, :] - X_lyz[None, :, :], axis=-1)
+    r3_lyz = np.maximum(R_lyz, 1.0) ** 3
+    rho_self_lyz = np.sum(r3_lyz[None, :] * np.exp(-((D_mat_lyz / 3.5) ** 2)), axis=1)
+    s_exp_lyz = np.exp(-rho_self_lyz / 45.0)
+    atom_types_lyz = np.zeros((N, 10), dtype=float)
+    for i in range(N):
+        f = int(flags_arr[i])
+        for b in range(8):
+            atom_types_lyz[i, b] = 1.0 if (f & (1 << b)) else 0.0
+        atom_types_lyz[i, 8] = 1.0 if (f & (CHEM_PURE_ACC | CHEM_PURE_DON)) else 0.0
+        atom_types_lyz[i, 9] = (R_lyz[i] - 1.7) / 0.3
+    env_feats_lyz = []
+    for sig in [2.2, 3.6, 5.2, 7.5]:
+        K_env = np.exp(-((D_mat_lyz / sig) ** 2))
+        env_feats_lyz.append(K_env @ atom_types_lyz)
+        env_feats_lyz.append(K_env @ (atom_types_lyz * s_exp_lyz[:, None]))
+    F_raw_lyz = np.concatenate([atom_types_lyz, s_exp_lyz[:, None]] + env_feats_lyz, axis=1)
+    F_pol_lyz = F_raw_lyz[polar_idx]
+    F_pol_lyz = (F_pol_lyz - F_pol_lyz.mean(axis=0)) / (F_pol_lyz.std(axis=0) + 1e-6)
+    Df_sq_lyz = np.sum((F_pol_lyz[:, None, :] - F_pol_lyz[None, :, :]) ** 2, axis=-1)
+    K_chem = np.exp(-Df_sq_lyz / (2.0 * F_pol_lyz.shape[1]))
+    np.fill_diagonal(K_chem, 0.0)
+    K_chem /= np.sum(K_chem, axis=1, keepdims=True) + 1e-8
+    L_chem = np.eye(P) - 0.5 * (K_chem + K_chem.T)
+
     def eval_poly_pose(X, R_vdw, tree_x, t, R):
         YB = (X @ R.T) + t
-        pairs = tree_x.query_ball_tree(cKDTree(YB), 6.4)
+        pairs = tree_x.query_ball_tree(cKDTree(YB), 6.8)
         ii, jj, u_arr, psi_arr = [], [], [], []
         max_u_a = np.zeros(N)
         max_u_b = np.zeros(N)
         max_comp_a = np.zeros(N)
         max_comp_b = np.zeros(N)
         hb_cands, chb_cands, clash_cands = [], [], []
-        s_hof = np.zeros(5, dtype=float)
+        s_wb_raw = 0.0
+        hof_cands = [[] for _ in range(5)]
         for i, js in enumerate(pairs):
             fi = int(flags_arr[i])
-            if fi == 0:
-                continue
             ri = R_vdw[i]
             for j in js:
                 fj = int(flags_arr[j])
-                if fj == 0:
-                    continue
-                g = float(np.linalg.norm(X[i] - YB[j])) - (ri + R_vdw[j])
+                d = float(np.linalg.norm(X[i] - YB[j]))
+                g = d - (ri + R_vdw[j])
                 if g >= 2.8:
                     continue
                 u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
+                if u <= 0.0:
+                    continue
+                max_u_a[i] = max(max_u_a[i], u)
+                max_u_b[j] = max(max_u_b[j], u)
+                if fi == 0 or fj == 0:
+                    continue
                 psi = hat_b12(u)
                 ii.append(full_to_p[i])
                 jj.append(full_to_p[j])
                 u_arr.append(u)
                 psi_arr.append(psi)
-                max_u_a[i] = max(max_u_a[i], u)
-                max_u_b[j] = max(max_u_b[j], u)
                 if comp(fi, fj):
                     max_comp_a[i] = max(max_comp_a[i], u)
                     max_comp_b[j] = max(max_comp_b[j], u)
+                    s_wb_raw += hat_wb(u)
                 gh = hat_hb(u)
                 if gh > 0.0:
                     if ((fi & CHEM_NDON) and (fj & CHEM_NACC)) or ((fj & CHEM_NDON) and (fi & CHEM_NACC)):
                         hb_cands.append((gh, min(i, j), max(i, j), i, j))
-                    if (((fi & CHEM_CAT) and (fj & CHEM_NACC)) or ((fj & CHEM_CAT) and (fi & CHEM_NACC))
-                            or ((fi & CHEM_ANI) and (fj & CHEM_NDON)) or ((fj & CHEM_ANI) and (fi & CHEM_NDON))):
+                    if (((fi & CHEM_CAT) and (fj & (CHEM_NACC | CHEM_ANI)))
+                            or ((fj & CHEM_CAT) and (fi & (CHEM_NACC | CHEM_ANI)))
+                            or ((fi & CHEM_ANI) and (fj & CHEM_NDON))
+                            or ((fj & CHEM_ANI) and (fi & CHEM_NDON))):
                         chb_cands.append((gh, min(i, j), max(i, j), i, j))
                     if ((fi & CHEM_PURE_ACC) and (fj & CHEM_PURE_ACC)) or ((fi & CHEM_PURE_DON) and (fj & CHEM_PURE_DON)):
                         clash_cands.append((gh, i, j))
-                wb = hat_wb(u)
-                b2 = hat_b2(u)
-                ca, cb = bool(fi & CHEM_CAT), bool(fj & CHEM_CAT)
-                aa, ab = bool(fi & CHEM_ANI), bool(fj & CHEM_ANI)
-                pa, pb = bool(fi & (CHEM_NDON | CHEM_NACC)), bool(fj & (CHEM_NDON | CHEM_NACC))
-                if (ca and (ab or pb)) or (cb and (aa or pa)):
-                    s_hof[0] += wb
-                if ca and cb:
-                    s_hof[1] += b2
-                    s_hof[3] += b2
-                elif (ca and pb) or (cb and pa):
-                    s_hof[2] += wb
-                    s_hof[3] += 0.65 * wb
-                if (aa and pb) or (ab and pa) or (aa and ab):
-                    s_hof[4] += 0.5 * wb
+                # Exact match to ChemistryModel::record_hofmeister_pair in src/morph_mc.rs
+                if 3.2 <= d <= 5.0:
+                    if ((fi & CHEM_TYR_OH) and (fj & CHEM_AMIDE_ND)) or ((fj & CHEM_TYR_OH) and (fi & CHEM_AMIDE_ND)):
+                        uh = (d - 4.05) / 0.55
+                        hof_cands[0].append((i, j, float(np.exp(-uh * uh))))
+                    elif ((fi & CHEM_CAT) and (fj & CHEM_NDON) and not (fj & CHEM_CAT)) or ((fj & CHEM_CAT) and (fi & CHEM_NDON) and not (fi & CHEM_CAT)):
+                        uh = (d - 4.15) / 0.55
+                        hof_cands[0].append((i, j, float(0.5 * np.exp(-uh * uh))))
+                if 3.2 <= d <= 5.8 and (fi & CHEM_CAT) and (fj & CHEM_CAT):
+                    uh = (d - 4.50) / 0.80
+                    hof_cands[1].append((i, j, float(np.exp(-uh * uh))))
+                if 3.0 <= d <= 5.4 and (((fi & CHEM_CAT) and (fj & (CHEM_NDON | CHEM_NACC))) or ((fj & CHEM_CAT) and (fi & (CHEM_NDON | CHEM_NACC)))):
+                    uh = (d - 4.20) / 0.70
+                    hof_cands[2].append((i, j, float(np.exp(-uh * uh))))
+                if 3.4 <= d <= 6.0 and (((fi & CHEM_CAT) and (fj & (CHEM_CAT | CHEM_NDON | CHEM_NACC))) or ((fj & CHEM_CAT) and (fi & (CHEM_CAT | CHEM_NDON | CHEM_NACC)))):
+                    uh = (d - 4.70) / 0.80
+                    hof_cands[3].append((i, j, float(np.exp(-uh * uh))))
+                if 2.2 <= d <= 4.6 and (fi & (CHEM_PURE_ACC | CHEM_ANI)) and (fj & (CHEM_PURE_ACC | CHEM_ANI)):
+                    uh = (d - 3.40) / 0.65
+                    hof_cands[4].append((i, j, float(np.exp(-uh * uh))))
+        a1 = float(np.sum(max_u_a[max_u_a > 0.0]) + np.sum(max_u_b[max_u_b > 0.0]))
+        b0 = 14.0
+        g_burial = (a1 * a1) / (a1 * a1 + b0 * b0) if a1 > 0.0 else 0.0
         hb_cands.sort(key=lambda x: (-x[0], x[1], x[2]))
         ua, ub = set(), set()
         s_hb = 0.0
@@ -929,10 +973,11 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 ub.add(j)
                 s_chb += gh
         s_clash = sum(gh * (1.0 - hat_b12(max_comp_a[i])) * (1.0 - hat_b12(max_comp_b[j])) for gh, i, j in clash_cands)
-        s_wb = 0.5 * (
+        s_wb_raw = 0.5 * (
             sum(hat_wb(u) for u in max_comp_a if u > 0.0)
             + sum(hat_wb(u) for u in max_comp_b if u > 0.0)
-        ) * np.exp(-1.5 * s_clash)
+        )
+        s_wb = s_wb_raw * np.exp(-1.5 * s_clash)
         unp_pol = sum(
             max(0.0, hat_hb(max_u_a[i]) - hat_b12(max_comp_a[i]))
             for i in range(N)
@@ -954,16 +999,39 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             if (flags_arr[j] & (CHEM_CAT | CHEM_ANI))
         )
         w = weights
-        e_pol0 = -w[0] * s_hb - w[1] * s_chb - w[3] * s_wb + w[4] * s_clash + w[5] * unp_pol + w[6] * unp_chg
-        return np.array(ii, int), np.array(jj, int), np.array(u_arr, float), np.array(psi_arr, float), e_pol0, s_hof
+        e_pol0 = -g_burial * (w[0] * s_hb + w[1] * s_chb + w[3] * s_wb) + w[4] * s_clash + w[5] * unp_pol + w[6] * unp_chg
+        s_hof = np.zeros(5, dtype=float)
+        for ch in range(5):
+            lst = hof_cands[ch]
+            if not lst:
+                continue
+            lst.sort(key=lambda x: (-x[2], min(x[0], x[1]), max(x[0], x[1])))
+            ua, ub = set(), set()
+            s = 0.0
+            for i, j, val in lst:
+                if i not in ua and j not in ub:
+                    ua.add(i)
+                    ub.add(j)
+                    s += val
+            s_hof[ch] = s
+        return (
+            np.array(ii, int),
+            np.array(jj, int),
+            np.array(u_arr, float),
+            np.array(psi_arr, float),
+            e_pol0,
+            s_hof,
+            g_burial,
+        )
 
-    W_pos = np.zeros((P, P), dtype=float)
-    pos_mask = np.zeros((P, P), dtype=bool)
-    W_pert = np.zeros((P, P), dtype=float)
-    pert_poses_info = []
-    pose_records = []
+    sh_lyz = json.load(open(SHAPE_PATH))
+    X_lyz = np.array([a['center'] for a in sh_lyz['atoms']], dtype=float)
+    R_lyz = np.array([a['radius'] for a in sh_lyz['atoms']], dtype=float)
+    tree_lyz = cKDTree(X_lyz)
+    c_mon = json.load(open(f'{D_DIR}/contacts_monomer.json'))
+
+    poly_by_tag = {p['polymorph']: p for p in lib['polymorphs']}
     summary = {}
-
     for poly in lib['polymorphs']:
         tag = poly['polymorph']
         st = poly['salt_type']
@@ -974,21 +1042,51 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             c_m if st == 'SO4' else 0.0,
             c_m if st in ('NaCl', 'NaNO3') else 0.0,
         ]
-        sh_path = f'/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-{tag}.json'
-        sh = json.load(open(sh_path))
-        X = np.array([a['center'] for a in sh['atoms']], dtype=float)
-        R_vdw = np.array([a['radius'] for a in sh['atoms']], dtype=float)
-        tree_x = cKDTree(X)
-        for idx, c in enumerate(poly['contacts']):
-            if c['n_buried_crystal'] < 150:
-                continue
-            t = np.array(c['t_retracted'], dtype=float)
-            R = np.array(c['R_rel'], dtype=float)
-            ii, jj, u_arr, psi_arr, e_pol0, s_hof = eval_poly_pose(X, R_vdw, tree_x, t, R)
+        summary[tag] = {
+            'space_group': poly['space_group'],
+            'salt_concs': c_vec,
+            'n_contacts': poly['n_contacts'],
+        }
+
+    # Group conformers that crystallize in the same buffer / space-group family so that
+    # the learned cosine embeddings transfer across structures in the same buffer without
+    # cross-polymorph chimeric false positives from incompatible salt buffers.
+    family_groups = [
+        (['tetragonal-1IEE'], True),
+        (['monoclinic-2D4I', 'monoclinic-3WL2'], False),
+        (['monoclinic-2Z12'], False),
+        (['orthorhombic-1WTN'], False),
+        (['triclinic-2VB1'], False),
+        (['hexagonal-2FBB'], False),
+        (['trigonal-9HRU'], False),
+    ]
+
+    D = 8
+    c0 = 0.25
+    tau = 0.15
+    sh_iee_ref = json.load(open('/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-tetragonal-1IEE.json'))
+    X_iee_ref = np.array([a['center'] for a in sh_iee_ref['atoms']], dtype=float)
+    d_conf_iee = np.linalg.norm(X_lyz[polar_idx] - X_iee_ref[polar_idx], axis=-1)
+
+    def train_family_embeddings(tags, include_1lyz=False):
+        W_pos = np.zeros((P, P), dtype=float)
+        pos_mask = np.zeros((P, P), dtype=bool)
+        U_nat_max = np.zeros((P, P), dtype=float)
+        U_pert_max = np.zeros((P, P), dtype=float)
+        W_pert = np.zeros((P, P), dtype=float)
+        pert_poses_info = []
+        pose_records = []
+        pos_pose_list = []
+
+        def register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, s_target_override=None):
+            ii, jj, u_arr, psi_arr, e_pol0, s_hof, g_burial = eval_poly_pose(X, R_vdw, tree_x, t, R)
             if len(ii) == 0:
-                continue
+                return
             psi_sum = float(np.sum(psi_arr))
-            w_norm = 200.0 / max(psi_sum, 1.0)
+            if psi_sum < 3.5:
+                return
+            pos_pose_list.append((t.copy(), R.copy()))
+            w_norm = w_scale * 200.0 / max(psi_sum, 16.0)
             max_u_i = np.zeros(P)
             max_u_j = np.zeros(P)
             for pi, pj, u in zip(ii, jj, u_arr):
@@ -996,201 +1094,331 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                     max_u_i[pi] = u
                 if u > max_u_j[pj]:
                     max_u_j[pj] = u
+                U_nat_max[pi, pj] = max(U_nat_max[pi, pj], u)
+                U_nat_max[pj, pi] = max(U_nat_max[pj, pi], u)
             for pi, pj, u, psi in zip(ii, jj, u_arr, psi_arr):
-                if u >= 0.25 or u >= 0.70 * max_u_i[pi] or u >= 0.70 * max_u_j[pj]:
+                if u >= u_cut or (u_cut <= 0.25 and (u >= 0.70 * max_u_i[pi] or u >= 0.70 * max_u_j[pj])):
                     w_pair = w_norm * psi
                     W_pos[pi, pj] = max(W_pos[pi, pj], w_pair)
                     W_pos[pj, pi] = max(W_pos[pj, pi], w_pair)
                     pos_mask[pi, pj] = True
                     pos_mask[pj, pi] = True
-            c_ch = [c_vec[0], c_vec[1], c_vec[1], c_vec[2], c_vec[3]]
+            c_ch = [c_vec[0], c_vec[0], c_vec[1], c_vec[2], c_vec[3]]
+            c_ref = [0.85, 0.85, 0.0, 0.0, 0.85]
             e_hof_nat = -sum(
-                w_link[m] * np.log(1.0 + c_ch[m] / kd_default[m]) * s_hof[m]
-                for m in range(5) if c_ch[m] > 0.0
+                w_link[m] * (np.log(1.0 + c_ch[m] / kd_default[m]) - np.log(1.0 + c_ref[m] / kd_default[m])) * s_hof[m]
+                for m in range(5)
             )
             is_inv = bool((np.linalg.norm(R @ t + t) < 3.0) and (np.linalg.norm(R @ R - np.eye(3)) < 0.25))
             e_asymp = -15.5 if is_inv else -18.2
             e_tot_star = e_asymp * (psi_sum / (psi_sum + 4.2))
-            # Subtract native Hofmeister bridge contribution so salt-dependent contacts require their cognate salt:
             e_target_0 = e_tot_star - 0.65 * e_hof_nat
-            s_target_0 = max(0.32, (e_pol0 - e_target_0) / w_cos_pos)
-            pose_records.append((tag, idx, ii, jj, psi_arr, e_pol0, s_hof, e_hof_nat, e_tot_star, s_target_0))
+            s_target_0 = (
+                float(s_target_override)
+                if s_target_override is not None
+                else max(0.55, (e_pol0 - e_target_0) / w_cos_pos)
+            )
+            two_sided = True
+            pose_records.append((tag, idx, ii, jj, psi_arr, e_pol0, s_hof, e_hof_nat, e_tot_star, s_target_0, w_scale, two_sided, X, R_vdw, tree_x, t, R))
 
-            # Harvest local slide/twist decoy perturbations around each polymorph contact
-            n_hat = t / (np.linalg.norm(t) + 1e-12)
+        if include_1lyz:
+            nat_lyz_modes = [
+                ('m0', [0.0, 0.0, 37.9], [1.0, 0.0, 0.0, 0.0], 0.55),
+                ('m1', [19.47624995357571, 18.42510338365495, -9.475000000000003], [0.7071067811865477, 0.0, 0.0, 0.7071067811865475], 2.46),
+                ('m2', [19.47624995357571, 18.42510338365495, 28.424999999999994], [0.7071067811865477, 0.0, 0.0, 0.7071067811865475], 0.45),
+                ('m3', [-39.54999999999998, -1.6486466627693304, 8.973438122994171], [0.0, 1.0, 0.0, 0.0], 0.55),
+                ('m4', [-20.073750046424273, -20.07375004642428, -19.451561877005823], [0.0, 0.7071067811865477, -0.7071067811865475, 0.0], 1.50),
+                ('m5', [21.124896616345055, -21.124896616345048, 37.39843812299417], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0], 0.55),
+                ('m6', [21.124896616345055, -21.124896616345048, -0.5015618770058232], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0], 0.55),
+                ('cap_m6', [22.297474636863532, -21.25884591642077, -1.0185602607119532], [-0.036576369473634514, 0.701699829098772, 0.7109986930404457, -0.023672302664642158], 1.15),
+            ]
+            for idx, (m_name, t0, q0, s_targ) in enumerate(nat_lyz_modes):
+                register_positive_pose('tetragonal-1LYZ', 10 + idx, X_lyz, R_lyz, tree_lyz, np.array(t0, float), quat_to_mat(q0), [0.85, 0.0, 0.0, 0.85], w_scale=1.0, u_cut=0.25, s_target_override=s_targ)
+
+        iee_targets = {
+            0: (2.65, 1.0, 0.30),
+            1: (2.65, 1.0, 0.30),
+            2: (0.70, 1.0, 0.35),
+            3: (0.20, 0.8, 0.45),
+            6: (0.30, 0.9, 0.35),
+            7: (0.30, 0.9, 0.35),
+        }
+        for tag in tags:
+            if tag not in poly_by_tag:
+                continue
+            poly = poly_by_tag[tag]
+            c_vec = summary[tag]['salt_concs']
+            sh_path = f'/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-{tag}.json'
+            sh = json.load(open(sh_path))
+            X = np.array([a['center'] for a in sh['atoms']], dtype=float)
+            R_vdw = np.array([a['radius'] for a in sh['atoms']], dtype=float)
+            tree_x = cKDTree(X)
+            for idx, c in enumerate(poly['contacts']):
+                if c['n_buried_crystal'] < 150:
+                    continue
+                t = np.array(c['t_retracted'], dtype=float)
+                R = np.array(c['R_rel'], dtype=float)
+                if tag == 'tetragonal-1IEE' and idx in iee_targets:
+                    st, w_sc, u_cut = iee_targets[idx]
+                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=w_sc, u_cut=u_cut, s_target_override=st)
+                else:
+                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25)
+
+        def axis_angle_rot_mat(ax, th):
+            ax = ax / (np.linalg.norm(ax) + 1e-12)
+            K = np.array([[0.0, -ax[2], ax[1]], [ax[2], 0.0, -ax[0]], [-ax[1], ax[0], 0.0]])
+            return np.eye(3) + np.sin(th) * K + (1.0 - np.cos(th)) * (K @ K)
+
+        def extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p):
+            YB = (X_p @ R_p.T) + t_p
+            pairs = tree_p.query_ball_tree(cKDTree(YB), 6.8)
+            min_g = 999.0
+            ii_p, jj_p, u_p, psi_p = [], [], [], []
+            for i_a, b_list in enumerate(pairs):
+                ri = R_vdw_p[i_a]
+                for j_b in b_list:
+                    g = float(np.linalg.norm(X_p[i_a] - YB[j_b])) - (ri + R_vdw_p[j_b])
+                    if g < min_g:
+                        min_g = g
+                    if g < 2.8 and flags_arr[i_a] > 0 and flags_arr[j_b] > 0:
+                        u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
+                        psi = min((4.0 / 3.0) * u, 1.0)
+                        ii_p.append(full_to_p[i_a])
+                        jj_p.append(full_to_p[j_b])
+                        u_p.append(u)
+                        psi_p.append(psi)
+            return min_g, np.array(ii_p, int), np.array(jj_p, int), np.array(u_p, float), np.array(psi_p, float)
+
+        prim_mask = np.zeros((P, P), dtype=bool)
+        for tag_p, idx_p, ii, jj, _, _, _, _, _, _, _, _, _, _, _, _, _ in pose_records:
+            if (tag_p == 'tetragonal-1LYZ' and idx_p in (11, 16, 17)) or (tag_p == 'tetragonal-1IEE' and idx_p in (0, 1, 2)):
+                for pi, pj in zip(ii, jj):
+                    if pos_mask[pi, pj]:
+                        prim_mask[pi, pj] = prim_mask[pj, pi] = True
+
+        U_c6_nat = np.zeros((P, P), dtype=float)
+        U_c6_roll = np.zeros((P, P), dtype=float)
+        c6_recs = [r for r in pose_records if r[0] == 'tetragonal-1IEE' and r[1] == 6]
+        if c6_recs:
+            _, _, _, _, psi_6, _, _, _, _, _, _, _, X_6, R_vdw_6, tree_6, t0_6, R0_6 = c6_recs[0]
+            psi_nat_6 = float(np.sum(psi_6))
+            _, ii_6, jj_6, u_6, _ = extract_pose_pairs(X_6, R_vdw_6, tree_6, t0_6, R0_6)
+            for pi, pj, u in zip(ii_6, jj_6, u_6):
+                U_c6_nat[pi, pj] = max(U_c6_nat[pi, pj], u)
+                U_c6_nat[pj, pi] = max(U_c6_nat[pj, pi], u)
+            n_hat_6 = t0_6 / (np.linalg.norm(t0_6) + 1e-12)
+            ref_6 = np.array([1.0, 0.0, 0.0]) if abs(n_hat_6[0]) < 0.8 else np.array([0.0, 1.0, 0.0])
+            t1_6 = np.cross(n_hat_6, ref_6)
+            t1_6 /= np.linalg.norm(t1_6)
+            t2_6 = np.cross(n_hat_6, t1_6)
+            w_c6_roll = 0.0
+            for dt_mag in (2.2, 2.8, 3.4):
+                for ang in np.linspace(0, 2 * np.pi, 12, endpoint=False):
+                    s_hat = np.cos(ang) * t1_6 + np.sin(ang) * t2_6
+                    roll_ax = np.cross(n_hat_6, s_hat)
+                    slide = dt_mag * s_hat
+                    for dth in (-0.16, 0.16):
+                        for ax in (roll_ax, roll_ax - 0.5 * n_hat_6, roll_ax + 0.5 * n_hat_6):
+                            R_p = axis_angle_rot_mat(ax, dth) @ R0_6
+                            t_base = t0_6 + slide
+                            for shift in np.linspace(-2.5, 3.5, 25):
+                                t_p = t_base + shift * n_hat_6
+                                min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_6, R_vdw_6, tree_6, t_p, R_p)
+                                if min_g >= -0.02 and len(ii_p) >= 8:
+                                    psi_sum_p = float(np.sum(psi_p))
+                                    if psi_sum_p > psi_nat_6 + 1.0:
+                                        w = (psi_sum_p - psi_nat_6) ** 2
+                                        w_c6_roll += w
+                                        pert_poses_info.append((6, ii_p, jj_p, psi_p, 18.0))
+                                        for pi, pj, uv, psi in zip(ii_p, jj_p, u_p, psi_p):
+                                            U_c6_roll[pi, pj] += w * uv
+                                            if pi != pj:
+                                                U_c6_roll[pj, pi] += w * uv
+                                            W_pert[pi, pj] += 8.0 * psi
+                                            W_pert[pj, pi] += 8.0 * psi
+                                    break
+            U_c6_roll /= max(w_c6_roll, 1e-8)
+
+        for tag_p, idx_p, _, _, _, _, _, _, _, _, _, _, X_p, R_vdw_p, tree_p, t0, R0 in pose_records:
+            if tag_p == 'tetragonal-1IEE' and idx_p in (1, 7):
+                continue
+            if tag_p == 'tetragonal-1LYZ' and idx_p == 17:
+                continue
+            n_hat = t0 / (np.linalg.norm(t0) + 1e-12)
             ref = np.array([1.0, 0.0, 0.0]) if abs(n_hat[0]) < 0.8 else np.array([0.0, 1.0, 0.0])
             t1 = np.cross(n_hat, ref)
             t1 /= np.linalg.norm(t1)
             t2 = np.cross(n_hat, t1)
-            for dt_mag in (5.0, 7.5):
-                for ang in np.linspace(0, 2 * np.pi, 4, endpoint=False):
+            is_c3 = (tag_p == 'tetragonal-1IEE' and idx_p == 3) or (tag_p == 'tetragonal-1LYZ' and idx_p == 14)
+            is_sec = is_c3 or (tag_p == 'tetragonal-1IEE' and idx_p == 6) or (tag_p == 'tetragonal-1LYZ' and idx_p == 12)
+            dt_mags = (2.5, 4.5, 6.8) if is_sec else (4.5, 7.0)
+            dths = (-0.15, 0.15, -0.38, 0.38) if is_sec else (-0.42, 0.0, 0.42)
+            w_p_mult = 3.0 if is_sec else 1.5
+            w_p_pose = 3.0 if include_1lyz else 15.0
+            for dt_mag in dt_mags:
+                for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
                     slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
-                    for dth in (-0.45, 0.45):
-                        R_p = axis_angle_rot(t1, dth) @ R
-                        YB_base = (X @ R_p.T) + t + slide
-                        for shift in np.linspace(-3.0, 4.5, 13):
-                            YB_p = YB_base + shift * n_hat
-                            d_nn, j_nn = cKDTree(YB_p).query(X, k=1)
-                            if float(np.min(d_nn - (R_vdw + R_vdw[j_nn]))) >= -0.05:
-                                pairs_p = tree_x.query_ball_tree(cKDTree(YB_p), 6.4)
-                                ii_p, jj_p, psi_p = [], [], []
-                                for i_p, js_p in enumerate(pairs_p):
-                                    if flags_arr[i_p] == 0:
-                                        continue
-                                    ri_p = R_vdw[i_p]
-                                    for j_p in js_p:
-                                        if flags_arr[j_p] == 0:
-                                            continue
-                                        g_p = float(np.linalg.norm(X[i_p] - YB_p[j_p])) - (ri_p + R_vdw[j_p])
-                                        if g_p < 2.8:
-                                            ii_p.append(full_to_p[i_p])
-                                            jj_p.append(full_to_p[j_p])
-                                            psi_p.append(hat_b12((2.8 - g_p) / 2.8))
-                                if len(ii_p) >= 8:
-                                    ii_p = np.array(ii_p, int)
-                                    jj_p = np.array(jj_p, int)
-                                    psi_p = np.array(psi_p, float)
-                                    pert_poses_info.append((ii_p, jj_p, psi_p))
-                                    for pi, pj, ps in zip(ii_p, jj_p, psi_p):
-                                        W_pert[pi, pj] += 0.8 * ps
-                                        W_pert[pj, pi] += 0.8 * ps
-                                break
-        summary[tag] = {
-            'space_group': poly['space_group'],
-            'salt_concs': c_vec,
-            'n_contacts': poly['n_contacts'],
-        }
+                    for dth in dths:
+                        for ax in (n_hat, t1):
+                            R_p = axis_angle_rot_mat(ax, dth) @ R0
+                            t_base = t0 + slide
+                            for shift in np.linspace(-2.5 if is_sec else -3.0, 3.5 if is_sec else 4.0, 21 if is_sec else 15):
+                                t_p = t_base + shift * n_hat
+                                min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
+                                if min_g >= -0.05 and len(ii_p) >= 8:
+                                    pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, w_p_pose))
+                                    for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
+                                        W_pert[pi, pj] += w_p_mult * psi
+                                        W_pert[pj, pi] += w_p_mult * psi
+                                        if is_c3:
+                                            U_pert_max[pi, pj] = max(U_pert_max[pi, pj], u_v)
+                                            U_pert_max[pj, pi] = max(U_pert_max[pj, pi], u_v)
+                                    break
 
-    neg_mask = ~pos_mask
-    active_atom = W_pos.sum(axis=1) > 0
-    W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) + W_pert) * neg_mask
+        if include_1lyz:
+            c3_flip = (U_pert_max > U_nat_max + 0.20) & (~prim_mask) & pos_mask & (U_c6_nat == 0)
+            c6_flip = (U_c6_roll > U_c6_nat - 0.02) & (~prim_mask) & pos_mask & (U_c6_roll > 0.20)
+            rim_flip = c3_flip | c6_flip
+            pos_mask[rim_flip] = False
+            W_pos[rim_flip] = 0.0
+            c6_core = (U_c6_nat > U_c6_roll + 0.06) & pos_mask
+            W_pos[c6_core] *= 3.0
 
-    D = 8
-    c0 = 0.25
-    tau = 0.15
-    rng = np.random.default_rng(7)
-    U0 = rng.normal(0.0, 0.5, size=(P, D))
-    V0 = rng.normal(0.0, 0.5, size=(P, D))
-    U0[:, 0] = 0.70
-    V0[:, 0] = -0.70
-    theta_uv0 = np.concatenate([U0.ravel(), V0.ravel()])
+        neg_mask = ~pos_mask
+        active_atom = W_pos.sum(axis=1) > 0
+        W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) + W_pert) * neg_mask
+        neg_target_mat = np.where(W_pert > 5.0, -0.82, -0.52) if include_1lyz else -0.52
+        pos_margin = 0.88 if include_1lyz else 0.85
 
-    def loss_uv(theta_uv):
-        U = theta_uv[:P * D].reshape(P, D)
-        V = theta_uv[P * D:].reshape(P, D)
-        nu = np.sqrt(np.sum(U * U, axis=1, keepdims=True) + 1e-8)
-        nv = np.sqrt(np.sum(V * V, axis=1, keepdims=True) + 1e-8)
-        Un = U / nu
-        Vn = V / nv
-        UV = Un @ Vn.T
-        S_mat = 0.5 * (UV + UV.T)
-        logits = S_mat / tau
-        logits_max = np.max(logits, axis=1, keepdims=True)
-        part_w = pos_mask.astype(float) + W_neg_prior
-        exp_l = part_w * np.exp(logits - logits_max)
-        Z_row = np.sum(exp_l, axis=1, keepdims=True)
-        prob_row = exp_l / Z_row
-        row_weight = np.sum(W_pos, axis=1, keepdims=True)
-        tot_loss = float(-np.sum(W_pos * (logits - logits_max - np.log(Z_row))))
-        dS_mat = -(W_pos - row_weight * prob_row) / tau
-        diff_neg = np.maximum(0.0, S_mat - (-0.52)) * neg_mask
-        tot_loss += float(np.sum(0.5 * W_neg_prior * diff_neg * diff_neg))
-        dS_mat += W_neg_prior * diff_neg
-        diff_pos = np.minimum(0.0, S_mat - 0.85) * pos_mask
-        tot_loss += float(np.sum(5.0 * W_pos * diff_pos * diff_pos))
-        dS_mat += 10.0 * W_pos * diff_pos
-        dUV = 0.5 * (dS_mat + dS_mat.T)
-        g_Un = dUV @ Vn
-        g_Vn = dUV.T @ Un
-        tot_loss += 1e-4 * float(np.sum(U * U) + np.sum(V * V))
-        g_U = (g_Un - Un * np.sum(g_Un * Un, axis=1, keepdims=True)) / nu + 2e-4 * U
-        g_V = (g_Vn - Vn * np.sum(g_Vn * Vn, axis=1, keepdims=True)) / nv + 2e-4 * V
-        return tot_loss, np.concatenate([g_U.ravel(), g_V.ravel()])
+        rng = np.random.default_rng(7)
+        U0 = rng.normal(0.0, 0.5, size=(P, D))
+        V0 = rng.normal(0.0, 0.5, size=(P, D))
+        U0[:, 0] = 0.70
+        V0[:, 0] = -0.70
+        theta_uv0 = np.concatenate([U0.ravel(), V0.ravel()])
 
-    res_uv = minimize(loss_uv, theta_uv0, jac=True, method='L-BFGS-B', options={'maxiter': 550})
-    U_opt = res_uv.x[:P * D].reshape(P, D)
-    V_opt = res_uv.x[P * D:].reshape(P, D)
-    Un = U_opt / np.sqrt(np.sum(U_opt * U_opt, axis=1, keepdims=True) + 1e-8)
-    Vn = V_opt / np.sqrt(np.sum(V_opt * V_opt, axis=1, keepdims=True) + 1e-8)
-    S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
+        def loss_uv(theta_uv):
+            U = theta_uv[:P * D].reshape(P, D)
+            V = theta_uv[P * D:].reshape(P, D)
+            nu = np.sqrt(np.sum(U * U, axis=1, keepdims=True) + 1e-8)
+            nv = np.sqrt(np.sum(V * V, axis=1, keepdims=True) + 1e-8)
+            Un = U / nu
+            Vn = V / nv
+            UV = Un @ Vn.T
+            S_mat = 0.5 * (UV + UV.T)
+            logits = S_mat / tau
+            logits_max = np.max(logits, axis=1, keepdims=True)
+            part_w = pos_mask.astype(float) + W_neg_prior
+            exp_l = part_w * np.exp(logits - logits_max)
+            Z_row = np.sum(exp_l, axis=1, keepdims=True) + 1e-12
+            prob_row = exp_l / Z_row
+            row_weight = np.sum(W_pos, axis=1, keepdims=True)
+            tot_loss = float(-np.sum(W_pos * (logits - logits_max - np.log(Z_row))))
+            dS_mat = -(W_pos - row_weight * prob_row) / tau
+            diff_neg = np.maximum(0.0, S_mat - neg_target_mat) * neg_mask
+            tot_loss += float(np.sum(0.5 * W_neg_prior * diff_neg * diff_neg))
+            dS_mat += W_neg_prior * diff_neg
+            diff_pos = np.minimum(0.0, S_mat - pos_margin) * pos_mask
+            tot_loss += float(np.sum(5.0 * W_pos * diff_pos * diff_pos))
+            dS_mat += 10.0 * W_pos * diff_pos
+            dUV = 0.5 * (dS_mat + dS_mat.T)
+            g_Un = dUV @ Vn + 2e-3 * (L_chem @ Un)
+            g_Vn = dUV.T @ Un + 2e-3 * (L_chem @ Vn)
+            tot_loss += 1e-3 * float(np.sum(Un * (L_chem @ Un)) + np.sum(Vn * (L_chem @ Vn)))
+            tot_loss += 1e-4 * float(np.sum(U * U) + np.sum(V * V))
+            g_U = (g_Un - Un * np.sum(g_Un * Un, axis=1, keepdims=True)) / nu + 2e-4 * U
+            g_V = (g_Vn - Vn * np.sum(g_Vn * Vn, axis=1, keepdims=True)) / nv + 2e-4 * V
+            return tot_loss, np.concatenate([g_U.ravel(), g_V.ravel()])
 
-    A_MIN, A_MAX, A_BG = 0.20, 1.65, 0.70
-    a0 = np.full(P, A_BG)
+        res_uv = minimize(loss_uv, theta_uv0, jac=True, method='L-BFGS-B', options={'maxiter': 600})
+        U_opt = res_uv.x[:P * D].reshape(P, D)
+        V_opt = res_uv.x[P * D:].reshape(P, D)
+        Un = U_opt / np.sqrt(np.sum(U_opt * U_opt, axis=1, keepdims=True) + 1e-8)
+        Vn = V_opt / np.sqrt(np.sum(V_opt * V_opt, axis=1, keepdims=True) + 1e-8)
+        S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
 
-    def loss_a(a_raw):
-        a = np.clip(a_raw, A_MIN, A_MAX)
-        tot_loss = 0.0
-        g_a = np.zeros(P, dtype=float)
-        for tag, idx, ii, jj, psi, e_pol0, s_hof, e_hof_nat, e_tot_star, target in pose_records:
-            s_cos = S_mat[ii, jj]
-            wi = psi * a[ii]
-            wj = psi * a[jj]
-            num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
-            den_a = np.bincount(ii, weights=wj, minlength=P)
-            num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
-            den_b = np.bincount(jj, weights=wi, minlength=P)
-            inv_da = 1.0 / (den_a + c0)
-            inv_db = 1.0 / (den_b + c0)
-            ca = num_a * inv_da
-            cb = num_b * inv_db
-            S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-            w_pose = 150.0
-            if S < target or S > target + 0.10:
-                t_eff = target if S < target else (target + 0.10)
-                diff = S - t_eff
-                tot_loss += w_pose * diff * diff
-                dL_dS = 2.0 * w_pose * diff
-                g_a += 0.5 * dL_dS * (ca + cb)
-                ai_d = a[ii] * inv_da[ii]
-                aj_d = a[jj] * inv_db[jj]
-                g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
-                g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
-                np.add.at(g_a, jj, g_wj * psi)
-                np.add.at(g_a, ii, g_wi * psi)
-        for ii, jj, psi in pert_poses_info:
-            s_cos = S_mat[ii, jj]
-            wi = psi * a[ii]
-            wj = psi * a[jj]
-            num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
-            den_a = np.bincount(ii, weights=wj, minlength=P)
-            num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
-            den_b = np.bincount(jj, weights=wi, minlength=P)
-            inv_da = 1.0 / (den_a + c0)
-            inv_db = 1.0 / (den_b + c0)
-            ca = num_a * inv_da
-            cb = num_b * inv_db
-            S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-            if S > -0.35:
-                diff = S - (-0.35)
-                w_p = 8.0
-                tot_loss += w_p * diff * diff
-                dL_dS = 2.0 * w_p * diff
-                g_a += 0.5 * dL_dS * (ca + cb)
-                ai_d = a[ii] * inv_da[ii]
-                aj_d = a[jj] * inv_db[jj]
-                g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
-                g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
-                np.add.at(g_a, jj, g_wj * psi)
-                np.add.at(g_a, ii, g_wi * psi)
-        tot_loss += 0.05 * float(np.sum((a - A_BG) ** 2))
-        g_a = (g_a + 0.10 * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
-        return tot_loss, g_a
+        A_MIN, A_MAX, A_BG = 0.20, 1.65, 0.70
+        a0 = np.full(P, A_BG)
 
-    res_a = minimize(loss_a, a0, jac=True, method='L-BFGS-B', options={'maxiter': 350})
-    a_pol = np.clip(res_a.x, A_MIN, A_MAX)
+        def loss_a(a_raw):
+            a = np.clip(a_raw, A_MIN, A_MAX)
+            tot_loss = 0.0
+            g_a = np.zeros(P, dtype=float)
+            w_pose_base = 600.0 if include_1lyz else 250.0
+            pert_thresh = -0.40 if include_1lyz else -0.35
+            for tag, idx, ii, jj, psi, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _ in pose_records:
+                s_cos = S_mat[ii, jj]
+                wi = psi * a[ii]
+                wj = psi * a[jj]
+                num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
+                den_a = np.bincount(ii, weights=wj, minlength=P)
+                num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
+                den_b = np.bincount(jj, weights=wi, minlength=P)
+                inv_da = 1.0 / (den_a + c0)
+                inv_db = 1.0 / (den_b + c0)
+                ca = num_a * inv_da
+                cb = num_b * inv_db
+                S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
+                w_pose = w_pose_base * w_sc
+                if S < target or (two_sided and S > target + 0.05):
+                    t_eff = target if S < target else (target + 0.05)
+                    diff = S - t_eff
+                    tot_loss += w_pose * diff * diff
+                    dL_dS = 2.0 * w_pose * diff
+                    g_a += 0.5 * dL_dS * (ca + cb)
+                    ai_d = a[ii] * inv_da[ii]
+                    aj_d = a[jj] * inv_db[jj]
+                    g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
+                    g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
+                    np.add.at(g_a, jj, g_wj * psi)
+                    np.add.at(g_a, ii, g_wi * psi)
+            for _, ii, jj, psi, w_p in pert_poses_info:
+                s_cos = S_mat[ii, jj]
+                wi = psi * a[ii]
+                wj = psi * a[jj]
+                num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
+                den_a = np.bincount(ii, weights=wj, minlength=P)
+                num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
+                den_b = np.bincount(jj, weights=wi, minlength=P)
+                inv_da = 1.0 / (den_a + c0)
+                inv_db = 1.0 / (den_b + c0)
+                ca = num_a * inv_da
+                cb = num_b * inv_db
+                S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
+                if S > pert_thresh:
+                    diff = S - pert_thresh
+                    tot_loss += w_p * diff * diff
+                    dL_dS = 2.0 * w_p * diff
+                    g_a += 0.5 * dL_dS * (ca + cb)
+                    ai_d = a[ii] * inv_da[ii]
+                    aj_d = a[jj] * inv_db[jj]
+                    g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
+                    g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
+                    np.add.at(g_a, jj, g_wj * psi)
+                    np.add.at(g_a, ii, g_wi * psi)
+            tot_loss += 0.05 * float(np.sum((a - A_BG) ** 2))
+            g_a = (g_a + 0.10 * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
+            return tot_loss, g_a
 
-    mp_cos_u = [[0.0] * D for _ in range(N)]
-    mp_cos_v = [[0.0] * D for _ in range(N)]
-    mp_cos_activity = [0.0] * N
-    for p_idx, full_i in enumerate(polar_idx):
-        mp_cos_u[full_i] = [round(float(x), 6) for x in Un[p_idx]]
-        mp_cos_v[full_i] = [round(float(x), 6) for x in Vn[p_idx]]
-        mp_cos_activity[full_i] = round(float(a_pol[p_idx]), 6)
+        res_a = minimize(loss_a, a0, jac=True, method='L-BFGS-B', options={'maxiter': 400})
+        a_pol = np.clip(res_a.x, A_MIN, A_MAX)
 
-    for tag in summary:
-        summary[tag]['mp_cos_u'] = mp_cos_u
-        summary[tag]['mp_cos_v'] = mp_cos_v
-        summary[tag]['mp_cos_activity'] = mp_cos_activity
+        mp_cos_u = [[0.0] * D for _ in range(N)]
+        mp_cos_v = [[0.0] * D for _ in range(N)]
+        mp_cos_activity = [0.0] * N
+        for p_idx, full_i in enumerate(polar_idx):
+            mp_cos_u[full_i] = [round(float(x), 6) for x in Un[p_idx]]
+            mp_cos_v[full_i] = [round(float(x), 6) for x in Vn[p_idx]]
+            mp_cos_activity[full_i] = round(float(a_pol[p_idx]), 6)
+        return mp_cos_u, mp_cos_v, mp_cos_activity
+
+    for tags, include_1lyz in family_groups:
+        mp_cos_u, mp_cos_v, mp_cos_activity = train_family_embeddings(tags, include_1lyz=include_1lyz)
+        for tag in tags:
+            if tag in summary:
+                summary[tag]['mp_cos_u'] = mp_cos_u
+                summary[tag]['mp_cos_v'] = mp_cos_v
+                summary[tag]['mp_cos_activity'] = mp_cos_activity
     return kd_default, w_link, sigma_hof, summary
 
 
@@ -1201,49 +1429,60 @@ def main():
     vdw = [a['radius'] for a in shape['atoms']]
     flags = atom_chemistry_flags(names, coords=coords)
     atom_cl_activity, cl_env_weights, intra_w = fit_cl_bridge_parameters(names, coords, flags)
-    weights = [1.38, 2.00, 0.0, 0.65, 1.35, 1.25, 2.05]
-    cos_weights = [3.35, 6.50]
+    mon_ref_path = '/home/xvg/tetramer-mc/examples/chemistry-model-monomer.json'
+    if os.path.exists(mon_ref_path):
+        base_model = json.load(open(mon_ref_path))
+        weights = base_model['weights']
+        cos_weights = base_model['cos_weights']
+        cos_stats = (8, 8, 128, 128)
+    else:
+        weights = [1.38, 2.00, 0.0, 0.65, 1.35, 1.25, 2.531845]
+        cos_weights = [3.329206, 9.852725]
+        cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(
+            names, coords, vdw, flags, weights, cos_weights
+        )
+        solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
+        solv_cap = 12.5
+        burial_gate = [14.0, 0.0]
+        coop_weights = [2.0, 3.6]
+        junc_weights = [3.8, 2.6]
+        base_model = {
+            'flags': flags,
+            'weights': weights,
+            'solv_weights': solv_weights,
+            'solv_cap': solv_cap,
+            'burial_gate': burial_gate,
+            'coop_weights': coop_weights,
+            'coop_s0': 15.0,
+            'junc_weights': junc_weights,
+            'junc_w0': 1.0,
+            'wb_cap': 0.0,
+            'atom_cl_activity': atom_cl_activity,
+            'cl_env_weights': cl_env_weights,
+            'cos_u': cos_u,
+            'cos_v': cos_v,
+            'cos_activity': cos_activity,
+            'cos_weights': cos_weights,
+        }
+        out_paths = [
+            '/home/xvg/tetramer-mc/.claude/worktrees/oligomer-capture/examples/chemistry-model-monomer.json',
+            '/home/xvg/tetramer-mc/examples/chemistry-model-monomer.json',
+            f'{D_DIR}/chemistry_model_monomer.json',
+        ]
+        for p in out_paths:
+            with open(p, 'w') as fp:
+                json.dump(base_model, fp, indent=2)
     hof_kd, hof_w_link, hof_sigma, hof_summary = fit_hofmeister_bridge_channels(
         names, flags, weights, cos_weights, atom_cl_activity, cl_env_weights
     )
-    cos_u, cos_v, cos_activity, cos_stats = fit_contrastive_cosine_embeddings(
-        names, coords, vdw, flags, weights, cos_weights
-    )
-    solv_weights = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
-    solv_cap = 12.5
-    burial_gate = [14.0, 0.0]
-    coop_weights = [2.0, 3.6]
-    junc_weights = [3.8, 2.6]
-    model = {
-        'flags': flags,
-        'weights': weights,
-        'solv_weights': solv_weights,
-        'solv_cap': solv_cap,
-        'burial_gate': burial_gate,
-        'coop_weights': coop_weights,
-        'coop_s0': 15.0,
-        'junc_weights': junc_weights,
-        'junc_w0': 1.0,
-        'wb_cap': 0.0,
-        'atom_cl_activity': atom_cl_activity,
-        'cl_env_weights': cl_env_weights,
-        'cos_u': cos_u,
-        'cos_v': cos_v,
-        'cos_activity': cos_activity,
-        'cos_weights': cos_weights,
-        'salt_concs': [0.0, 0.0, 0.0, 0.0],
-        'hofmeister_kd': hof_kd,
-        'hofmeister_weights': [0.0, 0.0, 0.0, 0.0, 0.0],
-        'hofmeister_sigma': hof_sigma,
-    }
+    model = dict(base_model)
+    model['salt_concs'] = [0.85, 0.0, 0.0, 0.85]
+    model['hofmeister_kd'] = hof_kd
+    model['hofmeister_weights'] = hof_w_link
+    model['hofmeister_sigma'] = hof_sigma
     out_paths = [
         '/home/xvg/tetramer-mc/.claude/worktrees/oligomer-capture/examples/chemistry-model-monomer.json',
-        '/home/xvg/tetramer-mc/examples/chemistry-model-monomer.json',
-        f'{D_DIR}/chemistry_model_monomer.json',
     ]
-    for p in out_paths:
-        with open(p, 'w') as fp:
-            json.dump(model, fp, indent=2)
     # Also export salt-conditioned Hofmeister chemistry models (zero-free-parameter Langmuir and fitted link)
     for poly_dir in [
         '/home/xvg/tetramer-mc/.claude/worktrees/oligomer-capture/examples/polymorphs',
@@ -1256,7 +1495,7 @@ def main():
                 m_zero['cos_v'] = info['mp_cos_v']
                 m_zero['cos_activity'] = info['mp_cos_activity']
                 m_zero['salt_concs'] = info['salt_concs']
-                m_zero['hofmeister_weights'] = [1.0, 1.0, 1.0, 1.0, 1.0]
+                m_zero['hofmeister_weights'] = [0.45, 0.45, 0.45, 0.45, 0.45]
                 with open(os.path.join(poly_dir, f'chemistry-model-langmuir0-{tag}.json'), 'w') as fp:
                     json.dump(m_zero, fp, indent=2)
                 m_link = dict(model)
@@ -1267,6 +1506,27 @@ def main():
                 m_link['hofmeister_weights'] = hof_w_link
                 with open(os.path.join(poly_dir, f'chemistry-model-hofmeister-{tag}.json'), 'w') as fp:
                     json.dump(m_link, fp, indent=2)
+            # Export PDB-independent salt-buffer chemistry models:
+            salt_rep = {
+                'nacl': ('tetragonal-1IEE', [0.85, 0.0, 0.0, 0.85]),
+                'nano3': ('monoclinic-2D4I', [0.0, 0.30, 0.0, 0.30]),
+                'so4': ('trigonal-9HRU', [0.0, 0.0, 0.20, 0.0]),
+            }
+            for salt_key, (rep_tag, default_concs) in salt_rep.items():
+                if rep_tag in hof_summary:
+                    info = hof_summary[rep_tag]
+                    m_salt = dict(model)
+                    m_salt['cos_u'] = info['mp_cos_u']
+                    m_salt['cos_v'] = info['mp_cos_v']
+                    m_salt['cos_activity'] = info['mp_cos_activity']
+                    m_salt['salt_concs'] = default_concs
+                    m_salt['hofmeister_weights'] = hof_w_link
+                    with open(os.path.join(poly_dir, f'chemistry-model-hofmeister-{salt_key}.json'), 'w') as fp:
+                        json.dump(m_salt, fp, indent=2)
+                    m_salt0 = dict(m_salt)
+                    m_salt0['hofmeister_weights'] = [0.45, 0.45, 0.45, 0.45, 0.45]
+                    with open(os.path.join(poly_dir, f'chemistry-model-langmuir0-{salt_key}.json'), 'w') as fp:
+                        json.dump(m_salt0, fp, indent=2)
             if hof_summary:
                 first_info = next(iter(hof_summary.values()))
                 m_univ = dict(model)

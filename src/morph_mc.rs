@@ -439,12 +439,14 @@ impl ChemistryModel {
         let c_chao = self.salt_concs[1].max(0.0);
         let c_so4 = self.salt_concs[2].max(0.0);
         let c_na = self.salt_concs[3].max(0.0);
+        let mu_hal_ref = (1.0 + 0.85 / kd[0].max(1e-4)).ln();
+        let mu_na_ref = (1.0 + 0.85 / kd[4].max(1e-4)).ln();
         let mu = [
-            (1.0 + c_hal / kd[0].max(1e-4)).ln(),
+            (1.0 + c_hal / kd[0].max(1e-4)).ln() - mu_hal_ref,
             (1.0 + c_chao / kd[1].max(1e-4)).ln(),
             (1.0 + c_chao / kd[2].max(1e-4)).ln(),
             (1.0 + c_so4 / kd[3].max(1e-4)).ln(),
-            (1.0 + c_na / kd[4].max(1e-4)).ln(),
+            (1.0 + c_na / kd[4].max(1e-4)).ln() - mu_na_ref,
         ];
         let mut e = 0.0f64;
         for m in 0..5 {
@@ -591,7 +593,8 @@ impl ChemistryModel {
         s_cos: f64,
     ) -> f64 {
         let hof_surf = if self.has_hofmeister() && e_solv_raw < 0.0 {
-            let mut s = 1.0f64;
+            let s_ref = 0.85 * (self.hofmeister_sigma[0] + self.hofmeister_sigma[3]);
+            let mut s = 1.0f64 - s_ref;
             for k in 0..4 {
                 s += self.hofmeister_sigma[k] * self.salt_concs[k].max(0.0);
             }
@@ -973,7 +976,19 @@ impl ChemistryModel {
         let s_cos = self.eval_cos_score(&cos_pairs, n);
         let e_hof = if has_hof {
             let s_hof = Self::eval_hofmeister_scores(&hof_cands);
-            self.eval_hofmeister_bridge_energy(&s_hof)
+            let raw_hof = self.eval_hofmeister_bridge_energy(&s_hof);
+            let b0 = self.burial_gate[0];
+            let g_b = if b0 > 0.0 {
+                (a1_burial * a1_burial) / (a1_burial * a1_burial + b0 * b0)
+            } else {
+                1.0
+            };
+            let g_c = if raw_hof < 0.0 && has_cos {
+                (s_cos / 0.50).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            g_b * g_c * raw_hof
         } else {
             0.0
         };
@@ -1804,12 +1819,25 @@ impl MorphMc {
                     }
                 }
                 let sr_centers: Vec<Vec3> = surf_rep.iter().map(|&idx| self.centers[idx]).collect();
+                let sr_flags: Vec<u8> =
+                    surf_rep.iter().map(|&idx| self.chem.flags[idx]).collect();
                 let sr_cut = 2.6;
                 let sr_cut2 = sr_cut * sr_cut;
                 let sr_bound_cut2 = (self.tree.bound + sr_cut) * (self.tree.bound + sr_cut);
 
                 let pol_centers: Vec<Vec3> = pol_rep.iter().map(|&idx| self.centers[idx]).collect();
                 let pol_flags: Vec<u8> = pol_rep.iter().map(|&idx| self.chem.flags[idx]).collect();
+                let pol_cl_act: Vec<bool> = pol_rep
+                    .iter()
+                    .map(|&idx| {
+                        self.chem
+                            .atom_cl_activity
+                            .get(idx)
+                            .copied()
+                            .unwrap_or(0.0)
+                            > 0.05
+                    })
+                    .collect();
                 let pol_normals: Vec<Vec3> =
                     pol_rep.iter().map(|&idx| self.body_normals[idx]).collect();
                 let pol_cut = 6.5;
@@ -1851,43 +1879,55 @@ impl MorphMc {
                 let (pol_half, pol_inv_cell, pol_dim, pol_offsets, pol_atoms) =
                     build_voxel_csr(&pol_centers, pol_cut, 3.25);
 
-                let sr_clashes = |r_rel: [[f64; 3]; 3], t_rel: Vec3| -> bool {
-                    let r_rel_t = transpose(r_rel);
-                    let q_in_p = scale(matvec(r_rel_t, t_rel), -1.0);
-                    for &xb in &sr_centers {
-                        let d_center = sub(xb, q_in_p);
-                        if d_center[0] * d_center[0]
-                            + d_center[1] * d_center[1]
-                            + d_center[2] * d_center[2]
-                            > sr_bound_cut2
-                        {
-                            continue;
-                        }
-                        let xb_w = add(matvec(r_rel, xb), t_rel);
-                        let ix = ((xb_w[0] + sr_half) * sr_inv_cell).floor() as isize;
-                        let iy = ((xb_w[1] + sr_half) * sr_inv_cell).floor() as isize;
-                        let iz = ((xb_w[2] + sr_half) * sr_inv_cell).floor() as isize;
-                        if ix < 0
-                            || ix >= sr_dim
-                            || iy < 0
-                            || iy >= sr_dim
-                            || iz < 0
-                            || iz >= sr_dim
-                        {
-                            continue;
-                        }
-                        let v_idx = ((ix * sr_dim + iy) * sr_dim + iz) as usize;
-                        let start = sr_offsets[v_idx] as usize;
-                        let end = sr_offsets[v_idx + 1] as usize;
-                        for &a_u16 in &sr_atoms[start..end] {
-                            let dx = sub(xb_w, sr_centers[a_u16 as usize]);
-                            if dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2] < sr_cut2 {
-                                return true;
+                let sr_clashes =
+                    |r_rel: [[f64; 3]; 3], t_rel: Vec3, allow_cat_hb: bool| -> bool {
+                        let r_rel_t = transpose(r_rel);
+                        let q_in_p = scale(matvec(r_rel_t, t_rel), -1.0);
+                        for (b_idx, &xb) in sr_centers.iter().enumerate() {
+                            let d_center = sub(xb, q_in_p);
+                            if d_center[0] * d_center[0]
+                                + d_center[1] * d_center[1]
+                                + d_center[2] * d_center[2]
+                                > sr_bound_cut2
+                            {
+                                continue;
+                            }
+                            let xb_w = add(matvec(r_rel, xb), t_rel);
+                            let ix = ((xb_w[0] + sr_half) * sr_inv_cell).floor() as isize;
+                            let iy = ((xb_w[1] + sr_half) * sr_inv_cell).floor() as isize;
+                            let iz = ((xb_w[2] + sr_half) * sr_inv_cell).floor() as isize;
+                            if ix < 0
+                                || ix >= sr_dim
+                                || iy < 0
+                                || iy >= sr_dim
+                                || iz < 0
+                                || iz >= sr_dim
+                            {
+                                continue;
+                            }
+                            let v_idx = ((ix * sr_dim + iy) * sr_dim + iz) as usize;
+                            let start = sr_offsets[v_idx] as usize;
+                            let end = sr_offsets[v_idx + 1] as usize;
+                            for &a_u16 in &sr_atoms[start..end] {
+                                let a_idx = a_u16 as usize;
+                                let dx = sub(xb_w, sr_centers[a_idx]);
+                                let d2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+                                if d2 < sr_cut2 {
+                                    if allow_cat_hb && d2 >= 4.90 {
+                                        let fa = sr_flags[a_idx];
+                                        let fb = sr_flags[b_idx];
+                                        if ((fa & CHEM_CAT != 0) && (fb & CHEM_NACC != 0))
+                                            || ((fb & CHEM_CAT != 0) && (fa & CHEM_NACC != 0))
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                    return true;
+                                }
                             }
                         }
-                    }
-                    false
-                };
+                        false
+                    };
 
                 let score_pol_comp = |r_rel: [[f64; 3]; 3], t_rel: Vec3| -> (usize, usize) {
                     let r_rel_t = transpose(r_rel);
@@ -1970,6 +2010,14 @@ impl MorphMc {
                                         && (fa & (CHEM_AMIDE_ND | CHEM_CAT) != 0))
                                 {
                                     w += 2;
+                                    if (((fa & CHEM_TYR_OH != 0) && (fb & CHEM_AMIDE_ND != 0))
+                                        || ((fb & CHEM_TYR_OH != 0) && (fa & CHEM_AMIDE_ND != 0)))
+                                        && pol_cl_act[a_idx]
+                                        && pol_cl_act[b_idx]
+                                        && (14.80..=18.85).contains(&d2)
+                                    {
+                                        w += 5;
+                                    }
                                 } else if ((fa & (CHEM_CAT | CHEM_ANI)) != 0)
                                     || ((fb & (CHEM_CAT | CHEM_ANI)) != 0)
                                 {
@@ -1987,6 +2035,12 @@ impl MorphMc {
                 let mut stage1_motif: Vec<(usize, usize, usize, usize)> = Vec::new();
                 let mut stage1_area: Vec<(usize, usize, usize, usize)> = Vec::new();
                 for &(i, j) in &comp_pairs {
+                    let fi = self.chem.flags[i];
+                    let fj = self.chem.flags[j];
+                    let allow_cat_hb = ((fi & CHEM_TYR_OH != 0)
+                        && (fj & (CHEM_NDON | CHEM_NACC) == (CHEM_NDON | CHEM_NACC)))
+                        || ((fj & CHEM_TYR_OH != 0)
+                            && (fi & (CHEM_NDON | CHEM_NACC) == (CHEM_NDON | CHEM_NACC)));
                     let ni = self.body_normals[i];
                     let nj = self.body_normals[j];
                     let target = [-ni[0], -ni[1], -ni[2]];
@@ -2006,7 +2060,7 @@ impl MorphMc {
                         ];
                         let r0 = matmul(rotation(q_twist), r_align);
                         let t0 = sub(xi_shift, matvec(r0, self.centers[j]));
-                        if norm(t0) < min_com_dist || sr_clashes(r0, t0) {
+                        if norm(t0) < min_com_dist || sr_clashes(r0, t0, allow_cat_hb) {
                             continue;
                         }
                         let (m_score, a_score) = score_pol_comp(r0, t0);
@@ -4010,7 +4064,19 @@ impl MorphMc {
 
         let e_hof = if has_hof {
             let s_hof = ChemistryModel::eval_hofmeister_scores(&hof_cands);
-            self.chem.eval_hofmeister_bridge_energy(&s_hof)
+            let raw_hof = self.chem.eval_hofmeister_bridge_energy(&s_hof);
+            let b0 = self.chem.burial_gate[0];
+            let g_b = if b0 > 0.0 {
+                (a1_burial * a1_burial) / (a1_burial * a1_burial + b0 * b0)
+            } else {
+                1.0
+            };
+            let g_c = if raw_hof < 0.0 && has_cos {
+                (s_cos / 0.50).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            g_b * g_c * raw_hof
         } else {
             0.0
         };
@@ -6538,7 +6604,7 @@ mod tests {
             position: [0.0; 3],
             orientation: [1.0, 0.0, 0.0, 0.0],
         };
-        let mc = MorphMc::new(tree, wall, model, well, vec![identity], vec![true])
+        let mc = MorphMc::new(tree, wall, model.clone(), well, vec![identity], vec![true])
             .unwrap()
             .with_chemistry_model(chem)
             .unwrap()
@@ -6641,6 +6707,69 @@ mod tests {
                     mean_draw_e < -5.0,
                     "expected annealed MemorySettings::draw around {name} to stay in attractive basin, got mean_E={mean_draw_e:+.2}"
                 );
+            }
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for &(p, w) in &prior {
+            for x in p.position {
+                x.to_bits().hash(&mut h);
+            }
+            for q in p.orientation {
+                q.to_bits().hash(&mut h);
+            }
+            w.to_bits().hash(&mut h);
+        }
+        let out_hash = h.finish();
+        println!("  1LYZ prior out_hash={out_hash:016x}");
+        assert_eq!(
+            out_hash, 0xe3684cb213c4c203,
+            "1LYZ surface prior drifted from nuc-55 baseline"
+        );
+        let shape_1iee = root.join("examples/polymorphs/monomer-shape-tetragonal-1IEE.json");
+        let chem_1iee = root.join("examples/polymorphs/chemistry-model-hofmeister-nacl.json");
+        if shape_1iee.exists() && chem_1iee.exists() {
+            let sh2: Shape = serde_json::from_str(&std::fs::read_to_string(&shape_1iee).unwrap()).unwrap();
+            let ch2: ChemistryModel = serde_json::from_str(&std::fs::read_to_string(&chem_1iee).unwrap()).unwrap();
+            let tr2 = SphereTree::new(sh2).unwrap();
+            let wl2 = Container::new(150.0, &tr2).unwrap();
+            let mc2 = MorphMc::new(tr2, wl2, model.clone(), well, vec![identity], vec![true])
+                .unwrap()
+                .with_chemistry_model(ch2)
+                .unwrap()
+                .with_contact_library(2.8)
+                .unwrap();
+            let mut rng2 = StdRng::seed_from_u64(42);
+            let prior2 = mc2.generate_surface_normal_prior(&mut rng2, 64, 0.5);
+            let nat_1iee = [
+                ("1IEE_c0(m1)", Pose { position: [19.7292, 17.99, -9.389], orientation: [0.7071068663189847, -0.007487998584367793, 0.011416997841576801, 0.7069748663439397] }),
+                ("1IEE_c2(m6)", Pose { position: [21.6511, -20.3661, -0.9638], orientation: [0.0, -0.6850479922507371, -0.728483991759389, 0.004507999949005505] }),
+                ("1IEE_c3(m4)", Pose { position: [-17.5659, -19.2315, -20.0125], orientation: [0.0, -0.7284207386623532, 0.6848727542861914, -0.01877599326368178] }),
+                ("1IEE_c6(m2)", Pose { position: [19.335, 18.591, 27.827], orientation: [0.7071068663189847, -0.007487998584367793, 0.011416997841576801, 0.7069748663439397] }),
+            ];
+            for (name, nat) in nat_1iee {
+                let r_nat = rotation(nat.orientation);
+                let mut best_sc = 999.0f64;
+                let mut best_dt = 999.0f64;
+                let mut best_dth = 999.0f64;
+                let mut best_w = 0.0f64;
+                for &(p, w) in &prior2 {
+                    let dt = norm(sub(p.position, nat.position));
+                    let r_p = rotation(p.orientation);
+                    let r_diff = matmul(transpose(r_p), r_nat);
+                    let tr = r_diff[0][0] + r_diff[1][1] + r_diff[2][2];
+                    let dth = ((tr - 1.0) * 0.5).clamp(-1.0, 1.0).acos().to_degrees();
+                    let sc = ((dt / 2.0).powi(2) + (dth / 20.0).powi(2)).sqrt();
+                    if sc < best_sc { best_sc = sc; best_dt = dt; best_dth = dth; best_w = w; }
+                }
+                let e_nat = mc2.pair_surrogate_energy(identity, nat);
+                println!("  {name}: best_sc={best_sc:.2} (dt={best_dt:.2} A, dth={best_dth:.1} deg, w={best_w:.5}), E_nat={e_nat:+.2} kT");
+                if name == "1IEE_c0(m1)" || name == "1IEE_c2(m6)" {
+                    assert!(
+                        best_sc < 2.2 && best_dt < 3.3 && best_dth < 25.0,
+                        "expected {name} to be discovered in 1IEE surface prior, got sc={best_sc:.2} (dt={best_dt:.2} A, dth={best_dth:.1} deg)"
+                    );
+                }
             }
         }
     }

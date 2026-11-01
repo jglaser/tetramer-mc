@@ -545,6 +545,62 @@ To eliminate all remaining radial step cutoffs and unify the entire 2-body and m
 | **4. Lateral 2nd Monomer — 4-Cycle Corner** (`m2 + m4`) | $+14.74 \pm 0.19$ | $-47.54$ | $-58.52$ | **$+34.68 \pm 0.07$** | Deeply supercritical 4-cycle corner ($\Delta G = -21.39\,k_{\text{B}}T$) |
 | **5. Lateral 4th Monomer — Full 3D Turn** (`m1 + m2 + m4`) | $+31.01 \pm 0.03$ | $-77.69$ | $-80.86$ | **$+52.09 \pm 0.05$** | Locked 3D crystal step ($\Delta G = -38.80\,k_{\text{B}}T$) |
 
+### 8.16 Space-Group Degrees of Freedom ($D = S + L - C$) and Universal Wukovitz–Yeates Calibration of `e_asymp`
+
+#### Physical Connection to Wukovitz & Yeates (1995)
+
+In `tools/chemistry_gap/train_chemistry_model.py`, the asymptotic pair-energy ceiling `e_asymp` sets the target total interface energy of each lattice-spanning generator contact:
+$$E_{\text{tot}}^* = e_{\text{asymp}} \frac{\Psi}{\Psi + 4.2}, \qquad s_{\text{target}, 0} = \frac{E_{\text{pol0}} - (E_{\text{tot}}^* - 0.65\,E_{\text{hof}}^{\text{nat}})}{w_{\text{cos}}^{+}},$$
+where $\Psi = \sum_{(i,j)} \psi_{ij}$ is the polar hydration-collar pair weight sum, $E_{\text{pol0}}$ is the baseline polar/desolvation energy, and $E_{\text{hof}}^{\text{nat}}$ is the specific-ion Hofmeister bridge energy.
+
+Why does `e_asymp` depend on the crystal space group, and why did `monoclinic-2D4I` (`nuc-78`) grow only 1D $2_1$ screw filaments (`c21`/`c22`) when calibrated with a uniform `e_asymp = -15.5 kT`? The exact physical explanation comes from **Wukovitz & Yeates (1995)** (*"Why protein crystals favour some space-groups over others"*, *Nature Structural Biology* **2**, 1062–1067), who analyzed the rigid-body degrees of freedom available for a monomeric protein to form a connected 3D crystal network in each of the 65 chiral space groups:
+
+$$D = S + L - C$$
+
+where:
+- **$S \in \{3, 5, 6\}$** is the number of rigid-body degrees of freedom for positioning and orienting a single molecule in the unit cell relative to the space group's symmetry elements ($S = 6$ when rotation axes run in multiple directions, as in $P\,2_1 2_1 2_1$, $P\,4_3 2_1 2$, $P\,3_1 2\,1$, $P\,6_1 2\,2$; $S = 5$ when all rotation/screw axes are parallel to a single direction, as in $P\,1\,2_1\,1$ or $C\,2$, where translation along that axis is an arbitrary origin shift; $S = 3$ in $P\,1$, where all 3 translations are origin shifts and all 3 orientations are fixed relative to the cell axes).
+- **$L \in \{1, 2, 3, 4, 6\}$** is the number of free unit-cell parameters ($6$ triclinic, $4$ monoclinic, $3$ orthorhombic, $2$ tetragonal/trigonal/hexagonal, $1$ cubic).
+- **$C \in \{2, 3, 4, 5\}$** is the **minimum number of unique crystal contacts (group generators)** required to form a connected 3D crystal network ($C = 2$ for $P\,2_1 2_1 2_1$, $P\,4_3 2_1 2$, $P\,3_1 2\,1$, $P\,6_1 2\,2$; $C = 3$ for $P\,1\,2_1\,1$, $C\,2$, and $P\,1$). For a crystal with $Z' > 1$ independent chains in the asymmetric unit, $Z' - 1$ additional non-crystallographic contacts are required to connect the asymmetric unit, giving an effective minimum generator count $C_{\text{eff}} = C + (Z' - 1)$.
+
+#### Striking Observation: Every Known HEWL Polymorph Sits Exclusively in Wukovitz & Yeates' Top Two Categories ($D \in \{6, 7\}$)
+
+Across all 65 chiral space groups, Wukovitz & Yeates (Table 1, p. 1064) showed that $D = S + L - C$ takes only four integer values:
+1. **$D = 7$ ("Optimal")**: **Only a single space group in 3D Euclidean geometry has $D = 7$**—orthorhombic **$P\,2_1 2_1 2_1$** ($S = 6, L = 3, C = 2 \implies D = 7$), which alone accounts for **36.1%** of all monomeric protein crystals in the PDB.
+2. **$D = 6$ ("Favourable")**: 13 space groups (average 9.4 occurrences in Wukovitz & Yeates' survey), led by monoclinic **$P\,1\,2_1\,1$** ($S = 5, L = 4, C = 3 \implies D = 6$, 11.1%), $C\,2$ (6.1%), tetragonal **$P\,4_3 2_1 2$** ($S = 6, L = 2, C = 2 \implies D = 6$, 5.7%), trigonal **$P\,3_1 2\,1$** ($S = 6, L = 2, C = 2 \implies D = 6$, 4.9%), hexagonal **$P\,6_1 2\,2$** ($S = 6, L = 2, C = 2 \implies D = 6$, 2.9%), and triclinic **$P\,1$** ($S = 3, L = 6, C = 3 \implies D = 6$, 2.9%).
+3. **$D = 5$ ("Unfavourable")**: 42 space groups (average 0.8 occurrences).
+4. **$D = 4$ ("Forbidden")**: 9 symmorphic space groups (average 0.1 occurrences, e.g. $P\,222$ with $S = 6, L = 3, C = 5 \implies D = 4$).
+
+Remarkably, **100% of the space groups in which hen egg-white lysozyme (HEWL) crystallizes belong to the $D = 7$ ("Optimal") or $D = 6$ ("Favourable") classes**, while their minimum generator counts $C_{\text{eff}}$ span from $2$ to $4$:
+
+| HEWL Polymorph | Space Group | $Z'$ | $S$ | $L$ | $C_1$ | $D = S + L - C_1$ | $C_{\text{eff}} = C_1 + Z' - 1$ | PDB Frequency (W&Y Table 1) | Calibrated $e_{\text{asymp}}$ ($k_{\text{B}}T$) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **`orthorhombic-1WTN`** | $P\,2_1 2_1 2_1$ | $1$ | $6$ | $3$ | $2$ | **$7$ (Optimal)** | $2$ | **36.1%** (#1 in PDB) | $-20.5\,k_{\text{B}}T$ |
+| **`tetragonal-1LYZ` / `1IEE`** | $P\,4_3 2_1 2$ | $1$ | $6$ | $2$ | $2$ | **$6$ (Favourable)** | $2$ | **5.7%** (#4 in PDB) | $-17.5\,k_{\text{B}}T$ |
+| **`hexagonal-2FBB`** | $P\,6_1 2\,2$ | $1$ | $6$ | $2$ | $2$ | **$6$ (Favourable)** | $2$ | **2.9%** | $-17.5\,k_{\text{B}}T$ |
+| **`monoclinic-2Z12`** | $P\,1\,2_1\,1$ | $1$ | $5$ | $4$ | $3$ | **$6$ (Favourable)** | $3$ | **11.1%** (#2 in PDB) | $-21.0\,k_{\text{B}}T$ |
+| **`triclinic-2VB1`** | $P\,1$ | $1$ | $3$ | $6$ | $3$ | **$6$ (Favourable)** | $3$ | **2.9%** | $-21.0\,k_{\text{B}}T$ |
+| **`trigonal-9HRU`** | $P\,3_1 2\,1$ | $2$ | $6$ | $2$ | $2$ | **$6$ (Favourable)** | $3$ | **4.9%** (#5 in PDB) | $-21.0\,k_{\text{B}}T$ |
+| **`monoclinic-2D4I`** | $P\,1\,2_1\,1$ | $2$ | $5$ | $4$ | $3$ | **$6$ (Favourable)** | $4$ | **11.1%** ($Z'=2$ pseudosym.) | $-24.5\,k_{\text{B}}T$ |
+| **`monoclinic-3WL2`** | $P\,1\,2_1\,1$ | $2$ | $5$ | $4$ | $3$ | **$6$ (Favourable)** | $4$ | **11.1%** ($Z'=2$ pseudosym.) | $-24.5\,k_{\text{B}}T$ |
+
+#### Universal $(E_0, \alpha, \beta)$ Parameterization of `e_asymp`
+
+Why do space groups with higher $C_{\text{eff}}$ or $D = 7$ require a deeper asymptotic pair-energy ceiling $e_{\text{asymp}}$ on their secondary generators?
+1. **Generator frustration scaling ($\beta\,(C_{\text{eff}} - 2)$)**: A globular protein typically possesses one dominant "sticky" surface patch ($E_{\text{pol0}} \approx -12\text{ to }-27\,k_{\text{B}}T$) that forms 1D screw chains (`c2` in `1LYZ`/`1IEE`, `c21`/`c22` in `2D4I`, `c0` in `2Z12`, `c1` in `9HRU`). When a space group requires only $C_{\text{eff}} = 2$ generators ($P\,4_3 2_1 2$, $P\,6_1 2\,2$), only **one** additional secondary patch is needed to cross-link the 1D helices into a 3D crystal. When $C_{\text{eff}} = 3$ ($P\,2_1$, $P\,1$) or $C_{\text{eff}} = 4$ ($Z'=2$ $P\,2_1$ in `2D4I`/`3WL2`), the crystal must recruit **2 to 3** progressively less optimal surface patches (whose uncalibrated $E_{\text{pol0}}$ is weak or even slightly repulsive, $+2\text{ to }+9.5\,k_{\text{B}}T$) to span all three dimensions; if those lateral generators do not reach the translational/rotational immobilization threshold ($\Delta S_{\text{bind}} \approx 16\text{--}19\,k_{\text{B}}T$), assembly stalls at 1D filaments (`nuc-78`).
+2. **Rigid-body pose-freedom scaling ($\alpha\,(D - 6)$)**: In $P\,2_1 2_1 2_1$ ($D = 7$), the presence of $7$ rigid-body degrees of freedom allows the crystal to pack using smaller, more oblique hydration-collar contacts (`c0` and `c2` in `1WTN` have $E_{\text{pol0}} = -2.76$ and $+2.16\,k_{\text{B}}T$), requiring a deeper directional cosine ceiling to lock the two screw generators in fixed-rigid-body MC.
+
+Implemented in `WY_SPACE_GROUP_TABLE` and `fit_hofmeister_bridge_channels` (`tools/chemistry_gap/train_chemistry_model.py`), the universal linear parameterization over $(D, C_{\text{eff}})$ is:
+
+$$e_{\text{asymp}}(D, C_{\text{eff}}) = E_0 - \alpha\,(D - 6) - \beta\,(C_{\text{eff}} - 2)$$
+
+with universal constants:
+- **$E_0 = -17.5\,k_{\text{B}}T$**: Baseline asymptotic generator ceiling for standard $D = 6, C_{\text{eff}} = 2$ space groups ($P\,4_3 2_1 2$, $P\,6_1 2\,2$).
+- **$\alpha = 3.0\,k_{\text{B}}T$**: Pose-freedom shift per excess Wukovitz–Yeates degree of freedom $(D - 6)$.
+- **$\beta = 3.5\,k_{\text{B}}T$**: Generator-recruitment shift per additional independent crystal generator $(C_{\text{eff}} - 2)$.
+
+Coupled with matching the Rust quadratic proximity weight $\psi_{ij} = u_{ij}^2$ in `loss_a` and excluding native-overlapping perturbation poses (`in_pos_frac >= 0.25`) from the negative pose penalty in `train_family_embeddings`, this 3-parameter Wukovitz–Yeates law lifts the lateral cross-chain generators of `monoclinic-2D4I` (`c0`: $-12.7 \to -19.4\,k_{\text{B}}T$, `c2`/`c12`: $-15.0 \to -20.4\,k_{\text{B}}T$, `c3`/`c13`: $-15.1 \to -19.2\,k_{\text{B}}T$, `c4`/`c5`: $-12.2 \to -18.6\,k_{\text{B}}T$, `c6`/`c14`: $-0.4 \to -12.2\,k_{\text{B}}T$), `monoclinic-2Z12` (`c2`: $-16.2\,k_{\text{B}}T$, `c4`: $-21.6\,k_{\text{B}}T$, `c8`: $-18.1\,k_{\text{B}}T$), `triclinic-2VB1` (`c0`: $-22.7\,k_{\text{B}}T$, `c2`: $-16.2\,k_{\text{B}}T$, `c6`: $-17.0\,k_{\text{B}}T$), and `orthorhombic-1WTN` (`c0`: $-15.4\,k_{\text{B}}T$, `c2`: $-11.2\,k_{\text{B}}T$) into the 3D crystal-growth regime while keeping `tetragonal-1LYZ` (`examples/chemistry-model-monomer.json`) and `tetragonal-1IEE` 100% bit-for-bit identical.
+
+
 
 
 

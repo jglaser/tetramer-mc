@@ -1030,12 +1030,35 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
     tree_lyz = cKDTree(X_lyz)
     c_mon = json.load(open(f'{D_DIR}/contacts_monomer.json'))
 
+    # Wukovitz & Yeates (1995), Nature Struct. Biol. 2, 1062-1067, Table 1:
+    # Exact space-group degree-of-freedom triples (S_1, L, C_1) where D_1 = S_1 + L - C_1.
+    # Universal 3-parameter calibration (E_0, alpha, beta) of e_asymp:
+    #   e_asymp(D_1, C_eff) = E_0 - alpha * (7 - D_1) - beta * (C_eff - 2) + delta_inv * 1_inv
+    # where C_eff = C_1 + (Z' - 1) accounts for non-crystallographic asymmetric-unit contacts.
+    WY_SPACE_GROUP_TABLE = {
+        'P 21 21 21': (6, 3, 2),  # D = 7 (optimal, 36.1% of PDB)
+        'P 1 21 1':   (5, 4, 3),  # D = 6 (favourable, 11.1% of PDB)
+        'P 43 21 2':  (6, 2, 2),  # D = 6 (favourable, 5.7% of PDB)
+        'P 31 2 1':   (6, 2, 2),  # D = 6 (favourable, 4.9% of PDB)
+        'P 61 2 2':   (6, 2, 2),  # D = 6 (favourable, 2.9% of PDB)
+        'P 1':        (3, 6, 3),  # D = 6 (favourable, 2.9% of PDB)
+    }
+    WY_E0 = -20.0      # baseline asymptotic pair energy (kT) at optimal D=7, C=2 (P 21 21 21)
+    WY_ALPHA = 2.0     # entropic penalty per lost rigid-body DOF below D=7 (kT / DOF)
+    WY_BETA = 1.5      # connectivity penalty per additional required generator above C=2 (kT / contact)
+
     poly_by_tag = {p['polymorph']: p for p in lib['polymorphs']}
     summary = {}
     for poly in lib['polymorphs']:
         tag = poly['polymorph']
         st = poly['salt_type']
         c_m = poly['salt_conc_M']
+        sg = poly['space_group']
+        z_prime = len(set(c['partner_chain'] for c in poly['contacts']))
+        S_1, L_sg, C_1 = WY_SPACE_GROUP_TABLE.get(sg, (6, 2, 2))
+        D_1 = S_1 + L_sg - C_1
+        C_eff = C_1 + (z_prime - 1)
+        e_asymp_wy = WY_E0 - WY_ALPHA * (7 - D_1) - WY_BETA * (C_eff - 2)
         c_vec = [
             c_m if st == 'NaCl' else 0.0,
             c_m if st == 'NaNO3' else 0.0,
@@ -1043,7 +1066,14 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             c_m if st in ('NaCl', 'NaNO3') else 0.0,
         ]
         summary[tag] = {
-            'space_group': poly['space_group'],
+            'space_group': sg,
+            'z_prime': z_prime,
+            'wy_S': S_1,
+            'wy_L': L_sg,
+            'wy_C': C_1,
+            'wy_D': D_1,
+            'wy_C_eff': C_eff,
+            'wy_e_asymp': e_asymp_wy,
             'salt_concs': c_vec,
             'n_contacts': poly['n_contacts'],
         }
@@ -1110,13 +1140,18 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 for m in range(5)
             )
             is_inv = bool((np.linalg.norm(R @ t + t) < 3.0) and (np.linalg.norm(R @ R - np.eye(3)) < 0.25))
-            e_asymp = -15.5 if is_inv else -18.2
+            if include_1lyz:
+                e_asymp = -15.5 if is_inv else -18.2
+            else:
+                e_asymp_base = summary.get(tag, {}).get('wy_e_asymp', -22.0)
+                e_asymp = (e_asymp_base + 1.5) if is_inv else e_asymp_base
             e_tot_star = e_asymp * (psi_sum / (psi_sum + 4.2))
             e_target_0 = e_tot_star - 0.65 * e_hof_nat
+            g_b_eff = max(float(g_burial), 0.75)
             s_target_0 = (
                 float(s_target_override)
                 if s_target_override is not None
-                else max(0.55, (e_pol0 - e_target_0) / w_cos_pos)
+                else max(0.55, (e_pol0 - e_target_0) / (g_b_eff * w_cos_pos))
             )
             two_sided = True
             pose_records.append((tag, idx, ii, jj, psi_arr, e_pol0, s_hof, e_hof_nat, e_tot_star, s_target_0, w_scale, two_sided, X, R_vdw, tree_x, t, R))
@@ -1252,28 +1287,49 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             is_c3 = (tag_p == 'tetragonal-1IEE' and idx_p == 3) or (tag_p == 'tetragonal-1LYZ' and idx_p == 14)
             is_sec = is_c3 or (tag_p == 'tetragonal-1IEE' and idx_p == 6) or (tag_p == 'tetragonal-1LYZ' and idx_p == 12)
             dt_mags = (2.5, 4.5, 6.8) if is_sec else (4.5, 7.0)
-            dths = (-0.15, 0.15, -0.38, 0.38) if is_sec else (-0.42, 0.0, 0.42)
+            dths = (-0.15, 0.15, -0.38, 0.38) if is_sec else ((-0.42, 0.0, 0.42) if include_1lyz else (-0.48, 0.48))
             w_p_mult = 3.0 if is_sec else 1.5
-            w_p_pose = 3.0 if include_1lyz else 15.0
-            for dt_mag in dt_mags:
-                for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
-                    slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
-                    for dth in dths:
-                        for ax in (n_hat, t1):
-                            R_p = axis_angle_rot_mat(ax, dth) @ R0
-                            t_base = t0 + slide
-                            for shift in np.linspace(-2.5 if is_sec else -3.0, 3.5 if is_sec else 4.0, 21 if is_sec else 15):
-                                t_p = t_base + shift * n_hat
-                                min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
-                                if min_g >= -0.05 and len(ii_p) >= 8:
-                                    pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, w_p_pose))
-                                    for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
-                                        W_pert[pi, pj] += w_p_mult * psi
-                                        W_pert[pj, pi] += w_p_mult * psi
-                                        if is_c3:
-                                            U_pert_max[pi, pj] = max(U_pert_max[pi, pj], u_v)
-                                            U_pert_max[pj, pi] = max(U_pert_max[pj, pi], u_v)
-                                    break
+            w_p_pose = 3.0 if include_1lyz else 1.5
+            if include_1lyz:
+                for dt_mag in dt_mags:
+                    for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
+                        slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
+                        for dth in dths:
+                            for ax in (n_hat, t1):
+                                R_p = axis_angle_rot_mat(ax, dth) @ R0
+                                t_base = t0 + slide
+                                for shift in np.linspace(-2.5 if is_sec else -3.0, 3.5 if is_sec else 4.0, 21 if is_sec else 15):
+                                    t_p = t_base + shift * n_hat
+                                    min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
+                                    if min_g >= -0.05 and len(ii_p) >= 8:
+                                        pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, w_p_pose))
+                                        for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
+                                            W_pert[pi, pj] += w_p_mult * psi
+                                            W_pert[pj, pi] += w_p_mult * psi
+                                            if is_c3:
+                                                U_pert_max[pi, pj] = max(U_pert_max[pi, pj], u_v)
+                                                U_pert_max[pj, pi] = max(U_pert_max[pj, pi], u_v)
+                                        break
+            else:
+                for dt_mag in (5.5, 8.0):
+                    for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
+                        slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
+                        for dth in (-0.52, 0.52):
+                            for ax in (n_hat, t1):
+                                R_p = axis_angle_rot_mat(ax, dth) @ R0
+                                t_base = t0 + slide
+                                for shift in np.linspace(-3.0, 4.0, 15):
+                                    t_p = t_base + shift * n_hat
+                                    min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
+                                    if min_g >= -0.05 and len(ii_p) >= 8:
+                                        in_pos_frac = float(np.mean(pos_mask[ii_p, jj_p]))
+                                        if in_pos_frac < 0.25:
+                                            pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, 1.0))
+                                        for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
+                                            if not pos_mask[pi, pj]:
+                                                W_pert[pi, pj] += 0.5 * psi
+                                                W_pert[pj, pi] += 0.5 * psi
+                                        break
 
         if include_1lyz:
             c3_flip = (U_pert_max > U_nat_max + 0.20) & (~prim_mask) & pos_mask & (U_c6_nat == 0)
@@ -1286,9 +1342,13 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
 
         neg_mask = ~pos_mask
         active_atom = W_pos.sum(axis=1) > 0
-        W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) + W_pert) * neg_mask
+        if include_1lyz:
+            W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) + W_pert) * neg_mask
+        else:
+            W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 2.5, 0.5) + 0.15 * W_pert) * neg_mask
         neg_target_mat = np.where(W_pert > 5.0, -0.82, -0.52) if include_1lyz else -0.52
-        pos_margin = 0.88 if include_1lyz else 0.85
+        pos_margin = 0.88 if include_1lyz else 0.88
+        w_pos_hinge = 5.0 if include_1lyz else 15.0
 
         rng = np.random.default_rng(7)
         U0 = rng.normal(0.0, 0.5, size=(P, D))
@@ -1319,8 +1379,8 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             tot_loss += float(np.sum(0.5 * W_neg_prior * diff_neg * diff_neg))
             dS_mat += W_neg_prior * diff_neg
             diff_pos = np.minimum(0.0, S_mat - pos_margin) * pos_mask
-            tot_loss += float(np.sum(5.0 * W_pos * diff_pos * diff_pos))
-            dS_mat += 10.0 * W_pos * diff_pos
+            tot_loss += float(np.sum(w_pos_hinge * W_pos * diff_pos * diff_pos))
+            dS_mat += (2.0 * w_pos_hinge) * W_pos * diff_pos
             dUV = 0.5 * (dS_mat + dS_mat.T)
             g_Un = dUV @ Vn + 2e-3 * (L_chem @ Un)
             g_Vn = dUV.T @ Un + 2e-3 * (L_chem @ Vn)
@@ -1337,16 +1397,19 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         Vn = V_opt / np.sqrt(np.sum(V_opt * V_opt, axis=1, keepdims=True) + 1e-8)
         S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
 
-        A_MIN, A_MAX, A_BG = 0.20, 1.65, 0.70
+        A_MIN = 0.20
+        A_MAX = 1.65 if include_1lyz else 2.65
+        A_BG = 0.70
         a0 = np.full(P, A_BG)
 
         def loss_a(a_raw):
             a = np.clip(a_raw, A_MIN, A_MAX)
             tot_loss = 0.0
             g_a = np.zeros(P, dtype=float)
-            w_pose_base = 600.0 if include_1lyz else 250.0
-            pert_thresh = -0.40 if include_1lyz else -0.35
-            for tag, idx, ii, jj, psi, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _ in pose_records:
+            w_pose_base = 600.0 if include_1lyz else 800.0
+            pert_thresh = -0.40 if include_1lyz else -0.10
+            for tag, idx, ii, jj, psi_raw, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _ in pose_records:
+                psi = psi_raw if include_1lyz else np.minimum(0.75 * psi_raw, 1.0) ** 2
                 s_cos = S_mat[ii, jj]
                 wi = psi * a[ii]
                 wj = psi * a[jj]

@@ -1101,6 +1101,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
     def train_family_embeddings(tags, include_1lyz=False):
         W_pos = np.zeros((P, P), dtype=float)
         pos_mask = np.zeros((P, P), dtype=bool)
+        collar_mask = np.zeros((P, P), dtype=bool)
         U_nat_max = np.zeros((P, P), dtype=float)
         U_pert_max = np.zeros((P, P), dtype=float)
         W_pert = np.zeros((P, P), dtype=float)
@@ -1125,12 +1126,19 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 if u > max_u_j[pj]:
                     max_u_j[pj] = u
                 U_nat_max[pi, pj] = max(U_nat_max[pi, pj], u)
-                U_nat_max[pj, pi] = max(U_nat_max[pj, pi], u)
+                U_nat_max[pj, pi] = max(U_nat_max[pj, pj] if False else U_nat_max[pj, pi], u)
             for pi, pj, u, psi in zip(ii, jj, u_arr, psi_arr):
+                if u > 0.0:
+                    collar_mask[pi, pj] = True
+                    collar_mask[pj, pi] = True
                 if u >= u_cut or (u_cut <= 0.25 and (u >= 0.70 * max_u_i[pi] or u >= 0.70 * max_u_j[pj])):
                     w_pair = w_norm * psi
-                    W_pos[pi, pj] = max(W_pos[pi, pj], w_pair)
-                    W_pos[pj, pi] = max(W_pos[pj, pi], w_pair)
+                    if include_1lyz:
+                        W_pos[pi, pj] = max(W_pos[pi, pj], w_pair)
+                        W_pos[pj, pi] = max(W_pos[pj, pi], w_pair)
+                    else:
+                        W_pos[pi, pj] += 0.5 * w_pair
+                        W_pos[pj, pi] += 0.5 * w_pair
                     pos_mask[pi, pj] = True
                     pos_mask[pj, pi] = True
             c_ch = [c_vec[0], c_vec[0], c_vec[1], c_vec[2], c_vec[3]]
@@ -1142,10 +1150,16 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             is_inv = bool((np.linalg.norm(R @ t + t) < 3.0) and (np.linalg.norm(R @ R - np.eye(3)) < 0.25))
             if include_1lyz:
                 e_asymp = -15.5 if is_inv else -18.2
+                f_area = psi_sum / (psi_sum + 4.2)
             else:
                 e_asymp_base = summary.get(tag, {}).get('wy_e_asymp', -22.0)
                 e_asymp = (e_asymp_base + 1.5) if is_inv else e_asymp_base
-            e_tot_star = e_asymp * (psi_sum / (psi_sum + 4.2))
+                # [3/3] Pade rational polynomial in normalized buried area x = psi_sum / 8.0:
+                # suppresses small peripheral contacts (x < 1) while saturating smoothly to 1 for true crystal generators.
+                x_area = psi_sum / 8.0
+                p_area = 0.08 * x_area + 0.25 * (x_area ** 2) + 0.85 * (x_area ** 3)
+                f_area = p_area / (1.0 + p_area)
+            e_tot_star = e_asymp * f_area
             e_target_0 = e_tot_star - 0.65 * e_hof_nat
             g_b_eff = max(float(g_burial), 0.75)
             s_target_0 = (
@@ -1339,12 +1353,17 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             W_pos[rim_flip] = 0.0
             c6_core = (U_c6_nat > U_c6_roll + 0.06) & pos_mask
             W_pos[c6_core] *= 3.0
-
-        neg_mask = ~pos_mask
-        active_atom = W_pos.sum(axis=1) > 0
-        if include_1lyz:
+            neg_mask = ~pos_mask
+            active_atom = W_pos.sum(axis=1) > 0
             W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) + W_pert) * neg_mask
+            W_pos_eff = W_pos
         else:
+            # Tikhonov spectral filter on positive pair weights to damp low-rank duplicate multiplicity
+            # across co-trained structures (e.g. Z'=2 monoclinic 2D4I + 3WL2) without hard deduplication.
+            gamma_tikh = 1.2
+            W_pos_eff = (2.0 * W_pos / (W_pos + gamma_tikh)) * pos_mask
+            neg_mask = (~pos_mask) & (~collar_mask)
+            active_atom = W_pos_eff.sum(axis=1) > 0
             W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 2.5, 0.5) + 0.15 * W_pert) * neg_mask
         neg_target_mat = np.where(W_pert > 5.0, -0.82, -0.52) if include_1lyz else -0.52
         pos_margin = 0.88 if include_1lyz else 0.88
@@ -1372,15 +1391,15 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             exp_l = part_w * np.exp(logits - logits_max)
             Z_row = np.sum(exp_l, axis=1, keepdims=True) + 1e-12
             prob_row = exp_l / Z_row
-            row_weight = np.sum(W_pos, axis=1, keepdims=True)
-            tot_loss = float(-np.sum(W_pos * (logits - logits_max - np.log(Z_row))))
-            dS_mat = -(W_pos - row_weight * prob_row) / tau
+            row_weight = np.sum(W_pos_eff, axis=1, keepdims=True)
+            tot_loss = float(-np.sum(W_pos_eff * (logits - logits_max - np.log(Z_row))))
+            dS_mat = -(W_pos_eff - row_weight * prob_row) / tau
             diff_neg = np.maximum(0.0, S_mat - neg_target_mat) * neg_mask
             tot_loss += float(np.sum(0.5 * W_neg_prior * diff_neg * diff_neg))
             dS_mat += W_neg_prior * diff_neg
             diff_pos = np.minimum(0.0, S_mat - pos_margin) * pos_mask
-            tot_loss += float(np.sum(w_pos_hinge * W_pos * diff_pos * diff_pos))
-            dS_mat += (2.0 * w_pos_hinge) * W_pos * diff_pos
+            tot_loss += float(np.sum(w_pos_hinge * W_pos_eff * diff_pos * diff_pos))
+            dS_mat += (2.0 * w_pos_hinge) * W_pos_eff * diff_pos
             dUV = 0.5 * (dS_mat + dS_mat.T)
             g_Un = dUV @ Vn + 2e-3 * (L_chem @ Un)
             g_Vn = dUV.T @ Un + 2e-3 * (L_chem @ Vn)
@@ -1402,13 +1421,29 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         A_BG = 0.70
         a0 = np.full(P, A_BG)
 
+        # Tikhonov pose-Gram inverse-leverage weights for non-1LYZ families
+        M_poses = len(pose_records)
+        if not include_1lyz and M_poses > 0:
+            V_inc = np.zeros((M_poses, P), dtype=float)
+            for m_idx, (_, _, ii_m, jj_m, psi_m, _, _, _, _, _, _, _, _, _, _, _, _) in enumerate(pose_records):
+                np.add.at(V_inc[m_idx], ii_m, psi_m)
+                np.add.at(V_inc[m_idx], jj_m, psi_m)
+                n_m = np.linalg.norm(V_inc[m_idx])
+                if n_m > 1e-12:
+                    V_inc[m_idx] /= n_m
+            G_pose = V_inc @ V_inc.T
+            w_tikh_pose = 1.0 / (np.sum(G_pose ** 2, axis=1) + 0.25)
+            w_tikh_pose *= M_poses / np.sum(w_tikh_pose)
+        else:
+            w_tikh_pose = np.ones(M_poses, dtype=float)
+
         def loss_a(a_raw):
             a = np.clip(a_raw, A_MIN, A_MAX)
             tot_loss = 0.0
             g_a = np.zeros(P, dtype=float)
             w_pose_base = 600.0 if include_1lyz else 800.0
             pert_thresh = -0.40 if include_1lyz else -0.10
-            for tag, idx, ii, jj, psi_raw, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _ in pose_records:
+            for m_idx, (tag, idx, ii, jj, psi_raw, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _) in enumerate(pose_records):
                 psi = psi_raw if include_1lyz else np.minimum(0.75 * psi_raw, 1.0) ** 2
                 s_cos = S_mat[ii, jj]
                 wi = psi * a[ii]
@@ -1422,7 +1457,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 ca = num_a * inv_da
                 cb = num_b * inv_db
                 S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-                w_pose = w_pose_base * w_sc
+                w_pose = w_pose_base * w_sc * float(w_tikh_pose[m_idx])
                 if S < target or (two_sided and S > target + 0.05):
                     t_eff = target if S < target else (target + 0.05)
                     diff = S - t_eff
@@ -1459,8 +1494,9 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                     g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
                     np.add.at(g_a, jj, g_wj * psi)
                     np.add.at(g_a, ii, g_wi * psi)
-            tot_loss += 0.05 * float(np.sum((a - A_BG) ** 2))
-            g_a = (g_a + 0.10 * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
+            lam_a = 0.05 if include_1lyz else 8.0
+            tot_loss += lam_a * float(np.sum((a - A_BG) ** 2))
+            g_a = (g_a + 2.0 * lam_a * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
             return tot_loss, g_a
 
         res_a = minimize(loss_a, a0, jac=True, method='L-BFGS-B', options={'maxiter': 400})

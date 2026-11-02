@@ -896,6 +896,8 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         max_comp_b = np.zeros(N)
         hb_cands, chb_cands, clash_cands = [], [], []
         s_wb_raw = 0.0
+        p2_solv = 0.0
+        p3_solv = 0.0
         hof_cands = [[] for _ in range(5)]
         for i, js in enumerate(pairs):
             fi = int(flags_arr[i])
@@ -909,6 +911,8 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
                 if u <= 0.0:
                     continue
+                p2_solv += u * u
+                p3_solv += u * u * u
                 max_u_a[i] = max(max_u_a[i], u)
                 max_u_b[j] = max(max_u_b[j], u)
                 if fi == 0 or fj == 0:
@@ -954,6 +958,10 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                     uh = (d - 3.40) / 0.65
                     hof_cands[4].append((i, j, float(np.exp(-uh * uh))))
         a1 = float(np.sum(max_u_a[max_u_a > 0.0]) + np.sum(max_u_b[max_u_b > 0.0]))
+        a2 = float(np.sum(max_u_a[max_u_a > 0.0] ** 2) + np.sum(max_u_b[max_u_b > 0.0] ** 2))
+        a05 = float(np.sum(np.sqrt(max_u_a[max_u_a > 0.0])) + np.sum(np.sqrt(max_u_b[max_u_b > 0.0])))
+        sw = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
+        e_solv_raw = sw[0] * p2_solv + sw[1] * p3_solv + sw[2] * a1 + sw[3] * a2 + sw[4] * a05
         b0 = 14.0
         g_burial = (a1 * a1) / (a1 * a1 + b0 * b0) if a1 > 0.0 else 0.0
         hb_cands.sort(key=lambda x: (-x[0], x[1], x[2]))
@@ -1000,6 +1008,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         )
         w = weights
         e_pol0 = -g_burial * (w[0] * s_hb + w[1] * s_chb + w[3] * s_wb) + w[4] * s_clash + w[5] * unp_pol + w[6] * unp_chg
+        e_desolv = 1.35 * s_clash + 1.25 * unp_pol + 2.05 * unp_chg
         s_hof = np.zeros(5, dtype=float)
         for ch in range(5):
             lst = hof_cands[ch]
@@ -1022,6 +1031,8 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             e_pol0,
             s_hof,
             g_burial,
+            e_solv_raw,
+            e_desolv,
         )
 
     sh_lyz = json.load(open(SHAPE_PATH))
@@ -1110,7 +1121,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         pos_pose_list = []
 
         def register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, s_target_override=None):
-            ii, jj, u_arr, psi_arr, e_pol0, s_hof, g_burial = eval_poly_pose(X, R_vdw, tree_x, t, R)
+            ii, jj, u_arr, psi_arr, e_pol0, s_hof, g_burial, e_solv_raw, e_desolv = eval_poly_pose(X, R_vdw, tree_x, t, R)
             if len(ii) == 0:
                 return
             psi_sum = float(np.sum(psi_arr))
@@ -1160,13 +1171,30 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 p_area = 0.08 * x_area + 0.25 * (x_area ** 2) + 0.85 * (x_area ** 3)
                 f_area = p_area / (1.0 + p_area)
             e_tot_star = e_asymp * f_area
-            e_target_0 = e_tot_star - 0.65 * e_hof_nat
-            g_b_eff = max(float(g_burial), 0.75)
-            s_target_0 = (
-                float(s_target_override)
-                if s_target_override is not None
-                else max(0.55, (e_pol0 - e_target_0) / (g_b_eff * w_cos_pos))
-            )
+            if include_1lyz:
+                e_target_0 = e_tot_star - 0.65 * e_hof_nat
+                g_b_eff = max(float(g_burial), 0.75)
+                s_target_0 = (
+                    float(s_target_override)
+                    if s_target_override is not None
+                    else max(0.55, (e_pol0 - e_target_0) / (g_b_eff * w_cos_pos))
+                )
+            else:
+                # Account for (1) the ~42% 3-body crystal stabilization (E_coop + E_junc) so that
+                # isolated 1-bond dimers in solution have reversible E_pair* = 0.58 * E_tot* (~ -12 to -14.5 kT)
+                # while 2-bond/3-bond 3D crystal vertices reach the full Wukovitz-Yeates target E_tot*, and
+                # (2) the physical hydration-shell baseline e_solv + 0.15 * e_desolv added at runtime.
+                c_tot = float(sum(c_vec))
+                hof_surf = max(0.25, min(1.85, 1.0 - sum(sigma_hof[m] * c_vec[m] for m in range(4)) - 0.08 * c_tot))
+                e_solv = max(-12.5, (e_solv_raw * hof_surf) if e_solv_raw < 0.0 else (e_solv_raw / hof_surf))
+                e_pair_star = 0.72 * e_tot_star
+                e_target_0 = e_pair_star - 0.65 * e_hof_nat
+                g_b_eff = max(float(g_burial), 0.50)
+                s_target_0 = (
+                    float(s_target_override)
+                    if s_target_override is not None
+                    else max(0.55, ((0.75 * e_solv + 0.12 * e_desolv) - e_target_0) / (g_b_eff * w_cos_pos))
+                )
             two_sided = True
             pose_records.append((tag, idx, ii, jj, psi_arr, e_pol0, s_hof, e_hof_nat, e_tot_star, s_target_0, w_scale, two_sided, X, R_vdw, tree_x, t, R))
 
@@ -1417,7 +1445,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
 
         A_MIN = 0.20
-        A_MAX = 1.65 if include_1lyz else 2.65
+        A_MAX = 1.65 if include_1lyz else 3.85
         A_BG = 0.70
         a0 = np.full(P, A_BG)
 
@@ -1444,7 +1472,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             w_pose_base = 600.0 if include_1lyz else 800.0
             pert_thresh = -0.40 if include_1lyz else -0.10
             for m_idx, (tag, idx, ii, jj, psi_raw, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _) in enumerate(pose_records):
-                psi = psi_raw if include_1lyz else np.minimum(0.75 * psi_raw, 1.0) ** 2
+                psi = psi_raw
                 s_cos = S_mat[ii, jj]
                 wi = psi * a[ii]
                 wj = psi * a[jj]
@@ -1494,7 +1522,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                     g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
                     np.add.at(g_a, jj, g_wj * psi)
                     np.add.at(g_a, ii, g_wi * psi)
-            lam_a = 0.05 if include_1lyz else 8.0
+            lam_a = 0.05 if include_1lyz else 0.5
             tot_loss += lam_a * float(np.sum((a - A_BG) ** 2))
             g_a = (g_a + 2.0 * lam_a * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
             return tot_loss, g_a
@@ -1588,8 +1616,11 @@ def main():
         '/home/xvg/tetramer-mc/examples/polymorphs',
     ]:
         if os.path.isdir(poly_dir):
+            phys_desolv_weights = [0.0, 0.0, 0.0, 0.0, 0.162, 0.150, 0.246]
             for tag, info in hof_summary.items():
+                # Export per-polymorph chemistry models with physical dehydration baseline + learned surface chemistry:
                 m_zero = dict(model)
+                m_zero['weights'] = phys_desolv_weights if tag != 'tetragonal-1IEE' else list(model['weights'])
                 m_zero['cos_u'] = info['mp_cos_u']
                 m_zero['cos_v'] = info['mp_cos_v']
                 m_zero['cos_activity'] = info['mp_cos_activity']
@@ -1598,6 +1629,7 @@ def main():
                 with open(os.path.join(poly_dir, f'chemistry-model-langmuir0-{tag}.json'), 'w') as fp:
                     json.dump(m_zero, fp, indent=2)
                 m_link = dict(model)
+                m_link['weights'] = phys_desolv_weights if tag != 'tetragonal-1IEE' else list(model['weights'])
                 m_link['cos_u'] = info['mp_cos_u']
                 m_link['cos_v'] = info['mp_cos_v']
                 m_link['cos_activity'] = info['mp_cos_activity']
@@ -1615,6 +1647,8 @@ def main():
                 if rep_tag in hof_summary:
                     info = hof_summary[rep_tag]
                     m_salt = dict(model)
+                    if salt_key != 'nacl':
+                        m_salt['weights'] = phys_desolv_weights
                     m_salt['cos_u'] = info['mp_cos_u']
                     m_salt['cos_v'] = info['mp_cos_v']
                     m_salt['cos_activity'] = info['mp_cos_activity']

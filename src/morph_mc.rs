@@ -2222,13 +2222,358 @@ impl MorphMc {
                     sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
                 });
 
+                // For Hofmeister / learned-chemistry models (`has_hofmeister() && has_cosine()`),
+                // also construct a learned-cosine patch-alignment pool over exposed polar atoms
+                // `(i, j)` with `M_ij = 0.5*(u_i . v_j + v_i . u_j) > 0.35`, using a 4.2 A soft
+                // cosine shell to accommodate curved monoclinic/trigonal interfaces before Stage-2
+                // radial retraction (0..=14 steps).
+                let mut by_cos: Vec<(usize, usize, f64, usize, usize, Pose)> = Vec::new();
+                if self.chem.has_hofmeister() && self.chem.has_cosine() {
+                    let surf_pol: Vec<usize> = surf
+                        .iter()
+                        .copied()
+                        .filter(|&idx| self.chem.flags[idx] != 0)
+                        .collect();
+                    let n_sp = surf_pol.len();
+                    let eval_cos_sp = |r_rel: [[f64; 3]; 3], t_rel: Vec3| -> f64 {
+                        let gap_max = 4.2f64;
+                        let r_rel_t = transpose(r_rel);
+                        let q_in_p = scale(matvec(r_rel_t, t_rel), -1.0);
+                        let sp_bound_cut2 =
+                            (self.tree.bound + gap_max + 4.0) * (self.tree.bound + gap_max + 4.0);
+                        let mut num_a = vec![0.0f64; n_sp];
+                        let mut den_a = vec![0.0f64; n_sp];
+                        let mut num_b = vec![0.0f64; n_sp];
+                        let mut den_b = vec![0.0f64; n_sp];
+                        for (b_s, &b_idx) in surf_pol.iter().enumerate() {
+                            let aj = self.chem.cos_activity[b_idx];
+                            if aj <= 1e-8 {
+                                continue;
+                            }
+                            let xb = self.centers[b_idx];
+                            let d_center = sub(xb, q_in_p);
+                            if d_center[0] * d_center[0]
+                                + d_center[1] * d_center[1]
+                                + d_center[2] * d_center[2]
+                                > sp_bound_cut2
+                            {
+                                continue;
+                            }
+                            let xb_w = add(matvec(r_rel, xb), t_rel);
+                            let rb = self.vdw[b_idx];
+                            let uj = &self.chem.cos_u[b_idx];
+                            let vj = &self.chem.cos_v[b_idx];
+                            for (a_s, &a_idx) in surf_pol.iter().enumerate() {
+                                let ai = self.chem.cos_activity[a_idx];
+                                if ai <= 1e-8 {
+                                    continue;
+                                }
+                                let r_cut = self.vdw[a_idx] + rb + gap_max;
+                                let dx = sub(xb_w, self.centers[a_idx]);
+                                let d2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+                                if d2 >= r_cut * r_cut {
+                                    continue;
+                                }
+                                let d = d2.sqrt();
+                                let u = ((r_cut - d) / gap_max).clamp(0.0, 1.0);
+                                let psi = ((4.0f64 / 3.0f64) * u).clamp(0.0, 1.0);
+                                if psi <= 0.0 {
+                                    continue;
+                                }
+                                let ui = &self.chem.cos_u[a_idx];
+                                let vi = &self.chem.cos_v[a_idx];
+                                let mut m_ij = 0.0f64;
+                                for c_k in 0..8 {
+                                    m_ij += ui[c_k] * vj[c_k] + uj[c_k] * vi[c_k];
+                                }
+                                m_ij *= 0.5;
+                                let wj = psi * aj;
+                                let wi = psi * ai;
+                                num_a[a_s] += wj * m_ij;
+                                den_a[a_s] += wj;
+                                num_b[b_s] += wi * m_ij;
+                                den_b[b_s] += wi;
+                            }
+                        }
+                        let mut sum_a = 0.0f64;
+                        let mut sum_b = 0.0f64;
+                        for s_i in 0..n_sp {
+                            let act_i = self.chem.cos_activity[surf_pol[s_i]];
+                            if den_a[s_i] > 1e-9 {
+                                sum_a += act_i * (num_a[s_i] / (den_a[s_i] + 0.25));
+                            }
+                            if den_b[s_i] > 1e-9 {
+                                sum_b += act_i * (num_b[s_i] / (den_b[s_i] + 0.25));
+                            }
+                        }
+                        0.5 * (sum_a + sum_b)
+                    };
+
+                    let mut stage1_cos: Vec<(f64, usize, usize, usize)> = Vec::new();
+                    for &i in &surf_pol {
+                        let ui = &self.chem.cos_u[i];
+                        let vi = &self.chem.cos_v[i];
+                        let ni = self.body_normals[i];
+                        let target = [-ni[0], -ni[1], -ni[2]];
+                        for &j in &surf_pol {
+                            if i == j {
+                                continue;
+                            }
+                            let uj = &self.chem.cos_u[j];
+                            let vj = &self.chem.cos_v[j];
+                            let mut m_ij = 0.0f64;
+                            for c_k in 0..8 {
+                                m_ij += ui[c_k] * vj[c_k] + uj[c_k] * vi[c_k];
+                            }
+                            m_ij *= 0.5;
+                            if m_ij <= 0.35 {
+                                continue;
+                            }
+                            let nj = self.body_normals[j];
+                            let r_align = rotation_between_unit(nj, target);
+                            let sep1 = self.vdw[i] + self.vdw[j] + 1.8;
+                            let xi_shift = add(self.centers[i], scale(ni, sep1));
+                            for k in 0..12usize {
+                                let psi = (k as f64) * (2.0 * std::f64::consts::PI / 12.0);
+                                let half_psi = 0.5 * psi;
+                                let q_twist = [
+                                    half_psi.cos(),
+                                    ni[0] * half_psi.sin(),
+                                    ni[1] * half_psi.sin(),
+                                    ni[2] * half_psi.sin(),
+                                ];
+                                let r0 = matmul(rotation(q_twist), r_align);
+                                let t0 = sub(xi_shift, matvec(r0, self.centers[j]));
+                                if norm(t0) < min_com_dist {
+                                    continue;
+                                }
+                                let sc = eval_cos_sp(r0, t0);
+                                if sc > 1.2 {
+                                    stage1_cos.push((sc, i, j, k));
+                                }
+                            }
+                        }
+                    }
+                    stage1_cos.sort_by(|a, b| {
+                        b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    let mut top_s1_cos: Vec<(f64, usize, usize, usize)> = Vec::new();
+                    let cos_s2_limit = (count * 2).max(128);
+                    for cap in [1usize, 2, 4, 8] {
+                        let mut s1_use: std::collections::HashMap<usize, usize> =
+                            std::collections::HashMap::new();
+                        for &(sc, i, j, k) in &stage1_cos {
+                            if top_s1_cos.len() >= cos_s2_limit {
+                                break;
+                            }
+                            if top_s1_cos
+                                .iter()
+                                .any(|&(_, ti, tj, tk)| ti == i && tj == j && tk == k)
+                            {
+                                continue;
+                            }
+                            if *s1_use.get(&i).unwrap_or(&0) >= cap
+                                || *s1_use.get(&j).unwrap_or(&0) >= cap
+                            {
+                                continue;
+                            }
+                            *s1_use.entry(i).or_insert(0) += 1;
+                            *s1_use.entry(j).or_insert(0) += 1;
+                            top_s1_cos.push((sc, i, j, k));
+                        }
+                    }
+                    for &(s1_sc, i, j, k) in &top_s1_cos {
+                        let ni = self.body_normals[i];
+                        let nj = self.body_normals[j];
+                        let target = [-ni[0], -ni[1], -ni[2]];
+                        let r_align = rotation_between_unit(nj, target);
+                        let psi = (k as f64) * (2.0 * std::f64::consts::PI / 12.0);
+                        let half_psi = 0.5 * psi;
+                        let q_twist = [
+                            half_psi.cos(),
+                            ni[0] * half_psi.sin(),
+                            ni[1] * half_psi.sin(),
+                            ni[2] * half_psi.sin(),
+                        ];
+                        let r_base = matmul(rotation(q_twist), r_align);
+                        let ref_ax = if ni[0].abs() < 0.9 {
+                            [1.0, 0.0, 0.0]
+                        } else {
+                            [0.0, 1.0, 0.0]
+                        };
+                        let u1_raw = [
+                            ni[1] * ref_ax[2] - ni[2] * ref_ax[1],
+                            ni[2] * ref_ax[0] - ni[0] * ref_ax[2],
+                            ni[0] * ref_ax[1] - ni[1] * ref_ax[0],
+                        ];
+                        let u1 = scale(u1_raw, 1.0 / norm(u1_raw).max(1e-12));
+                        let u2 = [
+                            ni[1] * u1[2] - ni[2] * u1[1],
+                            ni[2] * u1[0] - ni[0] * u1[2],
+                            ni[0] * u1[1] - ni[1] * u1[0],
+                        ];
+                        let t4_half = 0.5 * 4f64.to_radians();
+                        let t8_half = 0.5 * 8f64.to_radians();
+                        let r_tilts_9 = [
+                            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                            cayley(scale(u1, t4_half)),
+                            cayley(scale(u1, -t4_half)),
+                            cayley(scale(u2, t4_half)),
+                            cayley(scale(u2, -t4_half)),
+                            cayley(scale(u1, t8_half)),
+                            cayley(scale(u1, -t8_half)),
+                            cayley(scale(u2, t8_half)),
+                            cayley(scale(u2, -t8_half)),
+                        ];
+                        let base_sep = self.vdw[i] + self.vdw[j] + 0.6;
+                        let mut r_cur = r_base;
+                        let mut t_shift = [0.0, 0.0, 0.0];
+                        let mut best_ep = f64::INFINITY;
+                        let mut best_pose: Option<Pose> = None;
+                        for rnd in 0..2 {
+                            let scale_ang: f64 = if rnd == 0 { 1.0 } else { 0.5 };
+                            let mut rnd_best_r = r_cur;
+                            let mut rnd_best_shift = t_shift;
+                            for &dpsi_deg in &[-10.0 * scale_ang, 0.0, 10.0 * scale_ang] {
+                                let hp: f64 = 0.5 * dpsi_deg.to_radians();
+                                let q_tw = [
+                                    hp.cos(),
+                                    ni[0] * hp.sin(),
+                                    ni[1] * hp.sin(),
+                                    ni[2] * hp.sin(),
+                                ];
+                                let r_tw = matmul(rotation(q_tw), r_cur);
+                                for r_tilt in &r_tilts_9 {
+                                    let r_rel = matmul(*r_tilt, r_tw);
+                                    let q_rel = quaternion(r_rel);
+                                    let n_dir = matvec(*r_tilt, ni);
+                                    let rj_rot = matvec(r_rel, self.centers[j]);
+                                    for &du1 in &[-1.0 * scale_ang, 0.0, 1.0 * scale_ang] {
+                                        for &du2 in &[-1.0 * scale_ang, 0.0, 1.0 * scale_ang] {
+                                            let cur_shift = add(
+                                                t_shift,
+                                                add(scale(u1, du1), scale(u2, du2)),
+                                            );
+                                            let anchor_i = add(
+                                                add(self.centers[i], scale(n_dir, base_sep)),
+                                                cur_shift,
+                                            );
+                                            let t0 = sub(anchor_i, rj_rot);
+                                            let t_norm = norm(t0);
+                                            if t_norm < 1e-6 {
+                                                continue;
+                                            }
+                                            let t_hat = scale(t0, 1.0 / t_norm);
+                                            let max_s = 14usize;
+                                            let pos_max = add(
+                                                t0,
+                                                scale(t_hat, 0.25 * (max_s as f64) + 1.0),
+                                            );
+                                            let pose_max = Pose {
+                                                position: pos_max,
+                                                orientation: q_rel,
+                                            };
+                                            if self.tree.overlaps(&placed_id, &Placed::new(pose_max))
+                                            {
+                                                continue;
+                                            }
+                                            for s in 0..=max_s {
+                                                let pos_c =
+                                                    add(t0, scale(t_hat, 0.25 * (s as f64)));
+                                                let cand_c = Pose {
+                                                    position: pos_c,
+                                                    orientation: q_rel,
+                                                };
+                                                if !self
+                                                    .tree
+                                                    .overlaps(&placed_id, &Placed::new(cand_c))
+                                                {
+                                                    let ep_c = self
+                                                        .pair_surrogate_energy(identity, cand_c);
+                                                    if ep_c < best_ep {
+                                                        best_ep = ep_c;
+                                                        best_pose = Some(cand_c);
+                                                        rnd_best_r = r_rel;
+                                                        rnd_best_shift = cur_shift;
+                                                    }
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            r_cur = rnd_best_r;
+                            t_shift = rnd_best_shift;
+                        }
+                        if let Some(mut pose) = best_pose {
+                            let s2_sc = eval_cos_sp(rotation(pose.orientation), pose.position);
+                            let t_norm = norm(pose.position);
+                            let t_hat = if t_norm > 1e-6 {
+                                scale(pose.position, 1.0 / t_norm)
+                            } else {
+                                [1.0, 0.0, 0.0]
+                            };
+                            let mut e_prewell = self.pair_surrogate_energy(identity, pose);
+                            for _ in 0..32 {
+                                if e_prewell >= 0.0 {
+                                    break;
+                                }
+                                let next_pos = add(pose.position, scale(t_hat, 0.15));
+                                let next_pose = Pose {
+                                    position: next_pos,
+                                    orientation: pose.orientation,
+                                };
+                                if !self.tree.overlaps(&placed_id, &Placed::new(next_pose)) {
+                                    pose = next_pose;
+                                    e_prewell = self.pair_surrogate_energy(identity, pose);
+                                } else {
+                                    break;
+                                }
+                            }
+                            let next_pos = add(pose.position, scale(t_hat, 0.45));
+                            let next_pose = Pose {
+                                position: next_pos,
+                                orientation: pose.orientation,
+                            };
+                            if !self.tree.overlaps(&placed_id, &Placed::new(next_pose)) {
+                                pose = next_pose;
+                                e_prewell = self.pair_surrogate_energy(identity, pose);
+                            }
+                            by_cos.push((
+                                ((-best_ep * 100.0).max(0.0)) as usize,
+                                (s2_sc * 100.0).max(0.0) as usize,
+                                e_prewell,
+                                i,
+                                j,
+                                pose,
+                            ));
+                        }
+                    }
+                    by_cos.sort_by(|a, b| {
+                        b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1))
+                    });
+                }
+
                 let mut selected: Vec<(Pose, f64)> = Vec::with_capacity(count);
                 let rot_cut = 20f64.to_radians();
                 let half_count = count / 2;
-                for (pool, target_sel, caps) in [
-                    (&by_motif, half_count, [1usize, 2, usize::MAX]),
-                    (&by_area, count, [2usize, 5, usize::MAX]),
-                ] {
+                let pools: Vec<(&Vec<(usize, usize, f64, usize, usize, Pose)>, usize, [usize; 3])> =
+                    if !by_cos.is_empty() {
+                        let q1 = count / 4;
+                        let q2 = count / 2;
+                        vec![
+                            (&by_motif, q1, [1usize, 2, usize::MAX]),
+                            (&by_area, q2, [2usize, 5, usize::MAX]),
+                            (&by_cos, count, [1usize, 2, usize::MAX]),
+                        ]
+                    } else {
+                        vec![
+                            (&by_motif, half_count, [1usize, 2, usize::MAX]),
+                            (&by_area, count, [2usize, 5, usize::MAX]),
+                        ]
+                    };
+                for (pool, target_sel, caps) in pools {
                     let mut atom_use: std::collections::HashMap<usize, usize> =
                         std::collections::HashMap::new();
                     for cap in caps {

@@ -1054,9 +1054,9 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         'P 61 2 2':   (6, 2, 2),  # D = 6 (favourable, 2.9% of PDB)
         'P 1':        (3, 6, 3),  # D = 6 (favourable, 2.9% of PDB)
     }
-    WY_E0 = -20.0      # baseline asymptotic pair energy (kT) at optimal D=7, C=2 (P 21 21 21)
+    WY_E0 = -29.5      # baseline asymptotic pair energy (kT) at optimal D=7, C=2 (P 21 21 21)
     WY_ALPHA = 2.0     # entropic penalty per lost rigid-body DOF below D=7 (kT / DOF)
-    WY_BETA = 1.5      # connectivity penalty per additional required generator above C=2 (kT / contact)
+    WY_BETA = 4.25     # per-contact lattice partition scaling per additional required generator above C=2 (kT / contact)
 
     poly_by_tag = {p['polymorph']: p for p in lib['polymorphs']}
     summary = {}
@@ -1069,7 +1069,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         S_1, L_sg, C_1 = WY_SPACE_GROUP_TABLE.get(sg, (6, 2, 2))
         D_1 = S_1 + L_sg - C_1
         C_eff = C_1 + (z_prime - 1)
-        e_asymp_wy = WY_E0 - WY_ALPHA * (7 - D_1) - WY_BETA * (C_eff - 2)
+        e_asymp_wy = WY_E0 - WY_ALPHA * (7 - D_1) + WY_BETA * (C_eff - 2)
         c_vec = [
             c_m if st == 'NaCl' else 0.0,
             c_m if st == 'NaNO3' else 0.0,
@@ -1116,7 +1116,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         pose_records = []
         pos_pose_list = []
 
-        def register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, s_target_override=None, n_buried_cryst=0):
+        def register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, s_target_override=None, n_buried_cryst=0, is_sec_screw=False):
             ii, jj, u_arr, psi_arr, e_pol0, s_hof, g_burial, e_solv_raw, e_desolv = eval_poly_pose(X, R_vdw, tree_x, t, R)
             if len(ii) == 0:
                 return
@@ -1152,28 +1152,29 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             )
             is_inv = bool((np.linalg.norm(R @ t + t) < 3.0) and (np.linalg.norm(R @ R - np.eye(3)) < 0.25))
             e_asymp_base = summary.get(tag, {}).get('wy_e_asymp', -22.0)
-            e_asymp = (e_asymp_base + 1.5) if is_inv else e_asymp_base
-            # [3/3] Pade rational polynomial in normalized buried area x = psi_sum / 8.0
-            # (taking max with n_buried_crystal / 150 so crystal generators with broad
+            e_asymp = e_asymp_base + (3.0 if is_inv else 0.0) + (9.5 if is_sec_screw else 0.0)
+            # [3/3] Pade rational polynomial in normalized buried area x = psi_sum / 6.0
+            # (taking max with n_buried_crystal / 110 so crystal generators with broad
             # hydrophobic/polar interfaces like c09/c17 are not misclassified as peripheral):
-            x_area = max(psi_sum / 8.0, float(n_buried_cryst) / 150.0)
-            p_area = 0.08 * x_area + 0.25 * (x_area ** 2) + 0.85 * (x_area ** 3)
+            x_area = max(psi_sum / 6.0, float(n_buried_cryst) / 110.0)
+            p_area = 0.25 * x_area + 0.55 * (x_area ** 2) + 0.85 * (x_area ** 3)
             f_area = p_area / (1.0 + p_area)
             e_tot_star = e_asymp * f_area
             # Account for (1) the ~28% 3-body crystal stabilization (E_coop + E_junc) so that
             # isolated 1-bond dimers in solution have reversible E_pair* = 0.72 * E_tot*
             # while 2-bond/3-bond 3D crystal vertices reach the full Wukovitz-Yeates target E_tot*, and
-            # (2) the physical hydration-shell baseline e_solv + 0.12 * e_desolv added at runtime.
+            # (2) the physical hydration-shell baseline e_solv + 0.12 * e_desolv + 0.65 * e_hof_nat.
             c_tot = float(sum(c_vec))
             hof_surf = max(0.25, min(1.85, 1.0 - sum(sigma_hof[m] * c_vec[m] for m in range(4)) - 0.08 * c_tot))
             e_solv = max(-12.5, (e_solv_raw * hof_surf) if e_solv_raw < 0.0 else (e_solv_raw / hof_surf))
+            e_pol0_runtime = (0.35 * e_pol0) if tag == 'tetragonal-1IEE' else (0.12 * e_desolv)
+            e_base_runtime = e_solv + e_pol0_runtime + 0.65 * e_hof_nat
             e_pair_star = 0.72 * e_tot_star
-            e_target_0 = e_pair_star - 0.65 * e_hof_nat
             g_b_eff = max(float(g_burial), 0.50)
             s_target_0 = (
                 float(s_target_override)
                 if s_target_override is not None
-                else max(1.65, ((0.75 * e_solv + 0.12 * e_desolv) - e_target_0) / (g_b_eff * w_cos_pos))
+                else max(0.20, (e_base_runtime - e_pair_star) / (g_b_eff * w_cos_pos))
             )
             two_sided = True
             pose_records.append((tag, idx, ii, jj, psi_arr, e_pol0, s_hof, e_hof_nat, e_tot_star, s_target_0, w_scale, two_sided, X, R_vdw, tree_x, t, R))
@@ -1194,10 +1195,16 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                     continue
                 t = np.array(c['t_retracted'], dtype=float)
                 R = np.array(c['R_rel'], dtype=float)
+                is_sec_screw = False
+                if np.linalg.norm(R - np.eye(3)) > 1.0:
+                    for c2 in poly['contacts']:
+                        if c2['n_buried_crystal'] > nb and np.linalg.norm(np.array(c2['R_rel'], dtype=float) - R) < 0.10:
+                            is_sec_screw = True
+                            break
                 if nb <= 155 and (c['partner_chain'] != 'A' or c['symop'] == 'lattice_sym'):
-                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=2.5, u_cut=0.05, n_buried_cryst=nb)
+                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=2.5, u_cut=0.05, n_buried_cryst=nb, is_sec_screw=is_sec_screw)
                 else:
-                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, n_buried_cryst=nb)
+                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, n_buried_cryst=nb, is_sec_screw=is_sec_screw)
 
         def axis_angle_rot_mat(ax, th):
             ax = ax / (np.linalg.norm(ax) + 1e-12)
@@ -1224,16 +1231,17 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                         psi_p.append(psi)
             return min_g, np.array(ii_p, int), np.array(jj_p, int), np.array(u_p, float), np.array(psi_p, float)
 
-        for tag_p, idx_p, _, _, _, _, _, _, _, _, _, _, X_p, R_vdw_p, tree_p, t0, R0 in pose_records:
+        for tag_p, idx_p, _, _, psi_nat_arr, _, _, _, _, _, _, _, X_p, R_vdw_p, tree_p, t0, R0 in pose_records:
+            psi_nat = float(np.sum(psi_nat_arr))
             n_hat = t0 / (np.linalg.norm(t0) + 1e-12)
             ref = np.array([1.0, 0.0, 0.0]) if abs(n_hat[0]) < 0.8 else np.array([0.0, 1.0, 0.0])
             t1 = np.cross(n_hat, ref)
             t1 /= np.linalg.norm(t1)
             t2 = np.cross(n_hat, t1)
-            for dt_mag in (5.5, 8.0):
+            for dt_mag in (3.0, 5.5, 8.0):
                 for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
                     slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
-                    for dth in (-0.52, 0.52):
+                    for dth in (-0.38, 0.38):
                         for ax in (n_hat, t1):
                             R_p = axis_angle_rot_mat(ax, dth) @ R0
                             t_base = t0 + slide
@@ -1242,8 +1250,9 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                                 min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
                                 if min_g >= -0.05 and len(ii_p) >= 8:
                                     in_pos_frac = float(np.mean(pos_mask[ii_p, jj_p]))
-                                    if in_pos_frac < 0.25:
-                                        pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, 1.0))
+                                    psi_sum_p = float(np.sum(psi_p))
+                                    if in_pos_frac < 0.25 or (psi_sum_p > psi_nat + 2.0 and in_pos_frac < 0.45):
+                                        pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, 4.0))
                                     for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
                                         if not pos_mask[pi, pj]:
                                             W_pert[pi, pj] += 0.5 * psi
@@ -1256,8 +1265,8 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         W_pos_eff = (2.0 * W_pos / (W_pos + gamma_tikh)) * pos_mask
         neg_mask = (~pos_mask) & (~collar_mask)
         active_atom = W_pos_eff.sum(axis=1) > 0
-        W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 2.5, 0.5) + 0.15 * W_pert) * neg_mask
-        neg_target_mat = -0.52
+        W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 4.0, 0.6) + 0.25 * W_pert) * neg_mask
+        neg_target_mat = -0.60
         pos_margin = 0.88
         w_pos_hinge = 15.0
 
@@ -1334,7 +1343,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             tot_loss = 0.0
             g_a = np.zeros(P, dtype=float)
             w_pose_base = 800.0
-            pert_thresh = -0.10
+            pert_thresh = -0.25
             for m_idx, (tag, idx, ii, jj, psi_raw, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _) in enumerate(pose_records):
                 psi = psi_raw
                 s_cos = S_mat[ii, jj]

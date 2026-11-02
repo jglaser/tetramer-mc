@@ -2590,7 +2590,7 @@ impl MorphMc {
                         by_cos.push((
                             ((-ep_val * 100.0).max(0.0)) as usize,
                             (s2_sc * 100.0).max(0.0) as usize,
-                            e_prewell,
+                            ep_val,
                             i,
                             j,
                             pose,
@@ -2680,12 +2680,23 @@ impl MorphMc {
                         } else {
                             1.0
                         };
-                        let w = w_rank * w_boltz;
-                        let r_inv = transpose(rotation(pose.orientation));
+                        let r_p = rotation(pose.orientation);
+                        let r_inv = transpose(r_p);
                         let inv_pose = Pose {
                             position: matvec(r_inv, pose.position).map(|x| -x),
                             orientation: quaternion(r_inv),
                         };
+                        // Self-inverse 2-fold involutions (C2 symmetric dimers where pose ≈ inv_pose)
+                        // have cyclic symmetry order G_sym = 2 and are pushed twice into `out`
+                        // (`pose` and `inv_pose` represent the same mode), so scale by 0.5 / G_sym = 0.25.
+                        let is_self_inv = if norm(sub(pose.position, inv_pose.position)) < 4.5 {
+                            let r_diff = matmul(r_inv, r_inv);
+                            let tr = r_diff[0][0] + r_diff[1][1] + r_diff[2][2];
+                            ((tr - 1.0) * 0.5).clamp(-1.0, 1.0).acos() < 25f64.to_radians()
+                        } else {
+                            false
+                        };
+                        let w = w_rank * w_boltz * if is_self_inv { 0.25 } else { 1.0 };
                         out.push((pose, 0.5 * w));
                         out.push((inv_pose, 0.5 * w));
                     }

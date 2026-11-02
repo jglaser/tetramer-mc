@@ -1093,34 +1093,30 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
     # the learned cosine embeddings transfer across structures in the same buffer without
     # cross-polymorph chimeric false positives from incompatible salt buffers.
     family_groups = [
-        (['tetragonal-1IEE'], True),
-        (['monoclinic-2D4I', 'monoclinic-3WL2'], False),
-        (['monoclinic-2Z12'], False),
-        (['orthorhombic-1WTN'], False),
-        (['triclinic-2VB1'], False),
-        (['hexagonal-2FBB'], False),
-        (['trigonal-9HRU'], False),
+        ['tetragonal-1IEE'],
+        ['monoclinic-2D4I', 'monoclinic-3WL2'],
+        ['monoclinic-2Z12'],
+        ['orthorhombic-1WTN'],
+        ['triclinic-2VB1'],
+        ['hexagonal-2FBB'],
+        ['trigonal-9HRU'],
     ]
 
     D = 8
     c0 = 0.25
     tau = 0.15
-    sh_iee_ref = json.load(open('/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-tetragonal-1IEE.json'))
-    X_iee_ref = np.array([a['center'] for a in sh_iee_ref['atoms']], dtype=float)
-    d_conf_iee = np.linalg.norm(X_lyz[polar_idx] - X_iee_ref[polar_idx], axis=-1)
 
-    def train_family_embeddings(tags, include_1lyz=False):
+    def train_family_embeddings(tags):
         W_pos = np.zeros((P, P), dtype=float)
         pos_mask = np.zeros((P, P), dtype=bool)
         collar_mask = np.zeros((P, P), dtype=bool)
         U_nat_max = np.zeros((P, P), dtype=float)
-        U_pert_max = np.zeros((P, P), dtype=float)
         W_pert = np.zeros((P, P), dtype=float)
         pert_poses_info = []
         pose_records = []
         pos_pose_list = []
 
-        def register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, s_target_override=None):
+        def register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, s_target_override=None, n_buried_cryst=0):
             ii, jj, u_arr, psi_arr, e_pol0, s_hof, g_burial, e_solv_raw, e_desolv = eval_poly_pose(X, R_vdw, tree_x, t, R)
             if len(ii) == 0:
                 return
@@ -1137,19 +1133,15 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 if u > max_u_j[pj]:
                     max_u_j[pj] = u
                 U_nat_max[pi, pj] = max(U_nat_max[pi, pj], u)
-                U_nat_max[pj, pi] = max(U_nat_max[pj, pj] if False else U_nat_max[pj, pi], u)
+                U_nat_max[pj, pi] = max(U_nat_max[pj, pi], u)
             for pi, pj, u, psi in zip(ii, jj, u_arr, psi_arr):
                 if u > 0.0:
                     collar_mask[pi, pj] = True
                     collar_mask[pj, pi] = True
                 if u >= u_cut or (u_cut <= 0.25 and (u >= 0.70 * max_u_i[pi] or u >= 0.70 * max_u_j[pj])):
                     w_pair = w_norm * psi
-                    if include_1lyz:
-                        W_pos[pi, pj] = max(W_pos[pi, pj], w_pair)
-                        W_pos[pj, pi] = max(W_pos[pj, pi], w_pair)
-                    else:
-                        W_pos[pi, pj] += 0.5 * w_pair
-                        W_pos[pj, pi] += 0.5 * w_pair
+                    W_pos[pi, pj] += 0.5 * w_pair
+                    W_pos[pj, pi] += 0.5 * w_pair
                     pos_mask[pi, pj] = True
                     pos_mask[pj, pi] = True
             c_ch = [c_vec[0], c_vec[0], c_vec[1], c_vec[2], c_vec[3]]
@@ -1159,67 +1151,33 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 for m in range(5)
             )
             is_inv = bool((np.linalg.norm(R @ t + t) < 3.0) and (np.linalg.norm(R @ R - np.eye(3)) < 0.25))
-            if include_1lyz:
-                e_asymp = -15.5 if is_inv else -18.2
-                f_area = psi_sum / (psi_sum + 4.2)
-            else:
-                e_asymp_base = summary.get(tag, {}).get('wy_e_asymp', -22.0)
-                e_asymp = (e_asymp_base + 1.5) if is_inv else e_asymp_base
-                # [3/3] Pade rational polynomial in normalized buried area x = psi_sum / 8.0:
-                # suppresses small peripheral contacts (x < 1) while saturating smoothly to 1 for true crystal generators.
-                x_area = psi_sum / 8.0
-                p_area = 0.08 * x_area + 0.25 * (x_area ** 2) + 0.85 * (x_area ** 3)
-                f_area = p_area / (1.0 + p_area)
+            e_asymp_base = summary.get(tag, {}).get('wy_e_asymp', -22.0)
+            e_asymp = (e_asymp_base + 1.5) if is_inv else e_asymp_base
+            # [3/3] Pade rational polynomial in normalized buried area x = psi_sum / 8.0
+            # (taking max with n_buried_crystal / 150 so crystal generators with broad
+            # hydrophobic/polar interfaces like c09/c17 are not misclassified as peripheral):
+            x_area = max(psi_sum / 8.0, float(n_buried_cryst) / 150.0)
+            p_area = 0.08 * x_area + 0.25 * (x_area ** 2) + 0.85 * (x_area ** 3)
+            f_area = p_area / (1.0 + p_area)
             e_tot_star = e_asymp * f_area
-            if include_1lyz:
-                e_target_0 = e_tot_star - 0.65 * e_hof_nat
-                g_b_eff = max(float(g_burial), 0.75)
-                s_target_0 = (
-                    float(s_target_override)
-                    if s_target_override is not None
-                    else max(0.55, (e_pol0 - e_target_0) / (g_b_eff * w_cos_pos))
-                )
-            else:
-                # Account for (1) the ~42% 3-body crystal stabilization (E_coop + E_junc) so that
-                # isolated 1-bond dimers in solution have reversible E_pair* = 0.58 * E_tot* (~ -12 to -14.5 kT)
-                # while 2-bond/3-bond 3D crystal vertices reach the full Wukovitz-Yeates target E_tot*, and
-                # (2) the physical hydration-shell baseline e_solv + 0.15 * e_desolv added at runtime.
-                c_tot = float(sum(c_vec))
-                hof_surf = max(0.25, min(1.85, 1.0 - sum(sigma_hof[m] * c_vec[m] for m in range(4)) - 0.08 * c_tot))
-                e_solv = max(-12.5, (e_solv_raw * hof_surf) if e_solv_raw < 0.0 else (e_solv_raw / hof_surf))
-                e_pair_star = 0.72 * e_tot_star
-                e_target_0 = e_pair_star - 0.65 * e_hof_nat
-                g_b_eff = max(float(g_burial), 0.50)
-                s_target_0 = (
-                    float(s_target_override)
-                    if s_target_override is not None
-                    else max(0.55, ((0.75 * e_solv + 0.12 * e_desolv) - e_target_0) / (g_b_eff * w_cos_pos))
-                )
+            # Account for (1) the ~28% 3-body crystal stabilization (E_coop + E_junc) so that
+            # isolated 1-bond dimers in solution have reversible E_pair* = 0.72 * E_tot*
+            # while 2-bond/3-bond 3D crystal vertices reach the full Wukovitz-Yeates target E_tot*, and
+            # (2) the physical hydration-shell baseline e_solv + 0.12 * e_desolv added at runtime.
+            c_tot = float(sum(c_vec))
+            hof_surf = max(0.25, min(1.85, 1.0 - sum(sigma_hof[m] * c_vec[m] for m in range(4)) - 0.08 * c_tot))
+            e_solv = max(-12.5, (e_solv_raw * hof_surf) if e_solv_raw < 0.0 else (e_solv_raw / hof_surf))
+            e_pair_star = 0.72 * e_tot_star
+            e_target_0 = e_pair_star - 0.65 * e_hof_nat
+            g_b_eff = max(float(g_burial), 0.50)
+            s_target_0 = (
+                float(s_target_override)
+                if s_target_override is not None
+                else max(1.65, ((0.75 * e_solv + 0.12 * e_desolv) - e_target_0) / (g_b_eff * w_cos_pos))
+            )
             two_sided = True
             pose_records.append((tag, idx, ii, jj, psi_arr, e_pol0, s_hof, e_hof_nat, e_tot_star, s_target_0, w_scale, two_sided, X, R_vdw, tree_x, t, R))
 
-        if include_1lyz:
-            nat_lyz_modes = [
-                ('m0', [0.0, 0.0, 37.9], [1.0, 0.0, 0.0, 0.0], 0.55),
-                ('m1', [19.47624995357571, 18.42510338365495, -9.475000000000003], [0.7071067811865477, 0.0, 0.0, 0.7071067811865475], 2.46),
-                ('m2', [19.47624995357571, 18.42510338365495, 28.424999999999994], [0.7071067811865477, 0.0, 0.0, 0.7071067811865475], 0.45),
-                ('m3', [-39.54999999999998, -1.6486466627693304, 8.973438122994171], [0.0, 1.0, 0.0, 0.0], 0.55),
-                ('m4', [-20.073750046424273, -20.07375004642428, -19.451561877005823], [0.0, 0.7071067811865477, -0.7071067811865475, 0.0], 1.50),
-                ('m5', [21.124896616345055, -21.124896616345048, 37.39843812299417], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0], 0.55),
-                ('m6', [21.124896616345055, -21.124896616345048, -0.5015618770058232], [0.0, 0.7071067811865475, 0.7071067811865477, 0.0], 0.55),
-                ('cap_m6', [22.297474636863532, -21.25884591642077, -1.0185602607119532], [-0.036576369473634514, 0.701699829098772, 0.7109986930404457, -0.023672302664642158], 1.15),
-            ]
-            for idx, (m_name, t0, q0, s_targ) in enumerate(nat_lyz_modes):
-                register_positive_pose('tetragonal-1LYZ', 10 + idx, X_lyz, R_lyz, tree_lyz, np.array(t0, float), quat_to_mat(q0), [0.85, 0.0, 0.0, 0.85], w_scale=1.0, u_cut=0.25, s_target_override=s_targ)
-
-        iee_targets = {
-            0: (2.65, 1.0, 0.30),
-            1: (2.65, 1.0, 0.30),
-            2: (0.70, 1.0, 0.35),
-            3: (0.20, 0.8, 0.45),
-            6: (0.30, 0.9, 0.35),
-            7: (0.30, 0.9, 0.35),
-        }
         for tag in tags:
             if tag not in poly_by_tag:
                 continue
@@ -1231,15 +1189,15 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             R_vdw = np.array([a['radius'] for a in sh['atoms']], dtype=float)
             tree_x = cKDTree(X)
             for idx, c in enumerate(poly['contacts']):
-                if c['n_buried_crystal'] < 150:
+                nb = c['n_buried_crystal']
+                if nb < 149:
                     continue
                 t = np.array(c['t_retracted'], dtype=float)
                 R = np.array(c['R_rel'], dtype=float)
-                if tag == 'tetragonal-1IEE' and idx in iee_targets:
-                    st, w_sc, u_cut = iee_targets[idx]
-                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=w_sc, u_cut=u_cut, s_target_override=st)
+                if nb <= 155 and (c['partner_chain'] != 'A' or c['symop'] == 'lattice_sym'):
+                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=2.5, u_cut=0.05, n_buried_cryst=nb)
                 else:
-                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25)
+                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, n_buried_cryst=nb)
 
         def axis_angle_rot_mat(ax, th):
             ax = ax / (np.linalg.norm(ax) + 1e-12)
@@ -1266,136 +1224,42 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                         psi_p.append(psi)
             return min_g, np.array(ii_p, int), np.array(jj_p, int), np.array(u_p, float), np.array(psi_p, float)
 
-        prim_mask = np.zeros((P, P), dtype=bool)
-        for tag_p, idx_p, ii, jj, _, _, _, _, _, _, _, _, _, _, _, _, _ in pose_records:
-            if (tag_p == 'tetragonal-1LYZ' and idx_p in (11, 16, 17)) or (tag_p == 'tetragonal-1IEE' and idx_p in (0, 1, 2)):
-                for pi, pj in zip(ii, jj):
-                    if pos_mask[pi, pj]:
-                        prim_mask[pi, pj] = prim_mask[pj, pi] = True
-
-        U_c6_nat = np.zeros((P, P), dtype=float)
-        U_c6_roll = np.zeros((P, P), dtype=float)
-        c6_recs = [r for r in pose_records if r[0] == 'tetragonal-1IEE' and r[1] == 6]
-        if c6_recs:
-            _, _, _, _, psi_6, _, _, _, _, _, _, _, X_6, R_vdw_6, tree_6, t0_6, R0_6 = c6_recs[0]
-            psi_nat_6 = float(np.sum(psi_6))
-            _, ii_6, jj_6, u_6, _ = extract_pose_pairs(X_6, R_vdw_6, tree_6, t0_6, R0_6)
-            for pi, pj, u in zip(ii_6, jj_6, u_6):
-                U_c6_nat[pi, pj] = max(U_c6_nat[pi, pj], u)
-                U_c6_nat[pj, pi] = max(U_c6_nat[pj, pi], u)
-            n_hat_6 = t0_6 / (np.linalg.norm(t0_6) + 1e-12)
-            ref_6 = np.array([1.0, 0.0, 0.0]) if abs(n_hat_6[0]) < 0.8 else np.array([0.0, 1.0, 0.0])
-            t1_6 = np.cross(n_hat_6, ref_6)
-            t1_6 /= np.linalg.norm(t1_6)
-            t2_6 = np.cross(n_hat_6, t1_6)
-            w_c6_roll = 0.0
-            for dt_mag in (2.2, 2.8, 3.4):
-                for ang in np.linspace(0, 2 * np.pi, 12, endpoint=False):
-                    s_hat = np.cos(ang) * t1_6 + np.sin(ang) * t2_6
-                    roll_ax = np.cross(n_hat_6, s_hat)
-                    slide = dt_mag * s_hat
-                    for dth in (-0.16, 0.16):
-                        for ax in (roll_ax, roll_ax - 0.5 * n_hat_6, roll_ax + 0.5 * n_hat_6):
-                            R_p = axis_angle_rot_mat(ax, dth) @ R0_6
-                            t_base = t0_6 + slide
-                            for shift in np.linspace(-2.5, 3.5, 25):
-                                t_p = t_base + shift * n_hat_6
-                                min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_6, R_vdw_6, tree_6, t_p, R_p)
-                                if min_g >= -0.02 and len(ii_p) >= 8:
-                                    psi_sum_p = float(np.sum(psi_p))
-                                    if psi_sum_p > psi_nat_6 + 1.0:
-                                        w = (psi_sum_p - psi_nat_6) ** 2
-                                        w_c6_roll += w
-                                        pert_poses_info.append((6, ii_p, jj_p, psi_p, 18.0))
-                                        for pi, pj, uv, psi in zip(ii_p, jj_p, u_p, psi_p):
-                                            U_c6_roll[pi, pj] += w * uv
-                                            if pi != pj:
-                                                U_c6_roll[pj, pi] += w * uv
-                                            W_pert[pi, pj] += 8.0 * psi
-                                            W_pert[pj, pi] += 8.0 * psi
-                                    break
-            U_c6_roll /= max(w_c6_roll, 1e-8)
-
         for tag_p, idx_p, _, _, _, _, _, _, _, _, _, _, X_p, R_vdw_p, tree_p, t0, R0 in pose_records:
-            if tag_p == 'tetragonal-1IEE' and idx_p in (1, 7):
-                continue
-            if tag_p == 'tetragonal-1LYZ' and idx_p == 17:
-                continue
             n_hat = t0 / (np.linalg.norm(t0) + 1e-12)
             ref = np.array([1.0, 0.0, 0.0]) if abs(n_hat[0]) < 0.8 else np.array([0.0, 1.0, 0.0])
             t1 = np.cross(n_hat, ref)
             t1 /= np.linalg.norm(t1)
             t2 = np.cross(n_hat, t1)
-            is_c3 = (tag_p == 'tetragonal-1IEE' and idx_p == 3) or (tag_p == 'tetragonal-1LYZ' and idx_p == 14)
-            is_sec = is_c3 or (tag_p == 'tetragonal-1IEE' and idx_p == 6) or (tag_p == 'tetragonal-1LYZ' and idx_p == 12)
-            dt_mags = (2.5, 4.5, 6.8) if is_sec else (4.5, 7.0)
-            dths = (-0.15, 0.15, -0.38, 0.38) if is_sec else ((-0.42, 0.0, 0.42) if include_1lyz else (-0.48, 0.48))
-            w_p_mult = 3.0 if is_sec else 1.5
-            w_p_pose = 3.0 if include_1lyz else 1.5
-            if include_1lyz:
-                for dt_mag in dt_mags:
-                    for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
-                        slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
-                        for dth in dths:
-                            for ax in (n_hat, t1):
-                                R_p = axis_angle_rot_mat(ax, dth) @ R0
-                                t_base = t0 + slide
-                                for shift in np.linspace(-2.5 if is_sec else -3.0, 3.5 if is_sec else 4.0, 21 if is_sec else 15):
-                                    t_p = t_base + shift * n_hat
-                                    min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
-                                    if min_g >= -0.05 and len(ii_p) >= 8:
-                                        pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, w_p_pose))
-                                        for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
-                                            W_pert[pi, pj] += w_p_mult * psi
-                                            W_pert[pj, pi] += w_p_mult * psi
-                                            if is_c3:
-                                                U_pert_max[pi, pj] = max(U_pert_max[pi, pj], u_v)
-                                                U_pert_max[pj, pi] = max(U_pert_max[pj, pi], u_v)
-                                        break
-            else:
-                for dt_mag in (5.5, 8.0):
-                    for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
-                        slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
-                        for dth in (-0.52, 0.52):
-                            for ax in (n_hat, t1):
-                                R_p = axis_angle_rot_mat(ax, dth) @ R0
-                                t_base = t0 + slide
-                                for shift in np.linspace(-3.0, 4.0, 15):
-                                    t_p = t_base + shift * n_hat
-                                    min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
-                                    if min_g >= -0.05 and len(ii_p) >= 8:
-                                        in_pos_frac = float(np.mean(pos_mask[ii_p, jj_p]))
-                                        if in_pos_frac < 0.25:
-                                            pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, 1.0))
-                                        for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
-                                            if not pos_mask[pi, pj]:
-                                                W_pert[pi, pj] += 0.5 * psi
-                                                W_pert[pj, pi] += 0.5 * psi
-                                        break
+            for dt_mag in (5.5, 8.0):
+                for ang in np.linspace(0, 2 * np.pi, 6, endpoint=False):
+                    slide = dt_mag * (np.cos(ang) * t1 + np.sin(ang) * t2)
+                    for dth in (-0.52, 0.52):
+                        for ax in (n_hat, t1):
+                            R_p = axis_angle_rot_mat(ax, dth) @ R0
+                            t_base = t0 + slide
+                            for shift in np.linspace(-3.0, 4.0, 15):
+                                t_p = t_base + shift * n_hat
+                                min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
+                                if min_g >= -0.05 and len(ii_p) >= 8:
+                                    in_pos_frac = float(np.mean(pos_mask[ii_p, jj_p]))
+                                    if in_pos_frac < 0.25:
+                                        pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, 1.0))
+                                    for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
+                                        if not pos_mask[pi, pj]:
+                                            W_pert[pi, pj] += 0.5 * psi
+                                            W_pert[pj, pi] += 0.5 * psi
+                                    break
 
-        if include_1lyz:
-            c3_flip = (U_pert_max > U_nat_max + 0.20) & (~prim_mask) & pos_mask & (U_c6_nat == 0)
-            c6_flip = (U_c6_roll > U_c6_nat - 0.02) & (~prim_mask) & pos_mask & (U_c6_roll > 0.20)
-            rim_flip = c3_flip | c6_flip
-            pos_mask[rim_flip] = False
-            W_pos[rim_flip] = 0.0
-            c6_core = (U_c6_nat > U_c6_roll + 0.06) & pos_mask
-            W_pos[c6_core] *= 3.0
-            neg_mask = ~pos_mask
-            active_atom = W_pos.sum(axis=1) > 0
-            W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 16.0, 1.2) + W_pert) * neg_mask
-            W_pos_eff = W_pos
-        else:
-            # Tikhonov spectral filter on positive pair weights to damp low-rank duplicate multiplicity
-            # across co-trained structures (e.g. Z'=2 monoclinic 2D4I + 3WL2) without hard deduplication.
-            gamma_tikh = 1.2
-            W_pos_eff = (2.0 * W_pos / (W_pos + gamma_tikh)) * pos_mask
-            neg_mask = (~pos_mask) & (~collar_mask)
-            active_atom = W_pos_eff.sum(axis=1) > 0
-            W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 2.5, 0.5) + 0.15 * W_pert) * neg_mask
-        neg_target_mat = np.where(W_pert > 5.0, -0.82, -0.52) if include_1lyz else -0.52
-        pos_margin = 0.88 if include_1lyz else 0.88
-        w_pos_hinge = 5.0 if include_1lyz else 15.0
+        # Tikhonov spectral filter on positive pair weights to damp low-rank duplicate multiplicity
+        # across co-trained structures (e.g. Z'=2 monoclinic 2D4I + 3WL2) without hard deduplication.
+        gamma_tikh = 1.2
+        W_pos_eff = (2.0 * W_pos / (W_pos + gamma_tikh)) * pos_mask
+        neg_mask = (~pos_mask) & (~collar_mask)
+        active_atom = W_pos_eff.sum(axis=1) > 0
+        W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 2.5, 0.5) + 0.15 * W_pert) * neg_mask
+        neg_target_mat = -0.52
+        pos_margin = 0.88
+        w_pos_hinge = 15.0
 
         rng = np.random.default_rng(7)
         U0 = rng.normal(0.0, 0.5, size=(P, D))
@@ -1445,13 +1309,13 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
 
         A_MIN = 0.20
-        A_MAX = 1.65 if include_1lyz else 3.85
+        A_MAX = 3.85
         A_BG = 0.70
         a0 = np.full(P, A_BG)
 
-        # Tikhonov pose-Gram inverse-leverage weights for non-1LYZ families
+        # Tikhonov pose-Gram inverse-leverage weights
         M_poses = len(pose_records)
-        if not include_1lyz and M_poses > 0:
+        if M_poses > 0:
             V_inc = np.zeros((M_poses, P), dtype=float)
             for m_idx, (_, _, ii_m, jj_m, psi_m, _, _, _, _, _, _, _, _, _, _, _, _) in enumerate(pose_records):
                 np.add.at(V_inc[m_idx], ii_m, psi_m)
@@ -1469,8 +1333,8 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             a = np.clip(a_raw, A_MIN, A_MAX)
             tot_loss = 0.0
             g_a = np.zeros(P, dtype=float)
-            w_pose_base = 600.0 if include_1lyz else 800.0
-            pert_thresh = -0.40 if include_1lyz else -0.10
+            w_pose_base = 800.0
+            pert_thresh = -0.10
             for m_idx, (tag, idx, ii, jj, psi_raw, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _) in enumerate(pose_records):
                 psi = psi_raw
                 s_cos = S_mat[ii, jj]
@@ -1522,7 +1386,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                     g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
                     np.add.at(g_a, jj, g_wj * psi)
                     np.add.at(g_a, ii, g_wi * psi)
-            lam_a = 0.05 if include_1lyz else 0.5
+            lam_a = 0.5
             tot_loss += lam_a * float(np.sum((a - A_BG) ** 2))
             g_a = (g_a + 2.0 * lam_a * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
             return tot_loss, g_a
@@ -1539,8 +1403,8 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             mp_cos_activity[full_i] = round(float(a_pol[p_idx]), 6)
         return mp_cos_u, mp_cos_v, mp_cos_activity
 
-    for tags, include_1lyz in family_groups:
-        mp_cos_u, mp_cos_v, mp_cos_activity = train_family_embeddings(tags, include_1lyz=include_1lyz)
+    for tags in family_groups:
+        mp_cos_u, mp_cos_v, mp_cos_activity = train_family_embeddings(tags)
         for tag in tags:
             if tag in summary:
                 summary[tag]['mp_cos_u'] = mp_cos_u
@@ -1620,7 +1484,7 @@ def main():
             for tag, info in hof_summary.items():
                 # Export per-polymorph chemistry models with physical dehydration baseline + learned surface chemistry:
                 m_zero = dict(model)
-                m_zero['weights'] = phys_desolv_weights if tag != 'tetragonal-1IEE' else list(model['weights'])
+                m_zero['weights'] = phys_desolv_weights
                 m_zero['cos_u'] = info['mp_cos_u']
                 m_zero['cos_v'] = info['mp_cos_v']
                 m_zero['cos_activity'] = info['mp_cos_activity']
@@ -1629,7 +1493,7 @@ def main():
                 with open(os.path.join(poly_dir, f'chemistry-model-langmuir0-{tag}.json'), 'w') as fp:
                     json.dump(m_zero, fp, indent=2)
                 m_link = dict(model)
-                m_link['weights'] = phys_desolv_weights if tag != 'tetragonal-1IEE' else list(model['weights'])
+                m_link['weights'] = phys_desolv_weights
                 m_link['cos_u'] = info['mp_cos_u']
                 m_link['cos_v'] = info['mp_cos_v']
                 m_link['cos_activity'] = info['mp_cos_activity']

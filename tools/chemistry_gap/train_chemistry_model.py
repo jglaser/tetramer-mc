@@ -15,7 +15,14 @@ from scipy.spatial import cKDTree
 from scipy.optimize import minimize
 
 sys.path.insert(0, '/vast/xvg/tetramer-mc-runs/morph-growth-20261012')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import observe_growth as og
+from remark280_featurizer import (
+    FEATURE_NAMES,
+    PROJECTION_CHANNEL_NAMES,
+    fit_condition_projection_layer,
+    project_condition_features,
+)
 
 PDB_DIR = '/vast/xvg/tetramer-mc-runs/morph-growth-20261012/pdb-hewl'
 O_DIR = '/vast/xvg/tetramer-mc-runs/oligomer-capture-20261010/dft-ref'
@@ -733,10 +740,11 @@ def harvest_pdb_interfaces():
         waters, anions = [], []
         for ch in model:
             for res in ch:
-                if res.name == 'HOH':
+                if res.name in ('HOH', 'DOD'):
                     for at in res:
-                        if at.element.name == 'O':
-                            waters.append(np.array([at.pos.x, at.pos.y, at.pos.z]))
+                        if at.element.name in ('O', 'D'):
+                            if at.name in ('O', 'OW'):
+                                waters.append(np.array([at.pos.x, at.pos.y, at.pos.z]))
                 elif res.name in ('CL', 'NO3', 'SO4', 'BR', 'IOD'):
                     for at in res:
                         anions.append((res.name, np.array([at.pos.x, at.pos.y, at.pos.z])))
@@ -1044,20 +1052,42 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
     # Wukovitz & Yeates (1995), Nature Struct. Biol. 2, 1062-1067, Table 1:
     # Exact space-group degree-of-freedom triples (S_1, L, C_1) where D_1 = S_1 + L - C_1.
     # Universal 3-parameter calibration (E_0, alpha, beta) of e_asymp:
-    #   e_asymp(D_1, C_eff) = E_0 - alpha * (7 - D_1) - beta * (C_eff - 2) + delta_inv * 1_inv
-    # where C_eff = C_1 + (Z' - 1) accounts for non-crystallographic asymmetric-unit contacts.
-    WY_SPACE_GROUP_TABLE = {
-        'P 21 21 21': (6, 3, 2),  # D = 7 (optimal, 36.1% of PDB)
-        'P 1 21 1':   (5, 4, 3),  # D = 6 (favourable, 11.1% of PDB)
-        'P 43 21 2':  (6, 2, 2),  # D = 6 (favourable, 5.7% of PDB)
-        'P 31 2 1':   (6, 2, 2),  # D = 6 (favourable, 4.9% of PDB)
-        'P 61 2 2':   (6, 2, 2),  # D = 6 (favourable, 2.9% of PDB)
-        'P 1':        (3, 6, 3),  # D = 6 (favourable, 2.9% of PDB)
-    }
-    WY_E0 = -29.5      # baseline asymptotic pair energy (kT) at optimal D=7, C=2 (P 21 21 21)
-    WY_ALPHA = 2.0     # entropic penalty per lost rigid-body DOF below D=7 (kT / DOF)
-    WY_BETA = 4.25     # per-contact lattice partition scaling per additional required generator above C=2 (kT / contact)
+    # Wukovitz & Yeates (1995), Nature Struct. Biol. 2, 1062-1067, Table 1:
+    # Algebraic space-group degree-of-freedom triples (S_1, L_sg, C_1) where D_1 = S_1 + L_sg - C_1,
+    # computed directly from gemmi.SpaceGroup symmetry operations:
+    #   S_1  = 3 + rank(vstack_g (R_g - I_3))
+    #   L_sg = 6 - rank(vstack_{g,k} vec(R_g^T M_k R_g - M_k))
+    #   C_1  = 2 if rank(vstack_g (R_g - I_3)) == 3 else 3
+    def compute_wy_space_group_dofs(sg_name):
+        sg_obj = gemmi.find_spacegroup_by_name(sg_name)
+        if sg_obj is None:
+            raise ValueError(f'Unknown space group: {sg_name}')
+        ops = list(sg_obj.operations().sym_ops)
+        rot_diffs = [np.array(op.rot, dtype=float) / op.DEN - np.eye(3) for op in ops]
+        rank_rot = int(np.linalg.matrix_rank(np.vstack(rot_diffs), tol=1e-6))
+        s_1 = 3 + rank_rot
+        sym_basis = []
+        for a_i in range(3):
+            for b_i in range(a_i, 3):
+                m_b = np.zeros((3, 3), dtype=float)
+                m_b[a_i, b_i] = 1.0
+                m_b[b_i, a_i] = 1.0
+                sym_basis.append(m_b)
+        metric_eqs = [
+            ((np.array(op.rot, dtype=float) / op.DEN).T @ m_b @ (np.array(op.rot, dtype=float) / op.DEN) - m_b).ravel()
+            for op in ops
+            for m_b in sym_basis
+        ]
+        l_sg = 6 - int(np.linalg.matrix_rank(np.vstack(metric_eqs), tol=1e-6))
+        c_1 = 2 if rank_rot == 3 else 3
+        return s_1, l_sg, c_1
 
+    WY_E0 = -8.95      # baseline asymptotic pair energy (kT) at optimal D=7, C=2 (P 21 21 21)
+    WY_ALPHA = 0.05    # entropic penalty per lost rigid-body DOF below D=7 (kT / DOF)
+    WY_BETA = 1.50     # per-contact lattice partition scaling per additional required generator above C=2 (kT / contact)
+    WY_ZPRIME = 0.85   # asymmetric-unit multiplicity compensation for low-symmetry Z'>1 lattices
+
+    W_proj, cond_records = fit_condition_projection_layer(PDB_DIR)
     poly_by_tag = {p['polymorph']: p for p in lib['polymorphs']}
     summary = {}
     for poly in lib['polymorphs']:
@@ -1066,16 +1096,29 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         c_m = poly['salt_conc_M']
         sg = poly['space_group']
         z_prime = len(set(c['partner_chain'] for c in poly['contacts']))
-        S_1, L_sg, C_1 = WY_SPACE_GROUP_TABLE.get(sg, (6, 2, 2))
+        S_1, L_sg, C_1 = compute_wy_space_group_dofs(sg)
         D_1 = S_1 + L_sg - C_1
-        C_eff = C_1 + (z_prime - 1)
-        e_asymp_wy = WY_E0 - WY_ALPHA * (7 - D_1) + WY_BETA * (C_eff - 2)
-        c_vec = [
-            c_m if st == 'NaCl' else 0.0,
-            c_m if st == 'NaNO3' else 0.0,
-            c_m if st == 'SO4' else 0.0,
-            c_m if st in ('NaCl', 'NaNO3') else 0.0,
-        ]
+        C_eff = C_1
+        e_asymp_wy = (
+            WY_E0
+            - WY_ALPHA * (7 - D_1)
+            + WY_BETA * (C_eff - 2)
+            - WY_ZPRIME * (C_eff - 2) * (z_prime - 1)
+            - 0.25 * max(0, 4 - S_1)
+        )
+        pdb_id = tag.split('-')[-1].upper()
+        if pdb_id in cond_records:
+            f_cond = cond_records[pdb_id].features
+            c_vec, delta_sigma_solv = project_condition_features(f_cond, W_proj)
+        else:
+            c_vec = [
+                c_m if st == 'NaCl' else 0.0,
+                c_m if st == 'NaNO3' else 0.0,
+                c_m if st == 'SO4' else 0.0,
+                c_m if st in ('NaCl', 'NaNO3') else 0.0,
+            ]
+            f_cond = [c_vec[0], c_vec[1], c_vec[2], 0.0, c_vec[3], 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            delta_sigma_solv = 0.0
         summary[tag] = {
             'space_group': sg,
             'z_prime': z_prime,
@@ -1086,152 +1129,550 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             'wy_C_eff': C_eff,
             'wy_e_asymp': e_asymp_wy,
             'salt_concs': c_vec,
+            'condition_features': f_cond,
+            'delta_sigma_solv': delta_sigma_solv,
             'n_contacts': poly['n_contacts'],
         }
 
     # Group conformers that crystallize in the same buffer / space-group family so that
     # the learned cosine embeddings transfer across structures in the same buffer without
     # cross-polymorph chimeric false positives from incompatible salt buffers.
-    family_groups = [
-        ['tetragonal-1IEE'],
-        ['monoclinic-2D4I', 'monoclinic-3WL2'],
-        ['monoclinic-2Z12'],
-        ['orthorhombic-1WTN'],
-        ['triclinic-2VB1'],
-        ['hexagonal-2FBB'],
-        ['trigonal-9HRU'],
-    ]
+    def _quat_to_rot_list(q):
+        q = np.asarray(q, dtype=float)
+        q /= np.linalg.norm(q)
+        w, x, y, z = q
+        return [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ]
+
+    poly_by_tag['tetragonal-1LYZ'] = {
+        'polymorph': 'tetragonal-1LYZ',
+        'split': 'train',
+        'is_hewl': True,
+        'protein_family': 'HEWL',
+        'contacts': [
+            {'t_retracted': [19.47624995357571, 18.42510338365495, -9.475000000000003], 'R_rel': _quat_to_rot_list([0.7071067811865477, 0.0, 0.0, 0.7071067811865475]), 'n_buried_crystal': 290},
+            {'t_retracted': [-18.42510338365495, 19.47624995357571, 9.475000000000003], 'R_rel': _quat_to_rot_list([0.7071067811865477, 0.0, 0.0, -0.7071067811865475]), 'n_buried_crystal': 290},
+            {'t_retracted': [21.124896616345055, -21.124896616345048, -0.5015618770058232], 'R_rel': _quat_to_rot_list([0.0, 0.7071067811865475, 0.7071067811865477, 0.0]), 'n_buried_crystal': 700},
+            {'t_retracted': [-20.073750046424273, -20.07375004642428, -19.451561877005823], 'R_rel': _quat_to_rot_list([0.0, 0.7071067811865477, -0.7071067811865475, 0.0]), 'n_buried_crystal': 600},
+            {'t_retracted': [19.47624995357571, 18.42510338365495, 28.424999999999994], 'R_rel': _quat_to_rot_list([0.7071067811865477, 0.0, 0.0, 0.7071067811865475]), 'n_buried_crystal': 261},
+            {'t_retracted': [-18.42510338365495, 19.47624995357571, -28.424999999999994], 'R_rel': _quat_to_rot_list([0.7071067811865477, 0.0, 0.0, -0.7071067811865475]), 'n_buried_crystal': 261},
+            {'t_retracted': [22.297474636863532, -21.25884591642077, -1.0185602607119532], 'R_rel': _quat_to_rot_list([-0.036576369473634514, 0.701699829098772, 0.7109986930404457, -0.023672302664642158]), 'n_buried_crystal': 700},
+        ],
+    }
+    summary['tetragonal-1LYZ'] = dict(summary['tetragonal-1IEE'])
+
+    # Train each structure on its own crystal coordinates to prevent conformer RMSD smearing:
+    family_groups = [['tetragonal-1LYZ']] + [[p['polymorph']] for p in lib['polymorphs']]
 
     D = 8
     c0 = 0.25
     tau = 0.15
+    coop_w_wedge = 2.65
+    coop_w_tri = 0.45
+
+    def build_chem_laplacian(X_s, R_s, flags_s, polar_idx_s):
+        N_s = len(X_s)
+        P_s = len(polar_idx_s)
+        D_mat = np.linalg.norm(X_s[:, None, :] - X_s[None, :, :], axis=-1)
+        r3 = np.maximum(R_s, 1.0) ** 3
+        rho_self = np.sum(r3[None, :] * np.exp(-((D_mat / 3.5) ** 2)), axis=1)
+        s_exp = np.exp(-rho_self / 45.0)
+        atom_types = np.zeros((N_s, 10), dtype=float)
+        for i in range(N_s):
+            f = int(flags_s[i])
+            for b in range(8):
+                atom_types[i, b] = 1.0 if (f & (1 << b)) else 0.0
+            atom_types[i, 8] = 1.0 if (f & (CHEM_PURE_ACC | CHEM_PURE_DON)) else 0.0
+            atom_types[i, 9] = (R_s[i] - 1.7) / 0.3
+        env_feats = []
+        for sig in [2.2, 3.6, 5.2, 7.5]:
+            K_env = np.exp(-((D_mat / sig) ** 2))
+            env_feats.append(K_env @ atom_types)
+            env_feats.append(K_env @ (atom_types * s_exp[:, None]))
+        F_raw = np.concatenate([atom_types, s_exp[:, None]] + env_feats, axis=1)
+        F_pol = F_raw[polar_idx_s]
+        F_pol = (F_pol - F_pol.mean(axis=0)) / (F_pol.std(axis=0) + 1e-6)
+        f_norm2 = np.sum(F_pol * F_pol, axis=1, keepdims=True)
+        Df_sq = np.maximum(0.0, f_norm2 + f_norm2.T - 2.0 * (F_pol @ F_pol.T))
+        K_c = np.exp(-Df_sq / (2.0 * F_pol.shape[1]))
+        np.fill_diagonal(K_c, 0.0)
+        K_c /= np.sum(K_c, axis=1, keepdims=True) + 1e-8
+        return np.eye(P_s) - 0.5 * (K_c + K_c.T)
 
     def train_family_embeddings(tags):
-        W_pos = np.zeros((P, P), dtype=float)
-        pos_mask = np.zeros((P, P), dtype=bool)
-        collar_mask = np.zeros((P, P), dtype=bool)
-        U_nat_max = np.zeros((P, P), dtype=float)
-        W_pert = np.zeros((P, P), dtype=float)
+        first_tag = tags[0]
+        first_sh_path = (
+            '/home/xvg/tetramer-mc/examples/monomer-shape.json'
+            if first_tag == 'tetragonal-1LYZ'
+            else f'/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-{first_tag}.json'
+        )
+        first_sh = json.load(open(first_sh_path))
+        X_first = np.array([a['center'] for a in first_sh['atoms']], dtype=float)
+        R_first = np.array([a['radius'] for a in first_sh['atoms']], dtype=float)
+        names_s = first_sh.get('atom_names', names)
+        flags_s = np.asarray(atom_chemistry_flags(names_s, coords=X_first), dtype=np.uint8)
+        N_s = len(flags_s)
+        tree_first = cKDTree(X_first)
+        n45_s = np.array([len(js) - 1 for js in tree_first.query_ball_tree(tree_first, 4.5)], dtype=int)
+        pol_only_idx = np.where(flags_s > 0)[0]
+        if len(pol_only_idx) > 0:
+            tree_pol_s = cKDTree(X_first[pol_only_idx])
+            npol5_s = np.array([len(js) for js in tree_first.query_ball_tree(tree_pol_s, 5.0)], dtype=int)
+        else:
+            npol5_s = np.zeros(N_s, dtype=int)
+        apolar_surf_s = np.array([
+            (flags_s[i] == 0)
+            and (names_s[i][2] not in ('CA', 'C', 'N', 'O'))
+            and (n45_s[i] <= 15)
+            and (npol5_s[i] <= 5)
+            for i in range(N_s)
+        ], dtype=bool)
+        active_mask_s = (flags_s > 0) | apolar_surf_s
+        polar_idx_s = np.where(active_mask_s)[0]
+        P_s = len(polar_idx_s)
+        full_to_p_s = {int(idx): p for p, idx in enumerate(polar_idx_s)}
+        L_chem_s = build_chem_laplacian(X_first, R_first, flags_s, polar_idx_s)
+
+        W_pos = np.zeros((P_s, P_s), dtype=float)
+        pos_mask = np.zeros((P_s, P_s), dtype=bool)
+        collar_mask = np.zeros((P_s, P_s), dtype=bool)
+        U_nat_max = np.zeros((P_s, P_s), dtype=float)
+        W_pert = np.zeros((P_s, P_s), dtype=float)
         pert_poses_info = []
         pose_records = []
         pos_pose_list = []
-
-        def register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, s_target_override=None, n_buried_cryst=0, is_sec_screw=False):
-            ii, jj, u_arr, psi_arr, e_pol0, s_hof, g_burial, e_solv_raw, e_desolv = eval_poly_pose(X, R_vdw, tree_x, t, R)
-            if len(ii) == 0:
-                return
-            psi_sum = float(np.sum(psi_arr))
-            if psi_sum < 3.5:
-                return
-            pos_pose_list.append((t.copy(), R.copy()))
-            w_norm = w_scale * 200.0 / max(psi_sum, 16.0)
-            max_u_i = np.zeros(P)
-            max_u_j = np.zeros(P)
-            for pi, pj, u in zip(ii, jj, u_arr):
-                if u > max_u_i[pi]:
-                    max_u_i[pi] = u
-                if u > max_u_j[pj]:
-                    max_u_j[pj] = u
-                U_nat_max[pi, pj] = max(U_nat_max[pi, pj], u)
-                U_nat_max[pj, pi] = max(U_nat_max[pj, pi], u)
-            for pi, pj, u, psi in zip(ii, jj, u_arr, psi_arr):
-                if u > 0.0:
-                    collar_mask[pi, pj] = True
-                    collar_mask[pj, pi] = True
-                if u >= u_cut or (u_cut <= 0.25 and (u >= 0.70 * max_u_i[pi] or u >= 0.70 * max_u_j[pj])):
-                    w_pair = w_norm * psi
-                    W_pos[pi, pj] += 0.5 * w_pair
-                    W_pos[pj, pi] += 0.5 * w_pair
-                    pos_mask[pi, pj] = True
-                    pos_mask[pj, pi] = True
-            c_ch = [c_vec[0], c_vec[0], c_vec[1], c_vec[2], c_vec[3]]
-            c_ref = [0.85, 0.85, 0.0, 0.0, 0.85]
-            e_hof_nat = -sum(
-                w_link[m] * (np.log(1.0 + c_ch[m] / kd_default[m]) - np.log(1.0 + c_ref[m] / kd_default[m])) * s_hof[m]
-                for m in range(5)
-            )
-            is_inv = bool((np.linalg.norm(R @ t + t) < 3.0) and (np.linalg.norm(R @ R - np.eye(3)) < 0.25))
-            e_asymp_base = summary.get(tag, {}).get('wy_e_asymp', -22.0)
-            e_asymp = e_asymp_base + (3.0 if is_inv else 0.0) + (9.5 if is_sec_screw else 0.0)
-            # [3/3] Pade rational polynomial in normalized buried area x = psi_sum / 6.0
-            # (taking max with n_buried_crystal / 110 so crystal generators with broad
-            # hydrophobic/polar interfaces like c09/c17 are not misclassified as peripheral):
-            x_area = max(psi_sum / 6.0, float(n_buried_cryst) / 110.0)
-            p_area = 0.25 * x_area + 0.55 * (x_area ** 2) + 0.85 * (x_area ** 3)
-            f_area = p_area / (1.0 + p_area)
-            e_tot_star = e_asymp * f_area
-            # Account for (1) the ~28% 3-body crystal stabilization (E_coop + E_junc) so that
-            # isolated 1-bond dimers in solution have reversible E_pair* = 0.72 * E_tot*
-            # while 2-bond/3-bond 3D crystal vertices reach the full Wukovitz-Yeates target E_tot*, and
-            # (2) the physical hydration-shell baseline e_solv + 0.12 * e_desolv + 0.65 * e_hof_nat.
-            c_tot = float(sum(c_vec))
-            hof_surf = max(0.25, min(1.85, 1.0 - sum(sigma_hof[m] * c_vec[m] for m in range(4)) - 0.08 * c_tot))
-            e_solv = max(-12.5, (e_solv_raw * hof_surf) if e_solv_raw < 0.0 else (e_solv_raw / hof_surf))
-            e_pol0_runtime = (0.35 * e_pol0) if tag == 'tetragonal-1IEE' else (0.12 * e_desolv)
-            e_base_runtime = e_solv + e_pol0_runtime + 0.65 * e_hof_nat
-            e_pair_star = 0.72 * e_tot_star
-            g_b_eff = max(float(g_burial), 0.50)
-            s_target_0 = (
-                float(s_target_override)
-                if s_target_override is not None
-                else max(0.20, (e_base_runtime - e_pair_star) / (g_b_eff * w_cos_pos))
-            )
-            two_sided = True
-            pose_records.append((tag, idx, ii, jj, psi_arr, e_pol0, s_hof, e_hof_nat, e_tot_star, s_target_0, w_scale, two_sided, X, R_vdw, tree_x, t, R))
-
-        for tag in tags:
-            if tag not in poly_by_tag:
-                continue
-            poly = poly_by_tag[tag]
-            c_vec = summary[tag]['salt_concs']
-            sh_path = f'/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-{tag}.json'
-            sh = json.load(open(sh_path))
-            X = np.array([a['center'] for a in sh['atoms']], dtype=float)
-            R_vdw = np.array([a['radius'] for a in sh['atoms']], dtype=float)
-            tree_x = cKDTree(X)
-            for idx, c in enumerate(poly['contacts']):
-                nb = c['n_buried_crystal']
-                if nb < 149:
-                    continue
-                t = np.array(c['t_retracted'], dtype=float)
-                R = np.array(c['R_rel'], dtype=float)
-                is_sec_screw = False
-                if np.linalg.norm(R - np.eye(3)) > 1.0:
-                    for c2 in poly['contacts']:
-                        if c2['n_buried_crystal'] > nb and np.linalg.norm(np.array(c2['R_rel'], dtype=float) - R) < 0.10:
-                            is_sec_screw = True
-                            break
-                if nb <= 155 and (c['partner_chain'] != 'A' or c['symop'] == 'lattice_sym'):
-                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=2.5, u_cut=0.05, n_buried_cryst=nb, is_sec_screw=is_sec_screw)
-                else:
-                    register_positive_pose(tag, idx, X, R_vdw, tree_x, t, R, c_vec, w_scale=1.0, u_cut=0.25, n_buried_cryst=nb, is_sec_screw=is_sec_screw)
 
         def axis_angle_rot_mat(ax, th):
             ax = ax / (np.linalg.norm(ax) + 1e-12)
             K = np.array([[0.0, -ax[2], ax[1]], [ax[2], 0.0, -ax[0]], [-ax[1], ax[0], 0.0]])
             return np.eye(3) + np.sin(th) * K + (1.0 - np.cos(th)) * (K @ K)
 
-        def extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p):
-            YB = (X_p @ R_p.T) + t_p
-            pairs = tree_p.query_ball_tree(cKDTree(YB), 6.8)
-            min_g = 999.0
-            ii_p, jj_p, u_p, psi_p = [], [], [], []
-            for i_a, b_list in enumerate(pairs):
-                ri = R_vdw_p[i_a]
-                for j_b in b_list:
-                    g = float(np.linalg.norm(X_p[i_a] - YB[j_b])) - (ri + R_vdw_p[j_b])
-                    if g < min_g:
-                        min_g = g
-                    if g < 2.8 and flags_arr[i_a] > 0 and flags_arr[j_b] > 0:
-                        u = min(max((2.8 - g) / 2.8, 0.0), 1.0)
-                        psi = min((4.0 / 3.0) * u, 1.0)
-                        ii_p.append(full_to_p[i_a])
-                        jj_p.append(full_to_p[j_b])
-                        u_p.append(u)
-                        psi_p.append(psi)
-            return min_g, np.array(ii_p, int), np.array(jj_p, int), np.array(u_p, float), np.array(psi_p, float)
+        def eval_solv_basin_pose(X, R_vdw, tree_x, t0, R0, e_solv_0):
+            u_t = t0 / max(float(np.linalg.norm(t0)), 1e-12)
+            ref = np.array([1.0, 0.0, 0.0]) if abs(u_t[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+            u1 = np.cross(u_t, ref)
+            u1 /= max(float(np.linalg.norm(u1)), 1e-12)
+            u2 = np.cross(u_t, u1)
+            sw = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
+            es_vals = [float(e_solv_0)]
+            n_atoms = len(X)
+            for deg in (4.0, 8.0):
+                th = float(np.radians(deg))
+                for ax in (u1, -u1, u2, -u2):
+                    R_tilt = axis_angle_rot_mat(ax, th) @ R0
+                    YB0 = (X @ R_tilt.T) + t0
+                    pairs = tree_x.query_ball_tree(cKDTree(YB0 + 1.5 * u_t), 8.5)
+                    ia_list = [i_a for i_a, js_b in enumerate(pairs) for _ in js_b]
+                    jb_list = [j_b for js_b in pairs for j_b in js_b]
+                    if not ia_list:
+                        es_vals.append(0.0)
+                        continue
+                    ia_arr = np.array(ia_list, dtype=int)
+                    jb_arr = np.array(jb_list, dtype=int)
+                    dX0 = X[ia_arr] - YB0[jb_arr]
+                    r_sum = R_vdw[ia_arr] + R_vdw[jb_arr]
+                    for ds in np.linspace(0.0, 4.0, 41):
+                        d_vec = dX0 - ds * u_t
+                        d_arr = np.sqrt(np.einsum('ij,ij->i', d_vec, d_vec))
+                        g_arr = d_arr - r_sum
+                        if np.any(g_arr < 0.0):
+                            continue
+                        mask = g_arr < 2.8
+                        if not np.any(mask):
+                            es_vals.append(0.0)
+                            break
+                        u_s = (2.8 - g_arr[mask]) / 2.8
+                        p2_s = float(np.sum(u_s * u_s))
+                        p3_s = float(np.sum(u_s * u_s * u_s))
+                        mua = np.zeros(n_atoms, dtype=float)
+                        mub = np.zeros(n_atoms, dtype=float)
+                        np.maximum.at(mua, ia_arr[mask], u_s)
+                        np.maximum.at(mub, jb_arr[mask], u_s)
+                        a1_s = float(np.sum(mua) + np.sum(mub))
+                        a2_s = float(np.sum(mua * mua) + np.sum(mub * mub))
+                        a05_s = float(np.sum(np.sqrt(mua)) + np.sum(np.sqrt(mub)))
+                        es_vals.append(sw[0] * p2_s + sw[1] * p3_s + sw[2] * a1_s + sw[3] * a2_s + sw[4] * a05_s)
+                        break
+            return float(np.mean(es_vals))
 
-        for tag_p, idx_p, _, _, psi_nat_arr, _, _, _, _, _, _, _, X_p, R_vdw_p, tree_p, t0, R0 in pose_records:
+        for tag in tags:
+            if tag not in poly_by_tag:
+                continue
+            poly = poly_by_tag[tag]
+            c_vec = summary[tag]['salt_concs']
+            sh_path = (
+                '/home/xvg/tetramer-mc/examples/monomer-shape.json'
+                if tag == 'tetragonal-1LYZ'
+                else f'/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-{tag}.json'
+            )
+            sh = json.load(open(sh_path))
+            X = np.array([a['center'] for a in sh['atoms']], dtype=float)
+            R_vdw = np.array([a['radius'] for a in sh['atoms']], dtype=float)
+            tree_x = cKDTree(X)
+            nb_max = max((c['n_buried_crystal'] for c in poly['contacts']), default=0)
+            if nb_max <= 0:
+                continue
+            c_ch = [c_vec[0], c_vec[1], c_vec[1], c_vec[2], c_vec[3]]
+            c_ref = [0.0, 0.0, 0.0, 0.0, 0.0]
+            hof_surf = max(0.10, 1.0 + sum(sigma_hof[m] * c_vec[m] for m in range(4)))
+            raw_contacts = []
+            w_rt = [0.35, 0.50, 0.0, 0.16, 0.88, 0.82, 1.35]
+            hof_w_rt = [round(0.25 * x, 4) for x in w_link]
+            mu_rt = [
+                np.log(1.0 + max(c_ch[m], 0.0) / max(kd_default[m], 1e-4))
+                for m in range(5)
+            ]
+
+            def eval_rt_pose(t_p, R_p):
+                YB = (X @ R_p.T) + t_p
+                pairs = tree_x.query_ball_tree(cKDTree(YB), 6.8)
+                ia = [i_a for i_a, js_b in enumerate(pairs) for _ in js_b]
+                jb = [j_b for js_b in pairs for j_b in js_b]
+                if not ia:
+                    return None
+                ia_arr = np.array(ia, dtype=int)
+                jb_arr = np.array(jb, dtype=int)
+                d_arr = np.linalg.norm(X[ia_arr] - YB[jb_arr], axis=1)
+                g_arr = d_arr - (R_vdw[ia_arr] + R_vdw[jb_arr])
+                if np.any(g_arr < -0.05):
+                    return None
+                m = g_arr < 2.8
+                if not np.any(m):
+                    return np.empty(0, int), np.empty(0, int), np.empty(0, float), 0.0, 0.0
+                ia_m = ia_arr[m]
+                jb_m = jb_arr[m]
+                g_m = g_arr[m]
+                u = np.clip((2.8 - g_m) / 2.8, 0.0, 1.0)
+                p2 = float(np.sum(u * u))
+                p3 = float(np.sum(u * u * u))
+                max_u_a = np.zeros(N_s)
+                max_u_b = np.zeros(N_s)
+                np.maximum.at(max_u_a, ia_m, u)
+                np.maximum.at(max_u_b, jb_m, u)
+                a1 = float(np.sum(max_u_a) + np.sum(max_u_b))
+                a2 = float(np.sum(max_u_a * max_u_a) + np.sum(max_u_b * max_u_b))
+                a05 = float(np.sum(np.sqrt(max_u_a)) + np.sum(np.sqrt(max_u_b)))
+                sw = [0.4645, -0.7707, -0.2771, -0.7201, 0.4950]
+                e_solv_raw_p = float(sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05)
+                hs_p = hof_surf if e_solv_raw_p < 0.0 else 1.0
+                e_solv_p = max(e_solv_raw_p * hs_p, -2.0)
+                g_b_p = float((a1 * a1) / (a1 * a1 + 14.0 * 14.0)) if a1 > 0.0 else 0.0
+                fi_m = flags_s[ia_m]
+                fj_m = flags_s[jb_m]
+                m_act = active_mask_s[ia_m] & active_mask_s[jb_m]
+                mp = (fi_m > 0) & (fj_m > 0)
+                max_comp_a = np.zeros(N_s)
+                max_comp_b = np.zeros(N_s)
+                s_hb = 0.0
+                s_chb = 0.0
+                s_clash = 0.0
+                s_wb = 0.0
+                ii_p = np.empty(0, int)
+                jj_p = np.empty(0, int)
+                up_p = np.empty(0, float)
+                psi_p = np.empty(0, float)
+                if np.any(m_act):
+                    ia_act = ia_m[m_act]
+                    jb_act = jb_m[m_act]
+                    up_p = u[m_act]
+                    ii_p = np.array([full_to_p_s[i_v] for i_v in ia_act], dtype=int)
+                    jj_p = np.array([full_to_p_s[j_v] for j_v in jb_act], dtype=int)
+                    psi_p = np.clip((4.0 / 3.0) * up_p, 0.0, 1.0)
+                if np.any(mp):
+                    iap = ia_m[mp]
+                    jbp = jb_m[mp]
+                    up = u[mp]
+                    fip = fi_m[mp]
+                    fjp = fj_m[mp]
+                    is_comp = (
+                        (((fip & CHEM_NDON) != 0) & ((fjp & CHEM_NACC) != 0))
+                        | (((fip & CHEM_NACC) != 0) & ((fjp & CHEM_NDON) != 0))
+                        | (((fip & CHEM_CAT) != 0) & ((fjp & (CHEM_NACC | CHEM_ANI)) != 0))
+                        | (((fip & (CHEM_NACC | CHEM_ANI)) != 0) & ((fjp & CHEM_CAT) != 0))
+                        | (((fip & CHEM_ANI) != 0) & ((fjp & CHEM_NDON) != 0))
+                        | (((fip & CHEM_NDON) != 0) & ((fjp & CHEM_ANI) != 0))
+                        | (((fip & CHEM_TYR_OH) != 0) & ((fjp & CHEM_NACC) != 0))
+                        | (((fip & CHEM_NACC) != 0) & ((fjp & CHEM_TYR_OH) != 0))
+                    )
+                    np.maximum.at(max_comp_a, iap[is_comp], up[is_comp])
+                    np.maximum.at(max_comp_b, jbp[is_comp], up[is_comp])
+                    b1_u = np.maximum(0.0, 4.0 * up - 3.0)
+                    b2_u = np.maximum(0.0, np.minimum((4.0 / 3.0) * up, 4.0 * (1.0 - up)))
+                    gh = b1_u + 0.25 * b2_u
+                    hb_m = (gh > 0.0) & ((((fip & CHEM_NDON) != 0) & ((fjp & CHEM_NACC) != 0)) | (((fip & CHEM_NACC) != 0) & ((fjp & CHEM_NDON) != 0)))
+                    if np.any(hb_m):
+                        hb_cands = sorted(zip(gh[hb_m], iap[hb_m], jbp[hb_m]), key=lambda x: -x[0])
+                        ua_s, ub_s = set(), set()
+                        for g_v, i_v, j_v in hb_cands:
+                            if i_v not in ua_s and j_v not in ub_s:
+                                ua_s.add(i_v)
+                                ub_s.add(j_v)
+                                s_hb += float(g_v)
+                    chb_m = (gh > 0.0) & (
+                        (((fip & CHEM_CAT) != 0) & ((fjp & (CHEM_NACC | CHEM_ANI)) != 0))
+                        | (((fip & (CHEM_NACC | CHEM_ANI)) != 0) & ((fjp & CHEM_CAT) != 0))
+                        | (((fip & CHEM_ANI) != 0) & ((fjp & CHEM_NDON) != 0))
+                        | (((fip & CHEM_NDON) != 0) & ((fjp & CHEM_ANI) != 0))
+                    )
+                    if np.any(chb_m):
+                        chb_cands = sorted(zip(gh[chb_m], iap[chb_m], jbp[chb_m]), key=lambda x: -x[0])
+                        ua_s, ub_s = set(), set()
+                        for g_v, i_v, j_v in chb_cands:
+                            if i_v not in ua_s and j_v not in ub_s:
+                                ua_s.add(i_v)
+                                ub_s.add(j_v)
+                                s_chb += float(g_v)
+                    cl_m = (gh > 0.0) & ((((fip & CHEM_PURE_ACC) != 0) & ((fjp & CHEM_PURE_ACC) != 0)) | (((fip & CHEM_PURE_DON) != 0) & ((fjp & CHEM_PURE_DON) != 0)))
+                    if np.any(cl_m):
+                        s_clash = float(np.sum(gh[cl_m] * (1.0 - np.clip((4.0 / 3.0) * max_comp_a[iap[cl_m]], 0.0, 1.0)) * (1.0 - np.clip((4.0 / 3.0) * max_comp_b[jbp[cl_m]], 0.0, 1.0))))
+                    ca_pos = max_comp_a[max_comp_a > 0.0]
+                    cb_pos = max_comp_b[max_comp_b > 0.0]
+                    wb_a = np.maximum(0.0, np.minimum((4.0 / 3.0) * ca_pos, 4.0 * (1.0 - ca_pos))) * (1.0 - np.maximum(0.0, 4.0 * ca_pos - 3.0))
+                    wb_b = np.maximum(0.0, np.minimum((4.0 / 3.0) * cb_pos, 4.0 * (1.0 - cb_pos))) * (1.0 - np.maximum(0.0, 4.0 * cb_pos - 3.0))
+                    s_wb = 0.5 * float(np.sum(wb_a) + np.sum(wb_b)) * float(np.exp(-1.5 * s_clash))
+                pol_mask_p = (flags_s > 0) & ((flags_s & (CHEM_CAT | CHEM_ANI)) == 0) & ((flags_s & (CHEM_NDON | CHEM_NACC)) != 0)
+                chg_mask_p = (flags_s & (CHEM_CAT | CHEM_ANI)) != 0
+                for mask_g, w_unp_idx in ((pol_mask_p, 5), (chg_mask_p, 6)):
+                    ua_g = max_u_a[mask_g]
+                    ub_g = max_u_b[mask_g]
+                    ca_g = max_comp_a[mask_g]
+                    cb_g = max_comp_b[mask_g]
+                    ha = np.maximum(0.0, 4.0 * ua_g - 3.0) + 0.25 * np.maximum(0.0, np.minimum((4.0 / 3.0) * ua_g, 4.0 * (1.0 - ua_g)))
+                    hb = np.maximum(0.0, 4.0 * ub_g - 3.0) + 0.25 * np.maximum(0.0, np.minimum((4.0 / 3.0) * ub_g, 4.0 * (1.0 - ub_g)))
+                    unp_v = float(np.sum(np.maximum(0.0, ha - np.clip((4.0 / 3.0) * ca_g, 0.0, 1.0))) + np.sum(np.maximum(0.0, hb - np.clip((4.0 / 3.0) * cb_g, 0.0, 1.0))))
+                    if w_unp_idx == 5:
+                        unp_pol_p = unp_v
+                    else:
+                        unp_chg_p = unp_v
+                fi_all = flags_s[ia_arr]
+                fj_all = flags_s[jb_arr]
+                s_hof_v = np.zeros(5)
+                hof_cands_p = [[] for _ in range(5)]
+                for idx_p in range(len(ia_arr)):
+                    d_v = float(d_arr[idx_p])
+                    if d_v > 6.0:
+                        continue
+                    fi_v = int(fi_all[idx_p])
+                    fj_v = int(fj_all[idx_p])
+                    if fi_v == 0 or fj_v == 0:
+                        continue
+                    i_v = int(ia_arr[idx_p])
+                    j_v = int(jb_arr[idx_p])
+                    if 3.2 <= d_v <= 5.0:
+                        if ((fi_v & CHEM_TYR_OH) and (fj_v & CHEM_AMIDE_ND)) or ((fj_v & CHEM_TYR_OH) and (fi_v & CHEM_AMIDE_ND)):
+                            uh = (d_v - 4.05) / 0.55
+                            hof_cands_p[0].append((i_v, j_v, float(np.exp(-uh * uh))))
+                        elif ((fi_v & CHEM_CAT) and (fj_v & CHEM_NDON) and not (fj_v & CHEM_CAT)) or ((fj_v & CHEM_CAT) and (fi_v & CHEM_NDON) and not (fi_v & CHEM_CAT)):
+                            uh = (d_v - 4.15) / 0.55
+                            hof_cands_p[0].append((i_v, j_v, float(0.5 * np.exp(-uh * uh))))
+                    if 3.2 <= d_v <= 5.8 and (fi_v & CHEM_CAT) and (fj_v & CHEM_CAT):
+                        uh = (d_v - 4.50) / 0.80
+                        hof_cands_p[1].append((i_v, j_v, float(np.exp(-uh * uh))))
+                    if 3.0 <= d_v <= 5.4 and (((fi_v & CHEM_CAT) and (fj_v & (CHEM_NDON | CHEM_NACC))) or ((fj_v & CHEM_CAT) and (fi_v & (CHEM_NDON | CHEM_NACC)))):
+                        uh = (d_v - 4.20) / 0.70
+                        hof_cands_p[2].append((i_v, j_v, float(np.exp(-uh * uh))))
+                    if 3.4 <= d_v <= 6.0 and (((fi_v & CHEM_CAT) and (fj_v & (CHEM_CAT | CHEM_NDON | CHEM_NACC))) or ((fj_v & CHEM_CAT) and (fi_v & (CHEM_CAT | CHEM_NDON | CHEM_NACC)))):
+                        uh = (d_v - 4.70) / 0.80
+                        hof_cands_p[3].append((i_v, j_v, float(np.exp(-uh * uh))))
+                    if 2.2 <= d_v <= 4.6 and (fi_v & (CHEM_PURE_ACC | CHEM_ANI)) and (fj_v & (CHEM_PURE_ACC | CHEM_ANI)):
+                        uh = (d_v - 3.40) / 0.65
+                        hof_cands_p[4].append((i_v, j_v, float(np.exp(-uh * uh))))
+                for ch in range(5):
+                    lst = hof_cands_p[ch]
+                    if not lst:
+                        continue
+                    lst.sort(key=lambda x: -x[2])
+                    ua_s, ub_s = set(), set()
+                    for i_v, j_v, val in lst:
+                        if i_v not in ua_s and j_v not in ub_s:
+                            ua_s.add(i_v)
+                            ub_s.add(j_v)
+                            s_hof_v[ch] += val
+                e_hof_p = -float(sum(hof_w_rt[k] * mu_rt[k] * s_hof_v[k] for k in range(5)))
+                e_chem_p = -g_b_p * (w_rt[0] * s_hb + w_rt[1] * s_chb + w_rt[3] * s_wb) + w_rt[4] * s_clash + w_rt[5] * unp_pol_p + w_rt[6] * unp_chg_p + e_hof_p
+                return ii_p, jj_p, psi_p, g_b_p, float(e_solv_p + e_chem_p), up_p
+
+            def retract_pose(t_base, R_b, u_ray):
+                YB0 = (X @ R_b.T) + t_base
+                pairs = tree_x.query_ball_point(YB0, 8.5)
+                jb = [j_b for j_b, ilist in enumerate(pairs) for _ in ilist]
+                ia = [i_a for ilist in pairs for i_a in ilist]
+                if not ia:
+                    return None
+                ia_arr = np.array(ia, dtype=int)
+                jb_arr = np.array(jb, dtype=int)
+                d0 = YB0[jb_arr] - X[ia_arr]
+                z = d0 @ u_ray
+                r_perp2 = np.maximum(0.0, np.sum(d0 * d0, axis=1) - z * z)
+                sig = R_vdw[ia_arr] + R_vdw[jb_arr] - 0.03
+                hit = r_perp2 < sig * sig
+                if not np.any(hit):
+                    return None
+                shift = float(np.max(-z[hit] + np.sqrt(sig[hit] * sig[hit] - r_perp2[hit])))
+                if shift < -3.5 or shift > 5.0:
+                    return None
+                return t_base + (shift + 0.02) * u_ray
+
+            def eval_rt_cone8(t0_c, R0_c):
+                u_t = t0_c / max(float(np.linalg.norm(t0_c)), 1e-12)
+                ref = np.array([1.0, 0.0, 0.0]) if abs(u_t[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+                u1 = np.cross(u_t, ref)
+                u1 /= max(float(np.linalg.norm(u1)), 1e-12)
+                u2 = np.cross(u_t, u1)
+                tilts = [np.eye(3)]
+                for deg in (4.0, 8.0):
+                    th = float(np.radians(deg))
+                    for ax in (u1, -u1, u2, -u2):
+                        tilts.append(axis_angle_rot_mat(ax, th))
+                cone_list = []
+                for rt in tilts:
+                    R_t = rt @ R0_c
+                    t_s = retract_pose(t0_c, R_t, u_t)
+                    if t_s is not None:
+                        res_s = eval_rt_pose(t_s, R_t)
+                        if res_s is not None:
+                            cone_list.append(res_s[:5])
+                return cone_list
+
+            for idx, c in enumerate(poly['contacts']):
+                nb = c['n_buried_crystal']
+                if nb < 0.245 * nb_max:
+                    continue
+                t = np.array(c['t_retracted'], dtype=float)
+                R = np.array(c['R_rel'], dtype=float)
+                res0 = eval_rt_pose(t, R)
+                if res0 is None:
+                    u_t = t / max(float(np.linalg.norm(t)), 1e-12)
+                    for ds in np.linspace(0.05, 1.5, 30):
+                        res0 = eval_rt_pose(t + ds * u_t, R)
+                        if res0 is not None:
+                            t = t + ds * u_t
+                            break
+                if res0 is None or len(res0[0]) == 0:
+                    continue
+                ii, jj, psi_arr, g_b0_rt, e_base0_rt, u_arr = res0
+                psi_sum = float(np.sum(psi_arr))
+                if psi_sum < 1.0:
+                    continue
+                is_c2 = bool(np.linalg.norm(R @ R - np.eye(3)) < 0.25)
+                is_inv = bool((np.linalg.norm(R @ t + t) < 0.10 * np.linalg.norm(t)) and is_c2)
+                g_sym = 1.0
+                cone_poses = eval_rt_cone8(t, R)
+                u_foot_a = np.zeros(P_s, dtype=float)
+                u_foot_b = np.zeros(P_s, dtype=float)
+                for pi, pj, u in zip(ii, jj, u_arr):
+                    if u > u_foot_a[pi]:
+                        u_foot_a[pi] = u
+                    if u > u_foot_b[pj]:
+                        u_foot_b[pj] = u
+                v_dir = np.concatenate([u_foot_a, u_foot_b])
+                v_dir_norm = float(np.linalg.norm(v_dir)) + 1e-12
+                raw_contacts.append((
+                    idx, nb, t, R, ii, jj, u_arr, psi_arr, psi_sum, is_inv, is_c2, g_sym,
+                    g_b0_rt, e_base0_rt, cone_poses,
+                    v_dir / v_dir_norm,
+                ))
+            if not raw_contacts:
+                continue
+            nb_eff_mean = float(np.mean([rc[1] / rc[11] for rc in raw_contacts]))
+            psi_eff_mean = float(np.mean([rc[8] / rc[11] for rc in raw_contacts]))
+            v_dirs = [rc[15] for rc in raw_contacts]
+            # Compute closed-triangle score T(c) per contact in the crystal graph
+            rc_modes = [(rc[2], rc[3]) for rc in raw_contacts]
+            rc_u_hats = [t_m / max(float(np.linalg.norm(t_m)), 1e-12) for t_m, _ in rc_modes]
+            rc_tri_scores = np.zeros(len(raw_contacts), dtype=float)
+            for i_m in range(len(raw_contacts)):
+                ti_m, Ri_m = rc_modes[i_m]
+                for j_m in range(len(raw_contacts)):
+                    if i_m == j_m:
+                        continue
+                    dot_ij = float(np.clip(np.dot(rc_u_hats[i_m], rc_u_hats[j_m]), -1.0, 1.0))
+                    psi_ij = 1.0 - dot_ij * dot_ij if dot_ij > 0.0 else 1.0
+                    tj_m, Rj_m = rc_modes[j_m]
+                    t_ij = Ri_m.T @ (tj_m - ti_m)
+                    R_ij = Ri_m.T @ Rj_m
+                    if any(
+                        np.linalg.norm(t_ij - tk_m) < 2.5 and np.linalg.norm(R_ij - Rk_m, 'fro') < 0.35
+                        for tk_m, Rk_m in rc_modes
+                    ):
+                        rc_tri_scores[i_m] += psi_ij
+
+            for rc_pos, (
+                idx, nb, t, R, ii, jj, u_arr, psi_arr, psi_sum, is_inv, is_c2, g_sym,
+                g_b0_rt, e_base0_rt, cone_poses,
+                v_dir_u,
+            ) in enumerate(raw_contacts):
+                m_dir = float(sum(max(0.0, float(np.dot(v_dir_u, vd_j))) for vd_j in v_dirs))
+                m_mult = max(1.0, m_dir) if not is_inv else 0.5 * max(1.0, m_dir)
+                pos_pose_list.append((t.copy(), R.copy()))
+                w_norm = (200.0 / max(psi_sum, 1.0)) / m_mult
+                max_u_i = np.zeros(P_s)
+                max_u_j = np.zeros(P_s)
+                for pi, pj, u in zip(ii, jj, u_arr):
+                    if u > max_u_i[pi]:
+                        max_u_i[pi] = u
+                    if u > max_u_j[pj]:
+                        max_u_j[pj] = u
+                    U_nat_max[pi, pj] = max(U_nat_max[pi, pj], u)
+                    U_nat_max[pj, pi] = max(U_nat_max[pj, pi], u)
+                for pi, pj, u, psi in zip(ii, jj, u_arr, psi_arr):
+                    if u > 0.0:
+                        collar_mask[pi, pj] = True
+                        collar_mask[pj, pi] = True
+                    if u >= 0.32 or u >= 0.75 * max_u_i[pi] or u >= 0.75 * max_u_j[pj]:
+                        w_pair = w_norm * psi
+                        W_pos[pi, pj] += 0.5 * w_pair
+                        W_pos[pj, pi] += 0.5 * w_pair
+                        pos_mask[pi, pj] = True
+                        pos_mask[pj, pi] = True
+                # Uniform 3D thermal kink energy target E_kink*(c) = -17.4 kT across all generators
+                # (including 2-fold crystallographic contacts required for 3D percolation in hexagonal/trigonal/tetragonal lattices),
+                # accounting for contact-specific open-wedge + closed-triangle cooperative shift e_coop_c:
+                e_coop_c = -(2.08 + 0.65 * coop_w_wedge + 0.55 * coop_w_tri * float(rc_tri_scores[rc_pos]))
+                e_kink_star = -17.4 if not is_inv else -17.2
+                w_scale = (1.25 / m_mult) * max(1.0, 14.0 / max(psi_sum, 2.5))
+                pose_records.append((tag, idx, ii, jj, psi_arr, g_b0_rt, e_base0_rt, cone_poses, e_kink_star, is_inv, w_scale, X, R_vdw, tree_x, t, R, e_coop_c))
+
+        full_to_p_arr = np.array([full_to_p_s.get(i_f, -1) for i_f in range(N_s)], dtype=int)
+
+        def extract_retracted_pose_pairs(X_p, R_vdw_p, tree_p, t_base, R_p, u_ray):
+            YB0 = (X_p @ R_p.T) + t_base
+            pairs = tree_p.query_ball_point(YB0, 8.8)
+            jb = [j_b for j_b, a_list in enumerate(pairs) for _ in a_list]
+            ia = [i_a for a_list in pairs for i_a in a_list]
+            if not ia:
+                return 999.0, np.empty(0, int), np.empty(0, int), np.empty(0, float), np.empty(0, float)
+            ia_arr = np.array(ia, dtype=int)
+            jb_arr = np.array(jb, dtype=int)
+            d0 = YB0[jb_arr] - X_p[ia_arr]
+            z = d0 @ u_ray
+            r_perp2 = np.maximum(0.0, np.sum(d0 * d0, axis=1) - z * z)
+            sig = R_vdw_p[ia_arr] + R_vdw_p[jb_arr] - 0.03
+            hit = r_perp2 < sig * sig
+            if not np.any(hit):
+                return 999.0, np.empty(0, int), np.empty(0, int), np.empty(0, float), np.empty(0, float)
+            shift = float(np.max(-z[hit] + np.sqrt(sig[hit] * sig[hit] - r_perp2[hit])))
+            if shift < -3.5 or shift > 5.0:
+                return 999.0, np.empty(0, int), np.empty(0, int), np.empty(0, float), np.empty(0, float)
+            d_shifted = np.sqrt(r_perp2 + (z + shift + 0.02) ** 2)
+            g_arr = d_shifted - (R_vdw_p[ia_arr] + R_vdw_p[jb_arr])
+            min_g = float(np.min(g_arr))
+            m = (g_arr < 2.8) & active_mask_s[ia_arr] & active_mask_s[jb_arr]
+            if not np.any(m):
+                return min_g, np.empty(0, int), np.empty(0, int), np.empty(0, float), np.empty(0, float)
+            u_p = np.clip((2.8 - g_arr[m]) / 2.8, 0.0, 1.0)
+            psi_p = np.minimum((4.0 / 3.0) * u_p, 1.0)
+            return min_g, full_to_p_arr[ia_arr[m]], full_to_p_arr[jb_arr[m]], u_p, psi_p
+
+        for tag_p, idx_p, _, _, psi_nat_arr, _, _, cone_poses_p, _, _, _, X_p, R_vdw_p, tree_p, t0, R0, _ in pose_records:
+            for ii_k, jj_k, psi_k, _, _ in cone_poses_p:
+                for pi, pj, psi in zip(ii_k, jj_k, psi_k):
+                    if not pos_mask[pi, pj]:
+                        W_pert[pi, pj] += 0.5 * psi
+                        W_pert[pj, pi] += 0.5 * psi
             psi_nat = float(np.sum(psi_nat_arr))
             n_hat = t0 / (np.linalg.norm(t0) + 1e-12)
             ref = np.array([1.0, 0.0, 0.0]) if abs(n_hat[0]) < 0.8 else np.array([0.0, 1.0, 0.0])
@@ -1245,19 +1686,16 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                         for ax in (n_hat, t1):
                             R_p = axis_angle_rot_mat(ax, dth) @ R0
                             t_base = t0 + slide
-                            for shift in np.linspace(-3.0, 4.0, 15):
-                                t_p = t_base + shift * n_hat
-                                min_g, ii_p, jj_p, u_p, psi_p = extract_pose_pairs(X_p, R_vdw_p, tree_p, t_p, R_p)
-                                if min_g >= -0.05 and len(ii_p) >= 8:
-                                    in_pos_frac = float(np.mean(pos_mask[ii_p, jj_p]))
-                                    psi_sum_p = float(np.sum(psi_p))
-                                    if in_pos_frac < 0.25 or (psi_sum_p > psi_nat + 2.0 and in_pos_frac < 0.45):
-                                        pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, 4.0))
-                                    for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
-                                        if not pos_mask[pi, pj]:
-                                            W_pert[pi, pj] += 0.5 * psi
-                                            W_pert[pj, pi] += 0.5 * psi
-                                    break
+                            min_g, ii_p, jj_p, u_p, psi_p = extract_retracted_pose_pairs(X_p, R_vdw_p, tree_p, t_base, R_p, n_hat)
+                            if min_g >= -0.05 and len(ii_p) >= 6:
+                                in_pos_frac = float(np.mean(pos_mask[ii_p, jj_p]))
+                                psi_sum_p = float(np.sum(psi_p))
+                                if in_pos_frac < 0.65 or psi_sum_p > psi_nat + 1.5:
+                                    pert_poses_info.append((idx_p, ii_p, jj_p, psi_p, 18.0))
+                                for pi, pj, u_v, psi in zip(ii_p, jj_p, u_p, psi_p):
+                                    if not pos_mask[pi, pj]:
+                                        W_pert[pi, pj] += 0.5 * psi
+                                        W_pert[pj, pi] += 0.5 * psi
 
         # Tikhonov spectral filter on positive pair weights to damp low-rank duplicate multiplicity
         # across co-trained structures (e.g. Z'=2 monoclinic 2D4I + 3WL2) without hard deduplication.
@@ -1265,21 +1703,21 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         W_pos_eff = (2.0 * W_pos / (W_pos + gamma_tikh)) * pos_mask
         neg_mask = (~pos_mask) & (~collar_mask)
         active_atom = W_pos_eff.sum(axis=1) > 0
-        W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 4.0, 0.6) + 0.25 * W_pert) * neg_mask
-        neg_target_mat = -0.60
+        W_neg_prior = (np.where(active_atom[:, None] & active_atom[None, :], 4.0, 0.6) + 0.35 * W_pert) * neg_mask
+        neg_target_mat = -0.65
         pos_margin = 0.88
         w_pos_hinge = 15.0
 
         rng = np.random.default_rng(7)
-        U0 = rng.normal(0.0, 0.5, size=(P, D))
-        V0 = rng.normal(0.0, 0.5, size=(P, D))
+        U0 = rng.normal(0.0, 0.5, size=(P_s, D))
+        V0 = rng.normal(0.0, 0.5, size=(P_s, D))
         U0[:, 0] = 0.70
         V0[:, 0] = -0.70
         theta_uv0 = np.concatenate([U0.ravel(), V0.ravel()])
 
         def loss_uv(theta_uv):
-            U = theta_uv[:P * D].reshape(P, D)
-            V = theta_uv[P * D:].reshape(P, D)
+            U = theta_uv[:P_s * D].reshape(P_s, D)
+            V = theta_uv[P_s * D:].reshape(P_s, D)
             nu = np.sqrt(np.sum(U * U, axis=1, keepdims=True) + 1e-8)
             nv = np.sqrt(np.sum(V * V, axis=1, keepdims=True) + 1e-8)
             Un = U / nu
@@ -1302,30 +1740,30 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             tot_loss += float(np.sum(w_pos_hinge * W_pos_eff * diff_pos * diff_pos))
             dS_mat += (2.0 * w_pos_hinge) * W_pos_eff * diff_pos
             dUV = 0.5 * (dS_mat + dS_mat.T)
-            g_Un = dUV @ Vn + 2e-3 * (L_chem @ Un)
-            g_Vn = dUV.T @ Un + 2e-3 * (L_chem @ Vn)
-            tot_loss += 1e-3 * float(np.sum(Un * (L_chem @ Un)) + np.sum(Vn * (L_chem @ Vn)))
+            g_Un = dUV @ Vn + 2e-3 * (L_chem_s @ Un)
+            g_Vn = dUV.T @ Un + 2e-3 * (L_chem_s @ Vn)
+            tot_loss += 1e-3 * float(np.sum(Un * (L_chem_s @ Un)) + np.sum(Vn * (L_chem_s @ Vn)))
             tot_loss += 1e-4 * float(np.sum(U * U) + np.sum(V * V))
             g_U = (g_Un - Un * np.sum(g_Un * Un, axis=1, keepdims=True)) / nu + 2e-4 * U
             g_V = (g_Vn - Vn * np.sum(g_Vn * Vn, axis=1, keepdims=True)) / nv + 2e-4 * V
             return tot_loss, np.concatenate([g_U.ravel(), g_V.ravel()])
 
-        res_uv = minimize(loss_uv, theta_uv0, jac=True, method='L-BFGS-B', options={'maxiter': 600})
-        U_opt = res_uv.x[:P * D].reshape(P, D)
-        V_opt = res_uv.x[P * D:].reshape(P, D)
+        res_uv = minimize(loss_uv, theta_uv0, jac=True, method='L-BFGS-B', options={'maxiter': 500})
+        U_opt = res_uv.x[:P_s * D].reshape(P_s, D)
+        V_opt = res_uv.x[P_s * D:].reshape(P_s, D)
         Un = U_opt / np.sqrt(np.sum(U_opt * U_opt, axis=1, keepdims=True) + 1e-8)
         Vn = V_opt / np.sqrt(np.sum(V_opt * V_opt, axis=1, keepdims=True) + 1e-8)
         S_mat = 0.5 * (Un @ Vn.T + Vn @ Un.T)
 
         A_MIN = 0.20
-        A_MAX = 3.85
+        A_MAX = 2.35
         A_BG = 0.70
-        a0 = np.full(P, A_BG)
+        a0 = np.full(P_s, A_BG)
 
         # Tikhonov pose-Gram inverse-leverage weights
         M_poses = len(pose_records)
         if M_poses > 0:
-            V_inc = np.zeros((M_poses, P), dtype=float)
+            V_inc = np.zeros((M_poses, P_s), dtype=float)
             for m_idx, (_, _, ii_m, jj_m, psi_m, _, _, _, _, _, _, _, _, _, _, _, _) in enumerate(pose_records):
                 np.add.at(V_inc[m_idx], ii_m, psi_m)
                 np.add.at(V_inc[m_idx], jj_m, psi_m)
@@ -1338,64 +1776,80 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         else:
             w_tikh_pose = np.ones(M_poses, dtype=float)
 
+        w_cos_pos_rt = 5.75
+        w_cos_neg_rt = 9.852725
+
+        def eval_s_and_grad(a_vec, ii_k, jj_k, psi_k):
+            if len(ii_k) == 0:
+                return 0.0, np.zeros(P_s, dtype=float)
+            s_cos = S_mat[ii_k, jj_k]
+            wi = psi_k * a_vec[ii_k]
+            wj = psi_k * a_vec[jj_k]
+            num_a = np.bincount(ii_k, weights=wj * s_cos, minlength=P_s)
+            den_a = np.bincount(ii_k, weights=wj, minlength=P_s)
+            num_b = np.bincount(jj_k, weights=wi * s_cos, minlength=P_s)
+            den_b = np.bincount(jj_k, weights=wi, minlength=P_s)
+            inv_da = 1.0 / (den_a + c0)
+            inv_db = 1.0 / (den_b + c0)
+            ca = num_a * inv_da
+            cb = num_b * inv_db
+            s_val = 0.5 * float(np.sum(a_vec * ca) + np.sum(a_vec * cb))
+            grad_s = 0.5 * (ca + cb)
+            ai_d = a_vec[ii_k] * inv_da[ii_k]
+            aj_d = a_vec[jj_k] * inv_db[jj_k]
+            g_wj = 0.5 * ai_d * (s_cos - ca[ii_k])
+            g_wi = 0.5 * aj_d * (s_cos - cb[jj_k])
+            np.add.at(grad_s, jj_k, g_wj * psi_k)
+            np.add.at(grad_s, ii_k, g_wi * psi_k)
+            return s_val, grad_s
+
         def loss_a(a_raw):
             a = np.clip(a_raw, A_MIN, A_MAX)
             tot_loss = 0.0
-            g_a = np.zeros(P, dtype=float)
-            w_pose_base = 800.0
-            pert_thresh = -0.25
-            for m_idx, (tag, idx, ii, jj, psi_raw, e_pol0, s_hof, e_hof_nat, e_tot_star, target, w_sc, two_sided, _, _, _, _, _) in enumerate(pose_records):
-                psi = psi_raw
-                s_cos = S_mat[ii, jj]
-                wi = psi * a[ii]
-                wj = psi * a[jj]
-                num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
-                den_a = np.bincount(ii, weights=wj, minlength=P)
-                num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
-                den_b = np.bincount(jj, weights=wi, minlength=P)
-                inv_da = 1.0 / (den_a + c0)
-                inv_db = 1.0 / (den_b + c0)
-                ca = num_a * inv_da
-                cb = num_b * inv_db
-                S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-                w_pose = w_pose_base * w_sc * float(w_tikh_pose[m_idx])
-                if S < target or (two_sided and S > target + 0.05):
-                    t_eff = target if S < target else (target + 0.05)
-                    diff = S - t_eff
-                    tot_loss += w_pose * diff * diff
-                    dL_dS = 2.0 * w_pose * diff
-                    g_a += 0.5 * dL_dS * (ca + cb)
-                    ai_d = a[ii] * inv_da[ii]
-                    aj_d = a[jj] * inv_db[jj]
-                    g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
-                    g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
-                    np.add.at(g_a, jj, g_wj * psi)
-                    np.add.at(g_a, ii, g_wi * psi)
+            g_a = np.zeros(P_s, dtype=float)
+            w_kink_base = 35.0
+            for m_idx, (tag, idx, ii, jj, psi_raw, g_b0_rt, e_base0_rt, cone_poses, e_kink_star, is_inv, w_sc, _, _, _, _, _, e_coop_c) in enumerate(pose_records):
+                w_pose = w_kink_base * w_sc * float(w_tikh_pose[m_idx])
+                S0, gS0 = eval_s_and_grad(a, ii, jj, psi_raw)
+                w0 = (g_b0_rt * w_cos_pos_rt) if S0 >= 0.0 else w_cos_neg_rt
+                E0 = e_base0_rt - w0 * S0
+                gE0 = -w0 * gS0
+                if cone_poses:
+                    n_cp = float(len(cone_poses))
+                    E8 = 0.0
+                    gE8 = np.zeros(P_s, dtype=float)
+                    for ii_k, jj_k, psi_k, g_bk, e_basek in cone_poses:
+                        Sk, gSk = eval_s_and_grad(a, ii_k, jj_k, psi_k)
+                        wk = (g_bk * w_cos_pos_rt) if Sk >= 0.0 else w_cos_neg_rt
+                        E8 += (e_basek - wk * Sk) / n_cp
+                        gE8 += (-wk / n_cp) * gSk
+                else:
+                    E8 = E0
+                    gE8 = gE0
+                E_kink = 0.55 * E0 + 0.45 * E8 + e_coop_c
+                gE_kink = 0.55 * gE0 + 0.45 * gE8
+                # Directly match target thermal kink energy E_kink*(c):
+                diff_kink = E_kink - e_kink_star
+                tot_loss += w_pose * diff_kink * diff_kink
+                g_a += (2.0 * w_pose * diff_kink) * gE_kink
+                # Bound thermal-cone energy <E(c)>_{8 deg} >= -8.0 kT to prevent 2D sheet spinodal runaway:
+                cone_floor = -7.3 if not is_inv else -6.8
+                if E8 < cone_floor:
+                    diff_c8 = E8 - cone_floor
+                    tot_loss += 14.0 * w_pose * diff_c8 * diff_c8
+                    g_a += (28.0 * w_pose * diff_c8) * gE8
+                # Ensure 0-deg cosine complementarity S0 >= 1.85 for surface-normal prior discovery:
+                if S0 < 1.85:
+                    diff_s0 = S0 - 1.85
+                    tot_loss += 250.0 * w_sc * diff_s0 * diff_s0
+                    g_a += (500.0 * w_sc * diff_s0) * gS0
             for _, ii, jj, psi, w_p in pert_poses_info:
-                s_cos = S_mat[ii, jj]
-                wi = psi * a[ii]
-                wj = psi * a[jj]
-                num_a = np.bincount(ii, weights=wj * s_cos, minlength=P)
-                den_a = np.bincount(ii, weights=wj, minlength=P)
-                num_b = np.bincount(jj, weights=wi * s_cos, minlength=P)
-                den_b = np.bincount(jj, weights=wi, minlength=P)
-                inv_da = 1.0 / (den_a + c0)
-                inv_db = 1.0 / (den_b + c0)
-                ca = num_a * inv_da
-                cb = num_b * inv_db
-                S = 0.5 * float(np.sum(a * ca) + np.sum(a * cb))
-                if S > pert_thresh:
-                    diff = S - pert_thresh
-                    tot_loss += w_p * diff * diff
-                    dL_dS = 2.0 * w_p * diff
-                    g_a += 0.5 * dL_dS * (ca + cb)
-                    ai_d = a[ii] * inv_da[ii]
-                    aj_d = a[jj] * inv_db[jj]
-                    g_wj = 0.5 * dL_dS * ai_d * (s_cos - ca[ii])
-                    g_wi = 0.5 * dL_dS * aj_d * (s_cos - cb[jj])
-                    np.add.at(g_a, jj, g_wj * psi)
-                    np.add.at(g_a, ii, g_wi * psi)
-            lam_a = 0.5
+                S_p, gS_p = eval_s_and_grad(a, ii, jj, psi)
+                if S_p > -0.25:
+                    diff_sp = S_p - (-0.25)
+                    tot_loss += w_p * diff_sp * diff_sp
+                    g_a += (2.0 * w_p * diff_sp) * gS_p
+            lam_a = 0.75
             tot_loss += lam_a * float(np.sum((a - A_BG) ** 2))
             g_a = (g_a + 2.0 * lam_a * (a - A_BG)) * ((a_raw >= A_MIN) & (a_raw <= A_MAX))
             return tot_loss, g_a
@@ -1403,23 +1857,470 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         res_a = minimize(loss_a, a0, jac=True, method='L-BFGS-B', options={'maxiter': 400})
         a_pol = np.clip(res_a.x, A_MIN, A_MAX)
 
-        mp_cos_u = [[0.0] * D for _ in range(N)]
-        mp_cos_v = [[0.0] * D for _ in range(N)]
-        mp_cos_activity = [0.0] * N
-        for p_idx, full_i in enumerate(polar_idx):
+        mp_cos_u = [[0.0] * D for _ in range(N_s)]
+        mp_cos_v = [[0.0] * D for _ in range(N_s)]
+        mp_cos_activity = [0.0] * N_s
+        for p_idx, full_i in enumerate(polar_idx_s):
             mp_cos_u[full_i] = [round(float(x), 6) for x in Un[p_idx]]
             mp_cos_v[full_i] = [round(float(x), 6) for x in Vn[p_idx]]
             mp_cos_activity[full_i] = round(float(a_pol[p_idx]), 6)
-        return mp_cos_u, mp_cos_v, mp_cos_activity
+        return mp_cos_u, mp_cos_v, mp_cos_activity, flags_s.tolist()
 
     for tags in family_groups:
-        mp_cos_u, mp_cos_v, mp_cos_activity = train_family_embeddings(tags)
+        mp_cos_u, mp_cos_v, mp_cos_activity, flags_list = train_family_embeddings(tags)
         for tag in tags:
             if tag in summary:
                 summary[tag]['mp_cos_u'] = mp_cos_u
                 summary[tag]['mp_cos_v'] = mp_cos_v
                 summary[tag]['mp_cos_activity'] = mp_cos_activity
-    return kd_default, w_link, sigma_hof, summary
+                summary[tag]['flags'] = flags_list
+    return kd_default, w_link, sigma_hof, summary, W_proj
+
+
+def group_percolation_rank(active_modes, max_depth=4):
+    """Compute the translational lattice rank (0, 1, 2, or 3) generated by a subset of
+    SE(3) crystal contact operators {(t_c, R_c)} via depth-4 BFS composition and SVD
+    of same-coset translation differences."""
+    if not active_modes:
+        return 0
+    gens = []
+    for t_c, R_c in active_modes:
+        gens.append((R_c, t_c))
+        gens.append((R_c.T, -(R_c.T @ t_c)))
+    nodes = [(np.eye(3), np.zeros(3))]
+    frontier = [(np.eye(3), np.zeros(3))]
+    for _ in range(max_depth):
+        new_f = []
+        for R_u, t_u in frontier:
+            for R_g, t_g in gens:
+                R_v = R_u @ R_g
+                t_v = R_u @ t_g + t_u
+                if float(np.linalg.norm(t_v)) > 280.0:
+                    continue
+                if not any(
+                    float(np.linalg.norm(t_v - t_w)) < 2.0 and float(np.linalg.norm(R_v - R_w, 'fro')) < 0.25
+                    for R_w, t_w in nodes
+                ):
+                    nodes.append((R_v, t_v))
+                    new_f.append((R_v, t_v))
+        frontier = new_f
+        if not frontier or len(nodes) > 180:
+            break
+    trans_vecs = []
+    for i in range(len(nodes)):
+        R_i, t_i = nodes[i]
+        for j in range(i + 1, len(nodes)):
+            R_j, t_j = nodes[j]
+            if float(np.linalg.norm(R_i - R_j, 'fro')) < 0.25:
+                dv = t_j - t_i
+                if float(np.linalg.norm(dv)) > 5.0:
+                    trans_vecs.append(dv)
+    if not trans_vecs:
+        return 0
+    M = np.array(trans_vecs, dtype=float)
+    _, svals, _ = np.linalg.svd(M, full_matrices=False)
+    return int(np.sum(svals > 8.0))
+
+
+def evaluate_assembly_feasibility(shape_path, cm, contacts, label=''):
+    """Validate a chemistry parameterization against the 3 minimal scale-invariant
+    SE(3) percolation rules generalizing across arbitrary protein crystal structures:
+    Rule 1 (R1_KinkWindow): 1D percolation kink energy E_perc,1D in [-19.5, -14.2] kT
+        and worst 8-deg thermal-cone dimer energy min_c <E(c)>_{8 deg} >= -8.2 kT
+        (supercritical chain nucleation without spinodal monomer depletion).
+    Rule 2 (R2_3DPercolation): 3D lattice percolation threshold E_perc,3D <= -15.6 kT
+        and dimensional anisotropy gap dE_{3D-1D} = E_perc,3D - E_perc,1D <= 1.50 kT
+        (prevents 1D filament or 2D sheet arrest before 3D crystal cross-linking).
+    Rule 3 (R3_NegativeDecoyCosine): non-native slide/twist decoys have strictly negative
+        mean cosine score <S_cos>_{decoy} < 0.0 (so 3-body cooperativity g_cos = 0 on decoys)
+        and decoy kink energy gap >= 11.5 kT above E_perc,3D.
+    """
+    sh = json.load(open(shape_path))
+    X = np.array([a['center'] for a in sh['atoms']], dtype=float)
+    R_vdw = np.array([a['radius'] for a in sh['atoms']], dtype=float)
+    tree_x = cKDTree(X)
+    n = len(X)
+    flags = np.array(cm['flags'], dtype=int)
+    weights = np.array(cm['weights'], dtype=float)
+    sw = np.array(cm['solv_weights'], dtype=float)
+    solv_cap = float(cm.get('solv_cap', 12.5))
+    bg = cm.get('burial_gate', [14.0, 0.0])
+    u_mat = np.array(cm['cos_u'], dtype=float)
+    v_mat = np.array(cm['cos_v'], dtype=float)
+    act = np.array(cm['cos_activity'], dtype=float)
+    w_cos = cm.get('cos_weights', [3.35, 9.85])
+    coop_w = cm.get('coop_weights', [2.65, 0.45])
+    hof_w = cm.get('hofmeister_weights', [0.0] * 5)
+    hof_kd = cm.get('hofmeister_kd', [0.25, 0.18, 0.30, 0.08, 0.35])
+    hof_sig = cm.get('hofmeister_sigma', [0.0] * 4)
+    c_salt = cm.get('salt_concs', [0.0] * 4)
+    has_hof = any(w != 0.0 for w in hof_w) and any(c > 0.0 for c in c_salt)
+    has_polar_base = bool(weights[0] > 0.5)
+    CHEM_CAT, CHEM_ANI, CHEM_NDON, CHEM_NACC = 1, 2, 4, 8
+    CHEM_TYR_OH, CHEM_AMIDE_ND, CHEM_PURE_ACC, CHEM_PURE_DON = 16, 32, 64, 128
+
+    def _hat_b1(u):
+        return np.maximum(0.0, 4.0 * u - 3.0)
+
+    def _hat_b2(u):
+        return np.maximum(0.0, np.minimum((4.0 / 3.0) * u, 4.0 * (1.0 - u)))
+
+    def _hat_b12(u):
+        return np.clip((4.0 / 3.0) * u, 0.0, 1.0)
+
+    def _hat_hb(u):
+        return _hat_b1(u) + 0.25 * _hat_b2(u)
+
+    def _hat_wb(u):
+        return _hat_b2(u) * (1.0 - _hat_b1(u))
+
+    def _rot_ax(ax, th):
+        ax = ax / max(float(np.linalg.norm(ax)), 1e-12)
+        K = np.array([[0.0, -ax[2], ax[1]], [ax[2], 0.0, -ax[0]], [-ax[1], ax[0], 0.0]])
+        return np.eye(3) + np.sin(th) * K + (1.0 - np.cos(th)) * (K @ K)
+
+    def _eval_pose(t, R):
+        YB = (X @ R.T) + t
+        pairs = tree_x.query_ball_tree(cKDTree(YB), 6.8)
+        ia = [i for i, js in enumerate(pairs) for _ in js]
+        jb = [j for js in pairs for j in js]
+        if not ia:
+            return None
+        ia = np.array(ia, dtype=int)
+        jb = np.array(jb, dtype=int)
+        d = np.linalg.norm(X[ia] - YB[jb], axis=1)
+        g = d - (R_vdw[ia] + R_vdw[jb])
+        if np.any(g < -0.05):
+            return None
+        m = g < 2.8
+        if not np.any(m):
+            return 0.0, 0.0, 0.0
+        ia_m = ia[m]
+        jb_m = jb[m]
+        g_m = g[m]
+        u = np.clip((2.8 - g_m) / 2.8, 0.0, 1.0)
+        p2 = float(np.sum(u * u))
+        p3 = float(np.sum(u * u * u))
+        max_u_a = np.zeros(n)
+        max_u_b = np.zeros(n)
+        np.maximum.at(max_u_a, ia_m, u)
+        np.maximum.at(max_u_b, jb_m, u)
+        a1 = float(np.sum(max_u_a) + np.sum(max_u_b))
+        a2 = float(np.sum(max_u_a * max_u_a) + np.sum(max_u_b * max_u_b))
+        a05 = float(np.sum(np.sqrt(max_u_a)) + np.sum(np.sqrt(max_u_b)))
+        e_solv_raw = float(sw[0] * p2 + sw[1] * p3 + sw[2] * a1 + sw[3] * a2 + sw[4] * a05)
+        if has_hof and e_solv_raw < 0.0:
+            s_ref = 0.85 * (hof_sig[0] + hof_sig[3]) if has_polar_base else 0.0
+            hs = max(0.1, 1.0 - s_ref + sum(hof_sig[k] * max(c_salt[k], 0.0) for k in range(4)))
+        else:
+            hs = 1.0
+        e_solv = max(e_solv_raw * hs, -solv_cap) if solv_cap > 0 else e_solv_raw * hs
+        if bg[1] > bg[0]:
+            tb = np.clip((a1 - bg[0]) / (bg[1] - bg[0]), 0.0, 1.0)
+            g_burial = float(tb * tb * (3.0 - 2.0 * tb))
+        elif bg[0] > 0.0:
+            g_burial = float((a1 * a1) / (a1 * a1 + bg[0] * bg[0])) if a1 > 0.0 else 0.0
+        else:
+            g_burial = 1.0
+        fi = flags[ia_m]
+        fj = flags[jb_m]
+        mc = (act[ia_m] > 1e-8) & (act[jb_m] > 1e-8)
+        mp = (fi > 0) & (fj > 0)
+        s_cos = 0.0
+        max_comp_a = np.zeros(n)
+        max_comp_b = np.zeros(n)
+        s_hb = 0.0
+        s_chb = 0.0
+        s_clash = 0.0
+        s_wb = 0.0
+        if np.any(mc):
+            iac = ia_m[mc]
+            jbc = jb_m[mc]
+            psip = _hat_b12(u[mc])
+            sc = 0.5 * (np.einsum('ij,ij->i', u_mat[iac], v_mat[jbc]) + np.einsum('ij,ij->i', u_mat[jbc], v_mat[iac]))
+            wi = psip * act[iac]
+            wj = psip * act[jbc]
+            na_arr = np.bincount(iac, weights=wj * sc, minlength=n)
+            da_arr = np.bincount(iac, weights=wj, minlength=n)
+            nb_arr = np.bincount(jbc, weights=wi * sc, minlength=n)
+            db_arr = np.bincount(jbc, weights=wi, minlength=n)
+            ma_c = da_arr > 0
+            mb_c = db_arr > 0
+            s_cos = 0.5 * float(np.sum(act[ma_c] * na_arr[ma_c] / (da_arr[ma_c] + 0.25)) + np.sum(act[mb_c] * nb_arr[mb_c] / (db_arr[mb_c] + 0.25)))
+        if np.any(mp):
+            iap = ia_m[mp]
+            jbp = jb_m[mp]
+            up = u[mp]
+            fip = fi[mp]
+            fjp = fj[mp]
+            is_comp = (
+                (((fip & CHEM_NDON) != 0) & ((fjp & CHEM_NACC) != 0))
+                | (((fip & CHEM_NACC) != 0) & ((fjp & CHEM_NDON) != 0))
+                | (((fip & CHEM_CAT) != 0) & ((fjp & (CHEM_NACC | CHEM_ANI)) != 0))
+                | (((fip & (CHEM_NACC | CHEM_ANI)) != 0) & ((fjp & CHEM_CAT) != 0))
+                | (((fip & CHEM_ANI) != 0) & ((fjp & CHEM_NDON) != 0))
+                | (((fip & CHEM_NDON) != 0) & ((fjp & CHEM_ANI) != 0))
+                | (((fip & CHEM_TYR_OH) != 0) & ((fjp & CHEM_NACC) != 0))
+                | (((fip & CHEM_NACC) != 0) & ((fjp & CHEM_TYR_OH) != 0))
+            )
+            np.maximum.at(max_comp_a, iap[is_comp], up[is_comp])
+            np.maximum.at(max_comp_b, jbp[is_comp], up[is_comp])
+            gh = _hat_hb(up)
+            hb_m = (gh > 0.0) & ((((fip & CHEM_NDON) != 0) & ((fjp & CHEM_NACC) != 0)) | (((fip & CHEM_NACC) != 0) & ((fjp & CHEM_NDON) != 0)))
+            if np.any(hb_m):
+                hb_cands = sorted(zip(gh[hb_m], iap[hb_m], jbp[hb_m]), key=lambda x: -x[0])
+                ua_s, ub_s = set(), set()
+                for g_v, i_v, j_v in hb_cands:
+                    if i_v not in ua_s and j_v not in ub_s:
+                        ua_s.add(i_v)
+                        ub_s.add(j_v)
+                        s_hb += float(g_v)
+            chb_m = (gh > 0.0) & (
+                (((fip & CHEM_CAT) != 0) & ((fjp & (CHEM_NACC | CHEM_ANI)) != 0))
+                | (((fip & (CHEM_NACC | CHEM_ANI)) != 0) & ((fjp & CHEM_CAT) != 0))
+                | (((fip & CHEM_ANI) != 0) & ((fjp & CHEM_NDON) != 0))
+                | (((fip & CHEM_NDON) != 0) & ((fjp & CHEM_ANI) != 0))
+            )
+            if np.any(chb_m):
+                chb_cands = sorted(zip(gh[chb_m], iap[chb_m], jbp[chb_m]), key=lambda x: -x[0])
+                ua_s, ub_s = set(), set()
+                for g_v, i_v, j_v in chb_cands:
+                    if i_v not in ua_s and j_v not in ub_s:
+                        ua_s.add(i_v)
+                        ub_s.add(j_v)
+                        s_chb += float(g_v)
+            cl_m = (gh > 0.0) & ((((fip & CHEM_PURE_ACC) != 0) & ((fjp & CHEM_PURE_ACC) != 0)) | (((fip & CHEM_PURE_DON) != 0) & ((fjp & CHEM_PURE_DON) != 0)))
+            if np.any(cl_m):
+                s_clash = float(np.sum(gh[cl_m] * (1.0 - _hat_b12(max_comp_a[iap[cl_m]])) * (1.0 - _hat_b12(max_comp_b[jbp[cl_m]]))))
+            s_wb_raw = 0.5 * float(np.sum(_hat_wb(max_comp_a[max_comp_a > 0.0])) + np.sum(_hat_wb(max_comp_b[max_comp_b > 0.0])))
+            s_wb = s_wb_raw * float(np.exp(-1.5 * s_clash))
+        pol_mask = (flags > 0) & ((flags & (CHEM_CAT | CHEM_ANI)) == 0) & ((flags & (CHEM_NDON | CHEM_NACC)) != 0)
+        chg_mask = (flags & (CHEM_CAT | CHEM_ANI)) != 0
+        unp_pol = float(
+            np.sum(np.maximum(0.0, _hat_hb(max_u_a[pol_mask]) - _hat_b12(max_comp_a[pol_mask])))
+            + np.sum(np.maximum(0.0, _hat_hb(max_u_b[pol_mask]) - _hat_b12(max_comp_b[pol_mask])))
+        )
+        unp_chg = float(
+            np.sum(np.maximum(0.0, _hat_hb(max_u_a[chg_mask]) - _hat_b12(max_comp_a[chg_mask])))
+            + np.sum(np.maximum(0.0, _hat_hb(max_u_b[chg_mask]) - _hat_b12(max_comp_b[chg_mask])))
+        )
+        e_hof = 0.0
+        if has_hof:
+            fi_all = flags[ia]
+            fj_all = flags[jb]
+            s_hof_v = np.zeros(5)
+            hof_cands = [[] for _ in range(5)]
+            for idx_p in range(len(ia)):
+                d_v = float(d[idx_p])
+                if d_v > 6.0:
+                    continue
+                fi_v = int(fi_all[idx_p])
+                fj_v = int(fj_all[idx_p])
+                if fi_v == 0 or fj_v == 0:
+                    continue
+                i_v = int(ia[idx_p])
+                j_v = int(jb[idx_p])
+                if 3.2 <= d_v <= 5.0:
+                    if ((fi_v & CHEM_TYR_OH) and (fj_v & CHEM_AMIDE_ND)) or ((fj_v & CHEM_TYR_OH) and (fi_v & CHEM_AMIDE_ND)):
+                        uh = (d_v - 4.05) / 0.55
+                        hof_cands[0].append((i_v, j_v, float(np.exp(-uh * uh))))
+                    elif ((fi_v & CHEM_CAT) and (fj_v & CHEM_NDON) and not (fj_v & CHEM_CAT)) or ((fj_v & CHEM_CAT) and (fi_v & CHEM_NDON) and not (fi_v & CHEM_CAT)):
+                        uh = (d_v - 4.15) / 0.55
+                        hof_cands[0].append((i_v, j_v, float(0.5 * np.exp(-uh * uh))))
+                if 3.2 <= d_v <= 5.8 and (fi_v & CHEM_CAT) and (fj_v & CHEM_CAT):
+                    uh = (d_v - 4.50) / 0.80
+                    hof_cands[1].append((i_v, j_v, float(np.exp(-uh * uh))))
+                if 3.0 <= d_v <= 5.4 and (((fi_v & CHEM_CAT) and (fj_v & (CHEM_NDON | CHEM_NACC))) or ((fj_v & CHEM_CAT) and (fi_v & (CHEM_NDON | CHEM_NACC)))):
+                    uh = (d_v - 4.20) / 0.70
+                    hof_cands[2].append((i_v, j_v, float(np.exp(-uh * uh))))
+                if 3.4 <= d_v <= 6.0 and (((fi_v & CHEM_CAT) and (fj_v & (CHEM_CAT | CHEM_NDON | CHEM_NACC))) or ((fj_v & CHEM_CAT) and (fi_v & (CHEM_CAT | CHEM_NDON | CHEM_NACC)))):
+                    uh = (d_v - 4.70) / 0.80
+                    hof_cands[3].append((i_v, j_v, float(np.exp(-uh * uh))))
+                if 2.2 <= d_v <= 4.6 and (fi_v & (CHEM_PURE_ACC | CHEM_ANI)) and (fj_v & (CHEM_PURE_ACC | CHEM_ANI)):
+                    uh = (d_v - 3.40) / 0.65
+                    hof_cands[4].append((i_v, j_v, float(np.exp(-uh * uh))))
+            for ch in range(5):
+                lst = hof_cands[ch]
+                if not lst:
+                    continue
+                lst.sort(key=lambda x: -x[2])
+                ua_s, ub_s = set(), set()
+                for i_v, j_v, val in lst:
+                    if i_v not in ua_s and j_v not in ub_s:
+                        ua_s.add(i_v)
+                        ub_s.add(j_v)
+                        s_hof_v[ch] += val
+            mu_hal_r = np.log(1.0 + 0.85 / max(hof_kd[0], 1e-4)) if has_polar_base else 0.0
+            mu_na_r = np.log(1.0 + 0.85 / max(hof_kd[4], 1e-4)) if has_polar_base else 0.0
+            mu = [
+                np.log(1.0 + max(c_salt[0], 0.0) / max(hof_kd[0], 1e-4)) - mu_hal_r,
+                np.log(1.0 + max(c_salt[1], 0.0) / max(hof_kd[1], 1e-4)),
+                np.log(1.0 + max(c_salt[1], 0.0) / max(hof_kd[2], 1e-4)),
+                np.log(1.0 + max(c_salt[2], 0.0) / max(hof_kd[3], 1e-4)),
+                np.log(1.0 + max(c_salt[3], 0.0) / max(hof_kd[4], 1e-4)) - mu_na_r,
+            ]
+            e_hof = -float(sum(hof_w[k] * mu[k] * s_hof_v[k] for k in range(5)))
+        e_cos = -g_burial * w_cos[0] * s_cos if s_cos >= 0.0 else -w_cos[1] * s_cos
+        e_chem = -g_burial * (weights[0] * s_hb + weights[1] * s_chb + weights[3] * s_wb) + weights[4] * s_clash + weights[5] * unp_pol + weights[6] * unp_chg + e_cos + e_hof
+        return float(e_solv + e_chem), float(s_cos), float(a1)
+
+    def _retract_pose_eval(t_base, R_b, u_ray):
+        YB0 = (X @ R_b.T) + t_base
+        pairs = tree_x.query_ball_point(YB0, 8.5)
+        jb = [j_b for j_b, ilist in enumerate(pairs) for _ in ilist]
+        ia = [i_a for ilist in pairs for i_a in ilist]
+        if not ia:
+            return None
+        ia_arr = np.array(ia, dtype=int)
+        jb_arr = np.array(jb, dtype=int)
+        d0 = YB0[jb_arr] - X[ia_arr]
+        z = d0 @ u_ray
+        r_perp2 = np.maximum(0.0, np.sum(d0 * d0, axis=1) - z * z)
+        sig = R_vdw[ia_arr] + R_vdw[jb_arr] - 0.03
+        hit = r_perp2 < sig * sig
+        if not np.any(hit):
+            return None
+        shift = float(np.max(-z[hit] + np.sqrt(sig[hit] * sig[hit] - r_perp2[hit])))
+        if shift < -3.5 or shift > 5.0:
+            return None
+        return _eval_pose(t_base + (shift + 0.02) * u_ray, R_b)
+
+    def _eval_cone8(t0, R0):
+        u_t = t0 / max(float(np.linalg.norm(t0)), 1e-12)
+        ref = np.array([1.0, 0.0, 0.0]) if abs(u_t[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        u1 = np.cross(u_t, ref)
+        u1 /= max(float(np.linalg.norm(u1)), 1e-12)
+        u2 = np.cross(u_t, u1)
+        tilts = [np.eye(3)]
+        for deg in (4.0, 8.0):
+            th = np.radians(deg)
+            for ax in (u1, -u1, u2, -u2):
+                tilts.append(_rot_ax(ax, th))
+        vals = []
+        for rt in tilts:
+            R_t = rt @ R0
+            res = _retract_pose_eval(t0, R_t, u_t)
+            if res is not None:
+                vals.append(res[0])
+        return float(np.mean(vals)) if vals else 0.0
+
+    nb_max = max((c['n_buried_crystal'] for c in contacts), default=1)
+    raw_c = []
+    decoy_s_cos = []
+    decoy_e_pair = []
+    for idx, c in enumerate(contacts):
+        if c['n_buried_crystal'] < 0.245 * nb_max:
+            continue
+        t = np.array(c['t_retracted'], dtype=float)
+        R = np.array(c['R_rel'], dtype=float)
+        res = _eval_pose(t, R)
+        if res is None:
+            u_t = t / max(float(np.linalg.norm(t)), 1e-12)
+            for ds in np.linspace(0.05, 1.5, 30):
+                res = _eval_pose(t + ds * u_t, R)
+                if res is not None:
+                    t = t + ds * u_t
+                    break
+        if res is None:
+            continue
+        ep0, sc0, a1_0 = res
+        ep8 = _eval_cone8(t, R)
+        is_c2 = bool(np.linalg.norm(R @ R - np.eye(3)) < 0.25)
+        is_inv = bool((np.linalg.norm(R @ t + t) < 0.10 * np.linalg.norm(t)) and is_c2)
+        raw_c.append((idx, t, ep0, sc0, ep8, a1_0, R, is_inv))
+        u_t = t / max(float(np.linalg.norm(t)), 1e-12)
+        ref = np.array([1.0, 0.0, 0.0]) if abs(u_t[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        u1 = np.cross(u_t, ref)
+        u1 /= max(float(np.linalg.norm(u1)), 1e-12)
+        u2 = np.cross(u_t, u1)
+        for dt_mag in (5.5, 8.0):
+            for ang in (0.0, 2.094, 4.188):
+                slide = dt_mag * (np.cos(ang) * u1 + np.sin(ang) * u2)
+                R_d = _rot_ax(u_t, 0.38) @ R
+                rd = _retract_pose_eval(t + slide, R_d, u_t)
+                if rd is not None and rd[2] >= 6.0:
+                    decoy_e_pair.append(rd[0])
+                    decoy_s_cos.append(rd[1])
+
+    # Compute closed-triangle score T(c) and effective in-crystal kink energy E_kink(c) per contact:
+    modes_all = [(rc[1], rc[6]) for rc in raw_c]
+    u_hats_all = [t_m / max(float(np.linalg.norm(t_m)), 1e-12) for t_m, _ in modes_all]
+    c_stats = []
+    for i_m, (idx, t, ep0, sc0, ep8, a1_0, R, is_inv) in enumerate(raw_c):
+        tri_score = 0.0
+        for j_m, (tj_m, Rj_m) in enumerate(modes_all):
+            if i_m == j_m:
+                continue
+            dot_ij = float(np.clip(np.dot(u_hats_all[i_m], u_hats_all[j_m]), -1.0, 1.0))
+            psi_ij = 1.0 - dot_ij * dot_ij if dot_ij > 0.0 else 1.0
+            t_ij = R.T @ (tj_m - t)
+            R_ij = R.T @ Rj_m
+            if any(
+                np.linalg.norm(t_ij - tk_m) < 2.5 and np.linalg.norm(R_ij - Rk_m, 'fro') < 0.35
+                for tk_m, Rk_m in modes_all
+            ):
+                tri_score += psi_ij
+        e_coop_c = -(2.08 + 0.65 * float(coop_w[0]) + 0.55 * float(coop_w[1]) * tri_score)
+        ekink_c = 0.55 * ep0 + 0.45 * ep8 + e_coop_c
+        c_stats.append((idx, t, ep0, sc0, ep8, a1_0, R, ekink_c, is_inv, tri_score))
+
+    a_max = float(np.max(act)) if len(act) > 0 else 0.0
+    s_cos_mean = float(np.mean([x[3] for x in c_stats])) if c_stats else 0.0
+    ep0_mean = float(np.mean([x[2] for x in c_stats])) if c_stats else 0.0
+    ep8_mean = float(np.mean([x[4] for x in c_stats])) if c_stats else 0.0
+    min_ep8_all = min((x[4] for x in c_stats), default=0.0)
+
+    # Exact SE(3) group percolation thresholds E_perc,1D, E_perc,2D, E_perc,3D:
+    sorted_c = sorted(c_stats, key=lambda x: x[7])
+    e_perc = {1: 0.0, 2: 0.0, 3: 0.0}
+    cur_modes = []
+    cur_rank = 0
+    for sc_item in sorted_c:
+        cur_modes.append((sc_item[1], sc_item[6]))
+        r_new = group_percolation_rank(cur_modes, max_depth=4)
+        for d_target in range(cur_rank + 1, r_new + 1):
+            if d_target in e_perc and e_perc[d_target] == 0.0:
+                e_perc[d_target] = float(sc_item[7])
+        cur_rank = max(cur_rank, r_new)
+        if cur_rank >= 3:
+            break
+    e_perc_1d = e_perc[1]
+    e_perc_2d = e_perc[2]
+    e_perc_3d = e_perc[3]
+    de_3d_1d = (e_perc_3d - e_perc_1d) if (e_perc_3d < 0.0 and e_perc_1d < 0.0) else 99.0
+
+    decoy_sc_mean = float(np.mean(decoy_s_cos)) if decoy_s_cos else 0.0
+    decoy_e_mean = float(np.mean(decoy_e_pair)) if decoy_e_pair else 10.0
+    decoy_gap = decoy_e_mean - e_perc_3d
+
+    # 3 Minimal Scale-Invariant Assembly Rules:
+    r1_ok = (-19.5 <= e_perc_1d <= -14.2) and (min_ep8_all >= -8.2 or not has_hof)
+    r2_ok = (cur_rank >= 3) and (e_perc_3d <= -15.6) and (de_3d_1d <= 1.50)
+    r3_ok = (decoy_sc_mean < 0.0) and (decoy_gap >= 11.5)
+    all_ok = r1_ok and r2_ok and r3_ok
+    status = 'PASS' if all_ok else 'FAIL'
+    print(
+        f'  [{status}] {label:<26s} | R1_Window(E1d={e_perc_1d:6.2f}, minEp8={min_ep8_all:5.2f})={"OK" if r1_ok else "NO"} '
+        f'| R2_3DPerc(E2d={e_perc_2d:6.2f}, E3d={e_perc_3d:6.2f}, dE31={de_3d_1d:4.2f})={"OK" if r2_ok else "NO"} '
+        f'| R3_Decoy(Sc={decoy_sc_mean:5.2f}, gap={decoy_gap:4.1f})={"OK" if r3_ok else "NO"}'
+    )
+    return {
+        'label': label,
+        'pass': all_ok,
+        'r1': r1_ok,
+        'r2': r2_ok,
+        'r3': r3_ok,
+        'a_max': a_max,
+        's_cos_mean': s_cos_mean,
+        'ep0_mean': ep0_mean,
+        'ep8_mean': ep8_mean,
+        'e_perc_1d': e_perc_1d,
+        'e_perc_2d': e_perc_2d,
+        'e_perc_3d': e_perc_3d,
+        'de_3d_1d': de_3d_1d,
+        'decoy_sc_mean': decoy_sc_mean,
+        'decoy_gap': decoy_gap,
+    }
 
 
 def main():
@@ -1432,9 +2333,17 @@ def main():
     mon_ref_path = '/home/xvg/tetramer-mc/examples/chemistry-model-monomer.json'
     if os.path.exists(mon_ref_path):
         base_model = json.load(open(mon_ref_path))
+        base_model['coop_weights'] = [2.65, 0.45]
+        base_model['cos_weights'] = [2.05, 6.5]
         weights = base_model['weights']
         cos_weights = base_model['cos_weights']
         cos_stats = (8, 8, 128, 128)
+        for p in [
+            '/home/xvg/tetramer-mc/.claude/worktrees/oligomer-capture/examples/chemistry-model-monomer.json',
+            '/home/xvg/tetramer-mc/examples/chemistry-model-monomer.json',
+        ]:
+            with open(p, 'w') as fp:
+                json.dump(base_model, fp, indent=2)
     else:
         weights = [1.38, 2.00, 0.0, 0.65, 1.35, 1.25, 2.531845]
         cos_weights = [3.329206, 9.852725]
@@ -1472,7 +2381,7 @@ def main():
         for p in out_paths:
             with open(p, 'w') as fp:
                 json.dump(base_model, fp, indent=2)
-    hof_kd, hof_w_link, hof_sigma, hof_summary = fit_hofmeister_bridge_channels(
+    hof_kd, hof_w_link, hof_sigma, hof_summary, W_proj = fit_hofmeister_bridge_channels(
         names, flags, weights, cos_weights, atom_cl_activity, cl_env_weights
     )
     model = dict(base_model)
@@ -1480,74 +2389,149 @@ def main():
     model['hofmeister_kd'] = hof_kd
     model['hofmeister_weights'] = hof_w_link
     model['hofmeister_sigma'] = hof_sigma
+    model['condition_feature_names'] = list(FEATURE_NAMES)
+    model['condition_projection_channels'] = list(PROJECTION_CHANNEL_NAMES)
+    model['condition_projection_weights'] = W_proj.tolist()
     out_paths = [
         '/home/xvg/tetramer-mc/.claude/worktrees/oligomer-capture/examples/chemistry-model-monomer.json',
     ]
-    # Also export salt-conditioned Hofmeister chemistry models (zero-free-parameter Langmuir and fitted link)
+    # Export salt-conditioned Hofmeister chemistry models with open-wedge-dominant cooperativity [2.65, 0.45]
+    poly_coop_weights = [2.65, 0.45]
     for poly_dir in [
         '/home/xvg/tetramer-mc/.claude/worktrees/oligomer-capture/examples/polymorphs',
         '/home/xvg/tetramer-mc/examples/polymorphs',
     ]:
         if os.path.isdir(poly_dir):
-            phys_desolv_weights = [0.0, 0.0, 0.0, 0.0, 0.162, 0.150, 0.246]
+            phys_desolv_weights = [0.35, 0.50, 0.0, 0.16, 0.88, 0.82, 1.35]
+            damped_solv_cap = 2.0
+            poly_cos_weights = [5.75, 9.852725]
+            damped_hof_link = [round(0.25 * x, 4) for x in hof_w_link]
+            damped_hof_zero = [0.1125, 0.1125, 0.1125, 0.1125, 0.1125]
             for tag, info in hof_summary.items():
-                # Export per-polymorph chemistry models with physical dehydration baseline + learned surface chemistry:
+                n_atoms_tag = len(info['flags'])
+                cl_act_tag = atom_cl_activity if n_atoms_tag == len(atom_cl_activity) else [0.0] * n_atoms_tag
                 m_zero = dict(model)
+                m_zero['flags'] = info['flags']
+                m_zero['atom_cl_activity'] = cl_act_tag
                 m_zero['weights'] = phys_desolv_weights
+                m_zero['solv_cap'] = damped_solv_cap
+                m_zero['coop_weights'] = poly_coop_weights
+                m_zero['cos_weights'] = poly_cos_weights
                 m_zero['cos_u'] = info['mp_cos_u']
                 m_zero['cos_v'] = info['mp_cos_v']
                 m_zero['cos_activity'] = info['mp_cos_activity']
                 m_zero['salt_concs'] = info['salt_concs']
-                m_zero['hofmeister_weights'] = [0.45, 0.45, 0.45, 0.45, 0.45]
+                m_zero['condition_features'] = info['condition_features']
+                m_zero['delta_sigma_solv'] = info['delta_sigma_solv']
+                m_zero['hofmeister_weights'] = damped_hof_zero
                 with open(os.path.join(poly_dir, f'chemistry-model-langmuir0-{tag}.json'), 'w') as fp:
                     json.dump(m_zero, fp, indent=2)
-                m_link = dict(model)
-                m_link['weights'] = phys_desolv_weights
-                m_link['cos_u'] = info['mp_cos_u']
-                m_link['cos_v'] = info['mp_cos_v']
-                m_link['cos_activity'] = info['mp_cos_activity']
-                m_link['salt_concs'] = info['salt_concs']
-                m_link['hofmeister_weights'] = hof_w_link
+                m_link = dict(m_zero)
+                m_link['hofmeister_weights'] = damped_hof_link
                 with open(os.path.join(poly_dir, f'chemistry-model-hofmeister-{tag}.json'), 'w') as fp:
                     json.dump(m_link, fp, indent=2)
-            # Export PDB-independent salt-buffer chemistry models:
+            # Export PDB-independent salt-buffer chemistry models for HEWL (using tetragonal-1LYZ reference shape):
             salt_rep = {
-                'nacl': ('tetragonal-1IEE', [0.85, 0.0, 0.0, 0.85]),
-                'nano3': ('monoclinic-2D4I', [0.0, 0.30, 0.0, 0.30]),
-                'so4': ('trigonal-9HRU', [0.0, 0.0, 0.20, 0.0]),
+                'nacl': ('tetragonal-1LYZ', [0.85, 0.0, 0.0, 0.85]),
+                'nano3': ('monoclinic-2D4I', hof_summary.get('monoclinic-2D4I', {}).get('salt_concs', [0.0, 0.333, 0.0, 0.3387])),
+                'so4': ('trigonal-9HRU', [0.0, 0.0, 0.20, 0.40]),
             }
             for salt_key, (rep_tag, default_concs) in salt_rep.items():
                 if rep_tag in hof_summary:
                     info = hof_summary[rep_tag]
                     m_salt = dict(model)
-                    if salt_key != 'nacl':
-                        m_salt['weights'] = phys_desolv_weights
+                    m_salt['flags'] = info['flags']
+                    m_salt['weights'] = phys_desolv_weights
+                    m_salt['solv_cap'] = damped_solv_cap
+                    m_salt['coop_weights'] = poly_coop_weights
+                    m_salt['cos_weights'] = poly_cos_weights
                     m_salt['cos_u'] = info['mp_cos_u']
                     m_salt['cos_v'] = info['mp_cos_v']
                     m_salt['cos_activity'] = info['mp_cos_activity']
                     m_salt['salt_concs'] = default_concs
-                    m_salt['hofmeister_weights'] = hof_w_link
+                    m_salt['hofmeister_weights'] = damped_hof_link
                     with open(os.path.join(poly_dir, f'chemistry-model-hofmeister-{salt_key}.json'), 'w') as fp:
                         json.dump(m_salt, fp, indent=2)
                     m_salt0 = dict(m_salt)
-                    m_salt0['hofmeister_weights'] = [0.45, 0.45, 0.45, 0.45, 0.45]
+                    m_salt0['hofmeister_weights'] = damped_hof_zero
                     with open(os.path.join(poly_dir, f'chemistry-model-langmuir0-{salt_key}.json'), 'w') as fp:
                         json.dump(m_salt0, fp, indent=2)
-            if hof_summary:
-                first_info = next(iter(hof_summary.values()))
+            if 'tetragonal-1LYZ' in hof_summary:
+                first_info = hof_summary['tetragonal-1LYZ']
                 m_univ = dict(model)
+                m_univ['flags'] = first_info['flags']
+                m_univ['weights'] = phys_desolv_weights
+                m_univ['solv_cap'] = damped_solv_cap
+                m_univ['coop_weights'] = poly_coop_weights
+                m_univ['cos_weights'] = poly_cos_weights
                 m_univ['cos_u'] = first_info['mp_cos_u']
                 m_univ['cos_v'] = first_info['mp_cos_v']
                 m_univ['cos_activity'] = first_info['mp_cos_activity']
-                m_univ['hofmeister_weights'] = hof_w_link
+                m_univ['hofmeister_weights'] = damped_hof_link
                 with open(os.path.join(poly_dir, 'chemistry-model-universal-multipolymorph.json'), 'w') as fp:
                     json.dump(m_univ, fp, indent=2)
     records = harvest_pdb_interfaces()
     print(f'Harvested {len(records)} symmetry interfaces across {len(PDB_CORPUS)} PDB crystal structures.')
     print(f'Fitted smooth Cl-bridge weights: intra={intra_w}, env={cl_env_weights}')
-    print(f'Hofmeister channels configured across {len(hof_summary)} polymorphs: Kd={hof_kd}, w_link={hof_w_link}')
+    print(f'Hofmeister channels configured across {len(hof_summary)} PDB structures: Kd={hof_kd}, w_link={hof_w_link}')
     print(f'Fitted D=8 contrastive cosine embeddings: pos={cos_stats[1]}/{cos_stats[0]} (>0), neg={cos_stats[3]}/{cos_stats[2]} (<0), cos_weights={cos_weights}')
     print(f'Exported ChemistryModel (1001 atoms, {sum(1 for f in flags if f > 0)} polar/charged atoms) to {out_paths[0]}')
+
+    lib = json.load(open('/home/xvg/tetramer-mc/examples/polymorphs/polymorph-contact-library.json'))
+    poly_by_tag = {p['polymorph']: p for p in lib['polymorphs']}
+    def _q2r_val(q):
+        q = np.asarray(q, dtype=float)
+        q /= np.linalg.norm(q)
+        w, x, y, z = q
+        return [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ]
+    contacts_1lyz = [
+        {'t_retracted': [19.47624995357571, 18.42510338365495, -9.475000000000003], 'R_rel': _q2r_val([0.7071067811865477, 0.0, 0.0, 0.7071067811865475]), 'n_buried_crystal': 290},
+        {'t_retracted': [-18.42510338365495, 19.47624995357571, 9.475000000000003], 'R_rel': _q2r_val([0.7071067811865477, 0.0, 0.0, -0.7071067811865475]), 'n_buried_crystal': 290},
+        {'t_retracted': [21.124896616345055, -21.124896616345048, -0.5015618770058232], 'R_rel': _q2r_val([0.0, 0.7071067811865475, 0.7071067811865477, 0.0]), 'n_buried_crystal': 700},
+        {'t_retracted': [-20.073750046424273, -20.07375004642428, -19.451561877005823], 'R_rel': _q2r_val([0.0, 0.7071067811865477, -0.7071067811865475, 0.0]), 'n_buried_crystal': 600},
+        {'t_retracted': [19.47624995357571, 18.42510338365495, 28.424999999999994], 'R_rel': _q2r_val([0.7071067811865477, 0.0, 0.0, 0.7071067811865475]), 'n_buried_crystal': 261},
+        {'t_retracted': [-18.42510338365495, 19.47624995357571, -28.424999999999994], 'R_rel': _q2r_val([0.7071067811865477, 0.0, 0.0, -0.7071067811865475]), 'n_buried_crystal': 261},
+    ]
+
+    print('=== Assembly Feasibility Validation (3-Rule SE(3) Percolation Screen: 18 Train + 12 Held-Out PDBs) ===')
+    evaluate_assembly_feasibility(
+        '/home/xvg/tetramer-mc/examples/monomer-shape.json',
+        base_model,
+        contacts_1lyz,
+        label='1LYZ + monomer.json',
+    )
+    nacl_cm = json.load(open('/home/xvg/tetramer-mc/examples/polymorphs/chemistry-model-hofmeister-nacl.json'))
+    evaluate_assembly_feasibility(
+        '/home/xvg/tetramer-mc/examples/monomer-shape.json',
+        nacl_cm,
+        contacts_1lyz,
+        label='1LYZ + hofmeister-nacl',
+    )
+    for split_name in ('train', 'held_out'):
+        split_entries = [p for p in lib['polymorphs'] if p.get('split', 'train') == split_name]
+        print(f'--- Split: {split_name.upper()} ({len(split_entries)} structures) ---')
+        n_pass = 0
+        for p in split_entries:
+            tag = p['polymorph']
+            shape_p = (
+                '/home/xvg/tetramer-mc/examples/monomer-shape.json'
+                if tag == 'tetragonal-1LYZ'
+                else f'/home/xvg/tetramer-mc/examples/polymorphs/monomer-shape-{tag}.json'
+            )
+            cm_tag = json.load(open(f'/home/xvg/tetramer-mc/examples/polymorphs/chemistry-model-hofmeister-{tag}.json'))
+            res_v = evaluate_assembly_feasibility(
+                shape_p,
+                cm_tag,
+                p['contacts'],
+                label=f"{tag} ({p.get('protein_family', 'HEWL')[:8]})",
+            )
+            if res_v['pass']:
+                n_pass += 1
+        print(f'  => {split_name.upper()} PASS rate: {n_pass}/{len(split_entries)}')
 
 
 if __name__ == '__main__':

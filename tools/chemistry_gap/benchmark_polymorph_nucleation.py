@@ -612,11 +612,16 @@ def summarize_run(run_dir: Path) -> Dict[str, object]:
     nat_clusters = connected_components(adj_nat)
     geom_sizes = [len(c) for c in geom_clusters]
     nat_sizes = [len(c) for c in nat_clusters]
-    free_monomers = sum(1 for s in geom_sizes if s == 1)
 
     nat_max = nat_sizes[0] if nat_sizes else 1
     geom_max = geom_sizes[0] if geom_sizes else 1
-    use_clusters = nat_clusters if nat_max >= 8 else geom_clusters
+    is_gas = (rt_contacts < 15) and (nat_max < 4)
+    if is_gas:
+        use_clusters = nat_clusters
+        free_monomers = sum(1 for s in nat_sizes if s == 1)
+    else:
+        use_clusters = nat_clusters if nat_max >= 8 else geom_clusters
+        free_monomers = sum(1 for s in geom_sizes if s == 1)
     rg_axes = multi_nucleus_rg_axes(pos, use_clusters, min_size=8)
 
     nat_nodes_ge8 = [u for c in nat_clusters if len(c) >= 8 for u in c]
@@ -636,24 +641,24 @@ def summarize_run(run_dir: Path) -> Dict[str, object]:
     n_nat_ge10 = sum(1 for s in nat_sizes if s >= 10)
     r1_r2 = rg_axes[0] / max(rg_axes[1], 1.0) if rg_axes[0] > 0 else 1.0
     r2_r3 = rg_axes[1] / max(rg_axes[2], 1.0) if rg_axes[1] > 0 else 1.0
-    if n_contacts < 100 or (nat_max < 20 and geom_max < 20):
+    if n_contacts < 100 or (nat_max < 15 and geom_max < 20):
         morph = "no nucleation"
     elif nat_frac < 25.0 or nat_max < 12:
         morph = "no nucleation (amorphous)" if geom_max >= 20 else "no nucleation"
-    elif nat_max < 20:
+    elif nat_max < 20 and n_nat_ge10 < 5:
         morph = "no nucleation"
     elif lat_dim == "1D" or (r1_r2 >= 3.5 and z_nat < 3.5):
         morph = "1D filaments"
     elif lat_dim == "2D" or (z_nat < 4.2 and r2_r3 >= 1.9):
         morph = "2D sheets"
-    elif n_nat_ge10 >= 8 and nat_max <= 60 and nat_frac >= 70.0 and r1_r2 < 2.2:
+    elif n_nat_ge10 >= 5 and nat_max <= 60 and nat_frac >= 70.0 and r1_r2 < 2.2:
         morph = "homogeneous 3D nuclei"
     elif r1_r2 > 2.5 and r2_r3 < 1.6:
         morph = "filament + 3D lateral"
     else:
         morph = "3D crystal"
 
-    display_sizes = nat_sizes[:5] if nat_max >= 8 else geom_sizes[:5]
+    display_sizes = nat_sizes[:5] if (nat_max >= 8 or is_gas) else geom_sizes[:5]
     return {
         "run": run_dir.name,
         "shape": shape_name.replace("monomer-shape-", "").replace(".json", ""),

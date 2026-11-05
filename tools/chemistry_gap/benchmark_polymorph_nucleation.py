@@ -163,13 +163,28 @@ def _register_30pdb_targets() -> None:
         split = str(p.get("split", "train"))
         is_hewl = bool(p.get("is_hewl", False))
         prot = str(p.get("protein_family", "HEWL"))
-        sc = p.get("salt_concs", [0.5, 0.0, 0.0, 0.5])
+        cm_rel = f"examples/polymorphs/chemistry-model-hofmeister-{tag}.json"
+        cm_path = REPO_ROOT / cm_rel
+        sc = p.get("salt_concs")
+        if sc is None and cm_path.exists():
+            try:
+                cm_data = json.loads(cm_path.read_text())
+                sc = cm_data.get("salt_concs")
+            except Exception:
+                sc = None
+        if not sc or len(sc) < 4:
+            sc = [0.0, 0.0, 0.0, 0.0]
+        sc = [round(float(x), 4) for x in sc[:4]]
         if sc[1] > 0.0:
-            s_type, s_conc = "nano3", float(sc[1])
+            s_type, s_conc = "nano3", round(float(sc[1]), 2)
         elif sc[2] > 0.0:
-            s_type, s_conc = "so4", float(sc[2])
+            s_type, s_conc = "so4", round(float(sc[2]), 2)
+        elif sc[0] > 0.0:
+            s_type, s_conc = "nacl", round(float(sc[0]), 2)
+        elif sc[3] > 0.0:
+            s_type, s_conc = "nacl", round(float(sc[3]), 2)
         else:
-            s_type, s_conc = "nacl", float(max(sc[0], 0.05))
+            s_type, s_conc = "none", 0.0
         if tag in existing_by_tag:
             key = existing_by_tag[tag]
         else:
@@ -180,9 +195,10 @@ def _register_30pdb_targets() -> None:
                     "label": f"{tag} ({prot})",
                     "shape": f"examples/polymorphs/monomer-shape-{tag}.json",
                     "seed_config": f"examples/polymorphs/seeded-{tag}.json",
-                    "chemistry_model": f"examples/polymorphs/chemistry-model-hofmeister-{tag}.json",
+                    "chemistry_model": cm_rel,
                     "salt_type": s_type,
                     "salt_conc_m": s_conc,
+                    "salt_concs": sc,
                 }
             )
         all30_keys.append(key)
@@ -228,6 +244,15 @@ def build_morph_mc_cmd(
     shape_path = repo_root / str(target["shape"])
     seed_cfg_path = repo_root / str(target["seed_config"])
     chem_path = repo_root / str(target["chemistry_model"])
+    salt_args = [
+        "--salt-type",
+        str(target["salt_type"]),
+        "--salt-concentration-m",
+        str(target["salt_conc_m"]),
+    ]
+    if "salt_concs" in target and target["salt_concs"] is not None:
+        sc_list = [str(x) for x in target["salt_concs"]]  # type: ignore[index]
+        salt_args.extend(["--salt-concs", ",".join(sc_list)])
     return [
         str(binary),
         "run",
@@ -248,10 +273,7 @@ def build_morph_mc_cmd(
         "0.0",
         "--chemistry-model",
         str(chem_path),
-        "--salt-type",
-        str(target["salt_type"]),
-        "--salt-concentration-m",
-        str(target["salt_conc_m"]),
+        *salt_args,
         "--dock-probability",
         "0.25",
         "--dock-sigma-translation",

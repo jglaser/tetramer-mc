@@ -553,9 +553,7 @@ impl ChemistryModel {
                 sum_b += self.cos_activity[i] * (num_b[i] / (den_b[i] + C0));
             }
         }
-        let s_raw = 0.5 * (sum_a + sum_b);
-        let h_coop = (s_raw.max(0.0) / 5.48).powi(6);
-        2.05 * (h_coop - 0.65) / (h_coop + 1.0)
+        0.5 * (sum_a + sum_b)
     }
 
     /// Stillinger-Weber / Tersoff bond-order saturation `phi(s) = s / (s + s_0)` for `s > 0.0`.

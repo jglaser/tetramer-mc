@@ -50,84 +50,93 @@ BENCHMARK_TARGETS: List[Dict[str, object]] = [
     },
     {
         "key": "1lyz-nacl",
-        "label": "1LYZ + hofmeister-nacl",
+        "label": "1LYZ + universal",
         "shape": "examples/monomer-shape.json",
         "seed_config": "examples/spherical-cluster-monomer.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-nacl.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nacl",
         "salt_conc_m": 0.85,
+        "salt_concs": [0.85, 0.0, 0.0, 0.0],
     },
     {
         "key": "1iee-nacl",
         "label": "tetragonal-1IEE (NaCl)",
         "shape": "examples/polymorphs/monomer-shape-tetragonal-1IEE.json",
         "seed_config": "examples/polymorphs/seeded-tetragonal-1IEE.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-nacl.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nacl",
         "salt_conc_m": 0.85,
+        "salt_concs": [0.85, 0.0, 0.0, 0.0],
     },
     {
         "key": "2d4i-nano3",
         "label": "monoclinic-2D4I (NaNO3)",
         "shape": "examples/polymorphs/monomer-shape-monoclinic-2D4I.json",
         "seed_config": "examples/polymorphs/seeded-monoclinic-2D4I.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-nano3.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nano3",
         "salt_conc_m": 0.30,
+        "salt_concs": [0.0, 0.30, 0.0, 0.0],
     },
     {
         "key": "3wl2-nano3",
         "label": "monoclinic-3WL2 (NaNO3)",
         "shape": "examples/polymorphs/monomer-shape-monoclinic-3WL2.json",
         "seed_config": "examples/polymorphs/seeded-monoclinic-3WL2.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-nano3.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nano3",
         "salt_conc_m": 0.40,
+        "salt_concs": [0.0, 0.40, 0.0, 0.0],
     },
     {
         "key": "2z12-nacl",
         "label": "monoclinic-2Z12 (NaCl)",
         "shape": "examples/polymorphs/monomer-shape-monoclinic-2Z12.json",
         "seed_config": "examples/polymorphs/seeded-monoclinic-2Z12.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-monoclinic-2Z12.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nacl",
         "salt_conc_m": 1.50,
+        "salt_concs": [1.50, 0.0, 0.0, 0.0],
     },
     {
         "key": "1wtn-nacl",
         "label": "orthorhombic-1WTN (NaCl)",
         "shape": "examples/polymorphs/monomer-shape-orthorhombic-1WTN.json",
         "seed_config": "examples/polymorphs/seeded-orthorhombic-1WTN.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-orthorhombic-1WTN.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nacl",
         "salt_conc_m": 0.50,
+        "salt_concs": [0.50, 0.0, 0.0, 0.0],
     },
     {
         "key": "2vb1-nano3",
         "label": "triclinic-2VB1 (NaNO3)",
         "shape": "examples/polymorphs/monomer-shape-triclinic-2VB1.json",
         "seed_config": "examples/polymorphs/seeded-triclinic-2VB1.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-triclinic-2VB1.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nano3",
         "salt_conc_m": 0.30,
+        "salt_concs": [0.0, 0.30, 0.0, 0.0],
     },
     {
         "key": "2fbb-nano3",
         "label": "hexagonal-2FBB (NaNO3)",
         "shape": "examples/polymorphs/monomer-shape-hexagonal-2FBB.json",
         "seed_config": "examples/polymorphs/seeded-hexagonal-2FBB.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-hexagonal-2FBB.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "nano3",
         "salt_conc_m": 0.40,
+        "salt_concs": [0.0, 0.40, 0.0, 0.0],
     },
     {
         "key": "9hru-so4",
         "label": "trigonal-9HRU (SO4)",
         "shape": "examples/polymorphs/monomer-shape-trigonal-9HRU.json",
         "seed_config": "examples/polymorphs/seeded-trigonal-9HRU.json",
-        "chemistry_model": "examples/polymorphs/chemistry-model-hofmeister-so4.json",
+        "chemistry_model": "examples/polymorphs/chemistry-model-universal.json",
         "salt_type": "so4",
         "salt_conc_m": 0.20,
+        "salt_concs": [0.0, 0.0, 0.20, 0.0],
     },
 ]
 
@@ -163,12 +172,12 @@ def _register_30pdb_targets() -> None:
         split = str(p.get("split", "train"))
         is_hewl = bool(p.get("is_hewl", False))
         prot = str(p.get("protein_family", "HEWL"))
-        cm_rel = f"examples/polymorphs/chemistry-model-hofmeister-{tag}.json"
-        cm_path = REPO_ROOT / cm_rel
+        cm_rel = "examples/polymorphs/chemistry-model-universal.json"
+        legacy_cm_path = REPO_ROOT / f"examples/polymorphs/chemistry-model-hofmeister-{tag}.json"
         sc = p.get("salt_concs")
-        if sc is None and cm_path.exists():
+        if sc is None and legacy_cm_path.exists():
             try:
-                cm_data = json.loads(cm_path.read_text())
+                cm_data = json.loads(legacy_cm_path.read_text())
                 sc = cm_data.get("salt_concs")
             except Exception:
                 sc = None

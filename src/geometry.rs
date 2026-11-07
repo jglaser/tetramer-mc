@@ -20,6 +20,8 @@ pub struct Shape {
     #[serde(default)]
     pub volume: f64,
     pub atoms: Vec<Atom>,
+    #[serde(default)]
+    pub atom_names: Vec<(String, i64, String)>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Coverage {
@@ -715,6 +717,7 @@ mod tests {
             })
             .collect();
         let tree = SphereTree::new(Shape {
+            atom_names: vec![],
             name: "test".into(),
             volume: 0.,
             atoms,

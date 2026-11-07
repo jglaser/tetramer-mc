@@ -117,6 +117,22 @@ pub struct ChemistryModel {
     /// `-g_burial * w_cos_pos * S_cos` for `S_cos >= 0`, and `-w_cos_neg * S_cos` (`> 0` repulsive) for `S_cos < 0`.
     #[serde(default)]
     pub cos_weights: [f64; 2],
+    /// Optional 3-parameter Hill-function cooperative switch `[c_max, s_0, c_neg]` mapping raw surface
+    /// cosine score `s_raw` to `S_cos = c_max * ((s_raw / s_0)^6 - c_neg) / ((s_raw / s_0)^6 + 1)`.
+    #[serde(default)]
+    pub cos_sat: [f64; 3],
+    /// Optional universal monomer Cl-bridge intramolecular saturation parameters `[w_intra_acc, w_intra_ani]`.
+    #[serde(default)]
+    pub universal_cl_intra: [f64; 2],
+    /// Optional 111-dim universal monomer environment standardization mean.
+    #[serde(default)]
+    pub universal_f_mean: Vec<f64>,
+    /// Optional 111-dim universal monomer environment standardization std.
+    #[serde(default)]
+    pub universal_f_std: Vec<f64>,
+    /// Optional 112-dim universal monomer environment linear projection weights.
+    #[serde(default)]
+    pub universal_w_a: Vec<f64>,
     /// Optional 4-component salt concentrations `[c_hal, c_chao, c_so4, c_na]` in mol/L
     /// for Hofmeister ion-bridge channels (default `[0.0; 4]`, backward-compatible).
     #[serde(default)]
@@ -553,7 +569,440 @@ impl ChemistryModel {
                 sum_b += self.cos_activity[i] * (num_b[i] / (den_b[i] + C0));
             }
         }
-        0.5 * (sum_a + sum_b)
+        let s_raw = 0.5 * (sum_a + sum_b);
+        if self.cos_sat[0] > 0.0 && self.cos_sat[1] > 0.0 {
+            let h = (s_raw.max(0.0) / self.cos_sat[1]).powi(6);
+            self.cos_sat[0] * (h - self.cos_sat[2]) / (h + 1.0)
+        } else {
+            s_raw
+        }
+    }
+
+    /// Hydrate a universal (structure-independent) `ChemistryModel` directly from a monomer's
+    /// `Shape` (`atoms` and `atom_names`) when `flags` or `cos_activity` do not yet match `shape.atoms`.
+    pub fn hydrate_from_monomer(&mut self, shape: &crate::geometry::Shape) {
+        let n = shape.atoms.len();
+        if n == 0 || shape.atom_names.len() != n {
+            return;
+        }
+        if self.flags.len() == n
+            && self.cos_activity.len() == n
+            && self.cos_u.len() == n
+            && self.cos_v.len() == n
+        {
+            return;
+        }
+        let first_res = shape.atom_names.iter().map(|x| x.1).min().unwrap_or(0);
+        let last_res = shape.atom_names.iter().map(|x| x.1).max().unwrap_or(0);
+        let mut flags = vec![0u8; n];
+        for (i, (r, resn, a)) in shape.atom_names.iter().enumerate() {
+            let r_s = r.as_str();
+            let a_s = a.as_str();
+            let mut f = 0u8;
+            if (r_s == "LYS" && a_s == "NZ")
+                || (r_s == "ARG" && matches!(a_s, "NE" | "NH1" | "NH2"))
+                || (r_s == "HIS" && matches!(a_s, "ND1" | "NE2"))
+                || (*resn == first_res && a_s == "N")
+            {
+                f |= CHEM_CAT;
+            }
+            if (r_s == "ASP" && matches!(a_s, "OD1" | "OD2"))
+                || (r_s == "GLU" && matches!(a_s, "OE1" | "OE2"))
+                || (*resn == last_res && matches!(a_s, "O" | "OXT"))
+            {
+                f |= CHEM_ANI;
+            }
+            if (a_s == "N" && r_s != "PRO" && *resn > first_res)
+                || matches!(
+                    (r_s, a_s),
+                    ("ASN", "ND2")
+                        | ("GLN", "NE2")
+                        | ("TRP", "NE1")
+                        | ("SER", "OG")
+                        | ("THR", "OG1")
+                        | ("TYR", "OH")
+                )
+            {
+                f |= CHEM_NDON;
+            }
+            if (a_s == "O" && *resn < last_res)
+                || matches!(
+                    (r_s, a_s),
+                    ("ASN", "OD1")
+                        | ("GLN", "OE1")
+                        | ("SER", "OG")
+                        | ("THR", "OG1")
+                        | ("TYR", "OH")
+                )
+            {
+                f |= CHEM_NACC;
+            }
+            if r_s == "TYR" && a_s == "OH" {
+                f |= CHEM_TYR_OH;
+            }
+            if matches!(r_s, "ASN" | "GLN") && matches!(a_s, "ND2" | "NE2") {
+                f |= CHEM_AMIDE_ND;
+            }
+            if a_s == "O"
+                || matches!(
+                    (r_s, a_s),
+                    ("ASN", "OD1")
+                        | ("GLN", "OE1")
+                        | ("ASP", "OD1")
+                        | ("ASP", "OD2")
+                        | ("GLU", "OE1")
+                        | ("GLU", "OE2")
+                        | ("LEU", "OXT")
+                )
+            {
+                f |= CHEM_PURE_ACC;
+            }
+            if (a_s == "N" && r_s != "PRO")
+                || matches!(
+                    (r_s, a_s),
+                    ("ASN", "ND2")
+                        | ("GLN", "NE2")
+                        | ("TRP", "NE1")
+                        | ("LYS", "NZ")
+                        | ("ARG", "NE")
+                        | ("ARG", "NH1")
+                        | ("ARG", "NH2")
+                )
+            {
+                f |= CHEM_PURE_DON;
+            }
+            flags[i] = f;
+        }
+        self.flags = flags.clone();
+
+        let centers: Vec<Vec3> = shape.atoms.iter().map(|a| a.center).collect();
+        let radii: Vec<f64> = shape.atoms.iter().map(|a| a.radius).collect();
+
+        // Hydrate monomer Cl-bridge pre-organization activity:
+        let w_intra_acc = if self.universal_cl_intra[0] > 0.0 {
+            self.universal_cl_intra[0]
+        } else {
+            5.0
+        };
+        let w_intra_ani = if self.universal_cl_intra[1] > 0.0 {
+            self.universal_cl_intra[1]
+        } else {
+            2.5
+        };
+        let mut cl_act = vec![0.0f64; n];
+        for i in 0..n {
+            if (flags[i] & (CHEM_TYR_OH | CHEM_AMIDE_ND)) == 0 {
+                continue;
+            }
+            let k_prot = if (flags[i] & CHEM_TYR_OH) != 0 {
+                1.0
+            } else {
+                2.0
+            };
+            let res_i = shape.atom_names[i].1;
+            let xi = centers[i];
+            let mut xi_cat = 0.0f64;
+            let mut xi_ani = 0.0f64;
+            let mut xi_acc = 0.0f64;
+            for j in 0..n {
+                let res_j = shape.atom_names[j].1;
+                let d = norm(sub(centers[j], xi));
+                if (flags[j] & CHEM_CAT) != 0 && res_j != res_i {
+                    let u = ((d - 5.5).max(0.0)) / 2.2;
+                    xi_cat += (-u * u).exp();
+                }
+                if (flags[j] & CHEM_ANI) != 0 && res_j != res_i {
+                    let u = ((d - 4.0).max(0.0)) / 1.5;
+                    xi_ani += (-u * u).exp();
+                }
+                if (flags[j] & (CHEM_ANI | CHEM_NACC | CHEM_PURE_ACC)) != 0
+                    && (res_j - res_i).abs() >= 2
+                {
+                    let u = ((d - 3.0).max(0.0)) / 0.6;
+                    xi_acc += (-u * u).exp();
+                }
+            }
+            let defect = (xi_acc - 0.80 * (k_prot - 1.0)).powi(2);
+            let ai = (xi_cat / (xi_cat + 0.04)) * (-w_intra_acc * defect - w_intra_ani * xi_ani).exp();
+            cl_act[i] = (ai * 1e6).round() / 1e6;
+        }
+        self.atom_cl_activity = cl_act;
+
+        if self.universal_f_mean.len() != 111
+            || self.universal_f_std.len() != 111
+            || self.universal_w_a.len() != 112
+        {
+            return;
+        }
+
+        // Pairwise distance matrix and local coordination counts:
+        let mut d_mat = vec![vec![0.0f64; n]; n];
+        let mut n45 = vec![0usize; n];
+        let mut npol5 = vec![0usize; n];
+        for i in 0..n {
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                let d = norm(sub(centers[i], centers[j]));
+                d_mat[i][j] = d;
+                if d <= 4.5 {
+                    n45[i] += 1;
+                }
+                if flags[j] > 0 && d <= 5.0 {
+                    npol5[i] += 1;
+                }
+            }
+            if flags[i] > 0 {
+                npol5[i] += 1;
+            }
+        }
+        let mut apolar_surf = vec![false; n];
+        let mut active = vec![false; n];
+        let mut n_act_tot = 0.0f64;
+        for i in 0..n {
+            let a_s = shape.atom_names[i].2.as_str();
+            let is_bb = matches!(a_s, "CA" | "C" | "N" | "O");
+            apolar_surf[i] = flags[i] == 0 && !is_bb && n45[i] <= 15 && npol5[i] <= 5;
+            active[i] = flags[i] > 0 || apolar_surf[i];
+            if active[i] {
+                n_act_tot += 1.0;
+            }
+        }
+        let size_scale = 1.0 + 0.22 * (-((n_act_tot - 210.0) / 80.0).powi(2)).exp();
+        let mut w_loc = vec![0.0f64; n];
+        for i in 0..n {
+            if !active[i] {
+                continue;
+            }
+            let mut n_act = 0usize;
+            for j in 0..n {
+                if active[j] && d_mat[i][j] <= 7.0 {
+                    n_act += 1;
+                }
+            }
+            w_loc[i] = size_scale * 10.0 / (n_act as f64).max(4.0);
+        }
+
+        // 19-dim base atomic chemistry features:
+        let mut f_base = vec![[0.0f64; 19]; n];
+        for i in 0..n {
+            let f = flags[i];
+            let resn = shape.atom_names[i].0.as_str();
+            let aname = shape.atom_names[i].2.as_str();
+            f_base[i][0] = if (f & 1) != 0 { 1.0 } else { 0.0 };
+            f_base[i][1] = if (f & 2) != 0 { 1.0 } else { 0.0 };
+            f_base[i][2] = if (f & 4) != 0 { 1.0 } else { 0.0 };
+            f_base[i][3] = if (f & 8) != 0 { 1.0 } else { 0.0 };
+            f_base[i][4] = if (f & 16) != 0 { 1.0 } else { 0.0 };
+            f_base[i][5] = if apolar_surf[i] { 1.0 } else { 0.0 };
+            f_base[i][6] = radii[i] / 2.0;
+            f_base[i][7] = if matches!(resn, "LYS" | "ARG" | "HIS") { 1.0 } else { 0.0 };
+            f_base[i][8] = if matches!(resn, "ASP" | "GLU") { 1.0 } else { 0.0 };
+            f_base[i][9] = if matches!(resn, "PHE" | "TYR" | "TRP") { 1.0 } else { 0.0 };
+            f_base[i][10] = if matches!(resn, "SER" | "THR" | "ASN" | "GLN" | "CYS" | "TYR") { 1.0 } else { 0.0 };
+            f_base[i][11] = if resn == "GLY" { 1.0 } else { 0.0 };
+            f_base[i][12] = if resn == "PRO" { 1.0 } else { 0.0 };
+            f_base[i][13] = if matches!(aname, "CA" | "C" | "N" | "O") { 1.0 } else { 0.0 };
+            f_base[i][14] = if aname.starts_with('O') { 1.0 } else { 0.0 };
+            f_base[i][15] = if aname.starts_with('N') { 1.0 } else { 0.0 };
+            f_base[i][16] = if aname.starts_with('S') { 1.0 } else { 0.0 };
+            f_base[i][17] = (n45[i] as f64) / 15.0;
+            f_base[i][18] = (npol5[i] as f64) / 10.0;
+        }
+
+        // Principal inertia axes via 3x3 Jacobi eigendecomposition of covariance matrix:
+        let mut mean_c = [0.0f64; 3];
+        for c in &centers {
+            mean_c[0] += c[0];
+            mean_c[1] += c[1];
+            mean_c[2] += c[2];
+        }
+        let inv_n = 1.0 / (n as f64);
+        mean_c[0] *= inv_n;
+        mean_c[1] *= inv_n;
+        mean_c[2] *= inv_n;
+        let xc: Vec<Vec3> = centers.iter().map(|&c| sub(c, mean_c)).collect();
+        let mut cov = [[0.0f64; 3]; 3];
+        for v in &xc {
+            for r_i in 0..3 {
+                for c_i in 0..3 {
+                    cov[r_i][c_i] += v[r_i] * v[c_i] * inv_n;
+                }
+            }
+        }
+        let mut eigvecs = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        for _ in 0..50 {
+            let mut p = 0;
+            let mut q = 1;
+            let mut max_val = cov[0][1].abs();
+            for &(r_i, c_i) in &[(0, 2), (1, 2)] {
+                if cov[r_i][c_i].abs() > max_val {
+                    max_val = cov[r_i][c_i].abs();
+                    p = r_i;
+                    q = c_i;
+                }
+            }
+            if max_val < 1e-14 {
+                break;
+            }
+            let diff = cov[q][q] - cov[p][p];
+            let t = if diff.abs() < 1e-14 {
+                1.0
+            } else {
+                let phi = diff / (2.0 * cov[p][q]);
+                let sgn = if phi >= 0.0 { 1.0 } else { -1.0 };
+                sgn / (phi.abs() + (1.0 + phi * phi).sqrt())
+            };
+            let c_ang = 1.0 / (1.0 + t * t).sqrt();
+            let s_ang = t * c_ang;
+            let app = cov[p][p] - t * cov[p][q];
+            let aqq = cov[q][q] + t * cov[p][q];
+            cov[p][p] = app;
+            cov[q][q] = aqq;
+            cov[p][q] = 0.0;
+            cov[q][p] = 0.0;
+            for r_i in 0..3 {
+                if r_i != p && r_i != q {
+                    let arp = c_ang * cov[r_i][p] - s_ang * cov[r_i][q];
+                    let arq = s_ang * cov[r_i][p] + c_ang * cov[r_i][q];
+                    cov[r_i][p] = arp;
+                    cov[p][r_i] = arp;
+                    cov[r_i][q] = arq;
+                    cov[q][r_i] = arq;
+                }
+                let vrp = c_ang * eigvecs[r_i][p] - s_ang * eigvecs[r_i][q];
+                let vrq = s_ang * eigvecs[r_i][p] + c_ang * eigvecs[r_i][q];
+                eigvecs[r_i][p] = vrp;
+                eigvecs[r_i][q] = vrq;
+            }
+        }
+        let mut order = [0usize, 1, 2];
+        order.sort_by(|&a, &b| cov[a][a].total_cmp(&cov[b][b]));
+        let eigvals = [cov[order[0]][order[0]], cov[order[1]][order[1]], cov[order[2]][order[2]]];
+        let evecs = [
+            [eigvecs[0][order[0]], eigvecs[0][order[1]], eigvecs[0][order[2]]],
+            [eigvecs[1][order[0]], eigvecs[1][order[1]], eigvecs[1][order[2]]],
+            [eigvecs[2][order[0]], eigvecs[2][order[1]], eigvecs[2][order[2]]],
+        ];
+        let radii_axes = [
+            eigvals[0].max(1.0).sqrt(),
+            eigvals[1].max(1.0).sqrt(),
+            eigvals[2].max(1.0).sqrt(),
+        ];
+        let rg_tot = (eigvals[0] + eigvals[1] + eigvals[2] + 1e-8).sqrt();
+        let r3: Vec<f64> = radii.iter().map(|&r| r.max(1.0).powi(3)).collect();
+
+        // Build 111-dim feature matrix F:
+        let mut f_mat = vec![[0.0f64; 111]; n];
+        for i in 0..n {
+            for k in 0..19 {
+                f_mat[i][k] = f_base[i][k];
+            }
+            let v = xc[i];
+            for ax in 0..3 {
+                let p_ax = (v[0] * evecs[0][ax] + v[1] * evecs[1][ax] + v[2] * evecs[2][ax]).abs();
+                f_mat[i][19 + ax] = p_ax / radii_axes[ax];
+            }
+            let v_norm = norm(v);
+            f_mat[i][22] = v_norm / rg_tot;
+            let mut grad_rho = [0.0f64; 3];
+            for j in 0..n {
+                let dx = sub(centers[i], centers[j]);
+                let w_g = r3[j] * (-((d_mat[i][j] / 3.8).powi(2))).exp();
+                grad_rho[0] -= w_g * dx[0];
+                grad_rho[1] -= w_g * dx[1];
+                grad_rho[2] -= w_g * dx[2];
+            }
+            let g_norm = norm(grad_rho) + 1e-8;
+            let u_surf = [
+                -grad_rho[0] / g_norm,
+                -grad_rho[1] / g_norm,
+                -grad_rho[2] / g_norm,
+            ];
+            let u_rad = [
+                v[0] / (v_norm + 1e-8),
+                v[1] / (v_norm + 1e-8),
+                v[2] / (v_norm + 1e-8),
+            ];
+            f_mat[i][23] = u_surf[0] * u_rad[0] + u_surf[1] * u_rad[1] + u_surf[2] * u_rad[2];
+            for ax in 0..3 {
+                f_mat[i][24 + ax] =
+                    (u_surf[0] * evecs[0][ax] + u_surf[1] * evecs[1][ax] + u_surf[2] * evecs[2][ax]).abs();
+            }
+            for (s_idx, &sig) in [3.0f64, 5.0, 8.0, 12.0].iter().enumerate() {
+                let mut sum_all = 0.0f64;
+                let mut sum_act = 0.0f64;
+                for j in 0..n {
+                    let ks = (-0.5 * (d_mat[i][j] / sig).powi(2)).exp();
+                    sum_all += ks;
+                    if active[j] {
+                        sum_act += ks;
+                    }
+                }
+                f_mat[i][27 + 2 * s_idx] = sum_all / (1.0 + (sig / 2.5).powi(2));
+                f_mat[i][27 + 2 * s_idx + 1] = sum_act / (1.0 + (sig / 3.0).powi(2));
+            }
+            for (s_idx, &sig) in [2.2f64, 3.8, 6.0, 9.0].iter().enumerate() {
+                let mut w_sum = 0.0f64;
+                let mut conv = [0.0f64; 19];
+                for j in 0..n {
+                    let ws = (-0.5 * (d_mat[i][j] / sig).powi(2)).exp();
+                    w_sum += ws;
+                    for k in 0..19 {
+                        conv[k] += ws * f_base[j][k];
+                    }
+                }
+                let denom = w_sum.max(1e-8);
+                let base_off = 35 + 19 * s_idx;
+                for k in 0..19 {
+                    f_mat[i][base_off + k] = conv[k] / denom;
+                }
+            }
+        }
+
+        // Standardize and center over active surface atoms:
+        let mut phi = vec![[0.0f64; 112]; n];
+        let mut phi_mean = [0.0f64; 112];
+        for i in 0..n {
+            if !active[i] {
+                continue;
+            }
+            phi[i][0] = 1.0;
+            phi_mean[0] += 1.0 / n_act_tot.max(1.0);
+            for k in 0..111 {
+                let fn_k = (f_mat[i][k] - self.universal_f_mean[k]) / self.universal_f_std[k];
+                phi[i][k + 1] = fn_k;
+                phi_mean[k + 1] += fn_k / n_act_tot.max(1.0);
+            }
+        }
+        let mut cos_act = vec![0.0f64; n];
+        let mut cos_u = vec![[0.0f64; 8]; n];
+        let mut cos_v = vec![[0.0f64; 8]; n];
+        for i in 0..n {
+            if !active[i] {
+                continue;
+            }
+            let mut dot_w = 0.0f64;
+            for k in 0..112 {
+                dot_w += (phi[i][k] - phi_mean[k]) * self.universal_w_a[k];
+            }
+            let mult = (1.0 + dot_w).clamp(0.90, 1.18);
+            cos_act[i] = (w_loc[i] * mult * 1e6).round() / 1e6;
+            let q_i = (if (flags[i] & CHEM_CAT) != 0 { 1.0 } else { 0.0 })
+                - (if (flags[i] & CHEM_ANI) != 0 { 1.0 } else { 0.0 });
+            let p_i = (if (flags[i] & CHEM_PURE_DON) != 0 { 1.0 } else { 0.0 })
+                - (if (flags[i] & CHEM_PURE_ACC) != 0 { 1.0 } else { 0.0 });
+            cos_u[i][0] = 1.0;
+            cos_u[i][1] = 0.25 * q_i;
+            cos_u[i][2] = 0.20 * p_i;
+            cos_v[i][0] = 1.0;
+            cos_v[i][1] = -0.25 * q_i;
+            cos_v[i][2] = -0.20 * p_i;
+        }
+        self.cos_activity = cos_act;
+        self.cos_u = cos_u;
+        self.cos_v = cos_v;
     }
 
     /// Stillinger-Weber / Tersoff bond-order saturation `phi(s) = s / (s + s_0)` for `s > 0.0`.
@@ -1618,7 +2067,8 @@ impl MorphMc {
     }
 
     /// Switch on the learned interface chemistry residual model.
-    pub fn with_chemistry_model(mut self, chem: ChemistryModel) -> Result<Self> {
+    pub fn with_chemistry_model(mut self, mut chem: ChemistryModel) -> Result<Self> {
+        chem.hydrate_from_monomer(&self.tree.shape);
         ensure!(
             chem.flags.is_empty() || chem.flags.len() == self.centers.len(),
             "chemistry model flags length ({}) does not match body atoms ({})",
@@ -2241,7 +2691,7 @@ impl MorphMc {
                 // patch-alignment pool over polar atoms `(i, j)` with `M_ij > 0.35`, using a 4.2 A
                 // soft cosine shell before Stage-2 radial retraction (0..=14 steps).
                 let mut by_cos: Vec<(usize, usize, f64, usize, usize, Pose)> = Vec::new();
-                if self.chem.has_cosine() {
+                if self.chem.has_cosine() && self.chem.weights[0] == 0.0 {
                     let surf_pol: Vec<usize> = surf
                         .iter()
                         .copied()
@@ -2326,6 +2776,7 @@ impl MorphMc {
 
                     let eval_cos_pos_sp = |r_rel: [[f64; 3]; 3], t_rel: [f64; 3]| -> f64 {
                         let gap_s1 = 3.6f64;
+                        let m_floor = if self.chem.cos_sat[0] > 0.0 { 0.95 } else { 0.15 };
                         let mut sum_pos = 0.0f64;
                         for &b_idx in &surf_pol {
                             let xb = self.centers[b_idx];
@@ -2361,14 +2812,15 @@ impl MorphMc {
                                     m_ij += ui[c_k] * vj[c_k] + uj[c_k] * vi[c_k];
                                 }
                                 m_ij *= 0.5;
-                                if m_ij > 0.15 {
-                                    sum_pos += psi * ai * aj * (m_ij - 0.15);
+                                if m_ij > m_floor {
+                                    sum_pos += psi * ai * aj * (m_ij - m_floor);
                                 }
                             }
                         }
                         sum_pos
                     };
 
+                    let m_pair_cut = if self.chem.cos_sat[0] > 0.0 { 1.02 } else { 0.35 };
                     let mut stage1_cos: Vec<(f64, usize, usize, usize)> = Vec::new();
                     for &i in &surf_pol {
                         let ui = &self.chem.cos_u[i];
@@ -2386,7 +2838,7 @@ impl MorphMc {
                                 m_ij += ui[c_k] * vj[c_k] + uj[c_k] * vi[c_k];
                             }
                             m_ij *= 0.5;
-                            if m_ij <= 0.35 {
+                            if m_ij <= m_pair_cut {
                                 continue;
                             }
                             let nj = self.body_normals[j];
@@ -2666,7 +3118,15 @@ impl MorphMc {
                 let rot_cut = 20f64.to_radians();
                 let half_count = count / 2;
                 let pools: Vec<(&Vec<(usize, usize, f64, usize, usize, Pose)>, usize, [usize; 3])> =
-                    if !by_cos.is_empty() {
+                    if !by_cos.is_empty() && self.chem.cos_sat[0] > 0.0 {
+                        let q_m = (count * 12) / 32;
+                        let q_c = (count * 24) / 32;
+                        vec![
+                            (&by_motif, q_m, [1usize, 2, usize::MAX]),
+                            (&by_cos, q_c, [1usize, 2, usize::MAX]),
+                            (&by_area, count, [2usize, 5, usize::MAX]),
+                        ]
+                    } else if !by_cos.is_empty() {
                         let q_m = (count * 12) / 32;
                         let q_c = (count * 29) / 32;
                         vec![
@@ -3521,9 +3981,30 @@ impl MorphMc {
                 if phi_bc1 > 0.0 && phi_bc2 > 0.0 {
                     let psi_b = ChemistryModel::coop_psi(u_bc1, u_bc2);
                     let wedge_b = phi_bc1 * phi_bc2 * psi_b;
-                    let phi_c1c2 = 0.5
+                    let mut phi_c1c2 = 0.5
                         * (self.chem.coop_eff_phi(&self.patch[c1][c2])
                             + self.chem.coop_eff_phi(&self.patch[c2][c1]));
+                    if phi_c1c2 == 0.0 && self.chem.cos_sat[0] > 0.0 {
+                        let pos_c1 = self.poses[c1].position;
+                        let mut quad_sum = 0.0f64;
+                        for l in self.body_grid.near(&pos_c1) {
+                            if l == b || l == c1 || l == c2 {
+                                continue;
+                            }
+                            let phi_c1l = 0.5
+                                * (self.chem.coop_eff_phi(&self.patch[c1][l])
+                                    + self.chem.coop_eff_phi(&self.patch[l][c1]));
+                            if phi_c1l > 0.0 {
+                                let phi_c2l = 0.5
+                                    * (self.chem.coop_eff_phi(&self.patch[c2][l])
+                                        + self.chem.coop_eff_phi(&self.patch[l][c2]));
+                                quad_sum += phi_c1l * phi_c2l;
+                            }
+                        }
+                        if quad_sum > 0.0 {
+                            phi_c1c2 = 0.85 * (quad_sum / (quad_sum + 0.12));
+                        }
+                    }
                     e_coop -= (w_wedge + w_tri * phi_c1c2) * wedge_b;
                 }
                 if has_junc {
@@ -3551,11 +4032,102 @@ impl MorphMc {
                 if phi_cb > 0.0 && phi_cd > 0.0 {
                     let psi_c = ChemistryModel::coop_psi(u_cb, p_cd.u);
                     let wedge_c = phi_cb * phi_cd * psi_c;
-                    let phi_bd = lookup_eff_phi_b(d);
+                    let mut phi_bd = lookup_eff_phi_b(d);
+                    if phi_bd == 0.0 && self.chem.cos_sat[0] > 0.0 {
+                        let mut quad_sum = 0.0f64;
+                        for &(l, ref pb_l, ref pc_l) in contacts {
+                            if l == c || l == d {
+                                continue;
+                            }
+                            let phi_bl =
+                                0.5 * (self.chem.coop_eff_phi(pb_l) + self.chem.coop_eff_phi(pc_l));
+                            if phi_bl > 0.0 {
+                                let phi_dl = 0.5
+                                    * (self.chem.coop_eff_phi(&self.patch[d][l])
+                                        + self.chem.coop_eff_phi(&self.patch[l][d]));
+                                quad_sum += phi_bl * phi_dl;
+                            }
+                        }
+                        if quad_sum > 0.0 {
+                            phi_bd = 0.85 * (quad_sum / (quad_sum + 0.12));
+                        }
+                    }
                     e_coop -= (w_wedge + w_tri * phi_bd) * wedge_c;
                 }
                 if has_junc {
                     e_coop += self.vertex_surface_field_junc(pc_c, p_cd);
+                }
+            }
+        }
+        // 3. Vertex on second-shell neighbor l: wedge (c1, c2) on vertex l where b closes a 4-cycle l - c1 - b - c2 - l.
+        if self.chem.cos_sat[0] > 0.0 && w_tri != 0.0 && contacts.len() >= 2 {
+            let mut l_cands: Vec<usize> = Vec::new();
+            for &(c, _, _) in contacts {
+                let pos_c = self.poses[c].position;
+                for l in self.body_grid.near(&pos_c) {
+                    if l != b && (self.patch[l][c].s > 0.0 || self.patch[c][l].s > 0.0) && !l_cands.contains(&l) {
+                        l_cands.push(l);
+                    }
+                }
+            }
+            for l in l_cands {
+                let mut l_active: Vec<(usize, f64, Vec3)> = Vec::new();
+                let pos_l = self.poses[l].position;
+                for m in self.body_grid.near(&pos_l) {
+                    if m != b && m != l && self.patch[l][m].s > 0.0 {
+                        let phi_lm = self.chem.coop_eff_phi(&self.patch[l][m]);
+                        if phi_lm > 0.0 {
+                            l_active.push((m, phi_lm, self.patch[l][m].u));
+                        }
+                    }
+                }
+                if l_active.len() < 2 {
+                    continue;
+                }
+                for idx1 in 0..l_active.len() {
+                    let (j, phi_lj, u_lj) = l_active[idx1];
+                    let phi_bj = lookup_eff_phi_b(j);
+                    if phi_bj <= 0.0 {
+                        continue;
+                    }
+                    for &(k, phi_lk, u_lk) in &l_active[idx1 + 1..] {
+                        let phi_bk = lookup_eff_phi_b(k);
+                        if phi_bk <= 0.0 {
+                            continue;
+                        }
+                        let phi_jk = 0.5
+                            * (self.chem.coop_eff_phi(&self.patch[j][k])
+                                + self.chem.coop_eff_phi(&self.patch[k][j]));
+                        if phi_jk > 0.0 {
+                            continue;
+                        }
+                        let psi_l = ChemistryModel::coop_psi(u_lj, u_lk);
+                        let wedge_l = phi_lj * phi_lk * psi_l;
+                        let pos_j = self.poses[j].position;
+                        let mut quad_without_b = 0.0f64;
+                        for m in self.body_grid.near(&pos_j) {
+                            if m == b || m == l || m == j || m == k {
+                                continue;
+                            }
+                            let phi_jm = 0.5
+                                * (self.chem.coop_eff_phi(&self.patch[j][m])
+                                    + self.chem.coop_eff_phi(&self.patch[m][j]));
+                            if phi_jm > 0.0 {
+                                let phi_km = 0.5
+                                    * (self.chem.coop_eff_phi(&self.patch[k][m])
+                                        + self.chem.coop_eff_phi(&self.patch[m][k]));
+                                quad_without_b += phi_jm * phi_km;
+                            }
+                        }
+                        let quad_with_b = quad_without_b + phi_bj * phi_bk;
+                        let f_with = 0.85 * (quad_with_b / (quad_with_b + 0.12));
+                        let f_without = if quad_without_b > 0.0 {
+                            0.85 * (quad_without_b / (quad_without_b + 0.12))
+                        } else {
+                            0.0
+                        };
+                        e_coop -= w_tri * (f_with - f_without) * wedge_l;
+                    }
                 }
             }
         }
@@ -3586,9 +4158,29 @@ impl MorphMc {
                     if phi_ij > 0.0 && phi_ik > 0.0 {
                         let psi_i = ChemistryModel::coop_psi(u_ij, u_ik);
                         let wedge_i = phi_ij * phi_ik * psi_i;
-                        let phi_jk = 0.5
+                        let mut phi_jk = 0.5
                             * (self.chem.coop_eff_phi(&mat[j][k])
                                 + self.chem.coop_eff_phi(&mat[k][j]));
+                        if phi_jk == 0.0 && self.chem.cos_sat[0] > 0.0 {
+                            let mut quad_sum = 0.0f64;
+                            for l in 0..n {
+                                if l == i || l == j || l == k {
+                                    continue;
+                                }
+                                let phi_jl = 0.5
+                                    * (self.chem.coop_eff_phi(&mat[j][l])
+                                        + self.chem.coop_eff_phi(&mat[l][j]));
+                                if phi_jl > 0.0 {
+                                    let phi_kl = 0.5
+                                        * (self.chem.coop_eff_phi(&mat[k][l])
+                                            + self.chem.coop_eff_phi(&mat[l][k]));
+                                    quad_sum += phi_jl * phi_kl;
+                                }
+                            }
+                            if quad_sum > 0.0 {
+                                phi_jk = 0.85 * (quad_sum / (quad_sum + 0.12));
+                            }
+                        }
                         e_coop -= (w_wedge + w_tri * phi_jk) * wedge_i;
                     }
                     if has_junc {
@@ -5337,11 +5929,21 @@ impl MorphMc {
                 for &(u, v, _, _) in &patch_updates {
                     for w in self.body_grid.near_within(&self.poses[u].position, max_reach) {
                         if !coop_vertex_seen[w]
-                            && self.patch[w][u].s > 0.0
-                            && self.patch[w][v].s > 0.0
+                            && (self.patch[w][u].s > 0.0 || self.patch[u][w].s > 0.0)
+                            && (self.patch[w][v].s > 0.0 || self.patch[v][w].s > 0.0 || self.chem.cos_sat[0] > 0.0)
                         {
                             coop_vertex_seen[w] = true;
                             coop_vertices.push(w);
+                        }
+                    }
+                    if self.chem.cos_sat[0] > 0.0 {
+                        for w in self.body_grid.near_within(&self.poses[v].position, max_reach) {
+                            if !coop_vertex_seen[w]
+                                && (self.patch[w][v].s > 0.0 || self.patch[v][w].s > 0.0)
+                            {
+                                coop_vertex_seen[w] = true;
+                                coop_vertices.push(w);
+                            }
                         }
                     }
                 }
@@ -5785,11 +6387,21 @@ impl MorphMc {
                 for &(u, v, _, _) in &patch_updates {
                     for w in self.body_grid.near_within(&self.poses[u].position, max_reach) {
                         if !coop_vertex_seen[w]
-                            && self.patch[w][u].s > 0.0
-                            && self.patch[w][v].s > 0.0
+                            && (self.patch[w][u].s > 0.0 || self.patch[u][w].s > 0.0)
+                            && (self.patch[w][v].s > 0.0 || self.patch[v][w].s > 0.0 || self.chem.cos_sat[0] > 0.0)
                         {
                             coop_vertex_seen[w] = true;
                             coop_vertices.push(w);
+                        }
+                    }
+                    if self.chem.cos_sat[0] > 0.0 {
+                        for w in self.body_grid.near_within(&self.poses[v].position, max_reach) {
+                            if !coop_vertex_seen[w]
+                                && (self.patch[w][v].s > 0.0 || self.patch[v][w].s > 0.0)
+                            {
+                                coop_vertex_seen[w] = true;
+                                coop_vertices.push(w);
+                            }
                         }
                     }
                 }
@@ -5944,6 +6556,7 @@ mod tests {
         let r = 1.0;
         let probe = 1.4;
         let shape = Shape {
+            atom_names: vec![],
             name: "ball".into(),
             volume: 4. / 3. * std::f64::consts::PI,
             atoms: vec![Atom {
@@ -6091,6 +6704,7 @@ mod tests {
         let r = 1.0;
         let probe = 1.4;
         let shape = Shape {
+            atom_names: vec![],
             name: "ball".into(),
             volume: 4. / 3. * std::f64::consts::PI,
             atoms: vec![Atom {
@@ -6215,6 +6829,7 @@ mod tests {
     fn library_docking_matches_local_moves() {
         let r = 1.0;
         let shape = Shape {
+            atom_names: vec![],
             name: "ball".into(),
             volume: 4. / 3. * std::f64::consts::PI,
             atoms: vec![Atom {
@@ -6335,6 +6950,7 @@ mod tests {
     fn memory_keeps_marginal() {
         let r = 1.0;
         let shape = Shape {
+            atom_names: vec![],
             name: "ball".into(),
             volume: 4. / 3. * std::f64::consts::PI,
             atoms: vec![Atom {
@@ -6488,6 +7104,7 @@ mod tests {
         let r = 1.0;
         let probe = 1.4;
         let shape = Shape {
+            atom_names: vec![],
             name: "ball".into(),
             volume: 4. / 3. * std::f64::consts::PI,
             atoms: vec![Atom {
@@ -6617,6 +7234,7 @@ mod tests {
     #[test]
     fn chemistry_model_is_symmetric_and_consistent_under_moves() {
         let shape = Shape {
+            atom_names: vec![],
             name: "chem_dimer".into(),
             volume: 20.,
             atoms: vec![
@@ -6772,6 +7390,7 @@ mod tests {
         let r = 1.0;
         let probe = 1.4;
         let shape = Shape {
+            atom_names: vec![],
             name: "dimer_ball".into(),
             volume: 2. * 4. / 3. * std::f64::consts::PI,
             atoms: vec![
@@ -6957,6 +7576,7 @@ mod tests {
     fn weighted_library_docking_preserves_detailed_balance() {
         let r = 1.0;
         let shape = Shape {
+            atom_names: vec![],
             name: "ball".into(),
             volume: 4. / 3. * std::f64::consts::PI,
             atoms: vec![Atom {
@@ -7212,10 +7832,11 @@ mod tests {
         println!("  1LYZ prior out_hash={out_hash:016x}, len={}", prior.len());
         assert_eq!(prior.len(), 128, "1LYZ surface prior must retain full 128 modes");
         let shape_1iee = root.join("examples/polymorphs/monomer-shape-tetragonal-1IEE.json");
-        let chem_1iee = root.join("examples/polymorphs/chemistry-model-hofmeister-nacl.json");
+        let chem_1iee = root.join("examples/polymorphs/chemistry-model-universal.json");
         if shape_1iee.exists() && chem_1iee.exists() {
             let sh2: Shape = serde_json::from_str(&std::fs::read_to_string(&shape_1iee).unwrap()).unwrap();
-            let ch2: ChemistryModel = serde_json::from_str(&std::fs::read_to_string(&chem_1iee).unwrap()).unwrap();
+            let mut ch2: ChemistryModel = serde_json::from_str(&std::fs::read_to_string(&chem_1iee).unwrap()).unwrap();
+            ch2.salt_concs = [0.85, 0.0, 0.0, 0.0];
             let tr2 = SphereTree::new(sh2).unwrap();
             let wl2 = Container::new(150.0, &tr2).unwrap();
             let mc2 = MorphMc::new(tr2, wl2, model.clone(), well, vec![identity], vec![true])
@@ -7258,11 +7879,12 @@ mod tests {
             }
         }
         let shape_2d4i = root.join("examples/polymorphs/monomer-shape-monoclinic-2D4I.json");
-        let chem_2d4i = root.join("examples/polymorphs/chemistry-model-hofmeister-nano3.json");
+        let chem_2d4i = root.join("examples/polymorphs/chemistry-model-universal.json");
         let lib_path = root.join("examples/polymorphs/polymorph-contact-library.json");
         if shape_2d4i.exists() && chem_2d4i.exists() && lib_path.exists() {
             let sh3: Shape = serde_json::from_str(&std::fs::read_to_string(&shape_2d4i).unwrap()).unwrap();
-            let ch3: ChemistryModel = serde_json::from_str(&std::fs::read_to_string(&chem_2d4i).unwrap()).unwrap();
+            let mut ch3: ChemistryModel = serde_json::from_str(&std::fs::read_to_string(&chem_2d4i).unwrap()).unwrap();
+            ch3.salt_concs = [0.0, 0.30, 0.0, 0.0];
             let tr3 = SphereTree::new(sh3).unwrap();
             let wl3 = Container::new(150.0, &tr3).unwrap();
             let mc3 = MorphMc::new(tr3, wl3, model.clone(), well, vec![identity], vec![true])

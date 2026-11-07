@@ -362,6 +362,8 @@ def extract_native_modes(
                     for tm, rm in modes
                 ):
                     modes.append((t_rel, r_rel))
+            if modes:
+                return modes
     if not seed_cfg_path.exists():
         return modes
     cfg = json.loads(seed_cfg_path.read_text())
@@ -389,19 +391,30 @@ def extract_native_modes(
     return modes
 
 
-def read_last_jsonl(path: Path, max_bytes: int = 262144) -> Optional[Dict[str, object]]:
+def read_last_jsonl(
+    path: Path, max_bytes: int = 262144, target_sweep: Optional[int] = None
+) -> Optional[Dict[str, object]]:
     if not path.exists() or path.stat().st_size == 0:
         return None
     size = path.stat().st_size
     with path.open("rb") as f:
         f.seek(max(0, size - max_bytes), os.SEEK_SET)
         lines = [ln.strip() for ln in f.read().splitlines() if ln.strip()]
+    parsed: List[Dict[str, object]] = []
     for raw in reversed(lines):
         try:
-            return json.loads(raw.decode("utf-8", errors="replace"))
+            obj = json.loads(raw.decode("utf-8", errors="replace"))
+            parsed.append(obj)
         except Exception:
             continue
-    return None
+    if not parsed:
+        return None
+    if target_sweep is not None:
+        matches = [obj for obj in parsed if int(obj.get("sweep", -1)) == target_sweep]
+        if matches:
+            return max(matches, key=lambda o: int(o.get("contacts", -1)))
+        return max(parsed, key=lambda o: (int(o.get("sweep", -1)), int(o.get("contacts", -1))))
+    return parsed[0]
 
 
 def supercell_percolation_dim(
@@ -527,8 +540,11 @@ def summarize_run(run_dir: Path) -> Dict[str, object]:
     shape_name = Path(str(cfg.get("shape", ""))).name
     chem_name = Path(str(cfg.get("chemistry_model", ""))).name
     salt = f"{cfg.get('salt_type', 'none')}:{cfg.get('salt_concentration_m', 0.0)}M"
-    prog = read_last_jsonl(prog_path)
     traj = read_last_jsonl(traj_path)
+    traj_sweep = int(traj.get("sweep", traj.get("step", -1))) if traj else None
+    if traj_sweep is not None and traj_sweep < 0:
+        traj_sweep = None
+    prog = read_last_jsonl(prog_path, target_sweep=traj_sweep or int(cfg.get("sweeps", 1000000)))
     if prog is None:
         return {
             "run": run_dir.name,

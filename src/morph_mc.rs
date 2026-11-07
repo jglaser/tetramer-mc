@@ -2324,6 +2324,51 @@ impl MorphMc {
                         0.5 * (sum_a + sum_b)
                     };
 
+                    let eval_cos_pos_sp = |r_rel: [[f64; 3]; 3], t_rel: [f64; 3]| -> f64 {
+                        let gap_s1 = 3.6f64;
+                        let mut sum_pos = 0.0f64;
+                        for &b_idx in &surf_pol {
+                            let xb = self.centers[b_idx];
+                            let aj = self.chem.cos_activity[b_idx];
+                            if aj <= 1e-8 {
+                                continue;
+                            }
+                            let xb_w = add(matvec(r_rel, xb), t_rel);
+                            let rb = self.vdw[b_idx];
+                            let uj = &self.chem.cos_u[b_idx];
+                            let vj = &self.chem.cos_v[b_idx];
+                            for &a_idx in &surf_pol {
+                                let ai = self.chem.cos_activity[a_idx];
+                                if ai <= 1e-8 {
+                                    continue;
+                                }
+                                let r_cut = self.vdw[a_idx] + rb + gap_s1;
+                                let dx = sub(xb_w, self.centers[a_idx]);
+                                let d2 = dx[0] * dx[0] + dx[1] * dx[1] + dx[2] * dx[2];
+                                if d2 >= r_cut * r_cut {
+                                    continue;
+                                }
+                                let d = d2.sqrt();
+                                let u = ((r_cut - d) / gap_s1).clamp(0.0, 1.0);
+                                let psi = ((4.0f64 / 3.0f64) * u).clamp(0.0, 1.0);
+                                if psi <= 0.0 {
+                                    continue;
+                                }
+                                let ui = &self.chem.cos_u[a_idx];
+                                let vi = &self.chem.cos_v[a_idx];
+                                let mut m_ij = 0.0f64;
+                                for c_k in 0..8 {
+                                    m_ij += ui[c_k] * vj[c_k] + uj[c_k] * vi[c_k];
+                                }
+                                m_ij *= 0.5;
+                                if m_ij > 0.15 {
+                                    sum_pos += psi * ai * aj * (m_ij - 0.15);
+                                }
+                            }
+                        }
+                        sum_pos
+                    };
+
                     let mut stage1_cos: Vec<(f64, usize, usize, usize)> = Vec::new();
                     for &i in &surf_pol {
                         let ui = &self.chem.cos_u[i];
@@ -2362,8 +2407,8 @@ impl MorphMc {
                                 if norm(t0) < min_com_dist {
                                     continue;
                                 }
-                                let sc = eval_cos_sp(r0, t0);
-                                if sc > 0.25 {
+                                let sc = eval_cos_pos_sp(r0, t0);
+                                if sc > 0.35 {
                                     stage1_cos.push((sc, i, j, k));
                                 }
                             }
@@ -2702,8 +2747,8 @@ impl MorphMc {
                             orientation: quaternion(r_inv),
                         };
                         // Self-inverse 2-fold involutions (C2 symmetric dimers where pose ≈ inv_pose)
-                        // have cyclic symmetry order G_sym = 2 and are pushed twice into `out`
-                        // (`pose` and `inv_pose` represent the same mode), so scale by 0.5 / G_sym = 0.25.
+                        // are pushed twice into `out` (`pose` and `inv_pose` represent the same mode),
+                        // so scale by 0.5 to avoid double-counting without penalizing C2 cross-linkers.
                         let is_self_inv = if norm(sub(pose.position, inv_pose.position)) < 4.5 {
                             let r_diff = matmul(r_inv, r_inv);
                             let tr = r_diff[0][0] + r_diff[1][1] + r_diff[2][2];
@@ -2711,7 +2756,7 @@ impl MorphMc {
                         } else {
                             false
                         };
-                        let w = w_rank * w_boltz * if is_self_inv { 0.25 } else { 1.0 };
+                        let w = w_rank * w_boltz * if is_self_inv { 0.5 } else { 1.0 };
                         out.push((pose, 0.5 * w));
                         out.push((inv_pose, 0.5 * w));
                     }

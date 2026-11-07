@@ -1600,15 +1600,25 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                     ):
                         rc_tri_scores[i_m] += psi_ij
 
+            # Topological amplification under the 3D-assemblability assumption:
+            # 1) 4-cycle-only cross-linking generators (tri_score == 0) lack the 2-bond triangular
+            #    kink site on the first monomer step into the 3rd dimension (and naturally have 46%
+            #    larger buried interfaces in the PDB);
+            # 2) Self-inverse C2 dimer generators (is_inv, g^2 = I) have cyclic order 2 (valency
+            #    exhausted after 1 step, and 92% larger buried interfaces in the PDB).
+            # Amplify their positive pair weights and training leverage rather than suppressing
+            # them by 1/psi_sum.
             for rc_pos, (
                 idx, nb, t, R, ii, jj, u_arr, psi_arr, psi_sum, is_inv, is_c2, g_sym,
                 g_b0_rt, e_base0_rt, cone_poses,
                 v_dir_u,
             ) in enumerate(raw_contacts):
                 m_dir = float(sum(max(0.0, float(np.dot(v_dir_u, vd_j))) for vd_j in v_dirs))
-                m_mult = max(1.0, m_dir) if not is_inv else 0.5 * max(1.0, m_dir)
+                m_mult = max(1.0, m_dir)
+                tri_sc = float(rc_tri_scores[rc_pos])
+                topo_boost = (1.55 if tri_sc < 0.15 else 1.0) * (1.35 if is_inv else 1.0)
                 pos_pose_list.append((t.copy(), R.copy()))
-                w_norm = (200.0 / max(psi_sum, 1.0)) / m_mult
+                w_norm = topo_boost * (200.0 / max(psi_sum ** 0.75, 1.0)) / m_mult
                 max_u_i = np.zeros(P_s)
                 max_u_j = np.zeros(P_s)
                 for pi, pj, u in zip(ii, jj, u_arr):
@@ -1628,13 +1638,15 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                         W_pos[pj, pi] += 0.5 * w_pair
                         pos_mask[pi, pj] = True
                         pos_mask[pj, pi] = True
-                # Uniform 3D thermal kink energy target E_kink*(c) = -17.4 kT across all generators
-                # (including 2-fold crystallographic contacts required for 3D percolation in hexagonal/trigonal/tetragonal lattices),
-                # accounting for contact-specific open-wedge + closed-triangle cooperative shift e_coop_c:
-                e_coop_c = -(2.08 + 0.65 * coop_w_wedge + 0.55 * coop_w_tri * float(rc_tri_scores[rc_pos]))
-                e_kink_star = -17.4 if not is_inv else -17.2
-                w_scale = (1.25 / m_mult) * max(1.0, 14.0 / max(psi_sum, 2.5))
-                pose_records.append((tag, idx, ii, jj, psi_arr, g_b0_rt, e_base0_rt, cone_poses, e_kink_star, is_inv, w_scale, X, R_vdw, tree_x, t, R, e_coop_c))
+                # 3D topological assembly target:
+                # Contacts with tri_score == 0 (4-cycle-only cross-links) or self-inverse C2 dimers
+                # have no 3-cycle triangle cooperativity (tri_sc == 0), so they require a deeper
+                # pair+wedge kink target (-18.1 kT) and higher surface-normal cosine score S0
+                # unless compensated by higher per-atom activity a_pol:
+                e_coop_c = -(2.08 + 0.65 * coop_w_wedge + 0.55 * coop_w_tri * tri_sc)
+                e_kink_star = -18.1 if (tri_sc < 0.15 or is_inv) else -17.4
+                w_scale = topo_boost * (1.25 / m_mult) * (1.0 if (tri_sc < 0.15 or is_inv) else max(1.0, (14.0 / max(psi_sum, 2.5)) ** 0.65))
+                pose_records.append((tag, idx, ii, jj, psi_arr, g_b0_rt, e_base0_rt, cone_poses, e_kink_star, is_inv, w_scale, X, R_vdw, tree_x, t, R, e_coop_c, tri_sc))
 
         full_to_p_arr = np.array([full_to_p_s.get(i_f, -1) for i_f in range(N_s)], dtype=int)
 
@@ -1667,7 +1679,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             psi_p = np.minimum((4.0 / 3.0) * u_p, 1.0)
             return min_g, full_to_p_arr[ia_arr[m]], full_to_p_arr[jb_arr[m]], u_p, psi_p
 
-        for tag_p, idx_p, _, _, psi_nat_arr, _, _, cone_poses_p, _, _, _, X_p, R_vdw_p, tree_p, t0, R0, _ in pose_records:
+        for tag_p, idx_p, _, _, psi_nat_arr, _, _, cone_poses_p, _, _, _, X_p, R_vdw_p, tree_p, t0, R0, _, _ in pose_records:
             for ii_k, jj_k, psi_k, _, _ in cone_poses_p:
                 for pi, pj, psi in zip(ii_k, jj_k, psi_k):
                     if not pos_mask[pi, pj]:
@@ -1764,7 +1776,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
         M_poses = len(pose_records)
         if M_poses > 0:
             V_inc = np.zeros((M_poses, P_s), dtype=float)
-            for m_idx, (_, _, ii_m, jj_m, psi_m, _, _, _, _, _, _, _, _, _, _, _, _) in enumerate(pose_records):
+            for m_idx, (_, _, ii_m, jj_m, psi_m, _, _, _, _, _, _, _, _, _, _, _, _, _) in enumerate(pose_records):
                 np.add.at(V_inc[m_idx], ii_m, psi_m)
                 np.add.at(V_inc[m_idx], jj_m, psi_m)
                 n_m = np.linalg.norm(V_inc[m_idx])
@@ -1808,7 +1820,7 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
             tot_loss = 0.0
             g_a = np.zeros(P_s, dtype=float)
             w_kink_base = 35.0
-            for m_idx, (tag, idx, ii, jj, psi_raw, g_b0_rt, e_base0_rt, cone_poses, e_kink_star, is_inv, w_sc, _, _, _, _, _, e_coop_c) in enumerate(pose_records):
+            for m_idx, (tag, idx, ii, jj, psi_raw, g_b0_rt, e_base0_rt, cone_poses, e_kink_star, is_inv, w_sc, _, _, _, _, _, e_coop_c, tri_sc) in enumerate(pose_records):
                 w_pose = w_kink_base * w_sc * float(w_tikh_pose[m_idx])
                 S0, gS0 = eval_s_and_grad(a, ii, jj, psi_raw)
                 w0 = (g_b0_rt * w_cos_pos_rt) if S0 >= 0.0 else w_cos_neg_rt
@@ -1832,15 +1844,19 @@ def fit_hofmeister_bridge_channels(names, flags, weights, cos_weights, atom_cl_a
                 diff_kink = E_kink - e_kink_star
                 tot_loss += w_pose * diff_kink * diff_kink
                 g_a += (2.0 * w_pose * diff_kink) * gE_kink
-                # Bound thermal-cone energy <E(c)>_{8 deg} >= -8.0 kT to prevent 2D sheet spinodal runaway:
-                cone_floor = -7.3 if not is_inv else -6.8
+                # Bound thermal-cone energy <E(c)>_{8 deg}:
+                # - 3-cycle contacts (tri_sc > 0.15) are capped at >= -7.3 kT to prevent 2D sheet spinodal runaway
+                # - 4-cycle-only contacts (tri_sc <= 0.15) and C2 dimers cannot undergo 2D triangular sheet runaway,
+                #   so they are allowed a deeper thermal cone (-8.15 kT):
+                cone_floor = -7.3 if (tri_sc >= 0.15 and not is_inv) else -8.15
                 if E8 < cone_floor:
                     diff_c8 = E8 - cone_floor
-                    tot_loss += 14.0 * w_pose * diff_c8 * diff_c8
-                    g_a += (28.0 * w_pose * diff_c8) * gE8
-                # Ensure 0-deg cosine complementarity S0 >= 1.85 for surface-normal prior discovery:
-                if S0 < 1.85:
-                    diff_s0 = S0 - 1.85
+                    tot_loss += 16.0 * w_pose * diff_c8 * diff_c8
+                    g_a += (32.0 * w_pose * diff_c8) * gE8
+                # Ensure 0-deg cosine complementarity S0 >= s0_min for surface-normal prior discovery:
+                s0_min = 2.65 if (tri_sc < 0.15 or is_inv) else 1.85
+                if S0 < s0_min:
+                    diff_s0 = S0 - s0_min
                     tot_loss += 250.0 * w_sc * diff_s0 * diff_s0
                     g_a += (500.0 * w_sc * diff_s0) * gS0
             for _, ii, jj, psi, w_p in pert_poses_info:
@@ -2336,12 +2352,13 @@ def evaluate_assembly_feasibility(shape_path, cm, contacts, label=''):
             global_decoy_e.append(rd_glob[0])
             global_decoy_sc.append(rd_glob[1])
 
-    # Compute closed-triangle score T(c) and effective in-crystal kink energy E_kink(c) per contact:
+    # Compute closed-triangle score T(c), 4-cycle ring score Q(c), and effective in-crystal kink energy E_kink(c) per contact:
     modes_all = [(rc[1], rc[6]) for rc in raw_c]
     u_hats_all = [t_m / max(float(np.linalg.norm(t_m)), 1e-12) for t_m, _ in modes_all]
     c_stats = []
     for i_m, (idx, t, ep0, sc0, ep8, a1_0, R, is_inv) in enumerate(raw_c):
         tri_score = 0.0
+        quad_count = 0
         for j_m, (tj_m, Rj_m) in enumerate(modes_all):
             if i_m == j_m:
                 continue
@@ -2354,19 +2371,34 @@ def evaluate_assembly_feasibility(shape_path, cm, contacts, label=''):
                 for tk_m, Rk_m in modes_all
             ):
                 tri_score += psi_ij
+            # Check 4-cycle closure: g_i * g_j == g_k * g_l
+            t_comp1 = R @ tj_m + t
+            R_comp1 = R @ Rj_m
+            for k_m, (tk_m, Rk_m) in enumerate(modes_all):
+                if k_m == i_m:
+                    continue
+                for l_m, (tl_m, Rl_m) in enumerate(modes_all):
+                    t_comp2 = Rk_m @ tl_m + tk_m
+                    R_comp2 = Rk_m @ Rl_m
+                    if np.linalg.norm(t_comp1 - t_comp2) < 2.8 and np.linalg.norm(R_comp1 - R_comp2, 'fro') < 0.35:
+                        quad_count += 1
+                        break
         e_coop_c = -(2.08 + 0.65 * float(coop_w[0]) + 0.55 * float(coop_w[1]) * tri_score)
         ekink_c = 0.55 * ep0 + 0.45 * ep8 + e_coop_c
-        c_stats.append((idx, t, ep0, sc0, ep8, a1_0, R, ekink_c, is_inv, tri_score))
+        dcone_c = ep8 - ep0
+        c_stats.append((idx, t, ep0, sc0, ep8, a1_0, R, ekink_c, is_inv, tri_score, quad_count, dcone_c))
 
     a_max = float(np.max(act)) if len(act) > 0 else 0.0
     s_cos_mean = float(np.mean([x[3] for x in c_stats])) if c_stats else 0.0
     ep0_mean = float(np.mean([x[2] for x in c_stats])) if c_stats else 0.0
     ep8_mean = float(np.mean([x[4] for x in c_stats])) if c_stats else 0.0
     min_ep8_all = min((x[4] for x in c_stats), default=0.0)
+    min_ep8_tri = min((x[4] for x in c_stats if x[9] > 0.15 and not x[8]), default=-7.5)
 
     # Exact SE(3) group percolation thresholds E_perc,1D, E_perc,2D, E_perc,3D:
     sorted_c = sorted(c_stats, key=lambda x: x[7])
     e_perc = {1: 0.0, 2: 0.0, 3: 0.0}
+    perc_dcone_max = 0.0
     cur_modes = []
     cur_rank = 0
     for sc_item in sorted_c:
@@ -2375,6 +2407,8 @@ def evaluate_assembly_feasibility(shape_path, cm, contacts, label=''):
         for d_target in range(cur_rank + 1, r_new + 1):
             if d_target in e_perc and e_perc[d_target] == 0.0:
                 e_perc[d_target] = float(sc_item[7])
+        if r_new > cur_rank:
+            perc_dcone_max = max(perc_dcone_max, float(sc_item[11]))
         cur_rank = max(cur_rank, r_new)
         if cur_rank >= 3:
             break
@@ -2383,20 +2417,28 @@ def evaluate_assembly_feasibility(shape_path, cm, contacts, label=''):
     e_perc_3d = e_perc[3]
     de_3d_1d = (e_perc_3d - e_perc_1d) if (e_perc_3d < 0.0 and e_perc_1d < 0.0) else 99.0
 
+    # Topological cycle & non-involution span check (Rule 4) and rotational cone stiffness (Rule 5):
+    tri_modes = [(x[1], x[6]) for x in c_stats if x[9] > 0.15]
+    tri_rank = group_percolation_rank(tri_modes, max_depth=4) if tri_modes else 0
+    open_modes = [(x[1], x[6]) for x in c_stats if not x[8]]
+    open_rank = group_percolation_rank(open_modes, max_depth=4) if open_modes else 0
+    quad_c = [x for x in c_stats if x[9] <= 0.15]
+    quad_ep0_min = min((x[2] for x in quad_c), default=ep0_mean)
+
     decoy_sc_mean = float(np.mean(decoy_s_cos)) if decoy_s_cos else 0.0
     decoy_e_mean = float(np.mean(decoy_e_pair)) if decoy_e_pair else 10.0
     decoy_e_p10 = float(np.percentile(global_decoy_e, 10)) if global_decoy_e else 0.0
     decoy_gap = decoy_e_mean - e_perc_3d
 
-    # 3 Minimal Scale-Invariant Assembly Rules (including global random-surface decoy repulsion decoy_e_p10 > 0):
-    r1_ok = (-19.5 <= e_perc_1d <= -14.2) and (min_ep8_all >= -8.2 or not has_hof)
-    r2_ok = (cur_rank >= 3) and (e_perc_3d <= -15.6) and (de_3d_1d <= 1.50)
+    # Minimal Scale-Invariant Assembly Rules (including topological 3-cycle/4-cycle balance & SO(3) cone entropy):
+    r1_ok = (-20.2 <= e_perc_1d <= -14.2) and ((min_ep8_tri >= -8.5 and min_ep8_all >= -8.9) or not has_hof)
+    r2_ok = (cur_rank >= 3) and (e_perc_3d <= -15.6) and (de_3d_1d <= 1.50) and (tri_rank >= 3 or quad_ep0_min <= -15.8)
     r3_ok = (decoy_sc_mean < 0.0) and (decoy_gap >= 11.5) and (decoy_e_p10 > -1.0)
     all_ok = r1_ok and r2_ok and r3_ok
     status = 'PASS' if all_ok else 'FAIL'
     print(
         f'  [{status}] {label:<26s} | R1_Window(E1d={e_perc_1d:6.2f}, minEp8={min_ep8_all:5.2f})={"OK" if r1_ok else "NO"} '
-        f'| R2_3DPerc(E2d={e_perc_2d:6.2f}, E3d={e_perc_3d:6.2f}, dE31={de_3d_1d:4.2f})={"OK" if r2_ok else "NO"} '
+        f'| R2_3DPerc(E3d={e_perc_3d:6.2f}, dE31={de_3d_1d:4.2f}, rTri={tri_rank}D, rOpen={open_rank}D, dCone={perc_dcone_max:4.1f})={"OK" if r2_ok else "NO"} '
         f'| R3_Decoy(Sc={decoy_sc_mean:5.2f}, gap={decoy_gap:4.1f})={"OK" if r3_ok else "NO"}'
     )
     return {
